@@ -34,8 +34,10 @@ machine wheel now has production identity authorization/revocation and real
 private-keeper reward tests. Canonical uint256 cash/baseline math now agrees
 across Solidity, Rust, Python and Node/browser WASM. Both existing machine
 builders now reuse that monetary graph for deployment and bootstrap. Python
-also configures the separate desk and retains its component comparisons;
-household lifecycles, reporting and full economy restoration remain open.
+also configures the separate desk and retains its component comparisons.
+A short existing Python economy now reports canonical cash/principal and
+exact open receipt marks through completed JSON/PDF generation. Complete
+household lifecycles and full economy restoration remain open.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -44,7 +46,8 @@ five-year evidence and Notes/release checks remain separate gates below.
 The browser-only wallet sandbox now uses canonical Buck, with separate cash
 and liability displays and verified format-4 restoration. The five-year
 economy, Python savings sandbox and JavaScript leveraged equilibrium demo
-still have legacy household/reporting/persistence assumptions. Their deployment
+still have legacy household/persistence assumptions, with JS reporting integration
+also pending. Their deployment
 and bootstrap now use Buck's explicit Jubilee dependency and linked libraries. No five-year campaign
 has validated the corrected accounting, and the
 canonical cash-only diagnostic is not the leveraged household economy. Changing
@@ -646,7 +649,8 @@ implementation sequence, before changing the primary economy builder.
   with linked upkeep, public identity/credit setup and scheduled fund work.
   The Python deployment now uses that same stack and directly installs the
   machine after seeding TWAP liquidity; its separate desk also uses canonical
-  mode. Both household lifecycles, reporting and persistent-state paths still
+  mode. A short Python loop now captures canonical books and completes its
+  JSON/PDF; both household lifecycles, JS reporting and persistent-state paths still
   need conversion. The generic cash-stack record refuses to silently
   serialize this partially migrated machine economy.
   Use the existing basket valuation library and supported upkeep facets;
@@ -698,7 +702,28 @@ implementation sequence, before changing the primary economy builder.
   the unported Python-wheel comparison fail explicit enabling requests;
   default canonical upkeep uses the existing Solidity wheel. Removed an
   ineffective simulated rearm before the keeper's independent pending view.
-  Household/reporting/persistent-state work remains open.
+  Household/persistent-state work remains open; canonical Python reporting is
+  covered by the next checkpoint.
+- [X] Convert canonical Python observations and validate the existing report
+  path with a short actual-contract economy. SimLP debt is its owned NFT
+  principal, separately from cash; NAV includes only basket-owned inventory
+  plus cash, with unpaid relief reported separately. LOW collateral marks
+  and LP fees use exact pool net/nominal ratios; independent seed LPs have
+  their own diagnostic group. Each observed depositor and the fund's one
+  receipt have remaining basis and exact valueOf marks. Python/JS shared
+  receipt readers now avoid double rounding through displayed sharePrice;
+  actual Anvil/Tevm tiny-unit counterexamples cover that error. Required
+  canonical monetary reads fail visibly, while unavailable guarded relief
+  publications carry an explicit error instead of a substituted live mark.
+  Full-width scaled values/ages/shares serialize as decimal strings. Metadata
+  records actual public roles, five linked libraries, model, scale and code
+  hashes; this is observation attribution, not full-world restoration.
+  =make nix-venv-economy-accounting-test= includes both bootstrap builders,
+  exact client marks, the real three-day loop/wheel/fund investment and report
+  regressions. The short test changes only its local PDF threshold and checks
+  plotted mark returns as well as the completed JSON/adjacent multipage PDF.
+  No household/five-year stability result is claimed. Extend these same
+  fields to migrated household state and the JS economy before long runs.
 - [X] Port canonical cash/baseline math to Rust/PyO3/WASM with uint256
   inputs and full-width products. The existing zero-dependency kernel now
   supplies compounded decay, aggregate net fund growth, per-NFT baseline
@@ -771,7 +796,9 @@ Continue in this order:
    scheduling. Public identity/credit onboarding and canonical wheel binding /
    private-keeper rewards now pass. The existing JS bootstrap now wires the
    canonical graph and real opening pools. Python now does likewise, including
-   its separate desk, without disabled comparison advisers. Qualify actual
+   its separate desk, without disabled comparison advisers. Canonical Python
+   observations and a short bootstrap-only JSON/PDF run now pass; complete
+   household actions and JS reports remain open. Qualify actual
    canonical arbitrage inventory/fees before enabling those routes. Receiving
    cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
@@ -950,4 +977,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-06 | Bootstrap the existing JS machine world on canonical Buck | buildEquilibriumWorld now reuses buildBuckWorld net handles: one factory, linked basket and fund, with the same valuation library in upkeep. Governed basket/wheel binding, real zero-allowance keeper introduction and frozen Carrying mode precede work. Existing valuation and bounded fund jobs are configured; no arb triangle is enabled and optional basket retirement remains policy. Production BuckCredit replaces the unused demo credit harness, with actual insurer opt-in and the correct insurer pool for every proxy. A real Tevm bootstrap through the exact demo bundle checks weighted opening pools, basket principal, supply summed across NFTs, a premium-bearing issue and exact old-reserve decay plus fresh cash. Generic cash-stack serialization refuses incomplete economy state. The dedicated Make acceptance passes; the equilibrium page builds; wallet/controller/Chromium acceptance remains 15 passed. No Solidity behavior changed. Updated Make, root/detail/package guides and block pre/post invariants. Python deployment, both complete household lifecycles, full saved-state migration, canonical arb fee/inventory qualification, short-world and five-year JSON/PDF evidence and Notes remain open. | =e9b35549= |
 
-| 2026-11-06 | Bootstrap the existing Python machine and retain canonical component setups | The existing deploy function now links canonical Buck/one Jubilee fund and the shared basket library, configures the insurer pool/refund allowance, and uses actual selected-NFT operations. The primary machine directly deploys one BasketMachineWheel, omitting PairsRebalanceDirector, EquityTurnDirector and the replaced component facet; journal assertions verify the inventory. Independent full-range seed positions provide TWAP history before opening the real basket facility and configuring the separate canonical desk. Governed binding, zero-allowance keeper introduction/freeze and bounded fund jobs match JS. Existing BootstrapDMAgents now deposit initial TOKEN endowments, preserving reference prices and declared weights; ongoing entries retain market purchases. Canonical arb enabling and the unported Python-wheel comparison fail explicitly; an ineffective simulated rearm was removed. Combined Make acceptance builds kernels/artifacts and passes the JS demo-bundle bootstrap plus three Python cases (machine and both component setups). Final Python checks: five passed including retained allocation/ROI-basis regressions; exact one-day reserve decay and full-value premium issuance pass. Make/README/plan/pre-post invariants updated, including the obsolete two-compiler build comment. No Solidity behavior changed. Next canonical reporting, household lifecycle/persistence, arb qualification, short-world then five-year JSON/PDF campaigns, and Notes. | This commit |
+| 2026-11-06 | Bootstrap the existing Python machine and retain canonical component setups | The existing deploy function now links canonical Buck/one Jubilee fund and the shared basket library, configures the insurer pool/refund allowance, and uses actual selected-NFT operations. The primary machine directly deploys one BasketMachineWheel, omitting PairsRebalanceDirector, EquityTurnDirector and the replaced component facet; journal assertions verify the inventory. Independent full-range seed positions provide TWAP history before opening the real basket facility and configuring the separate canonical desk. Governed binding, zero-allowance keeper introduction/freeze and bounded fund jobs match JS. Existing BootstrapDMAgents now deposit initial TOKEN endowments, preserving reference prices and declared weights; ongoing entries retain market purchases. Canonical arb enabling and the unported Python-wheel comparison fail explicitly; an ineffective simulated rearm was removed. Combined Make acceptance builds kernels/artifacts and passes the JS demo-bundle bootstrap plus three Python cases (machine and both component setups). Final Python checks: five passed including retained allocation/ROI-basis regressions; exact one-day reserve decay and full-value premium issuance pass. Make/README/plan/pre-post invariants updated, including the obsolete two-compiler build comment. No Solidity behavior changed. Next canonical reporting, household lifecycle/persistence, arb qualification, short-world then five-year JSON/PDF campaigns, and Notes. | =954ecb10= |
+
+| 2026-11-06 | Restore canonical Python observations and exact open-receipt reporting | Replaced signed SimLP debt with actual owned-NFT principal and separate cash; basket NAV now excludes independent seed liquidity. LOW collateral and LP BUCK fees use exact net/nominal ratios. Public model/role/library/code metadata, fund nominal/net cash, deferred debt, claim seconds and guarded wheel publication are recorded without secrets; wide scaled values, ages and shares use decimal strings. Shared Python/JS receipt readers use exact valueOf rather than double-rounding sharePrice; real Anvil/Tevm tiny-unit cases catch the one-unit loss. Observed depositors and the fund have remaining basis and live receipt marks, separately from relief availability. The existing PDF plot now shows open-investor MTM without requiring a redemption or household roster. The three-day existing loop performs real V3/wheel/fund investment, checks authoritative books and plotted returns, and completes raw JSON plus an adjacent multipage PDF; only its test-local automatic-PDF threshold is shortened. make nix-venv-economy-accounting-test builds both kernels/artifacts and passes 17 Python plus two JS tests across bootstraps, marks and reporting. No Solidity behavior changed. Make, root/detail guides and pre/post invariants updated. Next complete both household lifecycles/JS reporting and persistence, qualify canonical arb, then real five-year campaigns/PDFs and Notes. | This commit |

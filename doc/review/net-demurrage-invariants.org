@@ -116,8 +116,25 @@ accounting model explicitly. =SIM_WHEEL_ARB=1= is rejected until actual net
 inventory/profit behavior is qualified; the legacy Python-wheel comparison
 is also gated under this model. The default uses the existing Solidity
 wheel. =make nix-venv-economy-bootstrap-test= runs both builders, including
-the Python machine and both retained component configurations. Reporting
-and complete household/persistent-state acceptance remain separate gates.
+the Python machine and both retained component configurations. The short
+Python reporting integration is covered below; complete household and
+persistent-state acceptance remain separate gates.
+
+| Observation block | Preconditions | Postconditions |
+|-------------------+---------------+----------------|
+| Deployment manifest | Configured canonical graph, expected on-chain model, code at each public role/library address. | Records chain, model, Q, actual roles, five libraries and code hashes without secrets. These identify observations; they do not verify a restored world or release provenance. |
+| Cash/principal frame | Required monetary views are callable; deferred debt does not exceed issued supply. | Cash, owned NFT principal, aggregate active/deferred debt and fund cash remain distinct. No signed-balance reconstruction. Required read failures stop capture; they never produce false zero books or completion evidence. |
+| Pool-backed marks | Actual owned basket liquidity, LOW nominal venue marks and exact scaled pool gross/net. | Discount the entire position mark before halving its BUCK side, matching contract rounding. Report nominal/net holdings and carried fees separately. NAV excludes independent seed positions and unpaid claims; equity adds the separate claim and subtracts principal. |
+| Receipt observation | Live tracked IDs, unique ownership, configured basket/token and one pinned block. | Each remaining basis/shares and exact valueOf mark comes from the contract. Do not multiply rounded sharePrice to estimate that mark. ROI is nonannualized, before exit costs; unknown third-party positions are not asserted covered. Jubilee's receipt is separate from depositor ROI. |
+| Relief observation | Same configured fund/wheel; current guarded publication may be unavailable. | Live investor mark never substitutes for the guarded relief mark. Save unavailable/error and the publication's key/block/time explicitly. A pending maturity heap reports unknown exact claim seconds. |
+| JSON/PDF completion | Existing loop completed and all required frames succeeded; report threshold reached. | Write completed raw JSON before PDF rendering. Preserve the JSON and rerender command on failure; replace an existing PDF only after a successful render. Full-width scaled amounts, BUCK-seconds and shares are decimal strings. |
+
+=make nix-venv-economy-accounting-test= checks both bootstraps, exact Anvil and
+Tevm receipt marks (including a one-unit double-rounding counterexample),
+and the existing Python loop with real V3 liquidity and scheduled fund
+investment. The three-day test locally shortens the automatic-PDF threshold
+and checks plotted open-position returns plus a valid multipage PDF. It does
+not establish household behavior, five-year stability or full-state restore.
 
 An ordinary account has net held =H= and net issued-but-unspent =U=. Its
 =balanceOf= is =floor((H+U)/Q)=; it may hold both while still owing multiple

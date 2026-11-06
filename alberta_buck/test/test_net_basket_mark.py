@@ -77,4 +77,16 @@ def test_open_basket_basis_and_mark_follow_actual_receipts():
         historical = mark_net_basket_positions(chain, basket, stack.token, owner.address, ids,
                                                block_number=aged.block_number)
         assert historical == aged
+        for token_id in ids:
+            shares = basket.functions.holdings(token_id).call()[0]
+            execute(owner, basket, "redeemShares", [token_id, shares, 0])
+        assert basket.functions.totalShares().call() == 0
+        receipt = execute(owner, basket, "deposit", [stack.token.address, 3, 0])
+        tiny_id = basket.events.Deposited().process_receipt(receipt, errors=DISCARD)[0]["args"]["receiptId"]
+        execute(owner, stack.token, "transfer", [basket.address, 2])
+        tiny = mark_net_basket_positions(chain, basket, stack.token, owner.address, [tiny_id])
+        equity = basket.functions.equity().call()
+        assert tiny.positions[0].shares == 3 and equity in (4, 5)
+        assert tiny.mark == equity
+        assert tiny.positions[0].shares * tiny.share_price // 10**18 == equity - 1
         assert not chain.mismatches

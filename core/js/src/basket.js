@@ -1,7 +1,6 @@
-// One owner's open cash-only BuckNet basket receipt marks at a single block.
+// One owner's canonical Buck basket receipt marks at a single block.
 import { isAddress, maxUint256, zeroAddress } from "viem";
 
-const WAD = 10n ** 18n;
 const receiptAbi = [{ type: "function", name: "ownerOf", stateMutability: "view",
   inputs: [{ name: "tokenId", type: "uint256" }], outputs: [{ name: "owner", type: "address" }] }];
 
@@ -30,9 +29,9 @@ export async function markNetBasketPositions(session, basket, buck, owner, token
       read(receipt, "ownerOf", [tokenId]), read(basket, "holdings", [tokenId]),
     ]);
     if (actualOwner.toLowerCase() !== address.toLowerCase()) throw new Error("foreign basket receipt");
-    const product = shares * sharePrice;
-    if (product > maxUint256) throw new Error("basket mark overflows contract arithmetic");
-    return { tokenId, shares, basis, mark: product / WAD };
+    // Read the single-rounding receipt value, not a second rounding of the
+    // displayed share price. Contract arithmetic/price failures propagate.
+    return { tokenId, shares, basis, mark: await read(basket, "valueOf", [tokenId]) };
   }));
   const basis = positions.reduce((sum, p) => sum + p.basis, 0n);
   const mark = positions.reduce((sum, p) => sum + p.mark, 0n);

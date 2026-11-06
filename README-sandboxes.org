@@ -17,12 +17,14 @@ Both machine deployment/bootstrap paths now reuse canonical Buck's linked
 basket and Jubilee fund, with real pool pairing and premium-bearing issuance.
 =make nix-core-equilibrium-bootstrap-test= tests that stage through the demo
 artifact bundle. =make nix-venv-economy-bootstrap-test= adds the existing
-Python builder, bootstrap agents, desk and component comparisons. Both
-household lifecycles, reporting and full economy save/restore still await conversion. The
+Python builder, bootstrap agents, desk and component comparisons.
+=make nix-venv-economy-accounting-test= also validates exact Python/JS receipt
+marks and a short Python loop through JSON/PDF reporting. Both complete
+household lifecycles and full economy save/restore still await conversion. The
 [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] records that boundary. Wallet success is not
 five-year household evidence. The cash-only basket in the wallet world is not
-bound to the K controller, and production basket identity onboarding, leveraged
-positions and the household savings lifecycle remain separate work.
+bound to the K controller; a working household savings lifecycle remains a
+separate gate from the tested public basket onboarding and contract lifecycles.
 
 The common JavaScript constructor is
 =buildBuckWorld(session, artifacts, {identity, accounting: "net"})=. It now

@@ -21,6 +21,12 @@ def test_report_uses_machine_targets_and_open_positions_not_legacy_counters():
     assert household_position(f) == (150, 165, pytest.approx(.1))
     f["octl"][1]["basket_mark"] = None
     assert household_position(f) == (150, None, None)
+    f["basket_positions"] = [{"basis": 50, "mark": 75}]
+    assert household_position(f) == (150, None, None)  # Do not mask an unavailable household mark.
+    f["octl"] = []
+    assert household_position(f) == (50, 75, .5)
+    f["basket_positions"][0]["mark"] = None
+    assert household_position(f) == (50, None, None)
 
 
 @pytest.fixture

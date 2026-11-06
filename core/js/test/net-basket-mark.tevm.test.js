@@ -74,5 +74,20 @@ test("cash-only net basket receipts expose open basis and mark", { skip }, async
   const restoredMark = await markNetBasketPositions(restoredSession, restored.net.basket, restored.buck, holder.account, ids);
   assert.equal(restoredMark.basis, reduced.basis);
   assert.equal(restoredMark.mark, reduced.mark);
+  for (const tokenId of ids) {
+    const [shares] = await s.call(basket, "holdings", [tokenId]);
+    await s.send(basket, "redeemShares", [tokenId, shares, 0n], { account: holder.account });
+  }
+  assert.equal(await s.call(basket, "totalShares"), 0n);
+  await s.send(world.buck, "approve", [basket.address, 3n], { account: holder.account });
+  const tinyDeposit = await s.send(basket, "deposit", [world.buck.address, 3n, 0n], { account: holder.account });
+  const tinyId = parseEventLogs({ abi: basket.abi, logs: tinyDeposit.logs, eventName: "Deposited" })[0].args.receiptId;
+  await s.send(world.buck, "transfer", [basket.address, 2n], { account: holder.account });
+  const tiny = await markNetBasketPositions(s, basket, world.buck, holder.account, [tinyId]);
+  const equity = await s.call(basket, "equity");
+  assert.equal(tiny.positions[0].shares, 3n);
+  assert.ok(equity === 4n || equity === 5n);
+  assert.equal(tiny.mark, equity);
+  assert.equal(tiny.positions[0].shares * tiny.sharePrice / 10n ** 18n, equity - 1n);
   assert.deepEqual(s.mismatches, []);
 });

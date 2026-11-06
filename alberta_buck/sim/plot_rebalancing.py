@@ -60,9 +60,14 @@ def _i(v):
 
 
 def household_position(frame):
-    """Open household basket basis, marked value and return in BUCK; never invent a missing mark."""
+    """Open household/observed receipt basis and mark; never invent a missing mark."""
     people = [a for a in frame.get("octl", []) if a.get("member") and a.get("active")]
     positions = [a for a in people if a.get("basket_at_risk", a.get("basket", 0))]
+    if not people and "basket_positions" in frame:
+        positions = frame["basket_positions"]
+        basis = sum(a["basis"] for a in positions)
+        marked = (sum(a["mark"] for a in positions) if all(a.get("mark") is not None for a in positions) else None)
+        return basis, marked, (marked - basis) / basis if basis and marked is not None else None
     basis = sum(a.get("basket_at_risk", a.get("basket", 0)) for a in positions)
     marked = (sum(a["basket_mark"] for a in positions)
               if all(a.get("basket_mark") is not None for a in positions) else None)
@@ -96,6 +101,7 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     days = [f["day"] for f in fr]
     machine = d.get("meta", {}).get("run", {}).get("basket") == "equity-machine"
     households = any(a.get("member") for f in fr for a in f.get("octl", []))
+    observed_positions = any("basket_positions" in f for f in fr)
 
     def col(key, t):
         return [f.get(key, [])[t] for f in fr]
@@ -498,7 +504,7 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
                  f"treasury {pct(treasury_apr[-1])} APR, demand leg "
                  f"{pct(basketeer[-1])} basketeer / {pct(holder[-1])} holder")
 
-    if households:
+    if households or observed_positions:
         # The older direct-mint APR above has no household denominator. Show the live open
         # receipt book instead: basis follows deposits/redemptions, so this is not a realized APR.
         ax.clear()
@@ -518,7 +524,8 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
         ax2.set_ylabel("Million BUCK")
         lines = ax.get_lines()[:1] + ax2.get_lines()
         ax.legend(lines, [line.get_label() for line in lines], loc="upper left", fontsize=7)
-        ax.set_title("Household basket positions: current mark vs remaining basis, before exit costs")
+        label = "Household" if households else "Observed"
+        ax.set_title(f"{label} basket positions: current mark vs remaining basis, before exit costs")
 
     fig.tight_layout()
     if pdf is None:
@@ -557,9 +564,10 @@ def render(data_path: Path = DATA, out_path: Path = OUT, *, pdf=None) -> None:
     print(f"  Treasury BUCK: {tb_final:,.2f}  "
           f"share of NAV: {ts_final:.2f}%  "
           f"treasury ROI: {treasury_roi_final:.2f}%")
-    if households:
+    if households or observed_positions:
         risk, mark, roi = household_position(last)
-        print(f"  household open basket basis: {risk/E6:,.2f} BUCK, "
+        label = "household" if households else "observed"
+        print(f"  {label} open basket basis: {risk/E6:,.2f} BUCK, "
               f"mark: {mark/E6 if mark is not None else 'n/a'}, "
               f"return: {pct(100*roi) if roi is not None else 'n/a'}")
     else:

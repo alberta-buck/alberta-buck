@@ -165,9 +165,16 @@ def _eqsave_frame(d, ctr) -> dict:
     if not str(getattr(d, "basket_impl", "")).startswith("equity"):
         return f
     b, n = d.basket, len(d.tokens)
+    canonical = getattr(d, "buck_accounting", "") == "net"
+    ratios = ([d.buck.functions.accountBalancesScaled(p).call() for p in d.pool_buck]
+              if canonical else None)
     try:
         p_low = [int(b.functions.marks(i, 0).call()[3]) for i in range(n)]
+        if canonical:
+            p_low = [p * net // gross if gross else 0 for p, (gross, net) in zip(p_low, ratios)]
     except Exception:
+        if canonical:
+            raise
         p_low = None
     try:
         f["eq_decl"] = [int(b.functions.constituents(i).call()[9]) for i in range(n)]
@@ -178,6 +185,8 @@ def _eqsave_frame(d, ctr) -> dict:
         f["eq_share_price"] = int(b.functions.sharePrice().call())
         f["eq_idle"] = [int(b.functions.idleToken(i).call()) for i in range(n)]
     except Exception:
+        if canonical:
+            raise
         pass
     eqd = getattr(d, "equity_director", None)
     if eqd is not None:
@@ -206,15 +215,29 @@ def _eqsave_frame(d, ctr) -> dict:
         try:
             f["eq_lien"] = int(b.functions.lien().call())
             f["eq_liquidity"] = int(b.functions.liquidity().call())
-            held = [int(b.functions.marks(i, int(b.functions.liquidityOf(i).call())).call()[1]) // 2 for i in range(n)]
-            f["eq_held_buck"] = sum(held)
-            carried = 0
-            for i in range(n):
-                raw = int(d.buck.functions.rawBalanceOf(d.pool_buck[i]).call())
-                if raw:
-                    carried += int(d.buck.functions.feeOwing(d.pool_buck[i]).call()) * min(held[i], raw) // raw
-            f["eq_carried_fee"] = carried
+            if canonical:
+                # Match the basket's LOW position mark, including its exact
+                # Carrying ratio and the same order of integer rounding.
+                nominal = [int(b.functions.marks(i, int(b.functions.liquidityOf(i).call())).call()[0])
+                           for i in range(n)]
+                held = [p * net // gross // 2 if gross else 0
+                        for p, (gross, net) in zip(nominal, ratios)]
+                f["eq_held_buck_nominal"] = sum(p // 2 for p in nominal)
+                f["eq_held_buck"] = sum(held)
+                f["eq_carried_fee"] = f["eq_held_buck_nominal"] - f["eq_held_buck"]
+                f["eq_unpaid_relief"] = int(b.functions.reliefAccrued().call())
+            else:
+                held = [int(b.functions.marks(i, int(b.functions.liquidityOf(i).call())).call()[1]) // 2 for i in range(n)]
+                f["eq_held_buck"] = sum(held)
+                carried = 0
+                for i in range(n):
+                    raw = int(d.buck.functions.rawBalanceOf(d.pool_buck[i]).call())
+                    if raw:
+                        carried += int(d.buck.functions.feeOwing(d.pool_buck[i]).call()) * min(held[i], raw) // raw
+                f["eq_carried_fee"] = carried
         except Exception:
+            if canonical:
+                raise
             pass
     if getattr(d, "signals", None) is not None:
         f["eq_signal_fresh"] = bool(d.signals.functions.fresh().call())
@@ -231,6 +254,8 @@ def _eqsave_frame(d, ctr) -> dict:
             f["mk_outstanding"] = int(desk.functions.monetaryOutstanding().call())
             f["mk_buck_held"] = int(desk.functions.monetaryBuckHeld().call())
         except Exception:
+            if canonical:
+                raise
             pass
         grant = getattr(d, "desk_grant", None)
         if grant and p_low:
@@ -386,6 +411,9 @@ class Snapshotter:
         if artifact and accounting:
             self.meta["buck_contract"] = {"artifact": artifact, "accounting": accounting,
                                           "address": d.buck.address}
+            if accounting == "net":
+                from alberta_buck.sim.net_snapshot import deployment_manifest
+                self.meta["buck_contract"].update(deployment_manifest(d))
         self.tokens = [t[0] for t in scenario.tokens]
         self._pool_abi, _ = load_artifact("UniswapV3Pool")
         # address -> day-0 USDC-micro value per RAW unit helper key
@@ -397,11 +425,14 @@ class Snapshotter:
 
     # -- LP (Uniswap V3 position) accounting --------------------------- #
 
-    def _raw_usd0(self, addr: str, raw: int) -> int:
+    def _raw_usd0(self, addr: str, raw: int, buck_ratio=None) -> int:
         """USDC-micro value at day-0 prices of `raw` units of token `addr`.
         USDC: 1:1.  BUCK: 1:1 (1 BUCK == 1 USDC at t0 by construction).
         TOKEN i: raw * ref0_i / 10**dec_i."""
         kind, i = self._kind[Web3.to_checksum_address(addr)]
+        if kind == "buck" and buck_ratio is not None:
+            gross, net = buck_ratio
+            return raw * net // gross if gross else 0
         if kind in ("usdc", "buck"):
             return raw
         return raw * self.s.prices.ref(i, 0) // (10 ** self.d.dec[i])
@@ -415,7 +446,12 @@ class Snapshotter:
         d = self.d
         fees = {"usdc": 0, "buck": 0, "ub": 0}
         cap = {"usdc": 0, "buck": 0, "ub": 0}
-        for addr, owner, lo, hi, grp in d.pool_meta:
+        canonical = getattr(d, "buck_accounting", "") == "net"
+        metadata = list(d.pool_meta) + list(getattr(d, "bootstrap_pool_meta", []))
+        for addr, owner, lo, hi, grp in metadata:
+            fees.setdefault(grp, 0)
+            cap.setdefault(grp, 0)
+            ratio = d.buck.functions.accountBalancesScaled(addr).call() if canonical else None
             p = d.w3.eth.contract(address=addr, abi=self._pool_abi)
             t0 = p.functions.token0().call()
             t1 = p.functions.token1().call()
@@ -427,12 +463,12 @@ class Snapshotter:
             fg1 = p.functions.feeGrowthGlobal1X128().call()
             unc0 = L * ((fg0 - fi0) & MASK256) // Q128 + owed0
             unc1 = L * ((fg1 - fi1) & MASK256) // Q128 + owed1
-            fees[grp] += self._raw_usd0(t0, unc0) + self._raw_usd0(t1, unc1)
+            fees[grp] += self._raw_usd0(t0, unc0, ratio) + self._raw_usd0(t1, unc1, ratio)
             sp = p.functions.slot0().call()[0]
             if sp:
                 a0 = L * Q96 // sp           # full-range redeemable amounts
                 a1 = L * sp // Q96
-                cap[grp] += self._raw_usd0(t0, a0) + self._raw_usd0(t1, a1)
+                cap[grp] += self._raw_usd0(t0, a0, ratio) + self._raw_usd0(t1, a1, ratio)
         return {g: (fees[g], cap[g]) for g in fees}
 
     def agg_value(self, agents, day) -> int:
@@ -454,6 +490,10 @@ class Snapshotter:
         sides), in 6-decimal BUCK wei (BUCK uses USDC-compatible
         decimals).  Empty pools (no reserves) contribute 0."""
         d = self.d
+        if getattr(d, "buck_accounting", "") == "net":
+            # Independent seed LPs are outside the basket's owned book.
+            # Unpaid relief is a separate asset, not deployable inventory.
+            return int(d.basket.functions.gross().call()) + int(d.basket.functions.liquidity().call())
         total = 0
         for i in range(len(d.tokens)):
             rt = _bal(d.tokens[i], d.pool_buck[i])
@@ -580,6 +620,8 @@ class Snapshotter:
             try:
                 buck_usd = buck_usd6(d.chain, d.pool_ub, d.buck)
             except Exception:
+                if getattr(d, "buck_accounting", "") == "net":
+                    raise
                 buck_usd = 0
             # The retired balance-ratio gauge, kept as a diagnostic (frame
             # field buck_usd_bal): its gap to buck_usd is what concentrated
@@ -591,10 +633,14 @@ class Snapshotter:
         try:
             bv = int(d.basket.functions.basketValueInBuck().call())
         except Exception:
+            if getattr(d, "buck_accounting", "") == "net":
+                raise
             bv = 0
         try:
             bk = int(d.kctrl.functions.buckK().call())
         except Exception:
+            if getattr(d, "buck_accounting", "") == "net":
+                raise
             bk = 0
         # PID internals (ppm error, ppm*s integral, ppm dError) -- additive
         # observability for the equilibrium experiment; 0 if unavailable.
@@ -744,7 +790,17 @@ class Snapshotter:
                 except Exception:
                     pass
 
+        canonical = getattr(d, "buck_accounting", "") == "net"
+        if canonical:
+            from alberta_buck.sim.net_snapshot import observe
+            net, positions = observe(d, agents)
+            simlp_drawn = net["simlp_principal"]
+        else:
+            net, positions = None, None
+            simlp_drawn = max(0, -d.buck.functions.signedBalanceOf(d.simlp.address).call())
+
         self.frames.append({
+            **({"net": net, "basket_positions": positions} if canonical else {}),
             "invested": init_val,                      # arb capital (USDC,d0)
             "lp": lp,                                  # group: [feeUsd, capUsd]
             "day": day,
@@ -753,7 +809,7 @@ class Snapshotter:
             "spotBuck": sb,
             "basketVal": bv,
             "buckK": bk,
-            "simlp_drawn": max(0, -d.buck.functions.signedBalanceOf(d.simlp.address).call()),
+            "simlp_drawn": simlp_drawn,                 # actual NFT principal in canonical worlds
             "pid_p": pid_p,
             "pid_i": pid_i,
             "pid_d": pid_d,

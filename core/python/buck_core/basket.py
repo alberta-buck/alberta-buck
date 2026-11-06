@@ -1,11 +1,10 @@
-"""Read a household's actual BuckNet equity-basket receipt marks."""
+"""Read an owner's actual canonical Buck basket receipt marks."""
 
 from dataclasses import dataclass
 
 from web3 import Web3
 
 
-WAD = 10**18
 MAX_UINT256 = 2**256 - 1
 RECEIPT_ABI = [{"type": "function", "name": "ownerOf", "stateMutability": "view",
                 "inputs": [{"name": "tokenId", "type": "uint256"}],
@@ -59,9 +58,9 @@ def mark_net_basket_positions(chain, basket, buck, owner, token_ids, *, block_nu
         if read(receipt.functions.ownerOf(token_id)).lower() != address.lower():
             raise ValueError("foreign basket receipt")
         shares, basis = read(basket.functions.holdings(token_id))
-        product = shares * price
-        if product > MAX_UINT256:
-            raise ValueError("basket mark overflows contract arithmetic")
-        positions.append(BasketPositionMark(token_id, shares, basis, product // WAD))
+        # valueOf rounds once from total equity/shares. Multiplying the
+        # already-rounded sharePrice can lose an additional raw unit.
+        mark = read(basket.functions.valueOf(token_id))
+        positions.append(BasketPositionMark(token_id, shares, basis, mark))
     return HouseholdBasketMark(block, price, tuple(positions), sum(p.basis for p in positions),
                                sum(p.mark for p in positions))

@@ -20,6 +20,7 @@ help:
 	  '  make nix-venv-core-net-math-test   # canonical uint256 math: Solidity, Rust, Python and JS' \
 	  '  make nix-core-equilibrium-bootstrap-test  # canonical JS world deployment and pool bootstrap' \
 	  '  make nix-venv-economy-bootstrap-test  # canonical Python + JS deployment and pool bootstrap' \
+	  '  make nix-venv-economy-accounting-test # bootstraps + short real economy, receipt marks and JSON/PDF' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
@@ -1653,7 +1654,7 @@ sim-plot-eq-%:
 .PHONY: core-build core-build-py core-build-wasm core-identity-vectors
 .PHONY: core-net-math-test core-net-math-vectors core-net-math-vectors-check
 .PHONY: core-equilibrium-bootstrap-test
-.PHONY: economy-bootstrap-test
+.PHONY: economy-bootstrap-test economy-accounting-test
 .PHONY: core-wallet-vectors core-registry-vectors
 .PHONY: core-vectors-sync core-vectors-check
 .PHONY: poseidon-constants poseidon-constants-check
@@ -1700,6 +1701,15 @@ core-equilibrium-bootstrap-test: sim-build core-build-wasm
 # The Python path also configures the separate canonical desk.
 economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 	python -m pytest alberta_buck/test/test_net_economy_bootstrap.py -q
+
+# Reuse those builders and the EXISTING loop/report writer. The integration
+# test shortens only its local PDF threshold: no five-year policy evidence.
+# Exact receipt marks run in Python/Anvil and JS/Tevm, including one-unit
+# double-rounding counterexamples. Full household actions remain gated.
+#   make nix-venv-economy-accounting-test
+economy-accounting-test: economy-bootstrap-test
+	python -m pytest alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py -q
+	cd core/js && node --test test/net-basket-mark.tevm.test.js
 
 # Each published crate carries its OWN copy of the vectors it replays:
 # `cargo package` includes only files under the crate directory, so a crate

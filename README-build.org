@@ -65,8 +65,9 @@ diagnostics; =net-demurrage-smoke= checks the shared canonical clients.
 =buck-accounting-test= exercises the
 corrected =Buck= itself, its unsigned cash and the independent allocation
 vectors. Both existing economy builders now bootstrap the new constructor,
-linked libraries and fund/basket graph. Their complete household lifecycles,
-reporting and persistent-state integration remain migration work. The wallet sandbox
+linked libraries and fund/basket graph. A short Python economy now exercises
+canonical cash/principal/receipt observations and completed JSON/PDF reporting.
+Complete household lifecycles and persistent-state integration remain migration work. The wallet sandbox
 now uses the corrected token and its own verified save format. Old test fixtures
 explicitly importing =BuckLinear= are legacy evidence, as listed in the plan.
 Shared setup lives in abstract fixtures. Desk accounting, invariants and
@@ -98,6 +99,7 @@ make nix-core-test-rust                   # Rust kernels and shared-vector check
 make nix-venv-core-net-math-test          # build + compare canonical uint256 math in Solidity/Rust/Python/Node/Chromium
 make nix-core-equilibrium-bootstrap-test # existing JS builder: canonical graph, real pools and premium issuance
 make nix-venv-economy-bootstrap-test     # both builders, Python desk and retained component setup
+make nix-venv-economy-accounting-test    # bootstraps, exact receipt marks, short real loop and JSON/PDF
 make nix-venv-economy-test                # Python/JS households, policy parity, runner tests
 make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_economy.py
 make nix-core-test-js JS_TEST_ARGS=test/household-policy.test.js
@@ -146,6 +148,17 @@ reference pools unchanged; ongoing investor purchases still trade normally.
 Canonical wheel arbitrage is disabled pending its inventory/fee qualification;
 an explicit =SIM_WHEEL_ARB=1= request fails. The Python wheel comparison is
 also gated under corrected accounting; the existing Solidity wheel is used.
+
+=economy-accounting-test= includes those bootstrap checks, exact receipt-mark
+tests in Anvil/Tevm and the existing Python loop with a small bootstrap-only
+population. Its three-day integration test shortens the PDF threshold locally
+to test the automatic completion path; production still requires five years
+for automatic PDFs. The completed JSON records monetary model, public role
+and library addresses/code hashes, actual cash, NFT principal, Jubilee cash
+and guarded publication, and each observed depositor's remaining basis/mark.
+The PDF shows open-position mark-to-market returns even without redemptions.
+This is reporting integration coverage, not household-policy or five-year
+stability evidence. No extra economy runner is introduced.
 
 Foundry excludes SNARK tests whose generated proof fixtures are absent, visibly. Their setup
 and regeneration, executable papers, release builds and deployment procedures remain in

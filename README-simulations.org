@@ -9,12 +9,13 @@ interaction and cross-language contract tests. They are not independent economic
 Historical economy runs deployed legacy =Buck= (or =BuckWithBasketHooks=),
 with signed-balance accounting. The canonical =Buck.sol= now uses compounded
 cash and per-facility Jubilee accounting. Both existing machine builders now
-use that stack for deployment and pool bootstrap; household lifecycles,
-reporting and persistent state still need migration. Each
+use that stack for deployment and pool bootstrap. A short Python economy now
+captures canonical books and generates JSON/PDF reports; complete household
+lifecycles and persistent state still need migration. Each
 bootstrap reuses one linked basket/fund, uses production BuckCredit with
 recipient opt-in, and configures the existing wheel's fund jobs and guarded
-valuation. The snapshot API rejects this partially migrated economy rather
-than silently saving only its cash stack. The economy commands are not yet restored under
+valuation. The JS full-world restore API rejects this partially migrated economy rather
+than silently saving only its cash stack. The household economy commands are not yet restored under
 the corrected model. Historical five-year results and household tests do not
 validate that model. Newly saved vectors
 record the actual BUCK artifact, address and accounting model in
@@ -39,12 +40,54 @@ not identify which accounting produced a result. The
 | Canonical money kernel | Do Solidity, native Python and Node/browser WASM agree on compounded cash and baseline facility relief? | =core-net-math-test= | Shared uint256 vectors, overflow checks and exact integer comparisons |
 | JS equilibrium bootstrap | Can the existing primary builder deploy its corrected monetary graph, pair the weighted opening and issue against a premium-bearing facility? | =core-equilibrium-bootstrap-test= | Real Tevm bootstrap through the demo artifact bundle; household decisions and restore remain pending |
 | Both economy bootstraps | Do the existing Python and JS builders construct the canonical graph, issue actual pool money and handle the insurer premium? | =economy-bootstrap-test= | JS check plus Python machine/desk and two retained component setups; no five-year loop |
+| Economy accounting/report integration | Does the existing loop record actual cash, principal and open investor marks and finish its report? | =economy-accounting-test= | Both bootstraps, exact Python/JS marks and a three-day bootstrap-only JSON/PDF check; no household/five-year policy claim |
 | Fund return comparison | Can Jubilee reach its 50-year target in a closed BUCK economy? | =demurrage-returns= | No-return and explicitly funded 2% return tables |
 | Control lab | Which feedback component causes a response or instability? | =control-lab-plan/interactive/verify= | Cached traces and an offline interactive page |
 | Sandboxes | Can a person operate a wallet, credit line and savings account? | See [[file:README-sandboxes.org][sandboxes]] | Interactive state and exported data |
 
 Keep these distinct checks. A five-year parity average cannot detect a broken wallet workflow;
 a short diagnostic trace cannot establish an economic equilibrium.
+
+** Reading canonical economy observations
+
+=make nix-venv-economy-accounting-test= exercises the existing runner and report
+writer. Its short integration test changes the automatic-PDF horizon only
+inside the test; production still automatically renders every completed
+five-year run. The actual contracts and scheduled wheel work run normally.
+
+=meta.buck_contract= records the accounting model, chain, public roles and
+linked-library code hashes. These identify the observed deployment; they are
+not a saved-world restore or independent release audit. Each canonical frame
+has =net= with total issuance, active/deferred NFT principal, SimLP cash and
+principal separately, Jubilee nominal/net cash and remaining relief budget.
+Full-width scaled amounts, BUCK-seconds and receipt shares are decimal
+strings, preserving precision for browser readers. A maturity backlog is
+explicit; it does not invent an exact claim total.
+
+=basketNav= is the basket's own net-marked inventory plus actual cash,
+excluding independent seed LP positions and unpaid relief. =eq_unpaid_relief=
+reports the separately marked asset; =eq_equity= includes it and subtracts
+actual basket principal. =eq_held_buck= uses LOW position marks and the pool's
+exact net/nominal ratio; =eq_held_buck_nominal= and =eq_carried_fee= expose the
+carried-fee difference. LP fee diagnostics use net-deliverable BUCK and
+day-zero TOKEN/USD prices, with independent seed positions in =bootstrap=.
+Market BVIB continues to use nominal issuance prices.
+
+=basket_positions= records each observed agent owner's live receipt IDs,
+remaining basis, exact =valueOf= mark and nonannualized ROI before exit costs.
+It does not claim to enumerate unknown third-party investors. Jubilee's one
+receipt is reported separately in =net.jubilee.position=. Both Python and JS
+read the contract's single-rounding =valueOf=: multiplying a rounded
+=sharePrice= by shares can understate the result by a raw BUCK unit. The PDF
+uses these open-position marks when no household position book is present,
+so a depositor who never redeems still has a visible return.
+
+Jubilee's live receipt mark is distinct from its guarded last wheel
+publication used by advisory relief quotes. An unavailable publication has
+an explicit error and no mark, not a substituted live value. Missing required
+cash/principal/valuation reads fail the canonical frame instead of recording
+false zeros. A marked gain never promises an immediately executable exit or
+waives K or Jubilee liquidity limits.
 
 * Demurrage and Jubilee reference
 
