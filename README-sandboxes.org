@@ -13,11 +13,12 @@ pool. Buys account for the pool's carried fees and report actual net delivery.
 Default trades require a positive output bound within 1% of the current spot
 estimate, before execution; larger price impact can therefore refuse a trade.
 
-The JS machine's deployment/bootstrap now reuses canonical Buck's linked
+Both machine deployment/bootstrap paths now reuse canonical Buck's linked
 basket and Jubilee fund, with real pool pairing and premium-bearing issuance.
 =make nix-core-equilibrium-bootstrap-test= tests that stage through the demo
-artifact bundle. The Python savings deployment and both household lifecycles
-and full economy save/restore still await conversion. The
+artifact bundle. =make nix-venv-economy-bootstrap-test= adds the existing
+Python builder, bootstrap agents, desk and component comparisons. Both
+household lifecycles, reporting and full economy save/restore still await conversion. The
 [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] records that boundary. Wallet success is not
 five-year household evidence. The cash-only basket in the wallet world is not
 bound to the K controller, and production basket identity onboarding, leveraged

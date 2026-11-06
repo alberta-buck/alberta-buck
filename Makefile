@@ -19,6 +19,7 @@ help:
 	  '  make nix-venv-core-build-py        # compiled Python kernels' \
 	  '  make nix-venv-core-net-math-test   # canonical uint256 math: Solidity, Rust, Python and JS' \
 	  '  make nix-core-equilibrium-bootstrap-test  # canonical JS world deployment and pool bootstrap' \
+	  '  make nix-venv-economy-bootstrap-test  # canonical Python + JS deployment and pool bootstrap' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
@@ -863,12 +864,9 @@ sim-report:
 	python -m alberta_buck.sim.report $(SIM_REPORT_VECTORS) --jobs $(JOBS) \
 		$(if $(SIM_REPORT_INDEX),--index "$(SIM_REPORT_INDEX)")
 
-# Two-step Solidity build:
-#  (1) v3 profile: compile 0.7.6 Uniswap V3 core contracts without via_ir.
-#  (2) default profile: compile everything else with via_ir enabled
-#      (required for BuckBasket's deep call stack).  Skips the 0.7.6
-#      trigger to avoid the IR-incompatibility error.
-# Both profiles share the same ``out/`` directory.
+# Stage the pinned official Uniswap artifacts, then compile our simulation
+# contracts with foundry.toml's single pinned compiler and via_ir profile.
+# No historical Uniswap compiler/profile is needed.
 # The simulation loaders and Uniswap staging also expect out/; FOUNDRY_OUT
 # alone does not redirect them. Use a separate worktree for isolated builds.
 sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) stage-uniswap
@@ -1655,6 +1653,7 @@ sim-plot-eq-%:
 .PHONY: core-build core-build-py core-build-wasm core-identity-vectors
 .PHONY: core-net-math-test core-net-math-vectors core-net-math-vectors-check
 .PHONY: core-equilibrium-bootstrap-test
+.PHONY: economy-bootstrap-test
 .PHONY: core-wallet-vectors core-registry-vectors
 .PHONY: core-vectors-sync core-vectors-check
 .PHONY: poseidon-constants poseidon-constants-check
@@ -1696,6 +1695,11 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 core-equilibrium-bootstrap-test: sim-build core-build-wasm
 	node core/js/bin/bundle-artifacts.mjs
 	cd core/js && node --test test/net-equilibrium-bootstrap.tevm.test.js
+
+# Both EXISTING builders, not the household loop or a five-year campaign.
+# The Python path also configures the separate canonical desk.
+economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
+	python -m pytest alberta_buck/test/test_net_economy_bootstrap.py -q
 
 # Each published crate carries its OWN copy of the vectors it replays:
 # `cargo package` includes only files under the crate directory, so a crate

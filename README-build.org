@@ -60,12 +60,13 @@ Foundry at a different output directory.
 * Tests
 
 The [[file:doc/review/bucknet-economy-implementation.org][current accounting plan]] corrects the existing =Buck.sol= using the
-BuckNet prototype's discoveries. =BuckNet*= tests and =net-demurrage-smoke=
-remain donor/regression diagnostics. =buck-accounting-test= exercises the
+BuckNet prototype's discoveries. =BuckNet*= tests remain donor/regression
+diagnostics; =net-demurrage-smoke= checks the shared canonical clients.
+=buck-accounting-test= exercises the
 corrected =Buck= itself, its unsigned cash and the independent allocation
-vectors. The primary household-economy and savings/equilibrium builders still need the new constructor,
-linked libraries and explicit cash/debt integration; they are not restored
-merely because the contract artifact retains its name. The wallet sandbox
+vectors. Both existing economy builders now bootstrap the new constructor,
+linked libraries and fund/basket graph. Their complete household lifecycles,
+reporting and persistent-state integration remain migration work. The wallet sandbox
 now uses the corrected token and its own verified save format. Old test fixtures
 explicitly importing =BuckLinear= are legacy evidence, as listed in the plan.
 Shared setup lives in abstract fixtures. Desk accounting, invariants and
@@ -96,6 +97,7 @@ make nix-venv-net-demurrage-smoke          # canonical linked Buck, Python/JS EV
 make nix-core-test-rust                   # Rust kernels and shared-vector checks
 make nix-venv-core-net-math-test          # build + compare canonical uint256 math in Solidity/Rust/Python/Node/Chromium
 make nix-core-equilibrium-bootstrap-test # existing JS builder: canonical graph, real pools and premium issuance
+make nix-venv-economy-bootstrap-test     # both builders, Python desk and retained component setup
 make nix-venv-economy-test                # Python/JS households, policy parity, runner tests
 make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_economy.py
 make nix-core-test-js JS_TEST_ARGS=test/household-policy.test.js
@@ -133,6 +135,17 @@ not run the household decision loop; that lifecycle and full economy
 save/restore remain explicit migration gates. Synthetic SimLP/router binding
 still uses the labelled registry harness; production service authorization
 is separately tested by the Solidity suites.
+
+=economy-bootstrap-test= includes that JS test and builds the native kernel
+for the Python path. It uses the existing Python deployment and bootstrap
+agents, checks the single machine/fund/basket graph and separate desk, and
+keeps the two older component configurations covered. The canonical machine
+omits the disabled advisers and replaced component facet. Opening TOKEN
+endowments model existing holdings, preserve declared weights and leave the
+reference pools unchanged; ongoing investor purchases still trade normally.
+Canonical wheel arbitrage is disabled pending its inventory/fee qualification;
+an explicit =SIM_WHEEL_ARB=1= request fails. The Python wheel comparison is
+also gated under corrected accounting; the existing Solidity wheel is used.
 
 Foundry excludes SNARK tests whose generated proof fixtures are absent, visibly. Their setup
 and regeneration, executable papers, release builds and deployment procedures remain in

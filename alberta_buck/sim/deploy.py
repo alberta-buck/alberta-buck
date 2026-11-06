@@ -1,8 +1,10 @@
 """Deploy + wire the full Direct system, V3 pools, and Universal Router.
 
-Order mirrors test/BuckBasket.t.sol::setUp.  Only BUCK-touching contracts (BuckBasket,
-each TOKEN/BUCK pool, the Universal Router) get a public bindContract
-Identity; TOKEN/USDC pools and SimLP never custody BUCK so they need none.
+Equity baskets use canonical compounded Buck, explicit NFT principal and one
+Jubilee fund. The machine seeds independent full-range liquidity before its
+strict TWAP venue is installed. BUCK services, including the funding SimLP,
+have explicit identities. Synthetic infrastructure uses the labelled registry
+harness; basket/fund/machine-wheel use their governed binding APIs as well.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from web3 import Web3
+from buck_core import NetCreditOps, deploy_net_basket, deploy_net_stack
 
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.chain import Chain, load_artifact
@@ -67,17 +70,21 @@ DEPOSITED_TOPIC = PRORATA_DEPOSITED_TOPIC
 REDEEMED_TOPIC = PRORATA_REDEEMED_TOPIC
 
 
-def wheel_arb_enabled() -> bool:
+def wheel_arb_enabled(d=None) -> bool:
     """SIM_WHEEL_ARB=0 turns the wheel's arbitrage off (no triangles): on an
     equity basket, whose wheel must run to place deposits, it is the
     "wheel off" of the experiments."""
+    if getattr(d, "buck_accounting", "") == "net":
+        if os.environ.get("SIM_WHEEL_ARB") not in (None, "0"):
+            raise NotImplementedError("canonical wheel arbitrage requires net inventory/fee qualification")
+        return False
     return os.environ.get("SIM_WHEEL_ARB", "1") != "0"
 
 
 def equity_arb_on(d) -> None:
     """Give the equity basket's wheel its arbitrage: one triangle per
     constituent (its TOKEN/BUCK pool, TOKEN/USDC, BUCK/USDC)."""
-    if d.wheel is None or not wheel_arb_enabled() \
+    if d.wheel is None or not wheel_arb_enabled(d) \
             or int(d.wheel.functions.triangleCount().call()) > 0:
         return
     for k, t in enumerate(d.tokens):
@@ -131,7 +138,7 @@ class Deployment:
     chain: Chain
     anvil: Any
     gov: str
-    pool_acct: str           # Buck.insurancePool: a Carrying SimLP (+ setBasket caller)
+    pool_acct: str           # bootstrap insurer's Carrying SimLP; legacy setBasket caller
     issuer_addr: str
     issuer_kp: Any
     reg: Any
@@ -155,9 +162,14 @@ class Deployment:
     basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "equity" | "equity-ops"
     buck_artifact: str = ""       # actual deployed contract, recorded in saved vectors
     buck_accounting: str = ""     # accounting model implemented by that deployment
-    net_credit_ops: Any = None    # selected-NFT net operations, on a future net deployment
-    net_market_ops: Any = None    # guarded net BUCK purchases, on a future net deployment
-    venue: Any = None             # BuckBasketUniswapV3 facet (prorata only)
+    net_stack: Any = None         # canonical token, fund, quoter and four monetary libraries
+    net_basket: Any = None        # the same basket plus its shared valuation library
+    v3_factory: Any = None
+    equity_upkeep: Any = None
+    bootstrap_pool_meta: list = field(default_factory=list)  # independent SimLP seed positions
+    net_credit_ops: Any = None    # actual selected-NFT operations through simulation proxies
+    net_market_ops: Any = None    # guarded household purchase wiring remains pending
+    venue: Any = None             # currently installed venue facet
     director: Any = None          # rebalance director (prorata only)
     director_impl: str = "pairs"  # "pairs": the one signal engine left
     controller_impl: str = "direct"   # "direct" (default) | "shadow"  (WP-3a)
@@ -165,8 +177,8 @@ class Deployment:
     desk: Any = None              # BasketDesk ("equity-ops": the desk, its own credit holder)
     equity_director: Any = None   # EquityTurnDirector (equity baskets)
     desk_grant: Any = None        # the desk's founding grant, TOKEN base units per constituent
-    wheel: Any = None             # BasketWheel (equity baskets: it places deposits)
-    equity_machine: bool = False  # replacement, activated after identical bootstrap
+    wheel: Any = None             # existing machine or component wheel
+    equity_machine: bool = False  # machine configured before canonical opening deposits
     signals: Any = None
     pair_signals: Any = None
     pair_policy: Any = None
@@ -188,10 +200,17 @@ def _erc20_abi() -> list:
 
 def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
            basket_impl="prorata", director_impl="pairs",
-           controller_impl="direct") -> Deployment:
+           controller_impl="direct", equity_machine=None) -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
     deployer, gov, issuer_addr = accts[0], accts[1], accts[3]
+    credit_holder = basket_impl in ("equity", "equity-ops")
+    machine = (os.environ.get("SIM_EQUITY_MACHINE", "0") == "1"
+               if equity_machine is None else bool(equity_machine))
+    if machine and (not credit_holder or controller_impl != "direct"):
+        raise ValueError("the basket machine requires an equity basket and the direct K controller")
+    if machine and len(scenario.tokens) < 2:
+        raise ValueError("the basket machine requires at least two constituents")
     erc20_abi = _erc20_abi()
 
     # --- identity layer ---------------------------------------------- #
@@ -204,8 +223,10 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     chain.send(reg.functions.trustIssuer(issuer_addr, idmod.pspubkey_arg(issuer_kp)),
                sender=gov)
     # Certified-operator bind copies this identity onto BUCK-touching contracts.
-    idmod.register_deployer(chain, reg, issuer_addr, issuer_kp, rng,
-                            int(w3.eth.chain_id), sender=deployer)
+    operator_args, operator_sk = idmod.register_args(
+        issuer_kp, int(deployer, 16), idmod.fields_for("Deployer", 0), rng,
+        int(w3.eth.chain_id), int(reg.address, 16), with_sk=True)
+    chain.send(reg.functions.register(issuer_addr, *operator_args), sender=deployer)
 
     # --- Direct BUCK stack ------------------------------------------- #
     credit = chain.deploy("BuckCredit")
@@ -249,17 +270,22 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # holders (a MARKED BuckCredit, a lien) and get it as is.  The pro-rata
     # baskets mint and burn through the hooks, so for them the sim deploys the
     # hooked subclass (src/legacy/BuckWithBasketHooks.sol).
-    credit_holder = basket_impl in ("equity", "equity-ops")
-    machine = os.environ.get("SIM_EQUITY_MACHINE", "0") == "1"
-    if machine and (not credit_holder or controller_impl != "direct"):
-        raise ValueError("SIM_EQUITY_MACHINE requires an equity basket and the direct K controller")
     buck_artifact = "Buck" if credit_holder else "BuckWithBasketHooks"
-    buck = chain.deploy(buck_artifact, credit.address, kctrl.address, reg.address, pool_acct)
-    chain.send(reg.functions.setBuck(buck.address), sender=gov)
-    # Wire BuckCredit -> Buck so activation can flow through Buck.mint ->
-    # activateFromBuck (which requires msg.sender == buck).  The wiring is an
-    # authorisation record only: BuckCredit never calls back into Buck.
-    chain.send(credit.functions.setBuck(buck.address), sender=deployer)
+    stack, basket_stack = None, None
+    if credit_holder:
+        stack = deploy_net_stack(chain, reg, credit, kctrl, gov,
+                                 credit_deployer=deployer, insurance_pool=pool)
+        buck = stack.token
+        chain.send(stack.fund.functions.authorizeIdentityBinding(
+            reg.address, deployer, operator_args[0], operator_args[1]), sender=gov)
+        idmod.bind_as_operator(chain, reg, stack.fund.address, True, True, sender=deployer)
+        chain.send(buck.functions.setInsurerPool(pool.address), sender=deployer)
+        chain.send(pool.functions.exec(buck.address, buck.encode_abi(
+            "approve(address,uint256)", args=[buck.address, 2**256 - 1])))
+    else:
+        buck = chain.deploy(buck_artifact, credit.address, kctrl.address, reg.address, pool_acct)
+        chain.send(reg.functions.setBuck(buck.address), sender=gov)
+        chain.send(credit.functions.setBuck(buck.address), sender=deployer)
 
     v3f = chain.deploy("UniswapV3Factory")
     # Constructor is identical for every shell (drop-in).  The spot/TWAP
@@ -295,11 +321,15 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # "equity-ops" adds the monetary desk BESIDE the basket (BasketDesk,
         # below): the basket itself is the same shell either way.
         name = "BuckBasketEquity"
-        basket = chain.deploy(name, *ctor)
+        basket_stack = deploy_net_basket(chain, stack, v3f, gov, fee_tier=FEE_BUCK)
+        basket = basket_stack.basket
         venue = chain.deploy("BuckBasketUniswapV3")
         chain.send(basket.functions.setVenue(venue.address), sender=gov)
-        eq_facet = chain.deploy("BuckBasketEquityWheel")
-        chain.send(basket.functions.setEquityWheel(eq_facet.address), sender=gov)
+        eq_facet = None
+        if not machine:
+            abi, bytecode = load_artifact("BuckBasketEquityWheel", libraries=basket_stack.libraries)
+            eq_facet = chain.deploy("BuckBasketEquityWheel", abi=abi, bytecode=bytecode)
+            chain.send(basket.functions.setEquityWheel(eq_facet.address), sender=gov)
         union, seen = [], set()
         for art in (name, "BuckBasketUniswapV3", "BuckBasketEquityWheel"):
             abi, _ = load_artifact(art)
@@ -318,8 +348,13 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # A credit holder: bound public and NON-Carrying (it holds a lien), and
         # it issues itself its MARKED credit.  The face caps what it may ever
         # issue at K x face; 1e23 raw (1e17 BUCK) is no practical cap.
-        idmod.bind_as_operator(chain, reg, basket.address, True, False, sender=deployer)
-        chain.send(basket.functions.openCredit(credit.address, 10**23), sender=gov)
+        chain.send(basket.functions.enableNetAccounting(), sender=gov)
+        chain.send(stack.fund.functions.configure(buck.address, basket.address), sender=gov)
+        if not machine:
+            chain.send(basket.functions.authorizeIdentityBinding(
+                reg.address, deployer, operator_args[0], operator_args[1]), sender=gov)
+            idmod.bind_as_operator(chain, reg, basket.address, True, False, sender=deployer)
+            chain.send(basket.functions.openCredit(credit.address, 10**23), sender=gov)
     desk = None
     if basket_impl == "equity-ops":
         # The monetary desk is its own credit holder beside the basket: its
@@ -328,9 +363,11 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # venue facet.  Nothing it holds or owes enters the basket's mark.
         # Its constituents are mirrored, and its policy and founding grant
         # set, once the basket has its pools (the desk block below).
+        abi, bytecode = load_artifact("BasketDesk", libraries=basket_stack.libraries)
         desk = chain.deploy("BasketDesk", buck.address, kctrl.address,
-                            basket.address, gov)
+                            basket.address, gov, abi=abi, bytecode=bytecode)
         idmod.bind_as_operator(chain, reg, desk.address, True, False, sender=deployer)
+        chain.send(desk.functions.enableNetAccounting(), sender=gov)
         chain.send(desk.functions.setVenue(venue.address), sender=gov)
         chain.send(desk.functions.openCredit(credit.address, 10**23), sender=gov)
         desk_union, seen = [], set()
@@ -477,16 +514,10 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # SimLP will custody BUCK to seed the floating BUCK/USDC pool, so it
     # needs a public Identity (BUCK transfers are identity-gated).
     #
-    # Bind as Public + NON-Carrying.  Under Phase 1b, buck.mint(N) no
-    # longer delivers N to the holder's raw balance -- it opens NFT-
-    # backed credit headroom that the holder spends INTO pools (raw
-    # goes negative).  A Carrying-flagged SimLP cannot go negative
-    # (_carryingTransfer asserts rawSigned >= value), so the V3 mint
-    # callback that transfers BUCK to the pool reverts with "BUCK:
-    # Carrying amount exceeds raw".  As Non-Carrying, SimLP uses its
-    # creditLimit (held + unusedCredit) as spendable; the transfer to
-    # the pool drives signedRaw to -value and the pool receives freshly
-    # issued BUCK.
+    # The funding holder is public and ordinary. Canonical mint issues its
+    # entire requested cash immediately; later LP transfers do not issue or
+    # retire principal. The explicitly hooked legacy comparison has its
+    # original headroom behavior.
     idmod.bind_as_operator(chain, reg, simlp.address, True, False, sender=deployer)
     big = 10 ** 30
     chain.send(usdc.functions.mint(simlp.address, big))
@@ -512,11 +543,20 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     d = Deployment(w3, chain, anvil, gov, pool_acct, issuer_addr, issuer_kp,
                    reg, buck, credit, kctrl, basket, router, simlp, usdc,
                    erc20_abi, tok, dec,
-                   basket_impl=basket_impl, buck_artifact=buck_artifact, buck_accounting="legacy-signed",
-                   venue=venue,
+                   basket_impl=basket_impl, buck_artifact=buck_artifact,
+                   buck_accounting="net" if credit_holder else "legacy-signed",
+                   net_stack=stack, net_basket=basket_stack, v3_factory=v3f,
+                   equity_upkeep=eq_facet if credit_holder else None, venue=venue,
                    controller_impl=controller_impl, observer=observer, desk=desk,
                    deposited_topic=deposited_topic, redeemed_topic=redeemed_topic)
     d.equity_machine = machine
+    if stack is not None:
+        def execute_credit(owner, target, method, args):
+            # Household credit belongs to its public simulation proxy. These
+            # fixture proxies have unrestricted exec; this is not a wallet.
+            proxy = chain.at("SimLP", getattr(owner, "address", owner))
+            return chain.send(proxy.functions.exec(target.address, target.encode_abi(method, args=args)))
+        d.net_credit_ops = NetCreditOps(chain, stack, execute_credit)
 
     # --- pools: TOKEN/USDC (truth) + TOKEN/BUCK (basket) ------------- #
     pool_v3_abi, _ = load_artifact("UniswapV3Pool")
@@ -587,16 +627,15 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # BUCK transfer is SimLP(public) -> pool(public).  No private EOA, no
     # storage fakery, and no existing pool is drained.
     Q96 = 1 << 96
-    # Buck.mint(amount) raises spendable by `amount` at the K it runs at,
-    # activating amount / K of a zero-premium face.  Mint TARGET_BUCK_LP with
-    # a 20% margin so full-range rounding never trips "amount exceeds
-    # spendable", on a face that covers it at the live resting K0 with a
-    # further 20%.  Only the LP transfer (~TARGET_BUCK_LP) actually enters
-    # supply; the surplus headroom is inert, so downstream pool depth /
-    # totalSupply are unchanged.
+    # Reserve a tenth of the common depth for each independent TOKEN/BUCK
+    # seed in machine mode, matching JS. A 20% cash margin covers rounding
+    # and elapsed demurrage. In canonical accounting all minted cash is real
+    # principal, including that margin; it remains in the funding holder.
     k0 = kctrl.functions.buckK().call()
-    mint_amt = dp.target_buck_lp * 12 // 10
-    FACE = max(2 * dp.target_buck_lp, (mint_amt * E18 // max(1, k0)) * 12 // 10)
+    seed_buck = dp.target_buck // 10 if machine else 0
+    funding = dp.target_buck_lp + seed_buck * len(tok)
+    mint_amt = funding * 12 // 10
+    FACE = max(2 * funding, (mint_amt * E18 // max(1, k0)) * 12 // 10)
 
     now_ts = w3.eth.get_block("latest")["timestamp"]
     # A credit only lands where its recipient asked for it, so SimLP has to
@@ -642,6 +681,16 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     lo_ub, hi_ub = full_range_ticks(TICK_SPACING[FEE_BUCK_UB])
     chain.send(simlp.functions.mint(pub, lo_ub, hi_ub, max(1, Lub), u0, u1))
     d.pool_ub = pub
+    if machine:
+        for i, asset in enumerate(tok):
+            pc = w3.eth.contract(address=d.pool_buck[i], abi=pool_v3_abi)
+            a0, a1 = pc.functions.token0().call(), pc.functions.token1().call()
+            sp = sqrt_price_x96(asset.address, 10**dec[i], buck.address, scenario.prices.day0(i))
+            liquidity = (seed_buck * sp // Q96 if buck.address.lower() == a0.lower()
+                         else seed_buck * Q96 // sp)
+            lo, hi = full_range_ticks(TICK_SPACING[FEE_BUCK])
+            chain.send(simlp.functions.mint(pc.address, lo, hi, max(1, liquidity), a0, a1))
+            d.bootstrap_pool_meta.append((pc.address, simlp.address, lo, hi, "bootstrap"))
 
     if verbose:
         buck_bal = buck.functions.balanceOf(pub).call()
@@ -649,7 +698,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         print(f"[deploy] BUCK/USDC pool {pub[:10]}...  "
               f"fee={FEE_BUCK_UB} ({TICK_SPACING[FEE_BUCK_UB]}-tick)")
         print(f"         sqrtPriceX96={spU}  implied $1.00/BUCK (by construction)")
-        print(f"         reserves: {buck_bal/E18:,.2f} BUCK  "
+        print(f"         reserves: {buck_bal/E6:,.2f} BUCK  "
               f"{usdc_bal/E6:,.2f} USDC")
 
     # LP-position metadata for ROI/APR accounting: (pool, owner, lo, hi,
@@ -674,7 +723,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # -- pass DIRECTOR_QUORUM=2|3 for a 30-day run).
     if director_impl != "pairs":
         raise ValueError(f"unknown director: {director_impl!r} (pairs)")
-    if basket_impl in ("prorata", "ops", "equity-ops"):
+    if basket_impl in ("prorata", "ops", "equity-ops") and not machine:
         # (on "equity-ops" the pairs director only feeds the desk its
         # common-mode signal; the basket rebalances itself -- see below)
         dir_deadband = int(os.environ.get("DIRECTOR_DEADBAND_BP", "150"))
@@ -770,15 +819,20 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     if basket_impl in ("equity", "equity-ops"):
         # The director is optional (SIM_EQUITY_DIRECTOR=0: none -- the
         # components then keep the plain band).
-        if os.environ.get("SIM_EQUITY_DIRECTOR", "1") != "0":
+        if not machine and os.environ.get("SIM_EQUITY_DIRECTOR", "1") != "0":
             eqd = chain.deploy("EquityTurnDirector", basket.address, gov)
             chain.send(basket.functions.setEquityDirector(eqd.address), sender=gov)
             d.equity_director = eqd
         wheel = chain.deploy(
-            "BasketWheel", buck.address, usdc.address, gov,
+            "BasketMachineWheel" if machine else "BasketWheel", buck.address, usdc.address, gov,
             int(os.environ.get("SIM_WHEEL_KAPPA_BP", "200")),
             int(float(os.environ.get("SIM_WHEEL_RESERVE_BUCK", "100")) * E6))
+        if machine:
+            chain.send(wheel.functions.authorizeIdentityBinding(
+                deployer, operator_args[0], operator_args[1]), sender=gov)
         idmod.bind_as_operator(chain, reg, wheel.address, True, True, sender=deployer)
+        idmod.identity_approve(chain, reg, buck, deployer, operator_args, operator_sk,
+                               wheel.address, rng, amount=0)
         chain.send(basket.functions.setWheel(wheel.address), sender=gov)
         chain.send(wheel.functions.setEquity(basket.address), sender=gov)
         # The arbitrage is the basket's (ruled 2026-09-29): one triangle per
@@ -788,11 +842,17 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         # (Its triangles are set by `equity_arb_on`, once the pools have
         # their first pairings: before the market trades, an arbitrage
         # against half-built pools only moves the marks.)
-        chain.send(wheel.functions.setArb(
-            d.pool_ub, basket.address,
-            int(os.environ.get("SIM_WHEEL_ARB_SHARE_BP", "1000")),
-            int(os.environ.get("SIM_WHEEL_ARB_CAP_BP", "200")), 1), sender=gov)
+        if not machine:
+            chain.send(wheel.functions.setArb(
+                d.pool_ub, basket.address,
+                int(os.environ.get("SIM_WHEEL_ARB_SHARE_BP", "1000")),
+                int(os.environ.get("SIM_WHEEL_ARB_CAP_BP", "200")), 1), sender=gov)
         d.wheel = wheel
+        chain.send(wheel.functions.setValuationSource(stack.fund.address), sender=gov)
+        chain.send(stack.fund.functions.setValuationWheel(wheel.address), sender=gov)
+        chain.send(stack.fund.functions.setInvestmentKeeper(wheel.address), sender=gov)
+        chain.send(wheel.functions.setJubilee(stack.fund.address,
+                   (8, 1000, 100, dp.target_buck // 100, E6, 0)), sender=gov)
         if verbose:
             eqd_s = d.equity_director.address[:10] + "..." if d.equity_director else "none"
             print(f"[deploy] equity basket {basket.address[:10]}...  "
@@ -873,4 +933,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                   + " ".join(f"{c}:lambda={d.sim_stab_gains[c][0] / E18:g}/w={d.sim_stab_gains[c][1] / E18:g}"
                              for c in ("uts", "utw", "fac", "sd"))
                   + "  (pseudo-stabilizer cap cleared)")
+    if machine:
+        from alberta_buck.sim.basket_machine import activate
+        chosen = getattr(scenario, "experiment", None)
+        activate(d, chosen.cfg.get("machine") if chosen is not None else None,
+                 turn_seconds=86_400 * max(1, getattr(scenario, "day_step", 1)) // scenario.ticks_per_day)
     return d

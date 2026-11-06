@@ -36,7 +36,7 @@ interfaces. The local wallet sandbox, public basket identity/credit setup and ex
 basket/desk contract flows are tested. The canonical wheel also has production identity
 binding and tests for actual net delivery of nominal BUCK rewards. Canonical
 256-bit cash math agrees across Solidity, Rust, Python and Node/browser WASM.
-The existing JS machine builder now bootstraps the same monetary graph; full
+Both existing machine builders now bootstrap the same monetary graph; full
 Python/JavaScript household worlds, five-year campaigns and corrected-token Notes proofs remain in the
 [[file:doc/review/bucknet-economy-implementation.org][unified accounting plan]]. Hosted examples below are separate deployments;
 local build commands use this checkout. The savings economy still needs its accounting migration.

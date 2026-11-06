@@ -73,7 +73,10 @@ class BasketWheelAgent(_ProxyAgent):
     def setup(self, d, scenario, rng) -> None:
         cls = type(self).__name__
         sp = lambda k, v: _spec(scenario, cls, k, v)
-        self.impl = str(sp("impl", "python"))
+        canonical = getattr(d, "buck_accounting", "") == "net"
+        self.impl = str(sp("impl", "solidity" if canonical else "python"))
+        if canonical and self.impl != "solidity":
+            raise NotImplementedError("the Python wheel comparison requires canonical cash/arb qualification; use the Solidity wheel")
         if self.impl == "solidity":
             self._setup_solidity(d, scenario, sp)
             return
@@ -226,7 +229,7 @@ class BasketWheelAgent(_ProxyAgent):
         d.chain.send(wheel.functions.setStartMode(1 if self.start == "buck" else 0),
                      sender=gov)
         k = 0
-        for i, tok in enumerate(d.tokens if wheel_arb_enabled() else []):
+        for i, tok in enumerate(d.tokens if wheel_arb_enabled(d) else []):
             idx = int(d.basket.functions.indexOf(tok.address).call()) - 1
             if idx < 0 or not d.pool_usdc[i] or not d.pool_buck[i]:
                 continue
@@ -294,7 +297,8 @@ class BasketWheelAgent(_ProxyAgent):
         # they are the basket's placing, and the reserve pays for the upkeep.
         upkeep = False
         if getattr(self, "equity", False):
-            self.sol.functions.rearm().call()
+            # pending() checks due slots directly; a simulated rearm would
+            # not persist and does not affect this view.
             upkeep = int(self.sol.functions.pending().call()) > 0
         if self.call_mode == "profitable" and not upkeep:
             pay = self._quote_pay_usd(d)

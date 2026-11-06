@@ -95,17 +95,29 @@ portfolio or token implementation is introduced by this kernel checkpoint.
 
 ** Current balance and event semantics
 
-Canonical JS builder checkpoint, November 6: =buildEquilibriumWorld='s
-machine mode reuses the existing net stack's single factory, linked basket
-and fund. The setup test uses the actual demo artifact bundle and real V3.
+Canonical Python/JS builder checkpoint, November 6: both existing machine
+paths use one linked basket/fund graph. JS checks its demo artifact bundle;
+Python checks its existing deployment, actual bootstrap agents and separate
+desk on real V3. Python's machine is configured before agent deposits, with
+independent seed liquidity for TWAP history; no replaced component facet or
+disabled legacy adviser is deployed. Older component setups remain separate
+tested comparisons.
 
 | Builder block | Preconditions | Postconditions |
 |---------------+---------------+----------------|
 | Monetary graph | Canonical Buck artifact with four linked libraries, explicit registry/controller/fund, matching BuckCredit. | Exactly one configured basket/fund graph; the upkeep facet uses that basket's valuation library. No duplicate token, fund, basket, wheel or economy runner. |
 | Basket/wheel setup | Registered operator, current governance and uninitialized basket. Synthetic SimLP/router binding uses the explicit registry harness. | Existing governed service-binding APIs are called, the basket owns its self-insured inactive facility before work, and the Carrying wheel is introduced/frozen with zero allowance. Production registry qualification remains separate Solidity evidence. |
-| Bootstrap money | Funding proxy explicitly accepts the actual insurer; free insured coverage and sufficient K; empty pools at declared prices. | Minted money is actual issued principal, opening pool weights approximate declared allocations, and each paired deposit has real V3 liquidity. This does not model an external mortgage. |
+| Bootstrap money | Funding proxy explicitly accepts the actual insurer; free insured coverage and sufficient K; seed pools at declared prices and explicit opening TOKEN endowments. | Minted money is actual issued principal, opening pool weights approximate declared allocations, and each paired deposit has real V3 liquidity. Endowments do not trade against or shock the reference pools. This does not model an external mortgage. |
 | Premium-bearing facility | Verified ordinary proxy, explicit insurer acceptance, actual funding reserve and matching insurer pool. | Requested fresh cash and full-value premium both become NFT principal. Old reserve cash compounds through the actual elapsed block time; receiving cash does not retire principal. Cache the proxy only after binding and insurer acceptance succeed. |
 | Maintenance/snapshot boundary | Same fund, keeper, valuation wheel and basket wiring; bounded Jubilee policy. | Existing maintenance jobs act outside Buck's monetary lock. No arbitrage triangle is enabled by bootstrap. Generic cash-only serialization refuses the incomplete economy; household lifecycle and complete restoration remain pending. |
+
+The Python machine and component/desk configurations select the canonical
+accounting model explicitly. =SIM_WHEEL_ARB=1= is rejected until actual net
+inventory/profit behavior is qualified; the legacy Python-wheel comparison
+is also gated under this model. The default uses the existing Solidity
+wheel. =make nix-venv-economy-bootstrap-test= runs both builders, including
+the Python machine and both retained component configurations. Reporting
+and complete household/persistent-state acceptance remain separate gates.
 
 An ordinary account has net held =H= and net issued-but-unspent =U=. Its
 =balanceOf= is =floor((H+U)/Q)=; it may hold both while still owing multiple

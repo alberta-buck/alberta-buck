@@ -86,8 +86,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     if machine and controller_impl != "direct":
         raise ValueError("the basket machine requires the direct K controller")
     d = deploy(chain, anvil, scenario, rng, basket_impl="equity-ops" if machine else basket_impl,
-               director_impl=director_impl, controller_impl=controller_impl)
-    d.equity_machine = d.equity_machine or machine
+               director_impl=director_impl, controller_impl=controller_impl,
+               equity_machine=True if machine else None)
 
     # --- build + register the agent population ----------------------- #
     # Reset per-class counters defensively so back-to-back sim runs in
@@ -142,8 +142,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
         placed = turn_wheel(d, rounds=2)
         from alberta_buck.sim.basket_machine import activate
         chosen = getattr(scenario, "experiment", None)
-        activate(d, chosen.cfg.get("machine") if chosen is not None else None,
-                 turn_seconds=86_400 * max(1, getattr(scenario, "day_step", 1)) // scenario.ticks_per_day)
+        if d.equity_machine and d.pair_policy is None:
+            activate(d, chosen.cfg.get("machine") if chosen is not None else None,
+                     turn_seconds=86_400 * max(1, getattr(scenario, "day_step", 1)) // scenario.ticks_per_day)
         equity_arb_on(d)
         if verbose:
             print(f"[sim] equity basket: the wheel made the pools' first "

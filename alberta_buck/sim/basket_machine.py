@@ -1,9 +1,11 @@
-"""The basket machine, put in place of the older upkeep after the common pool/bootstrap phase.
+"""Configure the existing basket machine after its pools have TWAP history.
 
 An experiment selects it with `[scenario] basket = "equity-machine"` (loop.run), and sizes it in its
 `[machine]` table; SIM_EQUITY_MACHINE=1 beside basket "equity-ops" selects it for a scenario that carries
-no experiment. It is the upkeep facet with its pair observer and policy, the strict venue, the parity
-reference and the outer-band desk policy. No deployed chain is migrated by this simulation helper.
+no experiment. Canonical deployment installs one machine wheel directly and
+seeds independent liquidity before this setup, then agents deposit into it.
+The old comparison path can still replace earlier upkeep. No deployed chain
+is migrated by this simulation helper.
 """
 from __future__ import annotations
 
@@ -129,6 +131,8 @@ def activate(d, given=None, turn_seconds=0) -> None:
     turns of its wheel, which K must be able to integrate over."""
     if not d.equity_machine:
         return
+    if d.pair_policy is not None:
+        raise ValueError("basket machine is already configured")
     s = settings(given)
     chain, gov, basket, wheel = d.chain, d.gov, d.basket, d.wheel
     pool_abi, _ = load_artifact("UniswapV3Pool")
@@ -154,7 +158,9 @@ def activate(d, given=None, turn_seconds=0) -> None:
     wanted = next((e["inputs"] for e in load_artifact(s["upkeep"])[0] if e.get("type") == "constructor"), [])
     given_to = {"policy": policy.address, "parity_": signals.address, "parityGain_": round(s["parity_gain"] * 10**18),
                 "parityGainDear_": round(s["parity_gain_dear"] * 10**18)}
-    response = chain.deploy(s["upkeep"], *(given_to[i["name"]] for i in wanted))
+    links = d.net_basket.libraries if getattr(d, "net_basket", None) is not None else None
+    abi, bytecode = load_artifact(s["upkeep"], libraries=links)
+    response = chain.deploy(s["upkeep"], *(given_to[i["name"]] for i in wanted), abi=abi, bytecode=bytecode)
     # Preserve an explicitly configured integration horizon. The otherwise
     # unlimited default must not integrate a recovered observation over an
     # arbitrarily long outage; but it must cover the time between two turns,
@@ -166,17 +172,29 @@ def activate(d, given=None, turn_seconds=0) -> None:
         chain.send(d.kctrl.functions.setDTMax(horizon), sender=gov)
     chain.send(basket.functions.setVenue(venue.address), sender=gov)
     chain.send(basket.functions.setEquityWheel(response.address), sender=gov)
+    if getattr(d, "net_stack", None) is not None:
+        from alberta_buck.sim import identity as idmod
+        operator = chain.deployer
+        chain.send(basket.functions.authorizeIdentityBinding(
+            d.reg.address, operator, d.reg.functions.pkOf(operator).call(),
+            d.reg.functions.ciphertextOf(operator).call()), sender=gov)
+        idmod.bind_as_operator(chain, d.reg, basket.address, True, False)
     # The upkeep facet is written for a credit marked net: K bounds the BUCKs let out, not those held.
     chain.send(basket.functions.setNetMark(True), sender=gov)
+    if getattr(d, "net_stack", None) is not None:
+        chain.send(basket.functions.openCredit(d.credit.address, 10**23), sender=gov)
     chain.send(basket.functions.setResponse((int(s["leash_bp"]), interval, round(s["tilt"] * 10000),
                                              int(s["lean_cap_bp"]))), sender=gov)
-    chain.send(wheel.functions.setResponseMode(True), sender=gov)
+    if getattr(d, "net_stack", None) is None:
+        chain.send(wheel.functions.setResponseMode(True), sender=gov)
     chain.send(wheel.functions.setController(d.kctrl.address), sender=gov)
     # These were comparison advisors; the replacement has one price service.
     zero = "0x" + "0" * 40
-    chain.send(wheel.functions.setDirector(zero), sender=gov)
+    if getattr(d, "net_stack", None) is None:
+        chain.send(wheel.functions.setDirector(zero), sender=gov)
     d.equity_director = None
     d.venue, d.signals, d.pair_signals, d.pair_policy = venue, signals, observer, policy
+    d.equity_upkeep = response
     source = signals
     if d.desk is not None:
         # Configuration of the replacement is independent of which legacy

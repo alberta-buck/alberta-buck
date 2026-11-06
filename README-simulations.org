@@ -8,9 +8,9 @@ interaction and cross-language contract tests. They are not independent economic
 
 Historical economy runs deployed legacy =Buck= (or =BuckWithBasketHooks=),
 with signed-balance accounting. The canonical =Buck.sol= now uses compounded
-cash and per-facility Jubilee accounting. The existing JS machine builder now
-uses that stack for deployment and pool bootstrap; the Python economy builder
-and both household lifecycles still need their accounting migration. The JS
+cash and per-facility Jubilee accounting. Both existing machine builders now
+use that stack for deployment and pool bootstrap; household lifecycles,
+reporting and persistent state still need migration. Each
 bootstrap reuses one linked basket/fund, uses production BuckCredit with
 recipient opt-in, and configures the existing wheel's fund jobs and guarded
 valuation. The snapshot API rejects this partially migrated economy rather
@@ -38,6 +38,7 @@ not identify which accounting produced a result. The
 | Canonical accounting smoke | Can Python and JS link corrected Buck and exercise its basic cash accounting? | =net-demurrage-smoke= | Local Anvil and Tevm tests; Python compared with the independent reference |
 | Canonical money kernel | Do Solidity, native Python and Node/browser WASM agree on compounded cash and baseline facility relief? | =core-net-math-test= | Shared uint256 vectors, overflow checks and exact integer comparisons |
 | JS equilibrium bootstrap | Can the existing primary builder deploy its corrected monetary graph, pair the weighted opening and issue against a premium-bearing facility? | =core-equilibrium-bootstrap-test= | Real Tevm bootstrap through the demo artifact bundle; household decisions and restore remain pending |
+| Both economy bootstraps | Do the existing Python and JS builders construct the canonical graph, issue actual pool money and handle the insurer premium? | =economy-bootstrap-test= | JS check plus Python machine/desk and two retained component setups; no five-year loop |
 | Fund return comparison | Can Jubilee reach its 50-year target in a closed BUCK economy? | =demurrage-returns= | No-return and explicitly funded 2% return tables |
 | Control lab | Which feedback component causes a response or instability? | =control-lab-plan/interactive/verify= | Cached traces and an offline interactive page |
 | Sandboxes | Can a person operate a wallet, credit line and savings account? | See [[file:README-sandboxes.org][sandboxes]] | Interactive state and exported data |

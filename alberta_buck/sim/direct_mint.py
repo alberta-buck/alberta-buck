@@ -267,10 +267,18 @@ class _DMBase(Agent):
         ctr["dmTotalInvested"] = (
             ctr.get("dmTotalInvested", 0) + invested_value)
 
-    def _enter(self, d, scenario, ctr, tok_idx: int) -> None:
-        """Buy TOKEN from the external TOKEN/USDC pool, then deposit it."""
+    def _enter(self, d, scenario, ctr, tok_idx: int, *, initial_inventory=False) -> None:
+        """Deposit an opening endowment, or buy TOKEN for an ongoing entry."""
         tc = d.tokens[tok_idx]
-        seed = self._buy_token_from_usdc(d, tok_idx, self.SEED_USDC)
+        if initial_inventory:
+            # An already-running economy starts with owned assets, just as
+            # the JS machine does. Replaying their original purchases here
+            # would shock the reference pools before the first real tick.
+            price = int(d.basket.functions.constituents(tok_idx).call()[3])
+            seed = self.SEED_USDC * 10**d.dec[tok_idx] // price
+            d.chain.send(tc.functions.mint(self.address, seed))
+        else:
+            seed = self._buy_token_from_usdc(d, tok_idx, self.SEED_USDC)
         if seed == 0:
             return
 
@@ -384,7 +392,10 @@ class BootstrapDMAgent(_DMBase):
             d._bootstrap_tickets = bootstrap_tickets(weights, count, self.SEED_USDC)
         self.SEED_USDC = d._bootstrap_tickets[self._seq]
         tok_idx = self._seq % len(d.tokens)
-        self._enter(d, scenario, ctr, tok_idx)
+        if getattr(d, "buck_accounting", "") == "net":
+            self._enter(d, scenario, ctr, tok_idx, initial_inventory=True)
+        else:
+            self._enter(d, scenario, ctr, tok_idx)
 
     def act(self, d, scenario, day, tick, ctr) -> None:
         # Bootstrap agents are pinned LPs -- they never exit and never
