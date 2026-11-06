@@ -104,8 +104,9 @@ interface IMarkedCredit {
 ///
 ///         The temporary legacy branch below is for existing signed-token
 ///         fixtures. Its signed balance/holder relief and implicit draw/repay
-///         behavior are not valid semantics of canonical Buck. Public net-mode
-///         credit opening stays gated pending desk and scheduled wheel work.
+///         behavior are not valid semantics of canonical Buck. Canonical
+///         opening validates the model, public ordinary identity and matching
+///         credit binding through shared setup in the existing upkeep facets.
 ///
 ///         Value is in BUCK.  A position's fair value is twice its BUCK side
 ///         at the chosen price (2 L sqrtP, full range).  The marks are: TWAP
@@ -175,9 +176,9 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     bool public netMark;
 
     /// @notice Canonical compounded cash and separate facility debt. Public
-    ///         credit opening remains gated until explicit spending, repayment
-    ///         and low-K exit integration is complete. Legacy fixtures alone
-    ///         retain the earlier signed-account branch during that migration.
+    ///         credit opening validates the model, identity and matching NFT;
+    ///         issuance, repayment and low-K exit solvency remain explicit.
+    ///         Legacy fixtures retain the earlier signed-account branch.
     bool public netAccounting;
 
     /// @notice The basket's share of a receipt's gain over its cost basis.

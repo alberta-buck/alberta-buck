@@ -1,5 +1,5 @@
 #+TITLE: Buck accounting correction: unified implementation plan
-#+DATE: 2026-11-05
+#+DATE: 2026-11-06
 #+OPTIONS: ^:nil toc:3
 
 * Direction, source and current state
@@ -26,7 +26,11 @@ Python/JS deployment and the browser wallet are restored. Both basket upkeep
 facets and the separate desk now use explicit cash/principal transitions;
 real V3 and actual Jubilee settlement checks cover their contract paths.
 Fund/maturity work and optional actual basket retirement are now scheduled in
-both existing wheels. Public leveraged basket opening still awaits onboarding.
+both existing wheels. Public basket onboarding now validates the canonical
+model, public ordinary identity and matching BuckCredit hook, with shared
+setup in the existing upkeep facets and no deployed initializer. Production
+registry authorization and both public V3 lifecycles pass. Production wheel
+identity wiring and primary world integration remain outstanding.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -435,10 +439,10 @@ The prototype's sampled maximum 1,275,392 burn gas is not a worst-case bound.
   their reserve budget. Mutating scans/funding reject callback reentry while
   valuation publication remains independent. Primary builders must still
   configure the same wheel/fund/basket bindings explicitly.
-- [-] Update the existing basket/desk to explicit principal/cash accounting,
+- [X] Update the existing basket/desk to explicit principal/cash accounting,
   actual facility issue/retirement and unchanged low-K solvency requirements.
-  Cash-only enableNetAccounting currently rejects openCredit, so it is not
-  the finished integration. Resolve basket/Jubilee cross-holding valuation
+  Canonical mode now supports the governed public openCredit API. Resolve
+  basket/Jubilee cross-holding valuation
   using existing marks without recursion, dilution or double counting. Test
   entry/exit, gains/losses, singular cases, stale marks and bounded real sales.
   Approved November 5: claims enter LP pricing, not new-credit collateral.
@@ -446,21 +450,33 @@ The prototype's sampled maximum 1,275,392 burn gas is not a worst-case bound.
   complete. Canonical basket snapshots now read actual cash, actual NFT
   principal and direct fund receipt ownership. LP prices include the solved
   claim; credit marks exclude it and preserve the separate held-BUCK offset.
-  Test-only opening exercises real debt, both upkeep issuance paths and
-  bounded governor/wheel retirement. Normal openCredit remains gated pending
-  public onboarding.
+  Harness probes exercise funding boundaries; the unmodified shell also
+  passes public opening, actual V3 issuance, explicit retirement and investor
+  exit through both upkeep facets. Production credential/binding checks
+  separately exercise the public ordinary identity and matched NFT setup.
+  Legacy branches remain for unconverted fixtures; primary-world wiring is
+  part of step 4, not evidence supplied by these contract tests.
   BasketJubileeMath is one linked read-only valuation library shared by the
   shell and existing facets. No new wheel, fund or token mode was introduced.
   Constituent registration now runs in the existing venue facet through the
   governed shell wrapper and authenticated self-call. Moving this AMM setup
   out of the share/credit shell retains its rules and frees runtime space:
-  shell 23,833 bytes after adding bounded retirement, V3 venue 20,603,
-  machine venue 20,915. Retain the explicit
+  shell 23,833 bytes at the earlier bounded-retirement checkpoint, V3 venue
+  20,603, machine venue 20,915. Current runtime sizes are in the latest log.
+  Retain the explicit
   runtime test and use the existing facet structure for further substantial code.
 - [ ] Complete the approved Carrying-service allowlist, safe revocation and
   settlement access; production insurer preparation and strategies; gas,
   runtime/creation limits and library/callback provenance. BuckCredit's last
   measured runtime was 24,516 bytes against the 24,576-byte runtime limit.
+  Before funded BUCK caller rewards or BUCK arbitrage, implement/test
+  target-controlled production-registry identity binding for the canonical
+  machine wheel. Its current API lacks that authorization path; cash-only
+  platform acceptance does not cover this service role. Keep its nominal
+  reserve accounting consistent with a public Carrying identity and actual
+  net reward delivery. The older comparison wheel has only 75 runtime bytes
+  spare: prefer the canonical machine wheel in primary builders and retire
+  legacy variants only after mapping their distinct detection coverage.
 - [ ] Keep BuckNet as an explicitly experimental regression oracle only until
   its distinct checks are exercised against Buck, then retire duplicate token
   orchestration and diagnostic deployment paths as coverage is demonstrated.
@@ -518,8 +534,8 @@ implementation sequence, before changing the primary economy builder.
   are known. LP proceeds remain cash; treasury has the same solvency gate.
   Fourteen focused cases cover real V3 burns, fund-owned receipt conversion,
   rollback, demurrage losses, 256 cash-boundary comparisons and full
-  exit after separate actual debt retirement. This does not enable public
-  leveraged opening before the remaining wheel/onboarding gates.
+  exit after separate actual debt retirement. Public opening and lifecycle
+  checks now supplement these individual exit regressions below.
 - [X] Port BasketDesk's own cash, principal and marked asset observations;
   mark new-credit collateral without unpaid relief. Replace implicit draw /
   receipt repayment with actual issue/reduce calls, keeping turnover, capital
@@ -577,22 +593,24 @@ implementation sequence, before changing the primary economy builder.
   clear without a reward. Nine real-contract checks cover both wheels,
   actual partial/full burns, low K, the mutual receipt, exhausted/shared
   liquidity, maturity-owner control and the mixed-age counterexample.
-- [ ] Enable normal net-mode openCredit only after real-contract lifecycle,
+- [X] Enable normal net-mode openCredit only after real-contract lifecycle,
   low-K and fund liquidity regressions pass. Validate the intended public,
   ordinary basket identity and zero-premium self-issued facility at that gate.
-  Add the missing basket-controlled authorization/revocation for production
-  IdentityRegistry contract binding; current basket fixtures bypass that
-  through the test harness. Validate model, identity flags and matching
-  BuckCredit without increasing the near-limit share shell. Reuse its
-  existing facet dispatch for substantial setup/lifecycle code and retain
-  the public numeric APIs. No new wheel, initializer contract or second fund.
-  Then convert the existing primary
-  Python/JS builders and household/savings lifecycle; no legacy fallback or
-  silent skipped action may make the corrected economy appear to run.
-  Desk deployment must link the existing basket valuation library, bind its
-  public ordinary identity, enable canonical mode before opening its matching
-  credit, and restore that mode/code/library wiring explicitly. Report live
-  accountState rather than treating stored diagnostic counters as wallet cash.
+  BasketCreditSetup is a shared abstract implementation in both existing
+  upkeep facets, adding no storage or deployed initializer. Governance
+  authorizes/revokes an exact public ordinary contract binding at the basket
+  address through IBasketUpkeep; the production registry still certifies the
+  operator, key, ciphertext, target and flags. Only the token's registry is
+  accepted, and binding setup closes after deposits or credit opening.
+  openCredit retains its governed shell API and calls the self-only
+  initializer. Model, identity, credit address and Buck hook checks fail
+  closed. Opening creates an inactive zero-premium NFT without changing
+  cash, supply or issuance age; later upkeep marks/activates and issues.
+  Position/credit guards also reject setup reentry. Six production-registry
+  cases and two real-V3 public lifecycle cases pass. The abstract registry
+  fixture preserves all 56 original tests without duplicating them.
+  Next complete wheel identity wiring and the existing primary builders in
+  step 4; public contract availability does not migrate a saved economy.
 
 ** 4. Migrate existing clients, proofs and the household economy
 
@@ -607,6 +625,14 @@ implementation sequence, before changing the primary economy builder.
   4, with per-insurer pools and a separate browser storage entry. The primary
   household-economy, Python savings and leveraged JS equilibrium builders still
   need their lifecycle and persistent-state conversion.
+  Use the existing basket valuation library and supported upkeep facets;
+  invoke binding control at the basket address with IBasketUpkeep/the facet
+  ABI, and public openCredit with the shell ABI. Deploy the desk with its
+  public ordinary identity and canonical mode before its matching credit.
+  Save/verify actual facet, wheel, fund, identity and library wiring. Report
+  live accountState rather than treating diagnostic counters as wallet cash;
+  no legacy fallback or silently skipped action may make the economy appear
+  to run. Keep the adaptive default and explicit comparison policies.
 - [ ] Port shared net math to Rust/PyO3/WASM with 256-bit inputs and full-width
   intermediate multiplication/division, lossless Python int / JS BigInt and
   the same rounding/overflow rules. The current demurrage kernel is legacy
@@ -662,14 +688,15 @@ Continue in this order:
    resolve the chosen mark without recursive fund/basket calls. Keep conservative
    K solvency and low-K exits. Replace implicit draw/repay with explicit issuance
    and reduction, and connect the existing wheel's marked reserve work.
-   Basket valuation is now connected and tested through actual debt using a
-   test-only opening seam. Explicit wheel issuance and bounded retirement are
+   Basket valuation is connected and tested through actual debt, with harness
+   boundary probes and the unmodified shell's public lifecycle. Explicit wheel issuance and bounded retirement are
    tested, as are actual-collateral cash/in-kind exits and the separate desk's
    canonical issue/purchase/retirement paths. Price-unit vectors distinguish
    nominal issuance from net liquidation. Fund reserve and maturity jobs are
    now connected to both existing wheels, including optional basket principal
-   scheduling. Next validate public identity/credit onboarding before removing the public opening
-   gate. Receiving cash alone must not reduce principal or make an insolvent
+   scheduling. Public identity/credit onboarding now passes. Complete
+   production wheel identity binding before enabling funded BUCK rewards or
+   BUCK arbitrage, then wire the primary world. Receiving cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
 2. Finish the existing Python/JS household lifecycle and primary world builders;
    retain adaptive default and the explicit comparison policies. Port setup,
@@ -710,6 +737,8 @@ make nix-match-BuckCompoundBasketFlowTest
 make nix-match-BuckCompoundBasketRepaymentTest
 make nix-match-JubileeWheelTest
 make nix-match-BasketRetirementWheelTest
+make nix-match-BasketCreditSetupTest
+make nix-match-BasketPublicLifecycleTest
 make nix-venv-demurrage-test
 make nix-match-BuckTest
 make nix-match-BuckDelegatedDemurrageTest
@@ -833,4 +862,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Schedule bounded Jubilee maintenance in both existing wheels | Added one shared kind for bounded claim-heap batches, deferred burns and reserve investment/redemption using the same fund and receipt. Every attempt authenticates wiring, catches target reads/execution and runs once per block; positive net/share bounds, canonical pool routes and price limits preserve atomic refusal, low-K gates and unrelated work. Expose the fund's exact scheduled outlay quote; an unobserved excess starts its budget clock without fake work/reward. Mutating scans/funding reject callback reentry while burn valuation remains independent. Thirteen canonical fund/basket/V3 cases plus a callback regression pass, including both pool orders, entry/sale rollback, shared budget and maturity-owner separation. Full make nix-test: 1,481 passed, one fork skip and the same four absent-proof exclusions. Final Make-driven rebuild/smoke: 34 Python, 20 JS, 15 wallet/browser passed; compiler/link/runtime checks passed. Fund runtime 23,114 bytes, machine wheel 20,550, older wheel 21,746; basket shell remains 24,459. Updated Make/README and pre/post invariants. Next: actual basket principal scheduling, public onboarding, primary household builders, long runs/PDFs and Notes; no new five-year acceptance claimed. | =376eb270= |
 
-| 2026-11-05 | Schedule actual basket principal retirement in the same maintenance kind | Added an optional fourth job using existing retireCredit, actual NFT principal and cash above the recomputed liquidity target. Governed cap/minimum, full-facility relief sizing, exact batch recheck and shared block liquidity bound the actual burn. Complete dust tails clear without work rewards; exhausted liquidity does not authorize or pretend to repay; mature NFTs remain owner-controlled. A real nine-raw-unit/five-BUCK-second counterexample shows partial-quote inversion selects an unaffordable two-unit batch; the full-facility quote safely retires one. Nine new cases reuse an abstract canonical fixture without repeated inherited tests. Full make nix-test: 1,490 passed, one fork skip and four absent-proof exclusions; final nine-case assertion pass also green. Compiler/link/runtime checks for 53 contracts and final sandbox build pass; package digest cb8d06c655f6500d1842434561a40fb7ffb6baba4288aeacf0bc34d0c0d5187a. Runtime: machine wheel 23,306 bytes; older wheel 24,501 (75 spare). No token/fund/cash-library/client code changed since the preceding 34 Python, 20 JS and 15 browser/wallet acceptance. The new scheduler is tested in Solidity and still requires primary-world wiring. Next production basket identity/model/credit onboarding, existing household builders, five-year JSON/PDFs and Notes. | This commit |
+| 2026-11-05 | Schedule actual basket principal retirement in the same maintenance kind | Added an optional fourth job using existing retireCredit, actual NFT principal and cash above the recomputed liquidity target. Governed cap/minimum, full-facility relief sizing, exact batch recheck and shared block liquidity bound the actual burn. Complete dust tails clear without work rewards; exhausted liquidity does not authorize or pretend to repay; mature NFTs remain owner-controlled. A real nine-raw-unit/five-BUCK-second counterexample shows partial-quote inversion selects an unaffordable two-unit batch; the full-facility quote safely retires one. Nine new cases reuse an abstract canonical fixture without repeated inherited tests. Full make nix-test: 1,490 passed, one fork skip and four absent-proof exclusions; final nine-case assertion pass also green. Compiler/link/runtime checks for 53 contracts and final sandbox build pass; package digest cb8d06c655f6500d1842434561a40fb7ffb6baba4288aeacf0bc34d0c0d5187a. Runtime: machine wheel 23,306 bytes; older wheel 24,501 (75 spare). No token/fund/cash-library/client code changed since the preceding 34 Python, 20 JS and 15 browser/wallet acceptance. The new scheduler is tested in Solidity and still requires primary-world wiring. Next production basket identity/model/credit onboarding, existing household builders, five-year JSON/PDFs and Notes. | =ffda5191= |
+
+| 2026-11-06 | Complete public basket identity and credit onboarding | Reused a shared abstract BasketCreditSetup in both existing upkeep facets, with no added storage or deployed initializer. The governed public openCredit validates canonical mode/model, verified public ordinary identity, matching BuckCredit and its Buck hook; it creates only an inactive zero-premium self-insured NFT. Exact production-registry binding authorization/revocation runs at the basket address through IBasketUpkeep; setup closes after deposits/credit and rejects position/credit reentry. Six real-registry credential tests and two unmodified-shell V3 lifecycles pass; the original 56 registry tests remain without inherited repetitions. Full implementation acceptance: 1,498 Solidity passed, one fork skip and the same four absent-proof exclusions; 34 Python, 20 JS and 15 wallet/browser passed. Added both suites to Make help and canonical acceptance. Final documentation cleanup: 356 canonical tests passed, compiler/link/runtime checks passed for 53 artifacts, and sandbox rebuilt; all 51 explicitly packaged ABIs and deployed executable bodies match the earlier full acceptance after excluding compiler metadata. Final package digest eea6e9606380c7ea6bb214eb62186f4797a2b18837f35cae07859876fa31afd9. Runtime: shell 24,240 bytes; component facet 16,496; machine facet 23,450; machine wheel 23,306; older wheel 24,501. Updated current state, setup flow, pre/post invariants and remaining gates. Next wheel production identity binding for funded BUCK rewards/arbitrage, primary household builders and snapshots, 256-bit native math, short world then five-year JSON/PDFs, and Notes/proof restoration. No corrected-accounting five-year run or release is claimed. | This commit |

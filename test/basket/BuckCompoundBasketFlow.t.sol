@@ -31,8 +31,9 @@ contract CutKAfterCompoundPosition is BuckBasketUniswapV3 {
     }
 }
 
-/// @dev Actual Buck, claim book, fund, credit NFT and V3 pools. The opening
-///      seam is test-only until the remaining leveraged exit/desk gates pass.
+/// @dev Actual Buck, claim book, fund, credit NFT and V3 pools. Harness probes
+///      isolate funding/rollback boundaries; BasketPublicLifecycleTest covers
+///      the unmodified shell's public opening and complete V3 lifecycle.
 contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
     EqToken[3] assets;
     address[3] pools;

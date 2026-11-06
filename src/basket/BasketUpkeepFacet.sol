@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {BuckBasketEquityStorage} from "./BuckBasketEquityStorage.sol";
+import {BasketCreditSetup} from "./BasketCreditSetup.sol";
 import {IBuckBasketVenue} from "./IBuckBasketVenue.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {IBasketReference} from "./IBasketReference.sol";
@@ -40,7 +41,7 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 /// the others, raised for one below. A liquidity position sells as its price
 /// rises, so its share moves half as far as a wallet's; a tilt of one half
 /// asks for the other half. The leash keeps the declared weights.
-contract BasketUpkeepFacet is BuckBasketEquityStorage, IBasketUpkeep {
+contract BasketUpkeepFacet is BasketCreditSetup {
     uint256 private constant NONE = type(uint256).max;
     /// @notice The most BUCKs to have issued in normal running, of K x equity.
     uint256 public constant CEILING_BP = 5000;

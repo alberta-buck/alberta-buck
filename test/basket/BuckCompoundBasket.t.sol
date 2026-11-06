@@ -9,8 +9,9 @@ import {JubileeFund} from "../../src/JubileeFund.sol";
 import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
 import {EqToken} from "./BuckBasketEquity.t.sol";
 
-/// @dev Test-only access to a real facility while the production opening gate
-///      remains shut pending explicit wheel spend/repayment/exit integration.
+/// @dev Test-only funding/mark probes around real facilities. Public opening
+///      uses the same initializer; BasketPublicLifecycleTest covers the
+///      unmodified shell without these probes.
 contract CompoundBasketHarness is BuckBasketEquity {
     constructor(address buck_, address k_, address factory_, address gov_)
         BuckBasketEquity(buck_, k_, factory_, gov_, 3000, 600, 64, 500, 1e3) {}

@@ -32,6 +32,7 @@ contract ReenterCompoundValuation is IJubileeValuationWheel {
             _mustReject(abi.encodeCall(basket.retireCredit, (1, type(uint256).max, 0)));
             _mustReject(abi.encodeCall(basket.deposit, (address(0), 0, 0)));
             _mustReject(abi.encodeCall(IBasketUpkeep.wheelStep, (0, 0)));
+            _mustReject(abi.encodeCall(IBasketUpkeep.initializeEquityCredit, (address(0), 0)));
         }
         (mark, key) = JubileeFund(valuationSource).wheelValuation();
         if (armed) readDuringCredit = mark > 0;
@@ -265,7 +266,7 @@ contract BuckCompoundBasketRepaymentTest is JubileeEquityFixture {
         (uint128 beforeShares,) = basket.holdings(id);
         vm.prank(GOV);
         basket.retireCredit(1e6, 1e6, 0);
-        assertEq(source.rejected(), 3);
+        assertEq(source.rejected(), 4);
         assertTrue(source.readDuringCredit());
         assertEq(basket.lien(), 39e6);
         (uint128 afterShares,) = basket.holdings(id);

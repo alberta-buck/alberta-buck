@@ -27,7 +27,7 @@ contract BindingAdapterMetadataStub is IContractBindingAdapter {
 /// @title IdentityRegistry.t.sol — register / verifyApprove parity tests.
 /// @notice Replays the JSON vectors emitted by alberta_buck.wallet.cli through
 ///         the on-chain verifier.  Same chain id 1 the wallet uses.
-contract IdentityRegistryTest is Test {
+abstract contract IdentityRegistryFixture is Test {
 
     IdentityRegistry internal reg;
     address internal constant GOV = address(0xA0);
@@ -44,7 +44,7 @@ contract IdentityRegistryTest is Test {
     string internal vj;
     string internal bj;
 
-    function setUp() public {
+    function setUp() public virtual {
         // The wallet's transcripts use chainid = 1.
         vm.chainId(1);
         vj = vm.readFile("test/vectors/identity.json");
@@ -177,6 +177,9 @@ contract IdentityRegistryTest is Test {
         reg.register(ISSUER, pk, E, _ps("bob"), _regProof("bob"));
     }
 
+}
+
+contract IdentityRegistryTest is IdentityRegistryFixture {
     // ---- governance --------------------------------------------------------
 
     function test_constructor_setsGovernance() public view {

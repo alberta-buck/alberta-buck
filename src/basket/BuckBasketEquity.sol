@@ -22,8 +22,8 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 ///
 ///         Canonical snapshots distinguish net cash, actual NFT principal
 ///         and a fee-aware marked Jubilee claim. LP prices include the claim;
-///         new-credit collateral excludes it. Public net-mode credit opening
-///         remains gated until desk and scheduled wheel work are integrated.
+///         new-credit collateral excludes it. Canonical credit opening checks
+///         the public ordinary identity, token model and matching credit NFT.
 ///         Canonical spending/repayment is explicit, and exits must preserve
 ///         actual activated backing. The implicit leveraged flow described
 ///         below is the legacy fixture path alone.
@@ -200,8 +200,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
 
     /// @notice Select the experimental net-token integration before any
     ///         deposits or credit are opened. This mode can invest existing
-    ///         BUCK. Normal credit opening remains gated pending desk and
-    ///         scheduled wheel integration; canonical draws are explicit.
+    ///         BUCK. Credit opening additionally validates the canonical model,
+    ///         public ordinary identity and credit binding. Draws are explicit.
     function enableNetAccounting() external onlyGov {
         if (netAccounting || totalShares != 0 || address(credit) != address(0)) revert AlreadyPresent();
         (bool ok, bytes memory data) = address(buck).staticcall(
@@ -218,17 +218,11 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     ///         the basket bound as a public, non-Carrying identity.  It is
     ///         activated at the first mark above zero.
     function openCredit(address credit_, uint256 face) external onlyGov {
-        if (netAccounting) revert NetCreditUnavailable();
         _openCredit(credit_, face);
     }
 
     function _openCredit(address credit_, uint256 face) internal {
-        if (address(credit) != address(0)) revert AlreadyPresent();
-        IMarkedCredit c = IMarkedCredit(credit_);
-        c.setCreditIssuer(address(this), true);
-        creditId = c.createCredit(address(this), 0, face, 0, DEP_MARKED, 0, 0, 0);
-        credit = c;
-        emit CreditOpened(credit_, creditId, face);
+        IBasketUpkeep(address(this)).initializeEquityCredit(credit_, face);
     }
 
     /// @notice Register a constituent (the pro-rata shell's rule: declared
@@ -713,9 +707,12 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     // --- Dispatch: the components facet, else the venue ------------------------- //
 
     fallback() external {
-        if ((_positionEntered || _creditEntered) && (msg.sig == IBasketUpkeep.wheelStep.selector
+        bool setup = msg.sig == IBasketUpkeep.initializeEquityCredit.selector
+                  || msg.sig == IBasketUpkeep.authorizeIdentityBinding.selector
+                  || msg.sig == IBasketUpkeep.revokeIdentityBinding.selector;
+        if ((_positionEntered || _creditEntered) && (setup || msg.sig == IBasketUpkeep.wheelStep.selector
             || msg.sig == bytes4(keccak256("setWheel(address)")))) revert PositionReentrant();
-        address v = (msg.sig == IBasketUpkeep.wheelStep.selector
+        address v = (setup || msg.sig == IBasketUpkeep.wheelStep.selector
                      || msg.sig == IBasketUpkeep.wheelDue.selector)
             ? equityWheel : address(venue);
         if (v == address(0)) revert VenueUnset();

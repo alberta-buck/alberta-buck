@@ -10,7 +10,7 @@ import {BasketUpkeepMaintenanceControl} from "../harness/BasketUpkeepMaintenance
 
 contract ControlledPairIntent {
     address public basket;
-    uint256 public constant count = 3;
+    function count() external pure virtual returns (uint256) { return 3; }
     uint256 public constant maxRate = 0.693147e18;
     uint256 public rate = 1e18;
     uint256 public impacts;

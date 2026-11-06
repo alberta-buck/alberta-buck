@@ -471,13 +471,25 @@ before making it mandatory in a production burn.
 
 ** Basket, identity and proofs
 
-The experimental basket's =enableNetAccounting= mode holds actual BUCK and
-does not issue its own credit. Entry/top-up must account for the *net change*
-received, preserve receipt ownership, basis and shares, and avoid dilution.
-An in-kind exit accounts for net BUCK actually received and returns residual
-shares when applicable. Legacy leveraged mode is not evidence for a net-mode
-leveraged basket: its own credit and Jubilee's receipt create a valuation
-cycle analyzed in [[file:basket-jubilee-crossholding.org][the cross-holding note]].
+Canonical BuckBasketEquity now supports publicly opened facilities and
+explicit issuance/retirement. Its snapshots distinguish actual cash,
+principal and the fee-aware marked Jubilee claim. Entry/top-up accounts for
+the net cash received, preserving receipt ownership, basis and shares without
+dilution. The mutual valuation cycle is solved as described in the
+[[file:basket-jubilee-crossholding.org][cross-holding note]]. Unpaid claims price LP holdings but do not back new
+credit or waive low-K exit requirements. Legacy leveraged fixtures remain
+separate evidence from the canonical public lifecycle.
+
+| Block | Preconditions | Postconditions / preserved invariants |
+|-------+---------------+----------------------------------------|
+| Basket binding authorization/revocation | Governance; the token's actual registry; no credit opened or LP shares issued. | Only an exact public ordinary binding is authorized, or its pending authorization is cleared. The production registry still certifies the binder, key, ciphertext, target and flags. No BUCK, facility or receipt moves. |
+| Public openCredit | Governance enters the shell outside an active position/credit operation. Canonical mode, model and verified public ordinary identity agree; no facility exists; the supplied credit is the token's credit and its Buck hook points back to that token. | One self-issued MARKED NFT, with the requested face, zero premium, zero activated coverage, zero principal and zero issuance age. Cash and supply are unchanged. Later financial operations must mark, activate and issue explicitly. |
+| Shared setup dispatch | Both supported upkeep facets inherit BasketCreditSetup over the same equity storage prefix; no new state or deployed initializer. | The shell routes setup selectors to its existing upkeep facet. Credit initialization accepts only the shell's self-call; binding changes retain governance checks. Position/credit locks reject setup reentry. Direct fallback calls cannot bypass public-open authorization. |
+
+Production-registry credential/binding checks run in BasketCreditSetupTest;
+BasketPublicLifecycleTest exercises the unmodified shell through both actual
+V3 lifecycle paths. The latter uses the registry fixture for flags. Both are
+included in make nix-buck-accounting-test; neither is five-year evidence.
 
 Identity authorization is separate from monetary authorization. A valid
 allowance does not replace verified parties or required bilateral receipt

@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {BuckBasketEquityStorage, IEquityDirector} from "./BuckBasketEquityStorage.sol";
+import {BasketCreditSetup} from "./BasketCreditSetup.sol";
 
 /// @title BuckBasketEquityWheel -- the equity basket's components, a facet.
 ///
@@ -39,7 +40,7 @@ import {BuckBasketEquityStorage, IEquityDirector} from "./BuckBasketEquityStorag
 ///         The arbitrage stays in the wheel (ArbKind): it needs no float and
 ///         credits its captures to the basket (creditDepositors /
 ///         creditTreasury).
-contract BuckBasketEquityWheel is BuckBasketEquityStorage {
+contract BuckBasketEquityWheel is BasketCreditSetup {
 
     uint8 internal constant DAILY  = 0;
     uint8 internal constant SYNC   = 1;

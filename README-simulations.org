@@ -115,10 +115,44 @@ The canonical basket valuation checks are included in
 =make nix-buck-accounting-test=; the focused suite is
 =make nix-match-BuckCompoundBasketTest=. It tests separate cash/principal,
 fee-aware Jubilee cross-holdings, entry dilution and the exclusion of unpaid
-claims from new-credit collateral. Test-only access supplies actual issued
-basket debt while normal =openCredit= remains gated on public onboarding
-validation. These valuation tests
-do not turn the five-year household economy into a completed migration.
+claims from new-credit collateral. Harness probes exercise individual funding
+boundaries; the unmodified shell's public lifecycle is tested separately.
+These contract checks do not complete the five-year household migration.
+
+Public =openCredit(credit, face)= now supports canonical mode. It requires
+governance, =enableNetAccounting=, a verified public ordinary basket identity,
+the canonical token model and the token's own BuckCredit with its Buck hook
+already wired. It creates a self-issued, zero-premium MARKED NFT with zero
+activated coverage and principal. Opening alone changes no cash, supply or
+issuance age; later upkeep marks and activates backing before explicit draws.
+
+For a fresh basket, configure its venue and one existing upkeep facet
+(=BuckBasketEquityWheel= or =BasketUpkeepFacet=). Governance calls
+=authorizeIdentityBinding(registry, binder, pk, E)= at the *basket address*,
+using =IBasketUpkeep= or the selected facet's ABI. The certified operator
+then calls =registry.bindContract(basket, pk, E, true, false)=. Authorization
+pins the exact binder, key, ciphertext and public/non-Carrying flags; only the
+token's registry is accepted. Governance can revoke pending authorization
+before deposits or credit opening. The deployed facet address is not the
+target of this binding.
+
+Enable canonical accounting once before any deposits or credit, configure
+the existing fund/wheel graph, then call the shell's ordinary =openCredit=.
+The shared =BasketCreditSetup= code is inherited by both upkeep facets and
+adds no deployed initializer or storage fields. Its
+=initializeEquityCredit= entry is a shell self-call; even governance must use
+=openCredit= rather than invoke the initializer through the fallback.
+Setup mutations are rejected during active position or credit operations.
+
+=make nix-match-BasketCreditSetupTest= exercises actual production-registry
+credential vectors, authorization/revocation, wrong flags, wrong registry,
+foreign credit and model refusal. =make nix-match-BasketPublicLifecycleTest=
+uses the unmodified basket shell for public opening, explicit issuance,
+actual V3 LP placement, debt retirement and investor exit through both upkeep
+facets. Its registry fixture supplies identity flags; the production
+certification tests provide the separate binding evidence. Both suites are
+included in =make nix-buck-accounting-test=. On a fresh checkout, build the
+venue artifacts with =make nix-sim-build= before using individual match targets.
 
 Both existing upkeep facets now use explicit canonical issuance: available
 credit is a planning limit, while =balanceOf= remains actual wallet cash.
@@ -224,9 +258,15 @@ forced by this job and cash on hand cannot itself make a low-K exit pass.
 counterexample, actual full/partial repayment and cash-floor/shared-budget
 checks in both existing wheels.
 
-Normal public credit opening remains the next contract step. World builders still need to wire
-this maintenance explicitly; the existence of the wheel slots does not
-migrate an existing simulation or saved world.
+World builders must still configure this maintenance and persist its actual
+facet, wheel, fund and identity bindings. Before enabling funded BUCK rewards
+or BUCK arbitrage, complete and test production identity binding for the
+canonical wheel. Its current API lacks target-controlled binding authorization;
+the cash-only platform smoke does not exercise that service role. The older
+comparison wheel has only 75 runtime bytes spare. Prefer the canonical
+machine wheel for the primary world and retire legacy variants only as their
+distinct checks are covered. Public opening and wheel jobs do not migrate an
+existing simulation or saved world by themselves.
 
 BVIB retains its nominal V3 reference: newly issued ordinary BUCK enter a pool
 at full value as that same number of nominal units. Net liquidation marks and

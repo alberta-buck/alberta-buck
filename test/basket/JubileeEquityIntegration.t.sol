@@ -17,9 +17,9 @@ import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {EqController, EqHolder, EqToken, IPool} from "./BuckBasketEquity.t.sol";
 import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
 
-/// @dev Real Buck, fund and equity basket. Its experimental net mode has
-///      no basket-issued credit, so leveraged low-K cases still need their own
-///      integration before this is a production basket configuration.
+/// @dev Real Buck, fund and equity basket. This cash-only base supports the
+///      separate issued-credit, low-K and public-lifecycle fixtures. It is
+///      contract integration evidence, not a five-year household economy.
 abstract contract JubileeEquityFixture is Test {
     uint256 constant YEAR = 365 days + 6 hours;
     uint256 constant Q = 1e36;
@@ -284,10 +284,16 @@ contract JubileeEquityIntegrationTest is JubileeEquityFixture {
         assertEq(basket.lien(), 0);
     }
 
-    function test_netModeCannotEnableLegacyBasketCredit() public {
-        vm.expectRevert(BuckBasketEquity.NetCreditUnavailable.selector);
+    function test_netModeOpensInactiveCreditWithNoCurrencyOrSupplyChange() public {
+        uint256 supply = buck.totalIssued();
         vm.prank(GOV);
         basket.openCredit(address(credit), 1e12);
+        assertEq(address(basket.credit()), address(credit));
+        assertEq(credit.ownerOf(basket.creditId()), address(basket));
+        (uint256 face, uint256 active, uint32 premium) = credit.creditInfo(basket.creditId());
+        assertEq(face, 1e12); assertEq(active, 0); assertEq(premium, 0);
+        assertEq(basket.lien(), 0); assertEq(buck.balanceOf(address(basket)), 0);
+        assertEq(buck.totalIssued(), supply);
         vm.expectRevert();
         vm.prank(GOV);
         basket.enableNetAccounting();
