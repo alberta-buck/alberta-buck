@@ -80,6 +80,11 @@ test("linked Buck issues, accrues and retires cash-only credit", { skip }, async
   await exec(buck, "mint", [100n * RAW]);
   const issuedAt = (await s.client.getBlock()).timestamp;
   const ops = netCreditOps(s, stack);
+  const freshMark = await ops.markHousehold(actor.address, [0n]);
+  assert.equal(freshMark.state.spendable, 100n * RAW);
+  assert.equal(freshMark.state.issued, 100n * RAW);
+  assert.equal(freshMark.creditLimit, 100n * RAW);
+  assert.equal(freshMark.reliefScaled + freshMark.premiumNetScaled, 0n);
   const fresh = await ops.quoteReliefRate(0n, RAW);
   assert.equal(fresh.selectedSeconds, 0n);
   assert.equal(fresh.annualRateWad, null);
@@ -106,6 +111,11 @@ test("linked Buck issues, accrues and retires cash-only credit", { skip }, async
   const tooLarge = await ops.quoteReliefRate(0n, 100n * RAW);
   assert.equal(tooLarge.exceedsLiquidityLimit, true);
   assert.equal(tooLarge.capped, false);
+  const marked = await ops.markHousehold(actor.address, [0n]);
+  assert.equal(marked.reliefScaled, cash);
+  assert.equal(marked.exceedsLiquidityLimit, true);
+  assert.ok(marked.state.issued > marked.state.spendable);
+  assert.deepEqual(await ops.markHousehold(actor.address, [0n], { blockNumber: freshMark.blockNumber }), freshMark);
   const deadline = (await s.client.getBlock()).timestamp + 3600n;
   await exec(buck, "authorizeReduction", [0n, RAW, 0n, deadline]);
   const pending = await ops.assessIssueCandidate(actor.address, 0n, 0n, RAW, 0n);

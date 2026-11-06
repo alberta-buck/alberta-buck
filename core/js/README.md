@@ -80,9 +80,26 @@ stack, reusing its one linked basket and Jubilee fund. The demo artifact
 bundle includes production BuckCredit; each funding/household proxy opts
 into its actual insurer. `make nix-core-equilibrium-bootstrap-test` checks
 the real opening pools, wheel/fund roles and a premium-bearing issuance.
-The household decision lifecycle remains gated and full economy snapshots
+The existing debtor, saver and investor setup now creates ordinary proxies
+and distinct, inactive facilities on that graph. The household decision
+lifecycle remains gated and full economy snapshots
 are rejected until their machine and pending-outcome state is migrated.
 This bootstrap check is not a five-year economy result.
+
+`world.netCreditOps.markHousehold(owner, tokenIds)` returns a same-block
+`state` with cash and NFT principal separately, `creditLimit`,
+`premiumNetScaled`, `reliefScaled`, `availableReliefScaled` and
+`exceedsLiquidityLimit`. Scaled fields use `1e36` per raw six-decimal BUCK.
+Each nominal premium uses its own facility's actual insurer BUCK-pool
+ratio; unobserved strategies and future funding are excluded. Marked
+relief is distinct from the shared liquidity limit. Required guarded-mark
+or maturity failures propagate. `{blockNumber}` selects a historical
+snapshot; duplicate/foreign facilities and Carrying wallets are rejected.
+`markNetBasketPositions` separately reads exact receipt `valueOf` and
+remaining basis before exit costs, avoiding a second rounding of
+`sharePrice`. Python exposes the matching `mark_household` and receipt
+reader. `make nix-venv-economy-accounting-test` covers both role setups,
+actual insurer-pool changes, receipt marks and the short JSON/PDF path.
 
 Subpaths map onto the modules directly: `alberta-buck-core/session`,
 `/journal`, `/identity`, `/wallet`, `/buckworld`, `/observer`, `/v3`, and

@@ -90,6 +90,9 @@ def test_linked_net_issuance_and_reduction_match_reference():
         issued = _exec(chain, actor, buck, "mint", [100 * RAW])
         issued_at = anvil.w3.eth.get_block(issued["blockNumber"])["timestamp"]
         ops = NetCreditOps(chain, stack)
+        fresh_mark = ops.mark_household(actor.address, [0])
+        assert fresh_mark.state.spendable == fresh_mark.state.issued == fresh_mark.credit_limit == 100 * RAW
+        assert fresh_mark.relief_scaled == fresh_mark.premium_net_scaled == 0
         fresh = ops.quote_relief_rate(0, RAW)
         assert fresh.selected_seconds == 0 and fresh.annual_rate_wad is None
         assert ops.quote_premium_refund(0, 0).reason == "no-premium"
@@ -123,6 +126,10 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert not observed.capped and not observed.exceeds_liquidity_limit
         too_large = ops.quote_relief_rate(0, 100 * RAW)
         assert too_large.exceeds_liquidity_limit and not too_large.capped
+        marked = ops.mark_household(actor.address, [0])
+        assert marked.relief_scaled == cash and marked.exceeds_liquidity_limit
+        assert marked.state.issued == 100 * RAW > marked.state.spendable
+        assert ops.mark_household(actor.address, [0], block_number=fresh_mark.block_number) == fresh_mark
 
         deadline = issued_at + YEAR + 3600
         _exec(chain, actor, buck, "authorizeReduction", [0, RAW, 0, deadline])
@@ -156,6 +163,8 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert ops.issue_coverage_menu(actor.address, 1, RAW, 0) == (pending,)
         with pytest.raises(Exception):
             ops.quote_relief_rate(0, RAW)  # stale claim denominator must not become a forecast
+        with pytest.raises(Exception):
+            ops.mark_household(actor.address, [0, 1])
         chain.send(buck.functions.processMaturities(10))
         assert not buck.functions.maturitiesPending().call()
         assert credit.functions.depreciatedFaceValue(0).call() > credit.functions.currentValue(0).call()

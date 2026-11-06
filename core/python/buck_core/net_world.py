@@ -171,6 +171,21 @@ class HouseholdCreditState:
 
 
 @dataclass(frozen=True)
+class HouseholdCreditMark:
+    """One block's debt/relief and current insurer-pool cash mark, not exit liquidity."""
+    block_number: int
+    state: HouseholdCreditState
+    credit_limit: int
+    premium_net_scaled: int
+    relief_scaled: int
+    available_relief_scaled: int
+
+    @property
+    def exceeds_liquidity_limit(self):
+        return self.relief_scaled > self.available_relief_scaled
+
+
+@dataclass(frozen=True)
 class ActivatedCapacityQuote:
     """Same-block zero-coverage issuance estimates, in raw BUCK units."""
     block_number: int
@@ -542,17 +557,18 @@ class NetCreditOps:
     def facility(self, token_id: int) -> FacilityState:
         return self._facility(token_id)
 
-    def _facility(self, token_id: int, spendable: int | None = None) -> FacilityState:
+    def _facility(self, token_id: int, spendable: int | None = None, *, block_number=None) -> FacilityState:
         credit, token = self.stack.credit, self.stack.token
-        owner = credit.functions.ownerOf(token_id).call()
-        face, active, rate = credit.functions.creditInfo(token_id).call()
-        issued, seconds = credit.functions.issuanceOf(token_id).call()
+        read = lambda fn: fn.call(block_identifier="latest" if block_number is None else block_number)
+        owner = read(credit.functions.ownerOf(token_id))
+        face, active, rate = read(credit.functions.creditInfo(token_id))
+        issued, seconds = read(credit.functions.issuanceOf(token_id))
         return FacilityState(token_id, owner, face, active, rate, issued, seconds,
-                             token.functions.premiumPrincipal(token_id).call(),
-                             token.functions.facilityPool(token_id).call(),
-                             token.functions.balanceOf(owner).call() if spendable is None else spendable)
+                             read(token.functions.premiumPrincipal(token_id)),
+                             read(token.functions.facilityPool(token_id)),
+                             read(token.functions.balanceOf(owner)) if spendable is None else spendable)
 
-    def household(self, owner, token_ids) -> HouseholdCreditState:
+    def household(self, owner, token_ids, *, block_number=None) -> HouseholdCreditState:
         """Read one wallet once and add only its explicitly selected facilities.
 
         The wallet is money, not a signed liability; purchasing or receiving
@@ -561,17 +577,50 @@ class NetCreditOps:
         """
         address = getattr(owner, "address", owner)
         ids = tuple(token_ids)
+        if block_number is not None and (type(block_number) is not int or block_number < 0):
+            raise ValueError("invalid household block")
+        read = lambda fn: fn.call(block_identifier="latest" if block_number is None else block_number)
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate household facility")
-        if self.stack.registry.functions.isCarrying(address).call():
+        if read(self.stack.registry.functions.isCarrying(address)):
             raise ValueError("household wallet must be non-Carrying")
-        spendable = self.stack.token.functions.balanceOf(address).call()
-        facilities = tuple(self._facility(token_id, spendable) for token_id in ids)
+        spendable = read(self.stack.token.functions.balanceOf(address))
+        facilities = tuple(self._facility(token_id, spendable, block_number=block_number) for token_id in ids)
         if any(f.owner.lower() != address.lower() for f in facilities):
             raise ValueError("foreign household facility")
         return HouseholdCreditState(
             spendable, sum(f.issued for f in facilities),
             sum(f.face - f.activated for f in facilities), sum(f.premium_nominal for f in facilities), facilities)
+
+    def mark_household(self, owner, token_ids, *, block_number=None) -> HouseholdCreditMark:
+        """Mark separate NFT debt/relief and each insurer's nominal refund.
+
+        Pre: distinct owned facilities and callable guarded fund quotes. Post:
+        all reads use one block; principal never changes with wallet cash.
+        Relief is a marked claim, with the shared liquidity limit reported
+        separately. Premium value uses only its actual pool's current BUCK
+        ratio, excluding unobserved insurer strategies and future funding.
+        A missing price/publication or maturity backlog propagates.
+        """
+        address = getattr(owner, "address", owner)
+        block = self.chain.w3.eth.block_number if block_number is None else block_number
+        state = self.household(address, token_ids, block_number=block)
+        read = lambda fn: fn.call(block_identifier=block)
+        token = self.stack.token
+        premium_net, relief, pools = 0, 0, {}
+        for facility in state.facilities:
+            if facility.premium_nominal:
+                pool = facility.insurer_pool
+                if pool.lower() == ZERO_ADDRESS:
+                    raise ValueError("premium has no insurer pool")
+                if pool not in pools:
+                    pools[pool] = read(token.functions.accountBalancesScaled(pool))
+                gross, net = pools[pool]
+                premium_net += facility.premium_nominal * Q * net // gross if gross else 0
+            if facility.issued:
+                relief += read(self.stack.fund.functions.previewRelief(facility.token_id, facility.issued))[0]
+        return HouseholdCreditMark(block, state, read(token.functions.creditLimit(address)), premium_net, relief,
+                                   read(token.functions.availableReliefScaled()))
 
     def quote_issue(self, token_id: int, coverage: int) -> IssueQuote:
         owner = self.stack.credit.functions.ownerOf(token_id).call()

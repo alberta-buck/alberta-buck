@@ -315,8 +315,7 @@ class _ProxyAgent(Agent):
         return ""
 
     def _bind_proxy(self, d) -> None:
-        """Deploy a SimLP proxy and bind it public + NON-carrying (so BUCK it
-        holds can go negative == draw credit; matches the SimLP binding)."""
+        """Deploy a public ordinary cash account; its credit NFTs are separate."""
         self.proxy = self._new_proxy(d)
 
     def _new_proxy(self, d):

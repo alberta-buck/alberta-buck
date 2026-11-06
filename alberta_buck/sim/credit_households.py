@@ -20,8 +20,6 @@ class CreditHouseholdAgent(_HouseholdAccounts):
     OCTL_STRIDE                 = 5                     # its books are read every fifth day (and the last)
 
     def setup(self, d, scenario, rng):
-        if getattr(d, "buck_accounting", "") == "net":
-            raise NotImplementedError("BuckNet household setup is not yet integrated")
         cls                     = type(self).__name__
         overrides               = {k: spec(scenario, cls, k, v) for k, v in policy.DEFAULTS.items()}
         overrides.update(getattr(self, "settings", {}))
@@ -1137,6 +1135,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             return
         if self._recover_pending_operations(d, ctr):
             return
+        if getattr(d, "buck_accounting", "") == "net":
+            raise NotImplementedError("canonical household decisions await issuance and exit migration")
         if not self._started:
             cash                = int(self.p["invest_cash_k" if self.investor else "cash_k"] * 1000 * PARITY)
             d.chain.send(d.usdc.functions.mint(self.proxy.address, cash))

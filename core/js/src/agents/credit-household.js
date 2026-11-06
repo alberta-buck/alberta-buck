@@ -79,7 +79,6 @@ export class CreditHouseholdAgent {
   get hypoBanked() { return this.hypoCash; }
 
   async setup(world) {
-    if (world.accounting === "net") throw new Error("BuckNet household setup is not yet integrated");
     this.tokenIdx = Math.trunc(uniform(this.seed, this.member, "token") * world.tokens.length);
     if (this.investor) { await world.proxyFor(this.account); return; }   // its dollars arrive at the proxy
     const per = this.face / 4n;
@@ -665,6 +664,7 @@ export class CreditHouseholdAgent {
   async act(world, day, tick) {
     if (tick || day < this.arrive_day || this.exited) return;
     if (await this.recoverPendingOperations(world)) return;
+    if (world.accounting === "net") throw new Error("canonical household decisions await issuance and exit migration");
     if (!this.started) {
       const cash = units((this.investor ? this.p.invest_cash_k : this.p.cash_k) * 1000);
       await world.fiatIn(this.account, cash, { tag: "household:starting-cash" });

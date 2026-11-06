@@ -136,12 +136,12 @@ export async function deployNetBasket(session, artifacts, stack, { factory, gove
 export function netCreditOps(session, stack, execute = null) {
   const { credit, token, fund, quoter } = stack;
   const send = execute ?? ((owner, target, name, args) => session.send(target, name, args, { account: owner }));
-  const readFacility = async (tokenId, knownSpendable) => {
-    const owner = await session.call(credit, "ownerOf", [tokenId]);
+  const readFacility = async (tokenId, knownSpendable, read = (c, name, args) => session.call(c, name, args)) => {
+    const owner = await read(credit, "ownerOf", [tokenId]);
     const [[face, activated, premiumRate], [issued, claimSeconds], premiumNominal, insurerPool, spendable] =
-      await Promise.all([session.call(credit, "creditInfo", [tokenId]), session.call(credit, "issuanceOf", [tokenId]),
-        session.call(token, "premiumPrincipal", [tokenId]), session.call(token, "facilityPool", [tokenId]),
-        knownSpendable ?? session.call(token, "balanceOf", [owner])]);
+      await Promise.all([read(credit, "creditInfo", [tokenId]), read(credit, "issuanceOf", [tokenId]),
+        read(token, "premiumPrincipal", [tokenId]), read(token, "facilityPool", [tokenId]),
+        knownSpendable ?? read(token, "balanceOf", [owner])]);
     return { tokenId, owner, face, activated, premiumRate, issued, claimSeconds, premiumNominal, insurerPool, spendable };
   };
   const facility = (tokenId) => readFacility(tokenId);
@@ -389,17 +389,40 @@ export function netCreditOps(session, stack, execute = null) {
     return result(pool, gross, net, fraction, "cash-only");
   };
   ops.cancelReduction = (owner, id) => ops.authorizeReduction(owner, id, 0n, 0n, 0n);
-  ops.household = async (owner, tokenIds) => {
+  ops.household = async (owner, tokenIds, { blockNumber = null } = {}) => {
     const address = owner.address ?? owner;
+    if (blockNumber !== null && (typeof blockNumber !== "bigint" || blockNumber < 0n)) throw new Error("invalid household block");
+    const read = blockNumber === null ? (c, name, args) => session.call(c, name, args) : issueBlockReader(blockNumber);
     if (new Set(tokenIds.map(String)).size !== tokenIds.length) throw new Error("duplicate household facility");
-    if (await session.call(stack.registry, "isCarrying", [address])) throw new Error("household wallet must be non-Carrying");
-    const spendable = await session.call(token, "balanceOf", [address]);
-    const facilities = await Promise.all(tokenIds.map((tokenId) => readFacility(tokenId, spendable)));
+    if (await read(stack.registry, "isCarrying", [address])) throw new Error("household wallet must be non-Carrying");
+    const spendable = await read(token, "balanceOf", [address]);
+    const facilities = await Promise.all(tokenIds.map((tokenId) => readFacility(tokenId, spendable, read)));
     if (facilities.some((f) => f.owner.toLowerCase() !== address.toLowerCase())) throw new Error("foreign household facility");
     return { spendable,
       issued: facilities.reduce((n, f) => n + f.issued, 0n),
       unactivated: facilities.reduce((n, f) => n + f.face - f.activated, 0n),
       premiumNominal: facilities.reduce((n, f) => n + f.premiumNominal, 0n), facilities };
+  };
+  // Same-block NFT/relief and current insurer BUCK-pool marks. An insurer's
+  // unobserved strategies and future funding are excluded. A guarded mark
+  // failure propagates; a marked claim is not executable cash or retirement.
+  ops.markHousehold = async (owner, tokenIds, { blockNumber = null } = {}) => {
+    blockNumber ??= (await session.client.getBlock()).number;
+    const read = issueBlockReader(blockNumber), address = owner.address ?? owner;
+    const state = await ops.household(owner, tokenIds, { blockNumber });
+    let premiumNetScaled = 0n, reliefScaled = 0n;
+    for (const f of state.facilities) {
+      if (f.premiumNominal) {
+        if (f.insurerPool.toLowerCase() === ZERO_ADDRESS) throw new Error("premium has no insurer pool");
+        const [gross, net] = await read(token, "accountBalancesScaled", [f.insurerPool]);
+        premiumNetScaled += gross ? f.premiumNominal * Q * net / gross : 0n;
+      }
+      if (f.issued) reliefScaled += (await read(fund, "previewRelief", [f.tokenId, f.issued]))[0];
+    }
+    const creditLimit = await read(token, "creditLimit", [address]);
+    const availableReliefScaled = await read(token, "availableReliefScaled");
+    return { blockNumber, state, creditLimit, premiumNetScaled, reliefScaled, availableReliefScaled,
+      exceedsLiquidityLimit: reliefScaled > availableReliefScaled };
   };
   // A wallet is money, never signed debt. Size one selected NFT reduction
   // against the minimum accepted relief and actual fund liquidity; do not

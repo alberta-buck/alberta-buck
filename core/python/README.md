@@ -64,6 +64,31 @@ These require the current compiled math kernel; they have no legacy fallback.
 callers. In a checkout, run `make nix-venv-core-net-math-test` for Solidity,
 Rust, Python, Node and browser agreement.
 
+## Selected household credit books
+
+`NetCreditOps(chain, stack).mark_household(owner, token_ids)` returns one
+block's ordinary wallet cash and selected NFT principal separately, plus
+the credit limit, marked Jubilee relief and the current cash-based value
+of each facility's nominal premium refund. `premium_net_scaled`,
+`relief_scaled` and `available_relief_scaled` use `1e36` per raw BUCK;
+the nested `state` uses raw six-decimal BUCK. `exceeds_liquidity_limit`
+compares the total claim with the shared block allowance: marked relief
+does not imply it can all be paid now.
+
+Each refund uses its facility's actual insurer pool, including when the
+insurer has changed its pool for new facilities. Unobserved insurer
+strategy assets and future funding are excluded. Missing guarded marks
+or a required maturity checkpoint fail instead of inventing relief.
+Use `block_number=...` for a historical book; the backend must support it.
+Duplicate/foreign facilities and Carrying household wallets are rejected.
+`mark_net_basket_positions` separately reads exact receipt `valueOf` marks
+and remaining basis before exit costs, without re-rounding `sharePrice`.
+
+The existing Python/JS households now initialize their ordinary accounts
+and separate facilities on canonical Buck. Their normal decision loop
+still refuses until issuance and exit migration is complete. These books
+are integration inputs, not a restored five-year economy.
+
 ## Status
 
 0.4.0, prototype. Unaudited software for a monetary system, published so

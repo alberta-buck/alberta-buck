@@ -20,7 +20,10 @@ artifact bundle. =make nix-venv-economy-bootstrap-test= adds the existing
 Python builder, bootstrap agents, desk and component comparisons.
 =make nix-venv-economy-accounting-test= also validates exact Python/JS receipt
 marks and a short Python loop through JSON/PDF reporting. Both complete
-household lifecycles and full economy save/restore still await conversion. The
+household lifecycles and full economy save/restore still await conversion.
+Existing debtor/saver/investor account and facility setup now works in both
+languages, with matching SDK credit books; normal decisions remain gated
+before new income until issuance/exits are ported. The
 [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] records that boundary. Wallet success is not
 five-year household evidence. The cash-only basket in the wallet world is not
 bound to the K controller; a working household savings lifecycle remains a

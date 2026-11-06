@@ -157,8 +157,14 @@ for automatic PDFs. The completed JSON records monetary model, public role
 and library addresses/code hashes, actual cash, NFT principal, Jubilee cash
 and guarded publication, and each observed depositor's remaining basis/mark.
 The PDF shows open-position mark-to-market returns even without redemptions.
+Both household role setups and same-block SDK credit books are also covered,
+including insurer-pool replacement and actual pending authorizations. Their
+normal decision loop is still gated before new income or borrowing.
 This is reporting integration coverage, not household-policy or five-year
 stability evidence. No extra economy runner is introduced.
+Pytest owns =build/test/economy-accounting/=: each target run replaces that
+scratch directory and leaves the latest integration =canonical.json= and
+=canonical.pdf= below it for inspection. Campaign output is kept separately.
 
 Foundry excludes SNARK tests whose generated proof fixtures are absent, visibly. Their setup
 and regeneration, executable papers, release builds and deployment procedures remain in

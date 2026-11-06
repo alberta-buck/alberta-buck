@@ -358,5 +358,15 @@ export function installHouseholdOps(world) {
   };
   world.households = { cash, pay, read, buy, issue, invest, mark, reserves, depositBuck, withdraw, redeemToRetire,
                        divest, saveBucks, tendWallet, emptyWallet };
+  if (world.accounting === "net") {
+    // Recovery must inspect real authorizations before the still-gated
+    // decision loop. Never let a missing adapter look like idle economics.
+    world.households.pending = async (account) => {
+      const ids = world._credits.get(account.address) ?? [];
+      await world.netCreditOps.household(world.holderAddress(account), ids);
+      for (const id of ids) if ((await s.call(buck, "reductionAuthorization", [id]))[0]) return true;
+      return false;
+    };
+  }
   return world;
 }

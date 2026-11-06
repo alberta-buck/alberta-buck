@@ -1706,9 +1706,12 @@ economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 # test shortens only its local PDF threshold: no five-year policy evidence.
 # Exact receipt marks run in Python/Anvil and JS/Tevm, including one-unit
 # double-rounding counterexamples. Full household actions remain gated.
+# Pytest owns build/test/economy-accounting: each run replaces that scratch
+# directory and leaves the latest canonical.json/PDF there for inspection.
 #   make nix-venv-economy-accounting-test
 economy-accounting-test: economy-bootstrap-test
-	python -m pytest alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py -q
+	mkdir -p build/test
+	python -m pytest alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py --basetemp=build/test/economy-accounting -q
 	cd core/js && node --test test/net-basket-mark.tevm.test.js
 
 # Each published crate carries its OWN copy of the vectors it replays:

@@ -37,7 +37,11 @@ builders now reuse that monetary graph for deployment and bootstrap. Python
 also configures the separate desk and retains its component comparisons.
 A short existing Python economy now reports canonical cash/principal and
 exact open receipt marks through completed JSON/PDF generation. Complete
-household lifecycles and full economy restoration remain open.
+household lifecycles and full economy restoration remain open. All three
+household roles now initialize actual ordinary accounts and distinct facilities
+in both languages. Their shared SDK credit mark separates principal, cash,
+guarded relief and each facility's own insurer-pool refund value; normal
+decisions still fail explicitly before income until issuance/exits migrate.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -737,12 +741,34 @@ implementation sequence, before changing the primary economy builder.
   callers. These arithmetic functions do not supply live fund relief,
   collateral authorization or a migrated household lifecycle; wire the
   validated helpers into the existing builders as those paths are restored.
+- [X] Initialize the existing debtor, saver and investor on the canonical
+  graph in both languages. Ordinary accounts and four distinct, inactive
+  opted-in facilities are actual contracts; investors own no mortgage/NFTs.
+  Match =NetCreditOps.mark_household= and =netCreditOps.markHousehold=:
+  one pinned block, explicit selected-NFT principal and wallet cash, marked
+  guarded Jubilee relief versus the shared liquidity allowance, and nominal
+  premiums valued using each facility's own current BUCK-pool ratio.
+  Unobserved insurer strategies/future funding are excluded. Historical
+  reads, full-claim liquidity limits and a pending maturity are covered in
+  the retained Anvil/Tevm monetary fixtures. Primary-world checks exercise
+  all three roles, transfers that leave principal unchanged, and replacement
+  of the insurer's future pool while the older facility retains its aged
+  pool. The JS primary adapter now checks actual pending authorizations;
+  recovery precedes the explicit normal-decision migration gate. No income,
+  origination or bank payment is fabricated by that setup acceptance.
 - [ ] Complete the existing adaptive household and saver using corrected Buck:
   actual cash versus capacity, mortgage counterfactual/carry costs, issuance,
   real BUCK/USDC and TOKEN routes, mortgage settlement, protected issuance
   reserve, discounted buyback and explicit NFT retirement. Preserve arrivals,
   randomized thresholds and always-invest/always-retire comparisons. Resolve
   unused retire_disc and overlapping borrow/paydown decisions.
+  Next connect the SDK books to complete personal net-worth/receipt marks;
+  retain actual cash and actual principal without a synthetic signed alias.
+  Replace the duplicated legacy mint/gate helpers using the shared bounded
+  issuance-candidate quotes, and account for the full-value premium as issued
+  principal. Guarded market buys must deliver net BUCK; bank retirement is a
+  separate confirmed USDC payment. Complete unused-facility release as well
+  as principal retirement; burn(0) remains an invalid closure shortcut.
 - [ ] Persist pending outcomes, buyback targets/reserves, mortgage cash-flow
   timing, NFT/receipt state, random streams and actual fund/insurer wiring.
   Reconcile receipts before retries; never count authorization as repayment,
@@ -806,6 +832,9 @@ Continue in this order:
    retain adaptive default and the explicit comparison policies. Port setup,
    issuance, asset exits, basket redemption, personal marks and persistent
    outcomes rather than adding another economy runner.
+   Household setup and same-block selected-facility books now work in both
+   languages; normal decisions remain explicitly gated. Finish portfolio
+   marks and guarded market/issuance wiring before enabling those decisions.
 3. Run identical operation vectors and a short real-contract household world,
    then the five-year baselines/policy comparisons and retained shocks. Save
    raw JSON, adjacent PDFs and campaign metadata for every completed long run.
@@ -979,4 +1008,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-06 | Bootstrap the existing Python machine and retain canonical component setups | The existing deploy function now links canonical Buck/one Jubilee fund and the shared basket library, configures the insurer pool/refund allowance, and uses actual selected-NFT operations. The primary machine directly deploys one BasketMachineWheel, omitting PairsRebalanceDirector, EquityTurnDirector and the replaced component facet; journal assertions verify the inventory. Independent full-range seed positions provide TWAP history before opening the real basket facility and configuring the separate canonical desk. Governed binding, zero-allowance keeper introduction/freeze and bounded fund jobs match JS. Existing BootstrapDMAgents now deposit initial TOKEN endowments, preserving reference prices and declared weights; ongoing entries retain market purchases. Canonical arb enabling and the unported Python-wheel comparison fail explicitly; an ineffective simulated rearm was removed. Combined Make acceptance builds kernels/artifacts and passes the JS demo-bundle bootstrap plus three Python cases (machine and both component setups). Final Python checks: five passed including retained allocation/ROI-basis regressions; exact one-day reserve decay and full-value premium issuance pass. Make/README/plan/pre-post invariants updated, including the obsolete two-compiler build comment. No Solidity behavior changed. Next canonical reporting, household lifecycle/persistence, arb qualification, short-world then five-year JSON/PDF campaigns, and Notes. | =954ecb10= |
 
-| 2026-11-06 | Restore canonical Python observations and exact open-receipt reporting | Replaced signed SimLP debt with actual owned-NFT principal and separate cash; basket NAV now excludes independent seed liquidity. LOW collateral and LP BUCK fees use exact net/nominal ratios. Public model/role/library/code metadata, fund nominal/net cash, deferred debt, claim seconds and guarded wheel publication are recorded without secrets; wide scaled values, ages and shares use decimal strings. Shared Python/JS receipt readers use exact valueOf rather than double-rounding sharePrice; real Anvil/Tevm tiny-unit cases catch the one-unit loss. Observed depositors and the fund have remaining basis and live receipt marks, separately from relief availability. The existing PDF plot now shows open-investor MTM without requiring a redemption or household roster. The three-day existing loop performs real V3/wheel/fund investment, checks authoritative books and plotted returns, and completes raw JSON plus an adjacent multipage PDF; only its test-local automatic-PDF threshold is shortened. make nix-venv-economy-accounting-test builds both kernels/artifacts and passes 17 Python plus two JS tests across bootstraps, marks and reporting. No Solidity behavior changed. Make, root/detail guides and pre/post invariants updated. Next complete both household lifecycles/JS reporting and persistence, qualify canonical arb, then real five-year campaigns/PDFs and Notes. | This commit |
+| 2026-11-06 | Restore canonical Python observations and exact open-receipt reporting | Replaced signed SimLP debt with actual owned-NFT principal and separate cash; basket NAV now excludes independent seed liquidity. LOW collateral and LP BUCK fees use exact net/nominal ratios. Public model/role/library/code metadata, fund nominal/net cash, deferred debt, claim seconds and guarded wheel publication are recorded without secrets; wide scaled values, ages and shares use decimal strings. Shared Python/JS receipt readers use exact valueOf rather than double-rounding sharePrice; real Anvil/Tevm tiny-unit cases catch the one-unit loss. Observed depositors and the fund have remaining basis and live receipt marks, separately from relief availability. The existing PDF plot now shows open-investor MTM without requiring a redemption or household roster. The three-day existing loop performs real V3/wheel/fund investment, checks authoritative books and plotted returns, and completes raw JSON plus an adjacent multipage PDF; only its test-local automatic-PDF threshold is shortened. make nix-venv-economy-accounting-test builds both kernels/artifacts and passes 17 Python plus two JS tests across bootstraps, marks and reporting. No Solidity behavior changed. Make, root/detail guides and pre/post invariants updated. Next complete both household lifecycles/JS reporting and persistence, qualify canonical arb, then real five-year campaigns/PDFs and Notes. | =4756e883= |
+
+| 2026-11-06 | Initialize canonical households and expose independent same-block credit marks | Existing Python/JS debtor, saver and investor setup now creates ordinary proxies and opted-in, inactive per-asset facilities, with no issued cash or synthetic bank payment. Normal decisions still fail explicitly before income until issuance/exits migrate; the existing pending-operation recovery runs first. Added matching SDK mark_household/markHousehold books with pinned-block cash, selected NFT principal, credit limit, actual per-facility insurer-pool cash-ratio premium marks and guarded Jubilee relief separately from the shared liquidity allowance. Existing readers accept a historical block; duplicate/foreign IDs and Carrying household wallets are refused. The primary JS adapter now inspects actual pending authorizations rather than mistaking a missing adapter for inactivity. Actual Anvil/Tevm fixtures cover historical reads, full-claim liquidity limits and a maturity backlog. Both primary builders cover all three roles, cash transfers without repayment, and an aged insurer pool retained by an old facility after selecting a fresh future pool; JS reuses the existing controlled insurer-pool helper. Updated Make acceptance passes 18 Python and three JS tests, including a real three-day wheel/fund JSON/PDF run; its owned build/test/economy-accounting scratch directory retains the latest review artifacts. Shared canonical client smoke passes 34 Python and 20 JS tests; focused Python book/recovery checks pass eight. The existing JS equilibrium page builds. No Solidity behavior changed. Updated SDK guides, Make/README, checklist and pre/post invariants. Next connect complete personal portfolio marks and guarded market/issuance operations, then exits/persistence, canonical arb qualification, real five-year campaigns/PDFs and Notes. | This commit |

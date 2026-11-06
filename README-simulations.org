@@ -54,6 +54,9 @@ a short diagnostic trace cannot establish an economic equilibrium.
 writer. Its short integration test changes the automatic-PDF horizon only
 inside the test; production still automatically renders every completed
 five-year run. The actual contracts and scheduled wheel work run normally.
+The target leaves its test JSON/PDF under =build/test/economy-accounting/=
+for inspection; pytest replaces that owned scratch directory on each run.
+Keep campaign results in the separate =build/sim/= campaign directories.
 
 =meta.buck_contract= records the accounting model, chain, public roles and
 linked-library code hashes. These identify the observed deployment; they are
@@ -72,6 +75,18 @@ exact net/nominal ratio; =eq_held_buck_nominal= and =eq_carried_fee= expose the
 carried-fee difference. LP fee diagnostics use net-deliverable BUCK and
 day-zero TOKEN/USD prices, with independent seed positions in =bootstrap=.
 Market BVIB continues to use nominal issuance prices.
+
+The existing debtor, saver and investor setup now works in both languages;
+the normal decision loop remains gated before new income while issuance and
+exits migrate. The shared =NetCreditOps.mark_household= /
+=netCreditOps.markHousehold= SDK book pins one block and separates wallet
+cash, selected-NFT principal, credit limit, marked relief and its shared cash
+allowance. Each nominal premium uses its facility's actual insurer pool,
+including after the insurer changes its pool for future issuance. These
+current BUCK-pool marks exclude unobserved insurer strategies/future funding;
+they do not promise an immediately payable refund. Missing guarded marks or
+required maturity aggregates propagate. Full personal portfolio reporting
+still needs to consume these books instead of the legacy signed logic.
 
 =basket_positions= records each observed agent owner's live receipt IDs,
 remaining basis, exact =valueOf= mark and nonannualized ROI before exit costs.
