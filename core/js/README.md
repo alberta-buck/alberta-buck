@@ -75,6 +75,15 @@ and overflowing results fail explicitly. Older `fee_owing` /
 Run `make nix-venv-core-net-math-test` in a checkout to compare all bindings
 and actual Solidity, including the browser build in Chromium.
 
+The existing `scenarios/eqworld` machine builder now bootstraps that corrected
+stack, reusing its one linked basket and Jubilee fund. The demo artifact
+bundle includes production BuckCredit; each funding/household proxy opts
+into its actual insurer. `make nix-core-equilibrium-bootstrap-test` checks
+the real opening pools, wheel/fund roles and a premium-bearing issuance.
+The household decision lifecycle remains gated and full economy snapshots
+are rejected until their machine and pending-outcome state is migrated.
+This bootstrap check is not a five-year economy result.
+
 Subpaths map onto the modules directly: `alberta-buck-core/session`,
 `/journal`, `/identity`, `/wallet`, `/buckworld`, `/observer`, `/v3`, and
 so on.

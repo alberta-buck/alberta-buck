@@ -100,8 +100,9 @@ export const WORLD_OPERATOR_FIELDS = {
  * @param opts.registryArtifact "IdentityRegistry" (default) or the test
  *                  harness for synthetic worlds
  * @param opts.creditArtifact   "BuckCredit" (default) or the test harness
- * @param opts.accounting "legacy" (default) or "net" for an experimental
- *                  cash-only BuckNet world with a neutral K reference.
+ * @param opts.accounting "legacy" (default) or "net" for the canonical
+ *                  linked Buck stack, initially cash-only with a neutral K
+ *                  reference. The equilibrium builder populates its basket.
  * @returns world {session, artifacts, id, reg, credit, kctrl, buck, gov,
  *                 poolAcct, pool (its handle, when the world made it),
  *                 operator (the world operator's handle, likewise),
@@ -238,6 +239,9 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
  * serialize with codec.js.
  */
 export function worldRecord(world) {
+  if (world.accounting === "net" && world.basketKind === "machine") {
+    throw new Error("equilibrium save/restore must include machine roles, facilities and household outcomes; migration is pending");
+  }
   const record = {
     names: { ...world.names },
     addresses: {

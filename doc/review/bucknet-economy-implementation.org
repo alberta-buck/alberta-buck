@@ -32,8 +32,9 @@ setup in the existing upkeep facets and no deployed initializer. Production
 registry authorization and both public V3 lifecycles pass. The canonical
 machine wheel now has production identity authorization/revocation and real
 private-keeper reward tests. Canonical uint256 cash/baseline math now agrees
-across Solidity, Rust, Python and Node/browser WASM. Primary world wiring
-remains outstanding.
+across Solidity, Rust, Python and Node/browser WASM. The existing JS machine
+builder now reuses that monetary graph for deployment and bootstrap; Python
+deployment, household lifecycles and full economy restoration remain open.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -639,9 +640,12 @@ implementation sequence, before changing the primary economy builder.
   helpers now deploy Buck with four explicit linked libraries. Browser bundle
   and saved net worlds use model identity, ABI version 7, all library addresses
   and code/wiring checks. The wallet sandbox now uses those helpers and format
-  4, with per-insurer pools and a separate browser storage entry. The primary
-  household-economy, Python savings and leveraged JS equilibrium builders still
-  need their lifecycle and persistent-state conversion.
+  4, with per-insurer pools and a separate browser storage entry. The existing
+  JS machine builder now uses those same stack/basket handles for bootstrap,
+  with linked upkeep, public identity/credit setup and scheduled fund work.
+  The Python deployment and both household lifecycles/persistent-state paths
+  still need conversion. The generic cash-stack record refuses to silently
+  serialize this partially migrated machine economy.
   Use the existing basket valuation library and supported upkeep facets;
   invoke binding control at the basket address with IBasketUpkeep/the facet
   ABI, and public openCredit with the shell ABI. Deploy the desk with its
@@ -655,6 +659,25 @@ implementation sequence, before changing the primary economy builder.
   validate frozen Carrying mode on restore. Preserve nominal reserve/reward
   units separately from actual net delivery; do not equate a submitted or
   reverted tick with completed monetary work.
+- [X] Convert the existing JS machine deployment/bootstrap, using its demo
+  artifact bundle rather than a second runner. Reuse the stack's one factory,
+  linked basket and fund; bind the basket/wheel via their governed APIs,
+  introduce the keeper with zero allowance before work and keep Carrying
+  frozen. Configure the existing wheel's guarded valuation and bounded
+  Jubilee jobs; optional basket retirement remains explicit policy. Production
+  BuckCredit replaces the unnecessary bundled credit harness: every SimLP
+  proxy explicitly accepts its actual insurer. The bootstrap check covers
+  weighted V3 pools, actual basket issuance, supply as summed NFT principal,
+  separate cash/principal and a full-value premium. It compares an aged
+  existing reserve plus fresh issuance against the exact shared-kernel decay,
+  rather than allowing a one-raw-unit discrepancy as unexplained slippage.
+  The registry harness remains explicit for synthetic infrastructure; this
+  does not establish production service allowlisting or canonical arb safety.
+  No triangle is enabled. The household setup/issuance/exit/mark gates and
+  explicit full-economy snapshot refusal remain until those paths migrate.
+  =make nix-core-equilibrium-bootstrap-test= passes against the exact demo
+  artifact bundle; the equilibrium page builds and all 15 wallet/browser
+  regressions still pass. The Python builder is the next deployment port.
 - [X] Port canonical cash/baseline math to Rust/PyO3/WASM with uint256
   inputs and full-width products. The existing zero-dependency kernel now
   supplies compounded decay, aggregate net fund growth, per-NFT baseline
@@ -725,7 +748,8 @@ Continue in this order:
    nominal issuance from net liquidation. Fund reserve and maturity jobs are
    now connected to both existing wheels, including optional basket principal
    scheduling. Public identity/credit onboarding and canonical wheel binding /
-   private-keeper rewards now pass. Wire the primary world and qualify actual
+   private-keeper rewards now pass. The existing JS bootstrap now wires the
+   canonical graph and real opening pools. Port Python deployment and qualify actual
    canonical arbitrage inventory/fees before enabling those routes. Receiving
    cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
@@ -900,4 +924,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-06 | Bind the canonical wheel and validate actual private-keeper rewards | Added governance-only authorization/revocation on BasketMachineWheel, deriving the registry from its immutable BUCK pay token and pinning public Carrying flags. No new deployment, state or alternate-registry input; work/funding guards also cover binding changes. Nine real-registry cases reuse the abstract basket identity fixture without repeating its six tests or the 56 registry tests. Real CP introductions preserve private funding/payee checks; zero-allowance approval needs no funds/facility and freezes Carrying mode before funding. Actual basket daily work pays nominal rewards with measured net delivery: an aged 20-BUCK nominal reserve pays 2 nominal / about 1.960397 net BUCK after one year, with unchanged supply/principal. Missing payee introductions roll back the whole work/reward transaction; idle work pays nothing. Full make nix-test: 1,507 passed, one fork skip and the same four absent-proof exclusions. Canonical Make subset: 365 passed; compiler/link/runtime checks passed for 53 artifacts and sandbox rebuilt. Package digest cc7f44f3362dd5094ae6a1c5a78ab2572f1c8462fb5dbeb2fa1cc827fad9be9e. Machine runtime 24,186 bytes (390 spare); older comparison wheel remains 24,501 and receives no new binding API. Token, fund and other monetary-library code is unchanged; existing cash-only client smoke is not wheel integration evidence. Updated Make/README and pre/post invariants. Next primary Python/JS deployment/restore wiring and household lifecycle, canonical arb fee/inventory qualification, native 256-bit math, short economy then five-year JSON/PDFs, and Notes. No new five-year acceptance or release is claimed. | =7347fe74= |
 
-| 2026-11-06 | Port canonical compounded arithmetic to the existing native/WASM kernel | Added no_std, dependency-free uint256 values and exact uint512 product division; compounded cash, aggregate fund net growth and per-NFT baseline relief reuse the same on-chain constants, chunks and rounding. Python int and JS BigInt preserve the full range; WASM uses exactly 32 big-endian bytes, with explicit domain/quotient errors and no linear fallback. An independent Python integer oracle supplies 318 shared cases, checked against actual Solidity, Rust, PyO3, Node WASM and the web build in Chromium. The Make acceptance builds all bindings and requires the browser check: 16 Python and nine JS/browser tests passed, with 1,024 random full-width products and 600 monthly checkpoints. All Rust kernels: 39 passed. Expanded canonical Solidity subset: 376 passed. Compiler/link/runtime checks passed for 53 artifacts; digest cd1daa5027d334aae2c1ec3978762353f72f8cb4f7ef16ff6add3b428cca0c70. Production Solidity behavior is unchanged; only an obsolete library comment was corrected. Legacy math helpers remain explicitly labelled for comparison callers. Updated Make, root/package guides, interface reference and pre/post invariants. Next primary household builders, snapshots, canonical arb inventory/fee qualification, short economy and five-year JSON/PDF campaigns, then Notes; no new economy acceptance claimed. | This commit |
+| 2026-11-06 | Port canonical compounded arithmetic to the existing native/WASM kernel | Added no_std, dependency-free uint256 values and exact uint512 product division; compounded cash, aggregate fund net growth and per-NFT baseline relief reuse the same on-chain constants, chunks and rounding. Python int and JS BigInt preserve the full range; WASM uses exactly 32 big-endian bytes, with explicit domain/quotient errors and no linear fallback. An independent Python integer oracle supplies 318 shared cases, checked against actual Solidity, Rust, PyO3, Node WASM and the web build in Chromium. The Make acceptance builds all bindings and requires the browser check: 16 Python and nine JS/browser tests passed, with 1,024 random full-width products and 600 monthly checkpoints. All Rust kernels: 39 passed. Expanded canonical Solidity subset: 376 passed. Compiler/link/runtime checks passed for 53 artifacts; digest cd1daa5027d334aae2c1ec3978762353f72f8cb4f7ef16ff6add3b428cca0c70. Production Solidity behavior is unchanged; only an obsolete library comment was corrected. Legacy math helpers remain explicitly labelled for comparison callers. Updated Make, root/package guides, interface reference and pre/post invariants. Next primary household builders, snapshots, canonical arb inventory/fee qualification, short economy and five-year JSON/PDF campaigns, then Notes; no new economy acceptance claimed. | =be1f5139= |
+
+| 2026-11-06 | Bootstrap the existing JS machine world on canonical Buck | buildEquilibriumWorld now reuses buildBuckWorld net handles: one factory, linked basket and fund, with the same valuation library in upkeep. Governed basket/wheel binding, real zero-allowance keeper introduction and frozen Carrying mode precede work. Existing valuation and bounded fund jobs are configured; no arb triangle is enabled and optional basket retirement remains policy. Production BuckCredit replaces the unused demo credit harness, with actual insurer opt-in and the correct insurer pool for every proxy. A real Tevm bootstrap through the exact demo bundle checks weighted opening pools, basket principal, supply summed across NFTs, a premium-bearing issue and exact old-reserve decay plus fresh cash. Generic cash-stack serialization refuses incomplete economy state. The dedicated Make acceptance passes; the equilibrium page builds; wallet/controller/Chromium acceptance remains 15 passed. No Solidity behavior changed. Updated Make, root/detail/package guides and block pre/post invariants. Python deployment, both complete household lifecycles, full saved-state migration, canonical arb fee/inventory qualification, short-world and five-year JSON/PDF evidence and Notes remain open. | This commit |

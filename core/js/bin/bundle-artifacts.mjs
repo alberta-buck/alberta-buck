@@ -30,7 +30,6 @@ export const NEEDED = [
   "IdentityRegistry",
   "IdentityRegistryHarness",   // eq world: uncertified binds of synthetic infra
   "BuckCredit",
-  "BuckCreditHarness",         // eq world: credits to proxies that never opt in
   "BuckKControllerDirect",
   "Buck",
   // Canonical Buck accounting graph; preserve creation-bytecode link metadata.

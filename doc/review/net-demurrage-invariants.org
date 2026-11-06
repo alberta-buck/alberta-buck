@@ -95,6 +95,18 @@ portfolio or token implementation is introduced by this kernel checkpoint.
 
 ** Current balance and event semantics
 
+Canonical JS builder checkpoint, November 6: =buildEquilibriumWorld='s
+machine mode reuses the existing net stack's single factory, linked basket
+and fund. The setup test uses the actual demo artifact bundle and real V3.
+
+| Builder block | Preconditions | Postconditions |
+|---------------+---------------+----------------|
+| Monetary graph | Canonical Buck artifact with four linked libraries, explicit registry/controller/fund, matching BuckCredit. | Exactly one configured basket/fund graph; the upkeep facet uses that basket's valuation library. No duplicate token, fund, basket, wheel or economy runner. |
+| Basket/wheel setup | Registered operator, current governance and uninitialized basket. Synthetic SimLP/router binding uses the explicit registry harness. | Existing governed service-binding APIs are called, the basket owns its self-insured inactive facility before work, and the Carrying wheel is introduced/frozen with zero allowance. Production registry qualification remains separate Solidity evidence. |
+| Bootstrap money | Funding proxy explicitly accepts the actual insurer; free insured coverage and sufficient K; empty pools at declared prices. | Minted money is actual issued principal, opening pool weights approximate declared allocations, and each paired deposit has real V3 liquidity. This does not model an external mortgage. |
+| Premium-bearing facility | Verified ordinary proxy, explicit insurer acceptance, actual funding reserve and matching insurer pool. | Requested fresh cash and full-value premium both become NFT principal. Old reserve cash compounds through the actual elapsed block time; receiving cash does not retire principal. Cache the proxy only after binding and insurer acceptance succeed. |
+| Maintenance/snapshot boundary | Same fund, keeper, valuation wheel and basket wiring; bounded Jubilee policy. | Existing maintenance jobs act outside Buck's monetary lock. No arbitrage triangle is enabled by bootstrap. Generic cash-only serialization refuses the incomplete economy; household lifecycle and complete restoration remain pending. |
+
 An ordinary account has net held =H= and net issued-but-unspent =U=. Its
 =balanceOf= is =floor((H+U)/Q)=; it may hold both while still owing multiple
 NFT principals. Its unissued capacity is not included. The exact scaled parts

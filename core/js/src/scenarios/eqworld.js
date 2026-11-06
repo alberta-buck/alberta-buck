@@ -24,16 +24,22 @@
 // plus reads (spotUB / spotUsd / spotBuck / bvib / K) and a per-day
 // series recorder for the charts.
 //
+// The machine now bootstraps canonical compounded Buck. The household
+// lifecycle's explicit net-mode gates remain until its monetary operations
+// and snapshot state are migrated; a successful bootstrap is not an economy.
+//
 // Custody pattern: EOA holders send their own txs (a private holder's BUCK
 // transfer to a public contract still needs the holder's identity
 // handshake with it -- Buck._identityCheckedTransfer).  CREDIT-drawing
-// holders get a PROXY (a SimLP instance bound public+NON-carrying --
-// carrying accounts cannot draw negative), created lazily by pledge();
+// holders get a PROXY (a simulation-only SimLP bound public+ordinary),
+// created lazily by pledge(); cash and facility principal are independent.
 // helpers dispatch on holderAddress().  Fiat legs (income, endowments)
 // enter as MockERC20 mints via fiatIn -- the sim's fiat bridge.
 
 import { encodeFunctionData, keccak256, toBytes } from "viem";
 import { installHouseholdOps } from "../agents/household-ops.js";
+import { linkArtifact } from "../artifacts.js";
+import { netCreditOps } from "../net-world.js";
 
 import { advanceTime, buildBuckWorld, DAY, identityApprove, identityOf, onboard }
   from "../buckworld.js";
@@ -142,14 +148,11 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
 
   const world = await buildBuckWorld(session, artifacts,
     { identity: opts.identity, rng: opts.rng,
-      // Synthetic infrastructure: the harnesses the Python sim deploys
-      // (deploy.py / notes_stack.py) -- uncertified binds of SimLP and
-      // the routers, credits to proxies that never opt in.
+      // Synthetic infrastructure still needs the registry harness for SimLP
+      // and router binds. Basket/wheel use their governed authorizers.
       registryArtifact: "IdentityRegistryHarness",
-      creditArtifact: "BuckCreditHarness",
-      // The equity basket is an ordinary credit holder on production Buck.
-      // The pro-rata basket mints by the hooks: the sims' subclass.
-      buckArtifact: machine ? "Buck" : "BuckWithBasketHooks" });
+      // Every proxy opts into its actual insurer; the NFT is production BuckCredit.
+      ...(machine ? { accounting: "net" } : { buckArtifact: "BuckWithBasketHooks" }) });
   const { reg, credit, kctrl, buck } = world;
   const me = session.account.address;
   // The deployer registers a real identity, then binds contracts as the
@@ -161,7 +164,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       [addr, g(operator.kp.pk), ct(operator.E), true, carrying], { tag });
 
   // --- factory, basket + venue, wiring (deploy.py order) --------------
-  const v3f = await session.deploy(artifacts("UniswapV3Factory"), [],
+  const v3f = machine ? world.net.factory : await session.deploy(artifacts("UniswapV3Factory"), [],
     { name: "UniswapV3Factory", gas });
   // The machine's venue (BasketVenueFacet) refuses a price from a pool that
   // is empty or has no history, so the shell starts on the plain venue,
@@ -170,19 +173,15 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const shellName = machine ? "BuckBasketEquity" : "BuckBasketProRata";
   const venueName = "BuckBasketUniswapV3";
   const basketArt = artifacts(shellName);
-  const basketShell = await session.deploy(basketArt,
+  // Reuse the canonical stack's one linked basket and fund graph. Do not
+  // deploy a second basket beside the one already configured in Jubilee.
+  const basketShell = machine ? world.net.basket : await session.deploy(basketArt,
     [buck.address, kctrl.address, v3f.address, me, FEES.buck, 600, 64, 500, 1000],
     { name: shellName, gas });
   const venue = await session.deploy(artifacts(venueName), [], { name: venueName, gas });
   await session.send(basketShell, "setVenue", [venue.address], { tag: "eq:setVenue" });
   await session.send(kctrl, "setBasket", [basketShell.address], { tag: "eq:kctrl.setBasket" });
-  if (machine) {
-    // A credit holder: bound public and NON-Carrying (it holds a lien), and
-    // it issues itself its MARKED credit.
-    await bind(basketShell.address, false, "eq:bind:basket");
-    await session.send(basketShell, "openCredit", [credit.address, MACHINE.creditFace],
-                       { tag: "eq:basket.openCredit" });
-  } else {
+  if (!machine) {
     // The basket is wired by the insurance pool: the world's own pool contract
     // acts through its exec(); a caller-supplied pool must be the deployer.
     if (world.pool) {
@@ -280,8 +279,12 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const depth = targetBuck + seedBuck * BigInt(tokens.length);
   const FACE = 2n * depth > face2 ? 2n * depth : face2;
   const now = (await session.client.getBlock()).timestamp;
+  const insurer = machine ? world.operator.account : session.account;
+  const acceptInsurer = (proxy, tag) => session.send(proxy, "exec", [credit.address, encodeFunctionData({
+    abi: credit.abi, functionName: "setCreditIssuer", args: [insurer.address, true] })], { tag });
+  await acceptInsurer(simlp, "eq:simlp.acceptInsurer");
   await session.send(credit, "createCredit",
-    [simlp.address, 0, FACE, 0n, 0, 0, now, 0], { tag: "eq:credit:simlp" });
+    [simlp.address, 0, FACE, 0n, 0, 0, now, 0], { tag: "eq:credit:simlp", account: insurer });
   await session.send(simlp, "exec",
     [buck.address, encodeFunctionData(
       { abi: buck.abi, functionName: "mint", args: [mintAmt] })],
@@ -338,21 +341,47 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     const parity = await session.deploy(artifacts("BasketReference"),
       [basket.address, MACHINE.interval, MACHINE.maxAge, MACHINE.deviationBp],
       { name: "BasketReference", gas });
-    const upkeep = await session.deploy(artifacts("BasketUpkeepFacet"),
+    const upkeep = await session.deploy(linkArtifact(artifacts("BasketUpkeepFacet"), {
+      "src/basket/BasketJubileeMath.sol:BasketJubileeMath": world.net.basketValuationLibrary.address }),
       [policy.address, parity.address, MACHINE.parityGain, MACHINE.parityGainDear],
       { name: "BasketUpkeepFacet", gas });
     const wheel = await session.deploy(artifacts("BasketMachineWheel"),
       [buck.address, usdc.address, me, 0, 0n], { name: "BasketMachineWheel", gas });
-    await bind(wheel.address, true, "eq:bind:wheel");
     await session.send(basket, "setEquityWheel", [upkeep.address], { tag: "eq:setEquityWheel" });
+    // These two service bindings use their actual governed authorization
+    // APIs, even though the registry harness is still needed for synthetic
+    // SimLP/Universal Router infrastructure. Production registry acceptance
+    // of the same APIs is separately covered by the contract suites.
+    await session.send(basket, "authorizeIdentityBinding",
+      [reg.address, me, g(operator.kp.pk), ct(operator.E)], { tag: "eq:basket.authorizeIdentity" });
+    await bind(basket.address, false, "eq:bind:basket");
+    await session.send(wheel, "authorizeIdentityBinding",
+      [me, g(operator.kp.pk), ct(operator.E)], { tag: "eq:wheel.authorizeIdentity" });
+    await bind(wheel.address, true, "eq:bind:wheel");
+    await identityApprove(world, operator, { account: { address: wheel.address }, kp: operator.kp,
+      fields: { given_name: "WorkWheel" } }, { allowance: 0n, rng: opts.rng });
     // The upkeep facet is written for a credit marked net: K bounds the
     // BUCKs the basket has let out, not those it holds beside its TOKEN.
     await session.send(basket, "setNetMark", [true], { tag: "eq:setNetMark" });
+    await session.send(basket, "openCredit", [credit.address, MACHINE.creditFace],
+                       { tag: "eq:basket.openCredit" });
     await session.send(basket, "setResponse", [MACHINE.response], { tag: "eq:setResponse" });
     await session.send(basket, "setWheel", [wheel.address], { tag: "eq:setWheel" });
     await session.send(wheel, "setSample", [parity.address], { tag: "eq:wheel.setSample" });
     await session.send(wheel, "setController", [kctrl.address], { tag: "eq:wheel.setController" });
     await session.send(wheel, "setEquity", [basket.address], { tag: "eq:wheel.setEquity" });
+    const fund = world.net.fund;
+    await session.send(wheel, "setValuationSource", [fund.address], { tag: "eq:wheel.setValuationSource" });
+    await session.send(fund, "setValuationWheel", [wheel.address], { tag: "eq:fund.setValuationWheel" });
+    await session.send(fund, "setInvestmentKeeper", [wheel.address], { tag: "eq:fund.setInvestmentKeeper" });
+    // Use the existing bounded jobs; portfolio trades remain outside Buck's
+    // lock. Optional basket-principal scheduling remains a policy parameter.
+    const jubileePolicy = opts.jubileePolicy ?? { maturitySteps: 8, saleCapBp: 1000, slippageBp: 100,
+      deferredBurnCap: targetBuck / 100n, retirementMinimum: 1_000_000n, retirementCap: 0n };
+    await session.send(wheel, "setJubilee", [fund.address, jubileePolicy], { tag: "eq:wheel.setJubilee" });
+    world.net.wheel = wheel;
+    world.net.upkeep = upkeep;
+    world.net.venue = machineVenue;
     parts = { observer, policy, parity, upkeep, wheel };
     world.turnWheel = async ({ tag } = {}) => {
       await session.send(wheel, "rearm", [], { tag: `${tag ?? "eq:wheel"}:rearm` });
@@ -398,6 +427,11 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     machine: parts,                 // null on the pro-rata basket
     wheel: parts?.wheel ?? null,
   });
+  if (machine) {
+    world.netCreditOps = netCreditOps(session, world.net, (owner, contract, name, args) =>
+      session.send(session.contractAt(artifacts("SimLP").abi, owner.address ?? owner), "exec",
+        [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })], { gas: 5_000_000n }));
+  }
 
   // ==== agent-facing op helpers (the doctrine's plumbing layer) ========
 
@@ -425,14 +459,15 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     session.send(usdc, "mint", [world.holderAddress(account), amount],
                  { tag: tag ?? "eq:fiat-in" });
 
-  /** Lazy per-holder proxy: SimLP instance, bound public+NON-carrying
-   *  (carrying accounts cannot draw credit negative). */
+  /** Simulation-only per-holder public ordinary proxy; it explicitly
+   *  accepts the same insurer/pool used to create its facilities. */
   world.proxyFor = async (account) => {
     let p = world._proxies.get(account.address);
     if (!p) {
       p = await session.deploy(artifacts("SimLP"), [],
         { name: "HolderProxy", gas });
       await bind(p.address, false, "eq:bind:proxy");
+      await acceptInsurer(p, "eq:proxy.acceptInsurer");
       world._proxies.set(account.address, p);
     }
     return p;
@@ -444,7 +479,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     const p = await world.proxyFor(account);
     const ts = (await session.client.getBlock()).timestamp;
     await session.send(credit, "createCredit",
-      [p.address, 0, face, 0n, 0, 0, ts, 0], { tag: `${tag}:credit` });
+      [p.address, 0, face, 0n, 0, 0, ts, 0], { tag: `${tag}:credit`, account: insurer });
     await session.send(p, "exec",
       [buck.address, encodeFunctionData(
         { abi: buck.abi, functionName: "mint", args: [face] })],
@@ -471,7 +506,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     for (const face of faces) {
       await session.send(credit, "createCredit",
         [p.address, 0, face, 0n, 0, 0, ts, Number(premiumBp)],
-        { tag: `${tag}:credit` });
+        { tag: `${tag}:credit`, account: insurer });
     }
     const ids = [];
     for (let i = 0; i < faces.length; i++) {

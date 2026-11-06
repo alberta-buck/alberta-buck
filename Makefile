@@ -18,6 +18,7 @@ help:
 	  '  make nix-venv-setup                # create/repair .venv; install editable Python packages' \
 	  '  make nix-venv-core-build-py        # compiled Python kernels' \
 	  '  make nix-venv-core-net-math-test   # canonical uint256 math: Solidity, Rust, Python and JS' \
+	  '  make nix-core-equilibrium-bootstrap-test  # canonical JS world deployment and pool bootstrap' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
@@ -1653,6 +1654,7 @@ sim-plot-eq-%:
 .PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps core-js-check-worktree
 .PHONY: core-build core-build-py core-build-wasm core-identity-vectors
 .PHONY: core-net-math-test core-net-math-vectors core-net-math-vectors-check
+.PHONY: core-equilibrium-bootstrap-test
 .PHONY: core-wallet-vectors core-registry-vectors
 .PHONY: core-vectors-sync core-vectors-check
 .PHONY: poseidon-constants poseidon-constants-check
@@ -1688,6 +1690,12 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 	cd core/rust && cargo test -p alberta-buck-math
 	python -m pytest core/python/tests/test_net_math.py core/python/tests/test_math_vectors.py -q
 	cd core/js && BUCK_REQUIRE_NET_MATH_BROWSER=1 node --test test/net-math.test.js test/net-math.browser.test.js test/math.vectors.test.js
+
+# Bootstrap the EXISTING machine world on canonical Buck; this is not the
+# household lifecycle or a completed economy. No silent legacy fallback.
+core-equilibrium-bootstrap-test: sim-build core-build-wasm
+	node core/js/bin/bundle-artifacts.mjs
+	cd core/js && node --test test/net-equilibrium-bootstrap.tevm.test.js
 
 # Each published crate carries its OWN copy of the vectors it replays:
 # `cargo package` includes only files under the crate directory, so a crate

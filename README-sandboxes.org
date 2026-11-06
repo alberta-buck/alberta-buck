@@ -13,8 +13,11 @@ pool. Buys account for the pool's carried fees and report actual net delivery.
 Default trades require a positive output bound within 1% of the current spot
 estimate, before execution; larger price impact can therefore refuse a trade.
 
-The Python savings economy and the JavaScript leveraged equilibrium demo are
-still awaiting their explicit cash/debt and basket-credit conversion. The
+The JS machine's deployment/bootstrap now reuses canonical Buck's linked
+basket and Jubilee fund, with real pool pairing and premium-bearing issuance.
+=make nix-core-equilibrium-bootstrap-test= tests that stage through the demo
+artifact bundle. The Python savings deployment and both household lifecycles
+and full economy save/restore still await conversion. The
 [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] records that boundary. Wallet success is not
 five-year household evidence. The cash-only basket in the wallet world is not
 bound to the K controller, and production basket identity onboarding, leveraged
@@ -102,6 +105,16 @@ reports a skip when an external savings page is not supplied. See the test outpu
 than treating a skipped browser test as coverage.
 
 * JavaScript equilibrium demo (accounting migration pending)
+
+The canonical deployment/bootstrap check is available now:
+
+#+begin_src sh
+make nix-core-equilibrium-bootstrap-test
+#+end_src
+
+It creates the opening weighted pools and checks actual premium-bearing
+issuance. The commands below build the existing interface, whose household
+execution remains gated while its cash/debt operations are migrated.
 
 #+begin_src sh
 make nix-core-demo-eqworld-serve EQWORLD_PORT=8983

@@ -95,6 +95,7 @@ make nix-core-test-js                     # JS platform and available browser te
 make nix-venv-net-demurrage-smoke          # canonical linked Buck, Python/JS EVM and real identity proofs
 make nix-core-test-rust                   # Rust kernels and shared-vector checks
 make nix-venv-core-net-math-test          # build + compare canonical uint256 math in Solidity/Rust/Python/Node/Chromium
+make nix-core-equilibrium-bootstrap-test # existing JS builder: canonical graph, real pools and premium issuance
 make nix-venv-economy-test                # Python/JS households, policy parity, runner tests
 make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_economy.py
 make nix-core-test-js JS_TEST_ARGS=test/household-policy.test.js
@@ -122,6 +123,16 @@ oracle output and the copy shipped with the Rust crate. This target starts
 no economy and provides no five-year evidence. Existing =fee_owing= and
 =carrying_transfer= helpers describe the retained legacy linear model;
 new accounting uses =net_decay=, =net_fund_after= and =net_target_relief=.
+
+=core-equilibrium-bootstrap-test= builds simulation artifacts and the Node
+kernel, regenerates the demo bundle and uses that exact bundle to bootstrap
+the existing machine world. It checks the single fund/basket graph, weighted
+opening pools, governed wheel binding, zero-allowance keeper introduction,
+real insurer acceptance, premium funding and independent principal. It does
+not run the household decision loop; that lifecycle and full economy
+save/restore remain explicit migration gates. Synthetic SimLP/router binding
+still uses the labelled registry harness; production service authorization
+is separately tested by the Solidity suites.
 
 Foundry excludes SNARK tests whose generated proof fixtures are absent, visibly. Their setup
 and regeneration, executable papers, release builds and deployment procedures remain in
