@@ -104,6 +104,15 @@ cash/principal/valuation reads fail the canonical frame instead of recording
 false zeros. A marked gain never promises an immediately executable exit or
 waives K or Jubilee liquidity limits.
 
+The existing built-in Python keeper, =BasketWheelAgent= and JS =turnWheel=
+now call =refreshValuation= after normal maintenance. Fund investment can
+change the one receipt's key and invalidate its previous quote; configuring
+a source alone does not publish it. This extra call writes only the wheel's
+valuation metadata, earns no work/reward and never sells LPs or moves money.
+Price-guard refusal preserves the prior publication; fund quotes still
+check its key and the current market band. Portfolio/report readers never
+submit that transaction themselves. Agent gas records include its cost.
+
 * Demurrage and Jubilee reference
 
 =make nix-venv-demurrage-reference= prints a 50-year closed-ledger example

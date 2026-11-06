@@ -17,7 +17,8 @@ from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
 from alberta_buck.sim.scenario import ROUTING
 
 
-def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatch, tmp_path):
+@pytest.mark.parametrize("keeper", [False, True], ids=["builtin", "agent"])
+def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatch, tmp_path, keeper):
     monkeypatch.delenv("SIM_WHEEL_ARB", raising=False)
     monkeypatch.setattr(report, "FIVE_YEARS", 3)
     report.preflight()
@@ -34,7 +35,7 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
     monkeypatch.setattr(PdfPages, "savefig", inspect_page)
     scenario = replace(ROUTING, name="canonical-report-integration", days=3, ticks_per_day=4,
                        tokens=[(*ROUTING.tokens[0][:3], 7500), (*ROUTING.tokens[1][:3], 2500)],
-                       csv_files=ROUTING.csv_files[:2], agents={"BootstrapDMAgent": 2})
+                       csv_files=ROUTING.csv_files[:2], agents={"BootstrapDMAgent": 2, **({"BasketWheelAgent": 1} if keeper else {})})
     scenario.experiment = expmod.load(None, sets=["deploy.target_buck_m=1", "deploy.target_buck_lp_m=1",
                                                  "machine.desk_capital_usd=1000"])
     deployments, observations = [], []
@@ -55,6 +56,10 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
         assert frame["simlp_drawn"] == net["simlp_principal"] > net["simlp_cash"] > 0
         assert int(net["jubilee"]["net_scaled"]) == buck.functions.netBalanceScaled(fund.address).call()
         assert net["jubilee"]["cash"] == buck.functions.netBalanceOf(fund.address).call()
+        assert net["jubilee"]["publication"]["ready"]
+        assert net["jubilee"]["relief_position_mark"] == fund.functions.reliefPositionMark().call()
+        credit_mark = d.net_credit_ops.mark_household(basket.address, [basket.functions.creditId().call()])
+        assert credit_mark.state.issued == frame["eq_lien"] and credit_mark.relief_scaled > 0
         assert int(net["claim_seconds"]) == buck.functions.claimSeconds().call()
         assert int(net["available_relief_scaled"]) == buck.functions.availableReliefScaled().call()
         assert frame["basketNav"] == basket.functions.gross().call() + basket.functions.liquidity().call()
@@ -87,6 +92,27 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
         for role in list(meta["roles"].values()) + list(meta["libraries"].values()):
             assert role["code_hash"] == Web3.to_hex(Web3.keccak(evm.w3.eth.get_code(role["address"])))
         assert len(meta["libraries"]) == 5
+        # A real price excursion makes publication refuse without spending
+        # money, retiring principal or changing the last published mark.
+        d = deployments[0]
+        pool = d.chain.at("UniswapV3Pool", d.pool_buck[0])
+        t0, t1 = pool.functions.token0().call(), pool.functions.token1().call()
+        zero = t0.lower() == d.buck.address.lower()
+        amount = d.buck.functions.balanceOf(d.simlp.address).call() // 2
+        d.chain.send(d.simlp.functions.swap(pool.address, d.simlp.address, zero, amount,
+                     4295128740 if zero else 1461446703485210103287273052203988822378723970341, t0, t1))
+        fund = d.net_stack.fund
+        position = fund.functions.positionId().call()
+        before = (d.wheel.functions.publishedValuation().call(), d.wheel.functions.reserve().call(),
+                  d.buck.functions.totalIssued().call(), d.buck.functions.fundFlows().call(),
+                  d.basket.functions.holdings(position).call())
+        from alberta_buck.sim.basket_machine import publish_jubilee_valuation
+        assert publish_jubilee_valuation(d)["status"] == 0
+        after = (d.wheel.functions.publishedValuation().call(), d.wheel.functions.reserve().call(),
+                 d.buck.functions.totalIssued().call(), d.buck.functions.fundFlows().call(),
+                 d.basket.functions.holdings(position).call())
+        assert after == before
+        assert not d.chain.mismatches
     assert data["meta"]["run"]["completed"] and len(observations) == len(data["frames"]) == 3
     assert any(f["net"]["jubilee"]["position"]["positions"] for f in observations)
     assert summary["pdf"] == str(tmp_path / "canonical.pdf")

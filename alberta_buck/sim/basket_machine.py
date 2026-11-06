@@ -241,3 +241,22 @@ def activate(d, given=None, turn_seconds=0) -> None:
             keys.add(key)
     d.basket = d.w3.eth.contract(address=basket.address, abi=union)
     chain.clear_balance_cache()
+
+
+def publish_jubilee_valuation(d, proxy=None):
+    """Publish the existing fund source after normal keeper work.
+
+    Pre: canonical wheel/fund wiring. Post: only valuation metadata changes;
+    no work/reward or monetary action is added. Guarded price refusal leaves
+    the prior publication in place and remains observable through fund quotes.
+    Reporting itself never calls this mutating entry point.
+    """
+    if getattr(d, "buck_accounting", "") != "net" or d.wheel is None:
+        return None
+    from alberta_buck.sim.chain import Expect
+    fn = d.wheel.functions.refreshValuation()
+    if proxy is not None:
+        fn = proxy.functions.exec(d.wheel.address, d.wheel.encode_abi("refreshValuation", args=[]))
+    return d.chain.send(fn, expect=Expect.EITHER)
+
+

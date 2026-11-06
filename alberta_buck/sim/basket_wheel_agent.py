@@ -317,6 +317,10 @@ class BasketWheelAgent(_ProxyAgent):
         from alberta_buck.sim.basket_machine import book_receipt
         book_receipt(d, rcpt, ctr)
         gas = int(rcpt.get("gasUsed", 0) or 0)
+        from alberta_buck.sim.basket_machine import publish_jubilee_valuation
+        valuation = publish_jubilee_valuation(d, proxy=self.proxy)
+        if valuation is not None:
+            gas += int(valuation.get("gasUsed", 0) or 0)
         c["wh_sol_gas"] += gas
         c["wh_sol_gas_usd"] += self.profile.usd(gas)
         buck_usd = buck_usd6(d.chain, d.pool_ub, d.buck) / E6

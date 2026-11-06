@@ -385,8 +385,14 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     parts = { observer, policy, parity, upkeep, wheel };
     world.turnWheel = async ({ tag } = {}) => {
       await session.send(wheel, "rearm", [], { tag: `${tag ?? "eq:wheel"}:rearm` });
-      return session.send(wheel, "tick", [12n, 0n],
+      const receipt = await session.send(wheel, "tick", [12n, 0n],
                           { tag: tag ?? "eq:wheel", gas: 12_000_000n });
+      // Fund maintenance can change the one receipt's key. Publish the
+      // existing guarded read-only source after that work, outside Buck.
+      // A refused price leaves quotes unavailable; it earns no work/reward.
+      await session.send(wheel, "refreshValuation", [],
+                         { tag: `${tag ?? "eq:wheel"}:valuation`, expect: "either" });
+      return receipt;
     };
 
     // Bootstrap the basket's pools to real depth: a targetBuck-sized

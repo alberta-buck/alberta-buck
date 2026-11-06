@@ -139,6 +139,18 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(debtor.started, false);
     await world.netCreditOps.cancelReduction(owner, first);
   });
+  await t.test("normal keeper work publishes the fund's guarded LP mark", async () => {
+    for (let day = 0; day < 3; day++) {
+      await advanceTime(world, DAY);
+      await world.turnWheel({ tag: "keeper:mark" });
+    }
+    assert.ok(await s.call(net.fund, "positionId") > 0n);
+    const publication = await s.call(wheel, "publishedValuation");
+    assert.equal(publication[5], true);
+    assert.equal(publication[1], await s.call(net.fund, "reliefPositionMark"));
+    assert.ok((await world.netCreditOps.markHousehold(basket.address,
+      [await s.call(basket, "creditId")])).reliefScaled > 0n);
+  });
   assert.equal(s.mismatches.length, 0);
   assert.throws(() => worldRecord(world), /equilibrium save\/restore/);
 });

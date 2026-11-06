@@ -52,6 +52,8 @@ def turn_wheel(d, rounds: int = 1, max_work: int = 12, ctr=None) -> int:
         work += w
         if w == 0:
             break
+    from alberta_buck.sim.basket_machine import publish_jubilee_valuation
+    publish_jubilee_valuation(d)
     return work
 
 
