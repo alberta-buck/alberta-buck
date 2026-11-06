@@ -258,15 +258,43 @@ forced by this job and cash on hand cannot itself make a low-K exit pass.
 counterexample, actual full/partial repayment and cash-floor/shared-budget
 checks in both existing wheels.
 
-World builders must still configure this maintenance and persist its actual
-facet, wheel, fund and identity bindings. Before enabling funded BUCK rewards
-or BUCK arbitrage, complete and test production identity binding for the
-canonical wheel. Its current API lacks target-controlled binding authorization;
-the cash-only platform smoke does not exercise that service role. The older
-comparison wheel has only 75 runtime bytes spare. Prefer the canonical
-machine wheel for the primary world and retire legacy variants only as their
-distinct checks are covered. Public opening and wheel jobs do not migrate an
-existing simulation or saved world by themselves.
+The canonical =BasketMachineWheel= now authorizes its own public Carrying
+binding: governance calls =wheel.authorizeIdentityBinding(binder, pk, E)=,
+then the certified operator calls
+=registry.bindContract(wheel, pk, E, true, true)=. Unlike the basket/fund
+setup methods, this wheel API takes no registry argument: it derives the
+registry from its immutable BUCK pay token. Governance can clear an unconsumed
+authorization with =wheel.revokeIdentityBinding()=; that does not unregister
+an already certified identity. Work/funding callbacks cannot replace or clear
+the pending binding.
+
+Before funding the reserve, a private operator performs the existing
+identity-bound =Buck.approve(wheel, 0, E, proof)=. The real Chaum-Pedersen proof
+introduces the private identity to this service and freezes its Carrying
+mode without granting a spending allowance or moving BUCK. Keepers need that
+introduction even when they only receive rewards and hold no BUCK or credit.
+A plain ERC-20 approval does not supply the receipt fragment. Missing private
+funding/payee introductions revert the whole transaction, including any work
+that preceded reward payment; builders must not report such a tick as progress.
+
+The reserve and =Ticked.reservePay= use nominal units, matching the Carrying
+wheel's =balanceOf=. A one-year-old 20-BUCK reserve remains 20 nominal BUCK,
+but a 2-BUCK nominal reward delivers about 1.960397 net BUCK. Use the token's
+=NetValueTransfer= event for actual delivery; neither reserve funding nor
+reward payment changes NFT principal or supply. Idle ticks earn nothing.
+=make nix-match-BasketMachineIdentityTest= covers production credentials,
+real private-keeper proofs, zero-allowance introductions, mode freezing,
+reentry refusal and actual basket work/reward rollback. It is included in
+=make nix-buck-accounting-test=; the cash-only platform smoke still does not
+exercise this wheel role.
+
+World builders must configure and persist the actual facet, wheel, fund,
+identity and introduction state. Use the canonical machine wheel for new
+worlds. The older comparison wheel has only 75 runtime bytes spare and does
+not gain this binding API; retire legacy variants only as their distinct
+checks are covered. Actual canonical arbitrage inventory/fee behavior still
+needs acceptance before enabling those triangles. Public opening and wheel
+jobs do not migrate an existing simulation or saved world by themselves.
 
 BVIB retains its nominal V3 reference: newly issued ordinary BUCK enter a pool
 at full value as that same number of nominal units. Net liquidation marks and

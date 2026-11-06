@@ -15,14 +15,14 @@ import {EqController} from "./BuckBasketEquity.t.sol";
 
 /// @dev Actual production registry and signed credential vectors, shared via
 ///      an abstract fixture rather than repeating its existing test suite.
-contract BasketCreditSetupTest is IdentityRegistryFixture {
+abstract contract BasketIdentityFixture is IdentityRegistryFixture {
     Buck token;
     BuckCredit credit;
     JubileeFund fund;
     BuckBasketEquity basket;
     IBasketUpkeep setup;
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
         _registerAlice();
         credit = new BuckCredit();
@@ -39,16 +39,19 @@ contract BasketCreditSetupTest is IdentityRegistryFixture {
         setup = IBasketUpkeep(address(basket));
     }
 
-    function _authorize() private {
+    function _authorize() internal {
         vm.prank(GOV);
         setup.authorizeIdentityBinding(reg, alice, _g1(".alice.elgamal_kp.pk"), _ct(".alice.ciphertext"));
     }
 
-    function _bind() private {
+    function _bind() internal {
         _authorize();
         vm.prank(alice);
         reg.bindContract(address(basket), _g1(".alice.elgamal_kp.pk"), _ct(".alice.ciphertext"), true, false);
     }
+}
+
+contract BasketCreditSetupTest is BasketIdentityFixture {
 
     function _open() private {
         vm.prank(GOV); basket.openCredit(address(credit), 1000e6);

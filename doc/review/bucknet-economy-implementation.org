@@ -29,8 +29,9 @@ Fund/maturity work and optional actual basket retirement are now scheduled in
 both existing wheels. Public basket onboarding now validates the canonical
 model, public ordinary identity and matching BuckCredit hook, with shared
 setup in the existing upkeep facets and no deployed initializer. Production
-registry authorization and both public V3 lifecycles pass. Production wheel
-identity wiring and primary world integration remain outstanding.
+registry authorization and both public V3 lifecycles pass. The canonical
+machine wheel now has production identity authorization/revocation and real
+private-keeper reward tests. Primary world wiring remains outstanding.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -469,14 +470,14 @@ The prototype's sampled maximum 1,275,392 burn gas is not a worst-case bound.
   settlement access; production insurer preparation and strategies; gas,
   runtime/creation limits and library/callback provenance. BuckCredit's last
   measured runtime was 24,516 bytes against the 24,576-byte runtime limit.
-  Before funded BUCK caller rewards or BUCK arbitrage, implement/test
-  target-controlled production-registry identity binding for the canonical
-  machine wheel. Its current API lacks that authorization path; cash-only
-  platform acceptance does not cover this service role. Keep its nominal
-  reserve accounting consistent with a public Carrying identity and actual
-  net reward delivery. The older comparison wheel has only 75 runtime bytes
-  spare: prefer the canonical machine wheel in primary builders and retire
-  legacy variants only after mapping their distinct detection coverage.
+  Canonical wheel identity binding and funded reward acceptance are now
+  implemented below. Cash-only platform acceptance still does not configure
+  that role in the primary world. Before enabling canonical arbitrage, add
+  actual inventory/fee acceptance for those routes. The older comparison
+  wheel has only 75 runtime bytes spare: prefer the canonical machine wheel
+  in primary builders and retire legacy variants only after mapping their
+  distinct detection coverage. This binding milestone does not complete the
+  ecosystem-wide service allowlist or production insurer strategies.
 - [ ] Keep BuckNet as an explicitly experimental regression oracle only until
   its distinct checks are exercised against Buck, then retire duplicate token
   orchestration and diagnostic deployment paths as coverage is demonstrated.
@@ -609,8 +610,22 @@ implementation sequence, before changing the primary economy builder.
   Position/credit guards also reject setup reentry. Six production-registry
   cases and two real-V3 public lifecycle cases pass. The abstract registry
   fixture preserves all 56 original tests without duplicating them.
-  Next complete wheel identity wiring and the existing primary builders in
-  step 4; public contract availability does not migrate a saved economy.
+  Public contract availability does not migrate a saved economy.
+- [X] Supply production identity control on the canonical machine wheel and
+  test actual nominal-reserve rewards with the corrected token. Governance
+  authorizes/revokes the exact public Carrying binding in the pay token's
+  registry; no registry/flag arguments or new deployment/state are needed.
+  The certified operator completes binding. A private operator's real
+  identity-bound zero-allowance approval freezes Carrying mode before
+  funding, without money or an NFT. All private funders/keepers need their
+  introduction; a failed reward rolls back actual basket work and reserve
+  payment. Counterparties, mode and receipt checks are not bypassed.
+  Nine production-registry cases cover authority/flag pinning, revocation,
+  guarded callbacks, genuine CP proofs, mode freezing, capped funding,
+  idle/no-op behavior and net reward delivery from aged nominal balances.
+  Root token/fund accounting and the older wheel's implementation are
+  unchanged. Next configure/persist these roles and introductions in the
+  existing Python/JS builders; qualify canonical arb before enabling it.
 
 ** 4. Migrate existing clients, proofs and the household economy
 
@@ -633,6 +648,11 @@ implementation sequence, before changing the primary economy builder.
   live accountState rather than treating diagnostic counters as wallet cash;
   no legacy fallback or silently skipped action may make the economy appear
   to run. Keep the adaptive default and explicit comparison policies.
+  Certify the canonical wheel via its token-derived binding API, introduce
+  private keepers through real zero-allowance approvals before funding, and
+  validate frozen Carrying mode on restore. Preserve nominal reserve/reward
+  units separately from actual net delivery; do not equate a submitted or
+  reverted tick with completed monetary work.
 - [ ] Port shared net math to Rust/PyO3/WASM with 256-bit inputs and full-width
   intermediate multiplication/division, lossless Python int / JS BigInt and
   the same rounding/overflow rules. The current demurrage kernel is legacy
@@ -694,9 +714,10 @@ Continue in this order:
    canonical issue/purchase/retirement paths. Price-unit vectors distinguish
    nominal issuance from net liquidation. Fund reserve and maturity jobs are
    now connected to both existing wheels, including optional basket principal
-   scheduling. Public identity/credit onboarding now passes. Complete
-   production wheel identity binding before enabling funded BUCK rewards or
-   BUCK arbitrage, then wire the primary world. Receiving cash alone must not reduce principal or make an insolvent
+   scheduling. Public identity/credit onboarding and canonical wheel binding /
+   private-keeper rewards now pass. Wire the primary world and qualify actual
+   canonical arbitrage inventory/fees before enabling those routes. Receiving
+   cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
 2. Finish the existing Python/JS household lifecycle and primary world builders;
    retain adaptive default and the explicit comparison policies. Port setup,
@@ -739,6 +760,7 @@ make nix-match-JubileeWheelTest
 make nix-match-BasketRetirementWheelTest
 make nix-match-BasketCreditSetupTest
 make nix-match-BasketPublicLifecycleTest
+make nix-match-BasketMachineIdentityTest
 make nix-venv-demurrage-test
 make nix-match-BuckTest
 make nix-match-BuckDelegatedDemurrageTest
@@ -864,4 +886,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-05 | Schedule actual basket principal retirement in the same maintenance kind | Added an optional fourth job using existing retireCredit, actual NFT principal and cash above the recomputed liquidity target. Governed cap/minimum, full-facility relief sizing, exact batch recheck and shared block liquidity bound the actual burn. Complete dust tails clear without work rewards; exhausted liquidity does not authorize or pretend to repay; mature NFTs remain owner-controlled. A real nine-raw-unit/five-BUCK-second counterexample shows partial-quote inversion selects an unaffordable two-unit batch; the full-facility quote safely retires one. Nine new cases reuse an abstract canonical fixture without repeated inherited tests. Full make nix-test: 1,490 passed, one fork skip and four absent-proof exclusions; final nine-case assertion pass also green. Compiler/link/runtime checks for 53 contracts and final sandbox build pass; package digest cb8d06c655f6500d1842434561a40fb7ffb6baba4288aeacf0bc34d0c0d5187a. Runtime: machine wheel 23,306 bytes; older wheel 24,501 (75 spare). No token/fund/cash-library/client code changed since the preceding 34 Python, 20 JS and 15 browser/wallet acceptance. The new scheduler is tested in Solidity and still requires primary-world wiring. Next production basket identity/model/credit onboarding, existing household builders, five-year JSON/PDFs and Notes. | =ffda5191= |
 
-| 2026-11-06 | Complete public basket identity and credit onboarding | Reused a shared abstract BasketCreditSetup in both existing upkeep facets, with no added storage or deployed initializer. The governed public openCredit validates canonical mode/model, verified public ordinary identity, matching BuckCredit and its Buck hook; it creates only an inactive zero-premium self-insured NFT. Exact production-registry binding authorization/revocation runs at the basket address through IBasketUpkeep; setup closes after deposits/credit and rejects position/credit reentry. Six real-registry credential tests and two unmodified-shell V3 lifecycles pass; the original 56 registry tests remain without inherited repetitions. Full implementation acceptance: 1,498 Solidity passed, one fork skip and the same four absent-proof exclusions; 34 Python, 20 JS and 15 wallet/browser passed. Added both suites to Make help and canonical acceptance. Final documentation cleanup: 356 canonical tests passed, compiler/link/runtime checks passed for 53 artifacts, and sandbox rebuilt; all 51 explicitly packaged ABIs and deployed executable bodies match the earlier full acceptance after excluding compiler metadata. Final package digest eea6e9606380c7ea6bb214eb62186f4797a2b18837f35cae07859876fa31afd9. Runtime: shell 24,240 bytes; component facet 16,496; machine facet 23,450; machine wheel 23,306; older wheel 24,501. Updated current state, setup flow, pre/post invariants and remaining gates. Next wheel production identity binding for funded BUCK rewards/arbitrage, primary household builders and snapshots, 256-bit native math, short world then five-year JSON/PDFs, and Notes/proof restoration. No corrected-accounting five-year run or release is claimed. | This commit |
+| 2026-11-06 | Complete public basket identity and credit onboarding | Reused a shared abstract BasketCreditSetup in both existing upkeep facets, with no added storage or deployed initializer. The governed public openCredit validates canonical mode/model, verified public ordinary identity, matching BuckCredit and its Buck hook; it creates only an inactive zero-premium self-insured NFT. Exact production-registry binding authorization/revocation runs at the basket address through IBasketUpkeep; setup closes after deposits/credit and rejects position/credit reentry. Six real-registry credential tests and two unmodified-shell V3 lifecycles pass; the original 56 registry tests remain without inherited repetitions. Full implementation acceptance: 1,498 Solidity passed, one fork skip and the same four absent-proof exclusions; 34 Python, 20 JS and 15 wallet/browser passed. Added both suites to Make help and canonical acceptance. Final documentation cleanup: 356 canonical tests passed, compiler/link/runtime checks passed for 53 artifacts, and sandbox rebuilt; all 51 explicitly packaged ABIs and deployed executable bodies match the earlier full acceptance after excluding compiler metadata. Final package digest eea6e9606380c7ea6bb214eb62186f4797a2b18837f35cae07859876fa31afd9. Runtime: shell 24,240 bytes; component facet 16,496; machine facet 23,450; machine wheel 23,306; older wheel 24,501. Updated current state, setup flow, pre/post invariants and remaining gates. Next wheel production identity binding for funded BUCK rewards/arbitrage, primary household builders and snapshots, 256-bit native math, short world then five-year JSON/PDFs, and Notes/proof restoration. No corrected-accounting five-year run or release is claimed. | =44354d77= |
+
+| 2026-11-06 | Bind the canonical wheel and validate actual private-keeper rewards | Added governance-only authorization/revocation on BasketMachineWheel, deriving the registry from its immutable BUCK pay token and pinning public Carrying flags. No new deployment, state or alternate-registry input; work/funding guards also cover binding changes. Nine real-registry cases reuse the abstract basket identity fixture without repeating its six tests or the 56 registry tests. Real CP introductions preserve private funding/payee checks; zero-allowance approval needs no funds/facility and freezes Carrying mode before funding. Actual basket daily work pays nominal rewards with measured net delivery: an aged 20-BUCK nominal reserve pays 2 nominal / about 1.960397 net BUCK after one year, with unchanged supply/principal. Missing payee introductions roll back the whole work/reward transaction; idle work pays nothing. Full make nix-test: 1,507 passed, one fork skip and the same four absent-proof exclusions. Canonical Make subset: 365 passed; compiler/link/runtime checks passed for 53 artifacts and sandbox rebuilt. Package digest cc7f44f3362dd5094ae6a1c5a78ab2572f1c8462fb5dbeb2fa1cc827fad9be9e. Machine runtime 24,186 bytes (390 spare); older comparison wheel remains 24,501 and receives no new binding API. Token, fund and other monetary-library code is unchanged; existing cash-only client smoke is not wheel integration evidence. Updated Make/README and pre/post invariants. Next primary Python/JS deployment/restore wiring and household lifecycle, canonical arb fee/inventory qualification, native 256-bit math, short economy then five-year JSON/PDFs, and Notes. No new five-year acceptance or release is claimed. | This commit |

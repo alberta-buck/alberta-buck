@@ -424,11 +424,18 @@ that limit. A later block permits retry but does not itself execute any work.
 | Reserve redemption | Below-target liquid cash, live guarded positive receipt mark, receipt-fraction cap and deficit sizing, positive aggregate net minimum. | Sells only bounded receipt shares, through registered constituent pools with positive per-leg net minima and governed sqrt-price movement limits; old TOKEN inventory is untouched. Underwater/low-K/price or execution refusal rolls the complete job back and earns no work. |
 | Basket principal retirement | Optional cap enabled; exact heap; matching facility in the fund's canonical ordinary basket; positive cash above its liquidity target; below full maturity. | Bounded actual principal/supply reduction through retireCredit, with cash-cost and exact quoted-relief bounds. Full-facility relief sizes the batch to available shared liquidity. Recomputed cash target remains covered or all effects revert. A complete dust tail can clear without reward; no partial dust work or phantom authorization. LP shares are untouched; receiving cash alone cannot repair backing. |
 | Wheel callbacks | Mutating tick/funding guard acquired before external work. | Nested scans and reserve funding revert. Independent valuation publication remains available; a successful job earns at most one work unit, irrespective of batch size. |
+| Canonical wheel binding | Current governance; no active work/funding callback; BUCK pay token exposes its immutable registry. | An exact public Carrying authorization is written in that registry, or its pending authorization cleared. No alternate registry/flags can be supplied. Cursor, valuation, reserve, supply and NFT debt are unchanged; revocation does not unregister a bound service. |
+| Private keeper introduction | Registered private keeper and certified public wheel; real CP proof bound to registry/chain/parties. | Identity-bound approval records the receipt fragment and freezes the wheel's Carrying mode. Amount zero needs no money/facility and grants no spending allowance. Plain approval is insufficient. |
+| Funded nominal reward | Frozen public Carrying wheel; actual due work; eligible verified/introduced recipient; reserve within available nominal cash. | Nominal balanceOf and reserve decrease by the same reward. NetValueTransfer measures actual net delivery including inherited fees. An identity/transfer failure rolls back all work and the reserve debit; idle ticks receive nothing. No facility principal changes. |
 
 The current canonical coverage is =make nix-match-JubileeWheelTest= plus
 =make nix-match-WorkWheelTest= and
 =make nix-match-BasketRetirementWheelTest=. Basket-principal retirement is an
 optional fourth job in the same kind; sale proceeds alone cannot repair backing.
+BasketMachineIdentityTest adds real-registry/private-proof evidence for the
+canonical wheel's binding and reward role, including zero-allowance setup
+before funding and refusal of mode reinterpretation after approval. These
+tests do not establish fee-aware canonical arbitrage or a five-year economy.
 
 For a facility with principal P and claim seconds S, total system seconds T
 and marked fund value V in scaled net units, its relief for p is

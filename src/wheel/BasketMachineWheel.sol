@@ -7,6 +7,9 @@ import {IBasketUpkeep} from "../basket/IBasketUpkeep.sol";
 import {IBasketView} from "../basket/IBasketView.sol";
 import {ArbKind} from "./ArbKind.sol";
 import {JubileeKind} from "./JubileeKind.sol";
+import {IBuckJubilee} from "../IBuckJubilee.sol";
+import {BN254} from "../BN254.sol";
+import {IdentityRegistry} from "../IdentityRegistry.sol";
 
 interface IWheelSample {
     function isDue() external view returns (bool);
@@ -92,6 +95,26 @@ abstract contract SampleKind is WorkWheel {
 contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, OpsKind, ResponseKind, ArbKind {
     constructor(address buck, address stable, address gov, uint16 kappa, uint256 reserveCap)
         WorkWheel(buck, gov, kappa, reserveCap) ArbKind(buck, stable) {}
+
+    /// @notice Authorize this service's public Carrying identity in BUCK's
+    ///         own registry; the certified operator completes the binding.
+    /// @dev PRE: current governance, no active work/funding callback, and a
+    ///      BUCK pay token exposing its immutable registry. POST: only an
+    ///      exact binder/key/ciphertext/public/Carrying authorization is set.
+    ///      No cash, reward reserve, work cursor or valuation is changed.
+    ///      Carrying keeps reserve transfers and balanceOf in nominal units;
+    ///      recipients still receive net BUCK after the pool's carried fees.
+    function authorizeIdentityBinding(address binder, BN254.G1Point calldata pk,
+        IdentityRegistry.ElGamalCT calldata E) external onlyGov workGuard
+    {
+        IBuckJubilee(address(payToken)).identity().authorizeContractBinding(binder, pk, E, true, true);
+    }
+
+    /// @notice Clear an unconsumed authorization in that same registry.
+    /// @dev This does not revoke an already-certified identity or move money.
+    function revokeIdentityBinding() external onlyGov workGuard {
+        IBuckJubilee(address(payToken)).identity().revokeContractBindingAuthorization();
+    }
 
     function _prepareOps() internal override {
         if (sampleSource != address(0)) { try IWheelSample(sampleSource).observe() {} catch {} }

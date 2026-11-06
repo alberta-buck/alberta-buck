@@ -33,7 +33,8 @@ it all.
 The current =Buck= implementation uses unsigned compounded cash, actual per-facility
 liabilities and an external Jubilee fund, while retaining its numeric mint/burn and identity
 interfaces. The local wallet sandbox, public basket identity/credit setup and explicit
-basket/desk contract flows are tested. Production wheel identity wiring, the primary
+basket/desk contract flows are tested. The canonical wheel also has production identity
+binding and tests for actual net delivery of nominal BUCK rewards. Primary
 Python/JavaScript household worlds, five-year campaigns and corrected-token Notes proofs remain in the
 [[file:doc/review/bucknet-economy-implementation.org][unified accounting plan]]. Hosted examples below are separate deployments;
 local build commands use this checkout. The savings economy still needs its accounting migration.
