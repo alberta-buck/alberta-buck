@@ -69,6 +69,30 @@ tests compare within one external raw unit. A global bound across arbitrary
 accounts, long histories and checkpoint frequencies remains to be proved; do
 not assert bit-exact conservation from those tests alone.
 
+** Canonical arithmetic kernel (November 6)
+
+The existing =buck-math= Rust crate now exposes canonical compounded cash
+through =net_decay=, =net_fund_after=, =net_target_relief= and
+=mul_div_256=. These are pure arithmetic, with no storage, identity,
+authorization, fund liquidity or collateral decisions. Raw NFT principal and
+BUCK-seconds remain distinct from =Q=-scaled cash: one full BUCK of cash is
+=10^42= internal units and cannot fit uint128. Old =fee_owing= and
+=carrying_transfer= functions retain the legacy model for comparison callers.
+
+| Block | Preconditions | Postconditions |
+|-------+---------------+----------------|
+| uint256 / bindings | Operands are unsigned integers no greater than =2^256-1=; byte ABI is exactly 32 big-endian bytes. Python rejects bool/non-integer units; JS requires BigInt. | Every input/output bit is preserved. Negative/out-of-range values fail; no floating-point amount or truncated narrowing is used. |
+| Multiply/divide | =denominator > 0=; operands each fit uint256. | All 512 product bits participate; return exact floor or ceiling. A quotient above uint256, including a ceiling overflow, fails. |
+| Cash decay | Amount and elapsed fit uint256; caller supplies the intended units and checkpoint interval. | Same chunked per-second compounding and rounding as NetDemurrageMath; result <= amount. At >= 9,000 years return zero in bounded work, even for maximum elapsed. |
+| Fund net growth | =0 <= fund <= issuance= in identical units; no issuance, retirement or external transfer within the interval. | =fundAfter + decay(issuance-fund,elapsed) == issuance= exactly for this aggregate calculation. This does not prove a global rounding bound across arbitrary individual accounts. |
+| Facility baseline relief | Positive raw principal; =reduction <= principal=; supplied raw BUCK-seconds belong to this facility. | Return =min(reduction,floor(floor(seconds*reduction/principal)/(50Y)))=. This is a baseline only, never authorization to bypass actual marked relief, current K or the liquid/block budget. |
+
+=make nix-venv-core-net-math-test= requires all native/Node/web bindings and
+Chromium, and checks 318 independent Python-integer vectors against actual
+Solidity, Rust, Python and Node/browser WASM. Python also checks 1,024 random
+full-width products and 600 monthly conservation checkpoints. No new economy,
+portfolio or token implementation is introduced by this kernel checkpoint.
+
 ** Current balance and event semantics
 
 An ordinary account has net held =H= and net issued-but-unspent =U=. Its

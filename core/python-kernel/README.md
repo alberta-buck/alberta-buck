@@ -4,13 +4,20 @@ The compiled Alberta Buck kernels for Python: integer monetary arithmetic
 bit-identical to the Solidity contracts, and the BN254 identity, wallet and
 registry cryptography.
 
-**Nothing requires this package.** It is the optional fast path behind
+The identity/cryptographic kernel is the optional fast path behind
 [`alberta-buck-core`](https://pypi.org/project/alberta-buck-core/) and the
 `alberta-buck` reference implementation. Everything here has a pure-Python
 equivalent in `alberta_buck.wallet`, which remains the executable
 specification -- this package is proven bit-identical to it by golden
 vectors, so choosing it cannot change a single emitted byte. It is only
 faster.
+
+The canonical monetary APIs (`net_decay`, `net_fund_after`,
+`net_target_relief`, `mul_div_256`) require this compiled math module; they
+have no fallback to the legacy linear model. They accept/return lossless
+uint256 Python `int` values and retain 512-bit products. In a checkout,
+`make nix-venv-core-net-math-test` builds and checks them against the same
+independent integer vectors as Solidity, Rust and Node/browser WASM.
 
 ```sh
 pip install alberta-buck-core            # pure Python, works everywhere

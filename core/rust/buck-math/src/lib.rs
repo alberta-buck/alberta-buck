@@ -1,30 +1,38 @@
 //! Alberta Buck integer monetary arithmetic.
 //!
 //! The Solidity contracts are the specification: every function here is
-//! bit-identical to the deployed-code paths, proven by the forge-generated
-//! golden vectors (`test/vectors/math-vectors.json`) asserted equally by
-//! the Rust, Python, and JS suites (alberta-buck-platform.org, Layer 2).
+//! bit-identical to the contract primitives, checked by shared vectors in
+//! test/vectors. Canonical net-math vectors use an independent Python-integer
+//! oracle checked against Solidity; legacy vectors are forge-generated.
+//! Rust, Python, Node and browser WASM consume the same canonical cases.
 //!
 //! Modules mirror the contracts:
 //!   * [`depreciation`] -- BuckCredit `_depreciate` / `currentValue`
-//!   * [`demurrage`]    -- Buck `_feeOwing` / `_carryingTransfer`
+//!   * [`net_demurrage`] -- canonical BuckCash compounded cash / NFT relief
+//!   * [`uint256`]      -- full uint256 values and 512-bit multiply/divide
+//!   * [`demurrage`]    -- legacy BuckLinear `_feeOwing` / `_carryingTransfer`
 //!   * [`pid`]          -- BuckKControllerDirect rescaled-ppm PID +
 //!     fundingFactor + bumpless governance algebra
 //!   * [`wide`]         -- full-width mulDiv (OZ Math.mulDiv semantics)
 //!
 //! Rules of the crate: integer math only -- no floats, ever; `no_std`
-//! and dependency-free (Holochain zomes consume this crate); floor
-//! division everywhere; overflow panics exactly where Solidity 0.8
-//! checked arithmetic reverts (overflow-checks stay on in release).
+//! and dependency-free (Holochain zomes consume this crate), with explicit
+//! floor/ceiling division. Canonical arithmetic returns domain or
+//! overflow errors where Solidity reverts; legacy helpers panic. Release
+//! overflow checks stay enabled as well.
 
 #![no_std]
 
 pub mod demurrage;
+pub mod net_demurrage;
+pub mod uint256;
 pub mod depreciation;
 pub mod pid;
 pub mod wide;
 
 pub use demurrage::{carrying_transfer, fee_owing, CarryingResult};
+pub use net_demurrage::{net_decay, net_fund_after, net_target_relief};
+pub use uint256::{mul_div_256, NetMathError, U256};
 pub use depreciation::{current_value, depreciate, DepType};
 pub use pid::DirectPid;
 pub use wide::{mul_div_wide, mul_wide};
@@ -43,13 +51,13 @@ pub const SECONDS_PER_YEAR: u128 = 31_557_600;
 /// DECLINING_BALANCE compounding cap (BuckCredit.MAX_DEP_YEARS).
 pub const MAX_DEP_YEARS: u128 = 100;
 
-/// Demurrage fixed-point scale (Buck.SCALE).
+/// Legacy linear demurrage scale (BuckLinear.SCALE); canonical NET_SCALE is 1e36.
 pub const SCALE: u128 = 1_000_000_000_000_000_000_000_000_000; // 1e27
 
-/// 0.02/year in SCALE (Buck.BASE_RATE_PER_YEAR).
+/// Legacy 0.02/year in SCALE (BuckLinear.BASE_RATE_PER_YEAR).
 pub const BASE_RATE_PER_YEAR: u128 = 20_000_000_000_000_000_000_000_000; // 2e25
 
-/// Per-second demurrage rate: the same floored integer division Buck.sol
+/// Legacy per-second demurrage rate: the floored division BuckLinear
 /// performs at compile time.
 pub const BASE_RATE_PER_SEC: u128 = BASE_RATE_PER_YEAR / SECONDS_PER_YEAR;
 

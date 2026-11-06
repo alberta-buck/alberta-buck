@@ -53,6 +53,28 @@ import identity from "alberta-buck-core/identity";
 const scalar = identity.reduceModOrder(12345n);
 ```
 
+Canonical cash math uses `createNetMath` and the initialized math kernel:
+
+```js
+import { createRequire } from "node:module";
+import { createNetMath } from "alberta-buck-core/net-math";
+const math = createNetMath(createRequire(import.meta.url)("alberta-buck-kernel/math"));
+const cash = 10n ** 42n;      // one BUCK in internal cash units
+const remaining = math.decay(cash, 31_557_600n);
+```
+
+For a browser, initialize `alberta-buck-kernel/web/math` with its explicit
+WASM source, then pass that module to `createNetMath`. Inputs/results are
+uint256 `BigInt`; full-width products are computed in Rust. `fundNetAfter`
+uses the same units as cash. `targetRelief(principal, buckSeconds, reduction)`
+uses raw NFT principal and raw BUCK-seconds and returns a baseline, not an
+executable relief quote. `mulDiv(a,b,denominator,roundUp=false)` implements
+floor/ceiling division. Missing functions, invalid units, division by zero
+and overflowing results fail explicitly. Older `fee_owing` /
+`carrying_transfer` kernel functions retain the legacy linear model.
+Run `make nix-venv-core-net-math-test` in a checkout to compare all bindings
+and actual Solidity, including the browser build in Chromium.
+
 Subpaths map onto the modules directly: `alberta-buck-core/session`,
 `/journal`, `/identity`, `/wallet`, `/buckworld`, `/observer`, `/v3`, and
 so on.

@@ -1,12 +1,43 @@
-//! The JS/WASM face of the buck-math kernel (browser + Node; numbers
-//! cross as BigInt).  Semantics, panics and all, are the kernel's --
-//! overflow/domain panics surface as WASM traps, where the contracts
-//! revert.
+//! The JS/WASM face of the buck-math kernel (browser + Node). Canonical
+//! uint256 values use a lossless byte ABI wrapped as BigInt in net-math.js;
+//! domain/quotient errors are JS errors. Legacy u128/i128 functions retain
+//! their BigInt scalar ABI and overflow/domain WASM traps.
 //!
 //! Built by `make nix-core-build-wasm` (wasm-pack, nodejs target) into
-//! core/js/wasm/; the JS suite asserts the golden vectors through it.
+//! core/js/kernel/node/; the web target goes to core/js/kernel/web/.
 
 use wasm_bindgen::prelude::*;
+
+// wasm-bindgen has no uint256 scalar ABI. The public JS wrapper converts
+// BigInt to/from exactly 32 big-endian bytes, in browsers and Node alike.
+fn uint256(bytes: &[u8]) -> Result<kernel::U256, JsError> {
+    let bytes: [u8; 32] = bytes.try_into().map_err(|_| JsError::new("uint256 requires exactly 32 bytes"))?;
+    Ok(kernel::U256::from_be_bytes(bytes))
+}
+
+fn net_result(result: Result<kernel::U256, kernel::NetMathError>) -> Result<Vec<u8>, JsError> {
+    result.map(|v| v.to_be_bytes().to_vec()).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn net_decay(amount: &[u8], elapsed: &[u8]) -> Result<Vec<u8>, JsError> {
+    net_result(kernel::net_decay(uint256(amount)?, uint256(elapsed)?))
+}
+
+#[wasm_bindgen]
+pub fn net_fund_after(issuance: &[u8], fund: &[u8], elapsed: &[u8]) -> Result<Vec<u8>, JsError> {
+    net_result(kernel::net_fund_after(uint256(issuance)?, uint256(fund)?, uint256(elapsed)?))
+}
+
+#[wasm_bindgen]
+pub fn net_target_relief(principal: &[u8], buck_seconds: &[u8], reduction: &[u8]) -> Result<Vec<u8>, JsError> {
+    net_result(kernel::net_target_relief(uint256(principal)?, uint256(buck_seconds)?, uint256(reduction)?))
+}
+
+#[wasm_bindgen]
+pub fn mul_div_256(a: &[u8], b: &[u8], denominator: &[u8], round_up: bool) -> Result<Vec<u8>, JsError> {
+    net_result(kernel::mul_div_256(uint256(a)?, uint256(b)?, uint256(denominator)?, round_up))
+}
 
 #[wasm_bindgen]
 pub fn depreciate(face: u128, dep_type: u8, rate_bp: u32, floor: u128,

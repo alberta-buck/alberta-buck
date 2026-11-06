@@ -1,11 +1,50 @@
 //! `import buck_math` -- the Python face of the buck-math kernel.
 //!
-//! Thin PyO3 wrappers; every number crosses as a native Python int
-//! (PyO3 maps u128/i128 losslessly).  Semantics, panics and all, are
-//! the kernel's -- overflow/domain panics surface as PanicException,
-//! where the contracts revert.
+//! Thin PyO3 wrappers: canonical uint256 values cross as native Python int
+//! via lossless bytes; domain/quotient errors raise ValueError. Existing
+//! u128/i128 comparison functions retain PyO3's scalar mapping and their
+//! legacy overflow/domain PanicException behavior.
 
 use pyo3::prelude::*;
+use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::types::{PyBool, PyBytes, PyInt};
+
+// Python ints stay ints: to_bytes rejects negatives and values above uint256,
+// and from_bytes returns the entire result. No float, string or u128 cast.
+fn uint256(value: &Bound<'_, PyInt>) -> PyResult<kernel::U256> {
+    if value.is_instance_of::<PyBool>() {
+        return Err(PyTypeError::new_err("uint256 requires an integer, not bool"));
+    }
+    let bytes: Vec<u8> = value.py().get_type::<PyInt>()
+        .call_method1("to_bytes", (value, 32, "big"))?.extract()?;
+    Ok(kernel::U256::from_be_bytes(bytes.try_into().unwrap()))
+}
+
+fn net_result(py: Python<'_>, result: Result<kernel::U256, kernel::NetMathError>) -> PyResult<Py<PyAny>> {
+    let value = result.map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(py.get_type::<PyInt>().call_method1("from_bytes", (PyBytes::new(py, &value.to_be_bytes()), "big"))?.unbind())
+}
+
+#[pyfunction]
+fn net_decay(amount: &Bound<'_, PyInt>, elapsed: &Bound<'_, PyInt>) -> PyResult<Py<PyAny>> {
+    net_result(amount.py(), kernel::net_decay(uint256(amount)?, uint256(elapsed)?))
+}
+
+#[pyfunction]
+fn net_fund_after(issuance: &Bound<'_, PyInt>, fund: &Bound<'_, PyInt>, elapsed: &Bound<'_, PyInt>) -> PyResult<Py<PyAny>> {
+    net_result(issuance.py(), kernel::net_fund_after(uint256(issuance)?, uint256(fund)?, uint256(elapsed)?))
+}
+
+#[pyfunction]
+fn net_target_relief(principal: &Bound<'_, PyInt>, buck_seconds: &Bound<'_, PyInt>, reduction: &Bound<'_, PyInt>) -> PyResult<Py<PyAny>> {
+    net_result(principal.py(), kernel::net_target_relief(uint256(principal)?, uint256(buck_seconds)?, uint256(reduction)?))
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, b, denominator, round_up=false))]
+fn mul_div_256(a: &Bound<'_, PyInt>, b: &Bound<'_, PyInt>, denominator: &Bound<'_, PyInt>, round_up: bool) -> PyResult<Py<PyAny>> {
+    net_result(a.py(), kernel::mul_div_256(uint256(a)?, uint256(b)?, uint256(denominator)?, round_up))
+}
 
 #[pyfunction]
 fn depreciate(face: u128, dep_type: u8, rate_bp: u32, floor: u128,
@@ -85,6 +124,11 @@ impl DirectPid {
 
 #[pymodule]
 fn buck_math(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(net_decay, m)?)?;
+    m.add_function(wrap_pyfunction!(net_fund_after, m)?)?;
+    m.add_function(wrap_pyfunction!(net_target_relief, m)?)?;
+    m.add_function(wrap_pyfunction!(mul_div_256, m)?)?;
+    m.add("NET_SCALE", kernel::net_demurrage::NET_SCALE)?;
     m.add_function(wrap_pyfunction!(depreciate, m)?)?;
     m.add_function(wrap_pyfunction!(current_value, m)?)?;
     m.add_function(wrap_pyfunction!(fee_owing, m)?)?;

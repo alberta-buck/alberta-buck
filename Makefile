@@ -17,6 +17,7 @@ help:
 	  '  make nix-install nix-js-deps        # pinned Solidity and JavaScript dependencies' \
 	  '  make nix-venv-setup                # create/repair .venv; install editable Python packages' \
 	  '  make nix-venv-core-build-py        # compiled Python kernels' \
+	  '  make nix-venv-core-net-math-test   # canonical uint256 math: Solidity, Rust, Python and JS' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
@@ -177,7 +178,7 @@ match-%:
 # See README-simulations.org for units, accounting gates and interpretation.
 .PHONY: buck-accounting-test
 buck-accounting-test: build-uniswap-artifacts
-	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*Test|BuckBurnModesTest|BuckSponsoredSwapTest|BuckCashTest|BuckNetMintMathTest|BuckNetBurnMathTest|BuckNetBurnCompatibilityTest|BuckNetBurnRoundingTest|BasketJubileeMathTest|BasketRetirementWheelTest|BasketCreditSetupTest|BasketPublicLifecycleTest|BasketMachineIdentityTest|Jubilee(Fund|Renewal|BurnValuation|LiquidityRebalance|MarkedRelief|MaturedRelease|MaturityIntegration|EquityIntegration|Claims|ReserveMath|Obligations|Wheel)Test)$$' -vvv
+	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*Test|BuckBurnModesTest|BuckSponsoredSwapTest|BuckCashTest|NetDemurrageMathTest|NetMathVectorsTest|BuckNetMintMathTest|BuckNetBurnMathTest|BuckNetBurnCompatibilityTest|BuckNetBurnRoundingTest|BasketJubileeMathTest|BasketRetirementWheelTest|BasketCreditSetupTest|BasketPublicLifecycleTest|BasketMachineIdentityTest|Jubilee(Fund|Renewal|BurnValuation|LiquidityRebalance|MarkedRelief|MaturedRelease|MaturityIntegration|EquityIntegration|Claims|ReserveMath|Obligations|Wheel)Test)$$' -vvv
 
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:
@@ -1651,6 +1652,7 @@ sim-plot-eq-%:
 
 .PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps core-js-check-worktree
 .PHONY: core-build core-build-py core-build-wasm core-identity-vectors
+.PHONY: core-net-math-test core-net-math-vectors core-net-math-vectors-check
 .PHONY: core-wallet-vectors core-registry-vectors
 .PHONY: core-vectors-sync core-vectors-check
 .PHONY: poseidon-constants poseidon-constants-check
@@ -1668,6 +1670,25 @@ core-wallet-vectors:
 core-registry-vectors:
 	python -m alberta_buck.registry.kernel_vectors core/vectors/registry-kernel-vectors.json
 
+# Canonical compounded cash uses uint256 values and uint512 products. The
+# independent Python-integer oracle is checked by the actual Solidity math
+# and by Rust plus both built bindings. Legacy linear vectors stay separate.
+#   make nix-venv-core-net-math-test
+# Review changes before regenerating; the second copy ships in the Rust crate.
+core-net-math-vectors:
+	python3 scripts/net-math-vectors.py --write
+	cp test/vectors/net-math-vectors.json core/rust/buck-math/tests/vectors/
+
+core-net-math-vectors-check:
+	python3 scripts/net-math-vectors.py
+	@cmp test/vectors/net-math-vectors.json core/rust/buck-math/tests/vectors/net-math-vectors.json
+
+core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vectors-check core-build-py core-build-wasm core-build-wasm-web
+	forge test $(FORGE_OPTS) --match-contract '^NetMathVectorsTest$$' -vvv
+	cd core/rust && cargo test -p alberta-buck-math
+	python -m pytest core/python/tests/test_net_math.py core/python/tests/test_math_vectors.py -q
+	cd core/js && BUCK_REQUIRE_NET_MATH_BROWSER=1 node --test test/net-math.test.js test/net-math.browser.test.js test/math.vectors.test.js
+
 # Each published crate carries its OWN copy of the vectors it replays:
 # `cargo package` includes only files under the crate directory, so a crate
 # whose tests reached ../../../test/vectors would ship a suite that cannot
@@ -1676,6 +1697,7 @@ core-registry-vectors:
 # on drift and gates core-test-rust, so a stale copy cannot ship.
 core-vectors-sync:
 	cp test/vectors/math-vectors.json            core/rust/buck-math/tests/vectors/
+	cp test/vectors/net-math-vectors.json        core/rust/buck-math/tests/vectors/
 	cp test/vectors/identity.json                core/rust/buck-identity/tests/vectors/
 	cp core/vectors/identity-kernel-vectors.json core/rust/buck-identity/tests/vectors/
 	cp core/vectors/registry-kernel-vectors.json core/rust/buck-registry/tests/vectors/
@@ -1683,6 +1705,7 @@ core-vectors-sync:
 
 core-vectors-check:
 	@cmp test/vectors/math-vectors.json            core/rust/buck-math/tests/vectors/math-vectors.json
+	@cmp test/vectors/net-math-vectors.json        core/rust/buck-math/tests/vectors/net-math-vectors.json
 	@cmp test/vectors/identity.json                core/rust/buck-identity/tests/vectors/identity.json
 	@cmp core/vectors/identity-kernel-vectors.json core/rust/buck-identity/tests/vectors/identity-kernel-vectors.json
 	@cmp core/vectors/registry-kernel-vectors.json core/rust/buck-registry/tests/vectors/registry-kernel-vectors.json

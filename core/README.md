@@ -35,10 +35,12 @@ Python package keeps working and transitions onto these incrementally.
                   shipped esbuild bundle.  Deps: viem + tevm
                   (`npm ci` in core/js).
       rust/       cargo workspace: buck-math -- the integer monetary kernel
-                  (BuckCredit depreciation, Buck demurrage fee + carrying
-                  buckSeconds apportionment, BuckKControllerDirect ppm PID +
+                  (BuckCredit depreciation, canonical compounded cash and
+                  per-facility baseline relief, legacy fee/buckSeconds
+                  comparisons, BuckKControllerDirect ppm PID +
                   fundingFactor + bumpless governance algebra), no_std and
-                  dependency-free (wide.rs hand-rolls the 256-bit mulDiv);
+                  dependency-free (uint256.rs supplies 256-bit operands /
+                  512-bit products; wide.rs retains the u128 helpers);
                   buck-identity -- the BN254 identity kernel (arkworks
                   curve/pairing, keccak Fiat-Shamir transcripts, circomlib
                   Poseidon, PS credentials, ElGamal, registration NIZK,
@@ -62,8 +64,9 @@ Python package keeps working and transitions onto these incrementally.
   `alberta_buck` imports `buck_core` (today via the sys.path shim in
   `alberta_buck/__init__.py`; via an installed wheel from Phase 2).
 - **The Solidity contracts are the mathematical spec**: kernel functions are
-  proven bit-identical against forge-generated golden vectors in
-  `test/vectors/`, asserted by all three language suites.
+  checked against shared vectors in `test/vectors/`. Canonical money vectors
+  use an independent Python integer oracle, checked against actual Solidity;
+  legacy math vectors are forge-generated. All exposed bindings replay them.
 - **Tests**: minimal in Rust, primary in Python and JS.  Every ported or new
   core capability gets coverage in each language that exposes it.
 
@@ -76,6 +79,7 @@ Python package keeps working and transitions onto these incrementally.
     make nix-core-test-js       # cd core/js && node --test
     make nix-core-test-rust     # cd core/rust && cargo test
     make nix-venv-core-test-py  # Python suite inside the repo venv
+    make nix-venv-core-net-math-test # canonical math: Solidity/Rust/Python/Node/Chromium
 
 The repo venv (`make venv` machinery) hosts BOTH packages: it installs
 `alberta_buck[tests,dev]` and `-e core/python`, so `import alberta_buck`
@@ -88,6 +92,18 @@ from the REAL contract code paths by `make nix-match-MathVectors` and
 asserted bit-identically by all three suites.  The Tevm-backed JS tests,
 kernel-binding tests, and the mixed-language join test skip cleanly when
 their artifacts aren't built.
+
+Canonical cash uses `Q=1e36` per external raw BUCK, so one full BUCK is
+`1e42` internal units. The new `net_decay`, `net_fund_after`,
+`net_target_relief` and `mul_div_256` APIs accept the entire uint256 range.
+Python receives/returns native `int`; `createNetMath` in JS converts `BigInt`
+through the WASM byte ABI. The dedicated acceptance target builds all
+bindings, rejects missing/stale kernels and requires Chromium. Its 318
+vectors come from an independent Python integer oracle, are checked by
+actual Solidity, and include 512-bit products, long idle periods and errors.
+`make core-net-math-vectors` regenerates reviewed fixtures; the check target
+detects oracle/crate-copy drift. The older `fee_owing` / `carrying_transfer`
+APIs remain solely for legacy comparisons and their current callers.
 
 The identity kernel's ground truth is the executable Python reference in
 `alberta_buck/wallet` (py_ecc):

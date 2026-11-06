@@ -1,5 +1,5 @@
-//! Buck demurrage -- the exact `_feeOwing` / `_carryingTransfer`
-//! buckSeconds algebra from src/Buck.sol.
+//! Legacy BuckLinear demurrage -- `_feeOwing` / `_carryingTransfer`
+//! buckSeconds algebra. Canonical BuckCash uses crate::net_demurrage.
 //!
 //! buckSeconds is the cumulative integral of (balance * dt), crystallised
 //! through each account's timestamp; the live value adds the current
@@ -8,9 +8,8 @@
 //! ```text
 //! fee = (buckSeconds + raw * elapsed) * BASE_RATE_PER_SEC / SCALE
 //! ```
-//! This mirrors the current gross-balance model, not the intended net-balance
-//! correction. See doc/review/net-demurrage-analysis.org before using it as
-//! a specification for future accrual or Jubilee funding.
+//! This retains the old gross-balance model for comparison callers. It is
+//! not a specification for canonical cash accrual or Jubilee funding.
 //!
 //! Carrying transfers apportion the sender's live buckSeconds to the
 //! recipient in proportion value/raw, so demurrage follows the BUCKs.

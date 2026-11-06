@@ -94,6 +94,7 @@ make nix-venv-core-test-py                 # Python platform tests
 make nix-core-test-js                     # JS platform and available browser tests
 make nix-venv-net-demurrage-smoke          # canonical linked Buck, Python/JS EVM and real identity proofs
 make nix-core-test-rust                   # Rust kernels and shared-vector checks
+make nix-venv-core-net-math-test          # build + compare canonical uint256 math in Solidity/Rust/Python/Node/Chromium
 make nix-venv-economy-test                # Python/JS households, policy parity, runner tests
 make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_economy.py
 make nix-core-test-js JS_TEST_ARGS=test/household-policy.test.js
@@ -108,6 +109,19 @@ dependencies are already present. Nix does not install these packages automatica
 provided by Nix; check skipped-test reasons. The savings browser test additionally needs its
 Python server: see [[file:README-sandboxes.org][the sandbox guide]]. Missing =anvil= is an environment failure, not a
 passing integration test; use the =nix-= wrapper.
+
+The canonical money kernel uses unsigned 256-bit inputs and 512-bit
+multiply/divide intermediates. One full BUCK is =10^42= internal cash units
+(six external decimals times =Q= =10^36=). =core-net-math-test= builds both
+native and Node/web WASM bindings and requires the Chromium test to run;
+missing or stale bindings fail this target. It checks the same independent
+Python-integer vectors against Solidity, Rust, Python, Node and the browser,
+including overflow and very old balances. Regenerate reviewed vectors with
+=make core-net-math-vectors=; =core-net-math-vectors-check= verifies the
+oracle output and the copy shipped with the Rust crate. This target starts
+no economy and provides no five-year evidence. Existing =fee_owing= and
+=carrying_transfer= helpers describe the retained legacy linear model;
+new accounting uses =net_decay=, =net_fund_after= and =net_target_relief=.
 
 Foundry excludes SNARK tests whose generated proof fixtures are absent, visibly. Their setup
 and regeneration, executable papers, release builds and deployment procedures remain in

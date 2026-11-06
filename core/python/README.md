@@ -42,6 +42,28 @@ per-platform wheel matrix behind it.
 In a repo checkout the built `.so` sits beside the shim and CPython prefers
 the extension, so a freshly rebuilt kernel takes effect immediately.
 
+The canonical monetary functions use full uint256 Python `int` values:
+
+```python
+from buck_core import buck_math
+
+year = 31_557_600
+cash = 10**42                 # one BUCK: 1e6 raw units times 1e36
+remaining = buck_math.net_decay(cash, year)
+fund = buck_math.net_fund_after(cash, 0, year)
+assert remaining + fund == cash
+baseline_relief = buck_math.net_target_relief(100_000_000, 100_000_000 * year, 100_000_000)
+```
+
+`net_target_relief` takes raw NFT principal, raw BUCK-seconds and a raw
+principal reduction; its output is a baseline, not a liquid fund quote.
+`mul_div_256(a, b, denominator, round_up=False)` uses an exact 512-bit
+product. Negative/out-of-range values and invalid arithmetic fail explicitly.
+These require the current compiled math kernel; they have no legacy fallback.
+`fee_owing` and `carrying_transfer` retain the old linear model for comparison
+callers. In a checkout, run `make nix-venv-core-net-math-test` for Solidity,
+Rust, Python, Node and browser agreement.
+
 ## Status
 
 0.4.0, prototype. Unaudited software for a monetary system, published so

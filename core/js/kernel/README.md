@@ -54,14 +54,19 @@ instead, which wraps these in a BigInt-native API and handles the loading.
 
 ## ABI notes
 
-`math` crosses `u128`/`i128` as JS `BigInt`. `identity` crosses 256-bit words
+Canonical `math.net_decay`, `net_fund_after`, `net_target_relief` and
+`mul_div_256` use exactly 32 big-endian bytes per uint256 operand/result.
+`alberta-buck-core/net-math` exposes them as `BigInt` through `createNetMath`;
+pass the same initialized Node or web module. Products retain all 512 bits,
+and invalid inputs/quotient overflow return errors rather than truncating.
+The older linear-model math and PID/depreciation functions cross
+`u128`/`i128` as JS `BigInt`. `identity` crosses 256-bit words
 as `0x`-prefixed hex strings; `alberta-buck-core` wraps that into the
 BigInt-native surface.
 
-The wasm is not run through `wasm-opt`: `buck_identity_bg.wasm` is about
-1.2 MB uncompressed and compresses well over the wire. Optimizing it is a
-size improvement, not a correctness one, and is tracked in the deployment
-plan.
+The bindings' Cargo profiles configure `wasm-opt` for release builds;
+the pinned Nix shell supplies it. Both the Node and web entry points are
+built from the same Rust kernel.
 
 ## Status
 

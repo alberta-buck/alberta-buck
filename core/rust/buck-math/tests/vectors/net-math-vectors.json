@@ -1,0 +1,3733 @@
+{
+  "format": 1,
+  "model": "Buck/compounded-cash/per-facility-jubilee/v1",
+  "scale": "0xc097ce7bc90715b34b9f1000000000",
+  "count": 318,
+  "cases": [
+    {
+      "name": "decay-0-0",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-1",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-31557600",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-1546322400",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x5c2b01e0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-1577880000",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-1609437600",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x5fee11a0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-31557599999",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x758fac2ff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-31557600000",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x758fac300"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-31557600001",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x758fac301"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-252460800000",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x3ac7d61800"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-284018399999",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x4220d0daff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-284018400000",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "decay",
+      "args": [
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-0",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "decay-1-1",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-31557600",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-1546322400",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x5c2b01e0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-1577880000",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-1609437600",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x5fee11a0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-31557599999",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x758fac2ff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-31557600000",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x758fac300"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-31557600001",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x758fac301"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-252460800000",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x3ac7d61800"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-284018399999",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x4220d0daff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-284018400000",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "decay",
+      "args": [
+        "0x1",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-0",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-1",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf423f",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-31557600",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0xef4e6",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-1546322400",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x5c2b01e0"
+      ],
+      "roundUp": false,
+      "value": "0x5ba0f",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-1577880000",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x59d07",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-1609437600",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x5fee11a0"
+      ],
+      "roundUp": false,
+      "value": "0x58092",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-31557599999",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x758fac2ff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-31557600000",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x758fac300"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-31557600001",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x758fac301"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-252460800000",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x3ac7d61800"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-284018399999",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x4220d0daff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-284018400000",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "decay",
+      "args": [
+        "0xf4240",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-0",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xc097ce7bc90715b34b9f1000000000",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-1",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xc097ce79bccad00fb675b4f5bc29fa",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-31557600",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0xbcc7869a818c0226e61d5ee59d75ef",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-1546322400",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x5c2b01e0"
+      ],
+      "roundUp": false,
+      "value": "0x4848440d05d9c0630d17afdc0322e2",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-1577880000",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x46d9db57f5dbf2773d0eebca5e06c3",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-1609437600",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x5fee11a0"
+      ],
+      "roundUp": false,
+      "value": "0x4572b403c7e3a7767e91f699320236",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-31557599999",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x758fac2ff"
+      ],
+      "roundUp": false,
+      "value": "0x6a8f241d5a381edafc62d26",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-31557600000",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x758fac300"
+      ],
+      "roundUp": false,
+      "value": "0x6a8f241c382aae14cf87256",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-31557600001",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x758fac301"
+      ],
+      "roundUp": false,
+      "value": "0x6a8f241b161d3d51b8304bf",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-252460800000",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x3ac7d61800"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-284018399999",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x4220d0daff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-284018400000",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "decay",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-0",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xb7abc627050305adf14a3d9e40000000000",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-1",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xb7abc625110fdad43c1dd907a9e6782f280",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-31557600",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0xb408b85a3133a9bd60cc5a94325e8c619c0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-1546322400",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x5c2b01e0"
+      ],
+      "roundUp": false,
+      "value": "0x44ef0b05fb685dfd76686af26dedb04fc80",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-1577880000",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x43919bb2aeb43607bef6ced60a13aacf6c0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-1609437600",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x5fee11a0"
+      ],
+      "roundUp": false,
+      "value": "0x423b17b4eb0d17a07d4ceb90b13523c7980",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-31557599999",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x758fac2ff"
+      ],
+      "roundUp": false,
+      "value": "0x659f6a8d0e1e2d4d0f59ae691580",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-31557600000",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x758fac300"
+      ],
+      "roundUp": false,
+      "value": "0x659f6a8bf98093ec50b9fea0c180",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-31557600001",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x758fac301"
+      ],
+      "roundUp": false,
+      "value": "0x659f6a8ae4e2fa8e830bef392a5c",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-252460800000",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x3ac7d61800"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-284018399999",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x4220d0daff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-284018400000",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "decay",
+      "args": [
+        "0xb7abc627050305adf14a3d9e40000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-0",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-1",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xfffffffd472beca9e45f175db58c0ba953a2103af85ab82d39",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-31557600",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0xfaee4cdd6f62db92bfbdd91d3e2a15e306bbfda3c7149545cb",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-1546322400",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x5c2b01e0"
+      ],
+      "roundUp": false,
+      "value": "0x6014635f648065a1399f7540fc39e3fa5e58217858124f57fb",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-1577880000",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x5e2d58d8b3bcdf1abadec751515a762155bcbdf4d8185a1bb1",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-1609437600",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x5fee11a0"
+      ],
+      "roundUp": false,
+      "value": "0x5c4ff333257d9b8f81eb4056b8c74050991d002f1c206b7b68",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-31557599999",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x758fac2ff"
+      ],
+      "roundUp": false,
+      "value": "0x8da432b11d1ef7ae7bb05903ce727017206153239a3",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-31557600000",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x758fac300"
+      ],
+      "roundUp": false,
+      "value": "0x8da432af9b93373025a284acb2dbd8f8f67f7133720",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-31557600001",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x758fac301"
+      ],
+      "roundUp": false,
+      "value": "0x8da432ae1a0776b5e908087f1beb1f2970d5de16440",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-252460800000",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x3ac7d61800"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-284018399999",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x4220d0daff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-284018400000",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-1606938044258990275541962092341162602522202993782792835301376-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "decay",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-1",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xfffffffd472beca9e45f175db58c0ba953a2103af85ab82d392aea2a568d79db",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-31557600",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0xfaee4cdd6f62db92bfbdd91d3e2a15e306bbfda3c7149545cb408655888fcb5d",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-1546322400",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x5c2b01e0"
+      ],
+      "roundUp": false,
+      "value": "0x6014635f648065a1399f7540fc39e3fa5e58217858124f57fb03dd229f1d2590",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-1577880000",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x5e2d58d8b3bcdf1abadec751515a762155bcbdf4d8185a1bb1c6a92d7f6c3b5d",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-1609437600",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x5fee11a0"
+      ],
+      "roundUp": false,
+      "value": "0x5c4ff333257d9b8f81eb4056b8c74050991d002f1c206b7b68b8948a33915f39",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-31557599999",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x758fac2ff"
+      ],
+      "roundUp": false,
+      "value": "0x8da432b11d1ef7ae7bb05903ce727017206153239a3682c0b189ae6cf",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-31557600000",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x758fac300"
+      ],
+      "roundUp": false,
+      "value": "0x8da432af9b93373025a284acb2dbd8f8f67f71337203a5e795e43ac7e",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-31557600001",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x758fac301"
+      ],
+      "roundUp": false,
+      "value": "0x8da432ae1a0776b5e908087f1beb1f2970d5de16440b98b52b9fca9aa",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-252460800000",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x3ac7d61800"
+      ],
+      "roundUp": false,
+      "value": "0x23f8c64",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-284018399999",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x4220d0daff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-284018400000",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "decay-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "decay",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-0-0",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-0-31557600",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x16bb16402bcffe9f8712cafed531129df100",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-0-1577880000",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x2d5a389571b6c91ceba8974635105146f9d00",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-0-284018400000",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x47bf19673df52e37f2410011d100000000000",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-10000000000000000000000000000000000000000000-0",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x72cb5bd86321e38cb6ce6682e80000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x72cb5bd86321e38cb6ce6682e80000000000",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-10000000000000000000000000000000000000000000-31557600",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x72cb5bd86321e38cb6ce6682e80000000000",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x874089788a9048b5e392839b74ac2a5af280",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-10000000000000000000000000000000000000000000-1577880000",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x72cb5bd86321e38cb6ce6682e80000000000",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x2ffde8aa6c89d339391e3b5a917515f314080",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-10000000000000000000000000000000000000000000-284018400000",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x72cb5bd86321e38cb6ce6682e80000000000",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x47bf19673df52e37f2410011d100000000000",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-0",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x23df8cb39efa971bf9208008e880000000000",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-31557600",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x24956565a0591710f5591660df298894ef880",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1577880000",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x3a8ca8fe57d5fbaa6ef4cbac030828a37ce80",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-284018400000",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x47bf19673df52e37f2410011d100000000000",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-0",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x47bf19673df52e37f2410011d100000000000",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-31557600",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x47bf19673df52e37f2410011d100000000000",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1577880000",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0x47bf19673df52e37f2410011d100000000000",
+      "error": ""
+    },
+    {
+      "name": "fund-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-284018400000",
+      "op": "fundNetAfter",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0x47bf19673df52e37f2410011d100000000000",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-0",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-31557600",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x511b322909d246d404226e2c1d5ea1cf944025c38eb6aba34bf79aa777034a2",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1577880000",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0xa1d2a7274c4320e5452138aeaea589deaa43420b27e7a5e44e3956d28093c4a2",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-284018400000",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-11579208923731619542357098500868790785326998466564056403945758400791312963993-0",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1999999999999999999999999999999999999999999999999999999999999999",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x1999999999999999999999999999999999999999999999999999999999999999",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-11579208923731619542357098500868790785326998466564056403945758400791312963993-31557600",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1999999999999999999999999999999999999999999999999999999999999999",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x1e29879f1bc0a0c8b9d522ff480d52b3ad239bb9666d79a795df87196b7e95c4",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-11579208923731619542357098500868790785326998466564056403945758400791312963993-1577880000",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1999999999999999999999999999999999999999999999999999999999999999",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0xab3d96702b093734be377fd069fb627b993c883d3d83aee713339af0a6eb642c",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-11579208923731619542357098500868790785326998466564056403945758400791312963993-284018400000",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1999999999999999999999999999999999999999999999999999999999999999",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-0",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-31557600",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x8288d991484e9236a021137160eaf50e7ca2012e1c75b55d1a5fbcd53bb81a50",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1577880000",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0xd0e95393a6219072a2909c575752c4ef5521a10593f3d2f2271cab694049e251",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-284018400000",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-31557600",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1577880000",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x5e0c89c0"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "fund-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-284018400000",
+      "op": "fundNetAfter",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x4220d0db00"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "fund-too-large",
+      "op": "fundNetAfter",
+      "args": [
+        "0x63",
+        "0x64",
+        "0x1e187e0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "fund exceeds issuance"
+    },
+    {
+      "name": "relief-1-0-0",
+      "op": "targetRelief",
+      "args": [
+        "0x1",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-1-0-1",
+      "op": "targetRelief",
+      "args": [
+        "0x1",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-1-31557600-0",
+      "op": "targetRelief",
+      "args": [
+        "0x1",
+        "0x1e187e0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-1-31557600-1",
+      "op": "targetRelief",
+      "args": [
+        "0x1",
+        "0x1e187e0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-1-1577880000-0",
+      "op": "targetRelief",
+      "args": [
+        "0x1",
+        "0x5e0c89c0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-1-1577880000-1",
+      "op": "targetRelief",
+      "args": [
+        "0x1",
+        "0x5e0c89c0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "relief-1-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "targetRelief",
+      "args": [
+        "0x1",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-1-115792089237316195423570985008687907853269984665640564039457584007913129639935-1",
+      "op": "targetRelief",
+      "args": [
+        "0x1",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-0-0",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-0-1",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-0-33333333",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0x0",
+        "0x1fca055"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-0-100000000",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0x0",
+        "0x5f5e100"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-3155760000000000-0",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0xb3625a1cbe000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-3155760000000000-1",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0xb3625a1cbe000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-3155760000000000-33333333",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0xb3625a1cbe000",
+        "0x1fca055"
+      ],
+      "roundUp": false,
+      "value": "0xa2c2a",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-3155760000000000-100000000",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0xb3625a1cbe000",
+        "0x5f5e100"
+      ],
+      "roundUp": false,
+      "value": "0x1e8480",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-157788000000000000-0",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0x230935999d1c000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-157788000000000000-1",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0x230935999d1c000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-157788000000000000-33333333",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0x230935999d1c000",
+        "0x1fca055"
+      ],
+      "roundUp": false,
+      "value": "0x1fca055",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-157788000000000000-100000000",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0x230935999d1c000",
+        "0x5f5e100"
+      ],
+      "roundUp": false,
+      "value": "0x5f5e100",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-115792089237316195423570985008687907853269984665640564039457584007913129639935-1",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-115792089237316195423570985008687907853269984665640564039457584007913129639935-33333333",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1fca055"
+      ],
+      "roundUp": false,
+      "value": "0x1fca055",
+      "error": ""
+    },
+    {
+      "name": "relief-100000000-115792089237316195423570985008687907853269984665640564039457584007913129639935-100000000",
+      "op": "targetRelief",
+      "args": [
+        "0x5f5e100",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x5f5e100"
+      ],
+      "roundUp": false,
+      "value": "0x5f5e100",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-0",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-38597363079105398474523661669562635951089994888546854679819194669304376546645",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-38597363079105398474523661669562635951089994888546854679819194669304376546645",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "roundUp": false,
+      "value": "0xe846b11df0009c5bb6323b132940ec81882c42012834a1fe6ade6f64",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x2b8d41359d001d5132296b1397bc2c5849884c603789de5fb409b4e2d",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-38597363079105398474523661669562635951089994888546854679819194669304376546645",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "roundUp": false,
+      "value": "0xe846b11df0009c5bb6323b132940ec81882c42012834a1fe6ade6f64",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x2b8d41359d001d5132296b1397bc2c5849884c603789de5fb409b4e2d",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-38597363079105398474523661669562635951089994888546854679819194669304376546645",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "roundUp": false,
+      "value": "0xe846b11df0009c5bb6323b132940ec81882c42012834a1fe6ade6f64",
+      "error": ""
+    },
+    {
+      "name": "relief-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "targetRelief",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x2b8d41359d001d5132296b1397bc2c5849884c603789de5fb409b4e2d",
+      "error": ""
+    },
+    {
+      "name": "zero-principal",
+      "op": "targetRelief",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "invalid principal"
+    },
+    {
+      "name": "excess-reduction",
+      "op": "targetRelief",
+      "args": [
+        "0x64",
+        "0xbc191380",
+        "0x65"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "invalid principal"
+    },
+    {
+      "name": "muldiv-0-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "division by zero"
+    },
+    {
+      "name": "muldiv-0-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "division by zero"
+    },
+    {
+      "name": "muldiv-1-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "muldiv-1-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "muldiv-2-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x1",
+        "0x1",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "muldiv-2-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x1",
+        "0x1",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": true,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "muldiv-3-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "division by zero"
+    },
+    {
+      "name": "muldiv-3-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "division by zero"
+    },
+    {
+      "name": "muldiv-4-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "muldiv-4-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": true,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "muldiv-5-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-5-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-6-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-6-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-7-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+        "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+        "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "muldiv-7-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+        "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+        "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-8-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x3"
+      ],
+      "roundUp": false,
+      "value": "0x304c053fa35f136e3ed871f86cff65ef45225211a0555555555555555555",
+      "error": ""
+    },
+    {
+      "name": "muldiv-8-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x3"
+      ],
+      "roundUp": true,
+      "value": "0x304c053fa35f136e3ed871f86cff65ef45225211a0555555555555555556",
+      "error": ""
+    },
+    {
+      "name": "muldiv-9-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x8000000000000000000000000000000000000000000000000000000000000000",
+        "0x2",
+        "0x2"
+      ],
+      "roundUp": false,
+      "value": "0x8000000000000000000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "muldiv-9-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x8000000000000000000000000000000000000000000000000000000000000000",
+        "0x2",
+        "0x2"
+      ],
+      "roundUp": true,
+      "value": "0x8000000000000000000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "muldiv-10-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x100000000000000000000000000000000",
+        "0x100000000000000000000000000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "muldiv-10-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x100000000000000000000000000000000",
+        "0x100000000000000000000000000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": true,
+      "value": "0x2",
+      "error": ""
+    },
+    {
+      "name": "muldiv-11-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x2000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x8000000000000000000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "muldiv-11-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x2000000000000000000000000000000000000"
+      ],
+      "roundUp": true,
+      "value": "0x8000000000000000000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "muldiv-12-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x7fec261f1a357c584af4b9f3cd18f857b8268b7b3bea9410b6636c1c65dff410",
+        "0x2e56581ee0f7278308846fcd550604e8bbd3079009dee92e62072a9e53bcd64",
+        "0x62803a52711f4093f569e29a6398b0cedeb7b93834448eff394d2c28c8aa6b55"
+      ],
+      "roundUp": false,
+      "value": "0x3c2d8c5bbffc202a43f998b238c6a482721202b5993337504124dd3b00d8c4c",
+      "error": ""
+    },
+    {
+      "name": "muldiv-12-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x7fec261f1a357c584af4b9f3cd18f857b8268b7b3bea9410b6636c1c65dff410",
+        "0x2e56581ee0f7278308846fcd550604e8bbd3079009dee92e62072a9e53bcd64",
+        "0x62803a52711f4093f569e29a6398b0cedeb7b93834448eff394d2c28c8aa6b55"
+      ],
+      "roundUp": true,
+      "value": "0x3c2d8c5bbffc202a43f998b238c6a482721202b5993337504124dd3b00d8c4d",
+      "error": ""
+    },
+    {
+      "name": "muldiv-13-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x640d2eec51fd34fccd1692011efd2e65ecd7e233ed1f65ad9e05eff737e52eb",
+        "0x3a1425338f4a97d11d6e90e6faedd47aadc88adb9f5ebc4f4309dd8b383b3bd5",
+        "0x7c2c4817bce4e2750235a74b0e4997915e0887eee40ac8d07cf545f405520cb5"
+      ],
+      "roundUp": false,
+      "value": "0x2ecbe72d186c8393fec28c9e48090b59b1e8e12bccc72c226168bceba6abd0f",
+      "error": ""
+    },
+    {
+      "name": "muldiv-13-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x640d2eec51fd34fccd1692011efd2e65ecd7e233ed1f65ad9e05eff737e52eb",
+        "0x3a1425338f4a97d11d6e90e6faedd47aadc88adb9f5ebc4f4309dd8b383b3bd5",
+        "0x7c2c4817bce4e2750235a74b0e4997915e0887eee40ac8d07cf545f405520cb5"
+      ],
+      "roundUp": true,
+      "value": "0x2ecbe72d186c8393fec28c9e48090b59b1e8e12bccc72c226168bceba6abd10",
+      "error": ""
+    },
+    {
+      "name": "muldiv-14-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x47d7e4a0160d2116b7b915c1778d764ee82269f4f0b1551f5e3b2b96c3c94367",
+        "0xae3607082ffb762aff6529a923f75959628dea49d4746756070cfca229ab47c1",
+        "0x9d12826eaf727e1ddc51faa3a9c47cd67ce255f836221cc06752a1d420058935"
+      ],
+      "roundUp": false,
+      "value": "0x4faeb367774d00de3434e2b7cbfffafb682b354cf3bdf0480483638be55c1bbf",
+      "error": ""
+    },
+    {
+      "name": "muldiv-14-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x47d7e4a0160d2116b7b915c1778d764ee82269f4f0b1551f5e3b2b96c3c94367",
+        "0xae3607082ffb762aff6529a923f75959628dea49d4746756070cfca229ab47c1",
+        "0x9d12826eaf727e1ddc51faa3a9c47cd67ce255f836221cc06752a1d420058935"
+      ],
+      "roundUp": true,
+      "value": "0x4faeb367774d00de3434e2b7cbfffafb682b354cf3bdf0480483638be55c1bc0",
+      "error": ""
+    },
+    {
+      "name": "muldiv-15-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xcf5fc5fcf5f6c35b0e2ad15553648e328fb745b0461452afd67d0ca02eb508ac",
+        "0x43973b0e7a65a7b2629ab2e9db936f7c65c69dcd8bb5b6999510204dd45869a0",
+        "0xe585e5063f3ed1829c583061013745c197bd45eb65da3e239164bae12cb55162"
+      ],
+      "roundUp": false,
+      "value": "0x3d117938aa2c37778cf0de5fb09e6ed90db4ad39ed8f762d5f8bd84e0b25809d",
+      "error": ""
+    },
+    {
+      "name": "muldiv-15-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xcf5fc5fcf5f6c35b0e2ad15553648e328fb745b0461452afd67d0ca02eb508ac",
+        "0x43973b0e7a65a7b2629ab2e9db936f7c65c69dcd8bb5b6999510204dd45869a0",
+        "0xe585e5063f3ed1829c583061013745c197bd45eb65da3e239164bae12cb55162"
+      ],
+      "roundUp": true,
+      "value": "0x3d117938aa2c37778cf0de5fb09e6ed90db4ad39ed8f762d5f8bd84e0b25809e",
+      "error": ""
+    },
+    {
+      "name": "muldiv-16-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xb2a87c939d2d8bc3dfe7e28f1ef9a39261b890a3462e01b214956a0be881722b",
+        "0x6064ba446c08e3f9d08747ea2f37478c09c9d58abe28fb6858a931417a3bacc",
+        "0xc515576cabc09708ad4dd58cff0484a5f5eb71a501a245562fcf6e1ce4318e36"
+      ],
+      "roundUp": false,
+      "value": "0x5761b6cbe0415c46dd7c6eea0043d611a0a172a800e34e71264aa971e6daeeb",
+      "error": ""
+    },
+    {
+      "name": "muldiv-16-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xb2a87c939d2d8bc3dfe7e28f1ef9a39261b890a3462e01b214956a0be881722b",
+        "0x6064ba446c08e3f9d08747ea2f37478c09c9d58abe28fb6858a931417a3bacc",
+        "0xc515576cabc09708ad4dd58cff0484a5f5eb71a501a245562fcf6e1ce4318e36"
+      ],
+      "roundUp": true,
+      "value": "0x5761b6cbe0415c46dd7c6eea0043d611a0a172a800e34e71264aa971e6daeec",
+      "error": ""
+    },
+    {
+      "name": "muldiv-17-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x6f82e81241ef0963ce68d32f3d0bef5c0a266c87470b120aa9df3661cdb37a0b",
+        "0xa5385cceed8db3993b80d893a0ce2809cff9ffc80e70e3fad2e14eea6f50b983",
+        "0x773ba9b57fe95f69358594240b3e1642c479ac12b0dc792c6547ec9390e456ed"
+      ],
+      "roundUp": false,
+      "value": "0x9a85306bba29fc6a3e6594af4d1129994a2f3e6c94e48c1893028c2f32bdffd2",
+      "error": ""
+    },
+    {
+      "name": "muldiv-17-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x6f82e81241ef0963ce68d32f3d0bef5c0a266c87470b120aa9df3661cdb37a0b",
+        "0xa5385cceed8db3993b80d893a0ce2809cff9ffc80e70e3fad2e14eea6f50b983",
+        "0x773ba9b57fe95f69358594240b3e1642c479ac12b0dc792c6547ec9390e456ed"
+      ],
+      "roundUp": true,
+      "value": "0x9a85306bba29fc6a3e6594af4d1129994a2f3e6c94e48c1893028c2f32bdffd3",
+      "error": ""
+    },
+    {
+      "name": "muldiv-18-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xdcc97f2406375d2b5d5f225a251c45fee4a164a671f04e39d0c0cc33e3a10271",
+        "0xe575b07122e22b9cdd3ee8fc375e8efc7e13c6807439e4c92342bb37313b0c90",
+        "0xcbcb9340e48c9e9ea6662635a0718bce5a37a110f474d68abf6e6e138acdbbe2"
+      ],
+      "roundUp": false,
+      "value": "0xf8976898029dd85644738d5e01178689d7dc2167e3569e6ce2d39504f6002ff3",
+      "error": ""
+    },
+    {
+      "name": "muldiv-18-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xdcc97f2406375d2b5d5f225a251c45fee4a164a671f04e39d0c0cc33e3a10271",
+        "0xe575b07122e22b9cdd3ee8fc375e8efc7e13c6807439e4c92342bb37313b0c90",
+        "0xcbcb9340e48c9e9ea6662635a0718bce5a37a110f474d68abf6e6e138acdbbe2"
+      ],
+      "roundUp": true,
+      "value": "0xf8976898029dd85644738d5e01178689d7dc2167e3569e6ce2d39504f6002ff4",
+      "error": ""
+    },
+    {
+      "name": "muldiv-19-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xceb25039bd749ee59a27f2491e9eb338272d4e8c93874021430af3c60f5bc14d",
+        "0x2bf5d87083ddbd2967026f8b0d54bef0eadbe433b04d409eda3bea84e43e2e67",
+        "0x5800db2a7220355f6bd2cd304964d2efd7fc1e12b0f80b14e43f985b5d3b9a39"
+      ],
+      "roundUp": false,
+      "value": "0x67404d0d851d94d4f4720e758500999208f9150b287212a1b23b56fdb232616c",
+      "error": ""
+    },
+    {
+      "name": "muldiv-19-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xceb25039bd749ee59a27f2491e9eb338272d4e8c93874021430af3c60f5bc14d",
+        "0x2bf5d87083ddbd2967026f8b0d54bef0eadbe433b04d409eda3bea84e43e2e67",
+        "0x5800db2a7220355f6bd2cd304964d2efd7fc1e12b0f80b14e43f985b5d3b9a39"
+      ],
+      "roundUp": true,
+      "value": "0x67404d0d851d94d4f4720e758500999208f9150b287212a1b23b56fdb232616d",
+      "error": ""
+    },
+    {
+      "name": "muldiv-20-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x99ce16254def61eaac68eaeb39b852611f6ea4b8d41b7356452452cee6184be2",
+        "0x2d5e1842c78350552d32d4735a3887b30e1203ef3b1f57700621581236f89bd0",
+        "0x22390b7a335f90d943fecdee2f960460742391a241a5db96195356e9dba286e6"
+      ],
+      "roundUp": false,
+      "value": "0xcbe45409a5881780b869baa05557949b4a52ef2a77f3f0f23fb8c84cd511fa2d",
+      "error": ""
+    },
+    {
+      "name": "muldiv-20-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x99ce16254def61eaac68eaeb39b852611f6ea4b8d41b7356452452cee6184be2",
+        "0x2d5e1842c78350552d32d4735a3887b30e1203ef3b1f57700621581236f89bd0",
+        "0x22390b7a335f90d943fecdee2f960460742391a241a5db96195356e9dba286e6"
+      ],
+      "roundUp": true,
+      "value": "0xcbe45409a5881780b869baa05557949b4a52ef2a77f3f0f23fb8c84cd511fa2e",
+      "error": ""
+    },
+    {
+      "name": "muldiv-21-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xd56267c6117832c991b324f4d8ea37e0c71a7e233a39b1acb720b00cbecf43d4",
+        "0xcf3179bd53b9cb9e6b32f8dfc43b5748fde94f43767d3e66c99ba6a2f11a7a6e",
+        "0xe553215373bf87c2ca3e6229e0579dfee87d9d689bc420ab318935bbeafe3fe3"
+      ],
+      "roundUp": false,
+      "value": "0xc0ca91d3661cb0cce90e2541120787e91225bb04d039a4034e3f70a09db4ca73",
+      "error": ""
+    },
+    {
+      "name": "muldiv-21-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xd56267c6117832c991b324f4d8ea37e0c71a7e233a39b1acb720b00cbecf43d4",
+        "0xcf3179bd53b9cb9e6b32f8dfc43b5748fde94f43767d3e66c99ba6a2f11a7a6e",
+        "0xe553215373bf87c2ca3e6229e0579dfee87d9d689bc420ab318935bbeafe3fe3"
+      ],
+      "roundUp": true,
+      "value": "0xc0ca91d3661cb0cce90e2541120787e91225bb04d039a4034e3f70a09db4ca74",
+      "error": ""
+    },
+    {
+      "name": "muldiv-22-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x2ea8315ac8e2abb08a744903de6b6411066b5c7223b8d4c4ae26b39bb6f7d2e2",
+        "0xa4db35a9188ae7e78f2e99f119f04b447db8a917c91a8605ae30bc841326110a",
+        "0xead158e6720056c4f6bec05fbad9b5596cc794aa313355740ff4ef303d0d864c"
+      ],
+      "roundUp": false,
+      "value": "0x20c18beaf6e6031411cde20ce00fb70f702a6a6c09d90a86a19d88f0a9e645dc",
+      "error": ""
+    },
+    {
+      "name": "muldiv-22-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x2ea8315ac8e2abb08a744903de6b6411066b5c7223b8d4c4ae26b39bb6f7d2e2",
+        "0xa4db35a9188ae7e78f2e99f119f04b447db8a917c91a8605ae30bc841326110a",
+        "0xead158e6720056c4f6bec05fbad9b5596cc794aa313355740ff4ef303d0d864c"
+      ],
+      "roundUp": true,
+      "value": "0x20c18beaf6e6031411cde20ce00fb70f702a6a6c09d90a86a19d88f0a9e645dd",
+      "error": ""
+    },
+    {
+      "name": "muldiv-23-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x23577cb6cea83426ff66f75e4462a66cef832a9dac5f8f4f6b4e2f71d8d5bfe5",
+        "0x6b10629cf047179b136b7c1e47af1a92e7699ae8490d9eb2f42d42a6505a45e6",
+        "0xa7a77e1af99c19e5a9e2ad0b4c1d4718ae61e161f6e30a5793be6d4d6768ff4f"
+      ],
+      "roundUp": false,
+      "value": "0x1691b9873fe38d2ead0e0b69fc9b537f91cda4c307e1994adeab6a5cf55dae8e",
+      "error": ""
+    },
+    {
+      "name": "muldiv-23-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x23577cb6cea83426ff66f75e4462a66cef832a9dac5f8f4f6b4e2f71d8d5bfe5",
+        "0x6b10629cf047179b136b7c1e47af1a92e7699ae8490d9eb2f42d42a6505a45e6",
+        "0xa7a77e1af99c19e5a9e2ad0b4c1d4718ae61e161f6e30a5793be6d4d6768ff4f"
+      ],
+      "roundUp": true,
+      "value": "0x1691b9873fe38d2ead0e0b69fc9b537f91cda4c307e1994adeab6a5cf55dae8f",
+      "error": ""
+    },
+    {
+      "name": "muldiv-24-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xa5944f75958bebd72649d882c64e95cb4d9bb2c7ad638008e5284dbb2c35a15c",
+        "0x92c7f67836260824b92fada85dcf8b390ae8c0488caa27838bd8e3d10af3f93",
+        "0x647750c8fb9711cf8bb55b09bf64aef341b40200db44de36838fa7ff6b8b42b4"
+      ],
+      "roundUp": false,
+      "value": "0xf1e9645376adf381b61711f78f8f89af451270d66eb178b1ce6b0ec1156d051",
+      "error": ""
+    },
+    {
+      "name": "muldiv-24-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xa5944f75958bebd72649d882c64e95cb4d9bb2c7ad638008e5284dbb2c35a15c",
+        "0x92c7f67836260824b92fada85dcf8b390ae8c0488caa27838bd8e3d10af3f93",
+        "0x647750c8fb9711cf8bb55b09bf64aef341b40200db44de36838fa7ff6b8b42b4"
+      ],
+      "roundUp": true,
+      "value": "0xf1e9645376adf381b61711f78f8f89af451270d66eb178b1ce6b0ec1156d052",
+      "error": ""
+    },
+    {
+      "name": "muldiv-25-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x99dc1ec01565d19599085d997f153f0a5d58c058992d93f89cadd6e438622e3f",
+        "0x6421936b2ef93e9fb68964694200be1d3842ba59c522dae5c2c0e779bc354c0a",
+        "0x4561900e906602d74125a7b80724b0851db96f1f0a0b9a450801d1dd849c5aeb"
+      ],
+      "roundUp": false,
+      "value": "0xde0d219c0b2db26e23d1470292a88369f8fd0fd654781b5518169fcd9d540209",
+      "error": ""
+    },
+    {
+      "name": "muldiv-25-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x99dc1ec01565d19599085d997f153f0a5d58c058992d93f89cadd6e438622e3f",
+        "0x6421936b2ef93e9fb68964694200be1d3842ba59c522dae5c2c0e779bc354c0a",
+        "0x4561900e906602d74125a7b80724b0851db96f1f0a0b9a450801d1dd849c5aeb"
+      ],
+      "roundUp": true,
+      "value": "0xde0d219c0b2db26e23d1470292a88369f8fd0fd654781b5518169fcd9d54020a",
+      "error": ""
+    },
+    {
+      "name": "muldiv-26-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x9a076fd759e9825f4af188bf2e3a4ef05831c0d3735ace1ed712eb205921e724",
+        "0xe30ad29493c6dac7cb0cac4fb7a3d6d39306317ec54400b04488472f53882e90",
+        "0xdf9e1801311c66ecdde9ed655937bbf6afa3937de1cdcb86cb8b2ec3b9a05bb2"
+      ],
+      "roundUp": false,
+      "value": "0x9c63552bde4dd1834997329cdc0af901a1fe7ee7d91f86ce23b980b997cfd782",
+      "error": ""
+    },
+    {
+      "name": "muldiv-26-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x9a076fd759e9825f4af188bf2e3a4ef05831c0d3735ace1ed712eb205921e724",
+        "0xe30ad29493c6dac7cb0cac4fb7a3d6d39306317ec54400b04488472f53882e90",
+        "0xdf9e1801311c66ecdde9ed655937bbf6afa3937de1cdcb86cb8b2ec3b9a05bb2"
+      ],
+      "roundUp": true,
+      "value": "0x9c63552bde4dd1834997329cdc0af901a1fe7ee7d91f86ce23b980b997cfd783",
+      "error": ""
+    },
+    {
+      "name": "muldiv-27-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xf8336a22b20719992515363ed20a21a503a10600e66cc4a49af488be560d0332",
+        "0x799bce6a5e0b2e445bba2cea021d65143e6732722d944226b955bcf1aaab3d35",
+        "0xe06884eea2e86d49023055d86e4beee526e1d3b3437b7b394304869c4d3846ba"
+      ],
+      "roundUp": false,
+      "value": "0x868082b630a015afb41a8d405f02537fc933a3195c62820d73624f444960cca4",
+      "error": ""
+    },
+    {
+      "name": "muldiv-27-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xf8336a22b20719992515363ed20a21a503a10600e66cc4a49af488be560d0332",
+        "0x799bce6a5e0b2e445bba2cea021d65143e6732722d944226b955bcf1aaab3d35",
+        "0xe06884eea2e86d49023055d86e4beee526e1d3b3437b7b394304869c4d3846ba"
+      ],
+      "roundUp": true,
+      "value": "0x868082b630a015afb41a8d405f02537fc933a3195c62820d73624f444960cca5",
+      "error": ""
+    },
+    {
+      "name": "muldiv-28-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xbd224c7df8dbfb1cd2423b3ddbeb13d9663c1691fc136b4d526b62f5710424e",
+        "0xb835acd91dd01dd817a8eae17baed30b42dba5a8dd4764511710e5e7fb420288",
+        "0x586fd58920a76325e32ec02cc45d6eafc31526e6bcd5fab78051aeabfc4a6968"
+      ],
+      "roundUp": false,
+      "value": "0x189f4f7254f5f79f08f1c28cf51e7fca5ce32ab231ea7470f3ef8366382eac99",
+      "error": ""
+    },
+    {
+      "name": "muldiv-28-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xbd224c7df8dbfb1cd2423b3ddbeb13d9663c1691fc136b4d526b62f5710424e",
+        "0xb835acd91dd01dd817a8eae17baed30b42dba5a8dd4764511710e5e7fb420288",
+        "0x586fd58920a76325e32ec02cc45d6eafc31526e6bcd5fab78051aeabfc4a6968"
+      ],
+      "roundUp": true,
+      "value": "0x189f4f7254f5f79f08f1c28cf51e7fca5ce32ab231ea7470f3ef8366382eac9a",
+      "error": ""
+    },
+    {
+      "name": "muldiv-29-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x22bd2992026bb5be7aaeaf0d052fc32cf01467225c82b4b6f4ee8ae518667e64",
+        "0xbfd325fc68e0b3b0a75063189f5c17a71cda308b5e9466f49aa5829ec4bf0fe",
+        "0x5a7235e78dd2aec0a2ea86973047225448bdf296fe44157c587bab0e1b958616"
+      ],
+      "roundUp": false,
+      "value": "0x49ad456d1dc4b709c36d2bfb39022b2e34232896cc0828c02ab854a6ad503f5",
+      "error": ""
+    },
+    {
+      "name": "muldiv-29-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x22bd2992026bb5be7aaeaf0d052fc32cf01467225c82b4b6f4ee8ae518667e64",
+        "0xbfd325fc68e0b3b0a75063189f5c17a71cda308b5e9466f49aa5829ec4bf0fe",
+        "0x5a7235e78dd2aec0a2ea86973047225448bdf296fe44157c587bab0e1b958616"
+      ],
+      "roundUp": true,
+      "value": "0x49ad456d1dc4b709c36d2bfb39022b2e34232896cc0828c02ab854a6ad503f6",
+      "error": ""
+    },
+    {
+      "name": "muldiv-30-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xcf2732797a6b12caa2555b68fe5ed35aedb32f357752ae58c22e6f8512c3bbe1",
+        "0x2f1d51a96043158f7ec915d44baa1814de02e819af40e95df6f2689e3476829b",
+        "0x57e2c4885dd068fb047b23748aceb9342be39d754e64a82d7acb8b8c891eab9a"
+      ],
+      "roundUp": false,
+      "value": "0x6f0d63337dd33f46be5086f4f4ec68d6a33c7889a0c1368f926eee3e82a248b8",
+      "error": ""
+    },
+    {
+      "name": "muldiv-30-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xcf2732797a6b12caa2555b68fe5ed35aedb32f357752ae58c22e6f8512c3bbe1",
+        "0x2f1d51a96043158f7ec915d44baa1814de02e819af40e95df6f2689e3476829b",
+        "0x57e2c4885dd068fb047b23748aceb9342be39d754e64a82d7acb8b8c891eab9a"
+      ],
+      "roundUp": true,
+      "value": "0x6f0d63337dd33f46be5086f4f4ec68d6a33c7889a0c1368f926eee3e82a248b9",
+      "error": ""
+    },
+    {
+      "name": "muldiv-31-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xe3c06b58282dd8ade12a1f3e384d2a7a012144f460acc44b7d6cbed14e0242ed",
+        "0x6998a81b5fce588f8b8659e867b59bcec70475b9aedb8ed5130029d551595040",
+        "0xb1d1eaa3984041d518af9663bbaa04f10e602bbedad76bb31d12e07497028ca8"
+      ],
+      "roundUp": false,
+      "value": "0x873f6568a621cdcdeb97682616e908730fbb8340f849e81cc5983201b07d9eb6",
+      "error": ""
+    },
+    {
+      "name": "muldiv-31-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xe3c06b58282dd8ade12a1f3e384d2a7a012144f460acc44b7d6cbed14e0242ed",
+        "0x6998a81b5fce588f8b8659e867b59bcec70475b9aedb8ed5130029d551595040",
+        "0xb1d1eaa3984041d518af9663bbaa04f10e602bbedad76bb31d12e07497028ca8"
+      ],
+      "roundUp": true,
+      "value": "0x873f6568a621cdcdeb97682616e908730fbb8340f849e81cc5983201b07d9eb7",
+      "error": ""
+    },
+    {
+      "name": "muldiv-32-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xa65451a8374236faae2849aa4626096d20a05bb562fc365101e01014a0efd7e0",
+        "0x4b82a8f7743b75bb4c2be9f317c1582ba4edd8bacad8c732986724d1e3ecb871",
+        "0xe1aa82275e29f4d02330ebbec8b0a0caba62f5552bb3268bcd24d1b5decfd2ec"
+      ],
+      "roundUp": false,
+      "value": "0x37a7da2ed97462067b4712e5d79f1e5ecfcc4546eb62c921bb5c6d3d8f945a91",
+      "error": ""
+    },
+    {
+      "name": "muldiv-32-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xa65451a8374236faae2849aa4626096d20a05bb562fc365101e01014a0efd7e0",
+        "0x4b82a8f7743b75bb4c2be9f317c1582ba4edd8bacad8c732986724d1e3ecb871",
+        "0xe1aa82275e29f4d02330ebbec8b0a0caba62f5552bb3268bcd24d1b5decfd2ec"
+      ],
+      "roundUp": true,
+      "value": "0x37a7da2ed97462067b4712e5d79f1e5ecfcc4546eb62c921bb5c6d3d8f945a92",
+      "error": ""
+    },
+    {
+      "name": "muldiv-33-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x1571c04ee2737558c7b959ff18b2fff197a3d99560a95f39b5fb0643a278ffd9",
+        "0xb1ceba653b72204fab50459878460735121773838c07e07cce48f3f1770787e2",
+        "0x3feca57929e09fd0cc14bc0d0feeadf886cbdb72642b5e3cd1cd2ccb09bcedbb"
+      ],
+      "roundUp": false,
+      "value": "0x3ba5e610edfc2dc66328b5299decaff3349ad628e362cc1825d480ebea27df3c",
+      "error": ""
+    },
+    {
+      "name": "muldiv-33-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x1571c04ee2737558c7b959ff18b2fff197a3d99560a95f39b5fb0643a278ffd9",
+        "0xb1ceba653b72204fab50459878460735121773838c07e07cce48f3f1770787e2",
+        "0x3feca57929e09fd0cc14bc0d0feeadf886cbdb72642b5e3cd1cd2ccb09bcedbb"
+      ],
+      "roundUp": true,
+      "value": "0x3ba5e610edfc2dc66328b5299decaff3349ad628e362cc1825d480ebea27df3d",
+      "error": ""
+    },
+    {
+      "name": "muldiv-34-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xf266115d932ab2bc3ea513ba632475effd82ce3895b9767658c31de18020ee49",
+        "0x81b852d87305e0a56a4dc24c1a43d7195abbf0c588d556c4679743038994bdf0",
+        "0x879091096b9d660b59b4a2406dff072c7757cce274ac3b7a442492db9fd9912b"
+      ],
+      "roundUp": false,
+      "value": "0xe7f2afa9aabd92a4f6b00ff28e3d69bdc1696c3143707976260551ede790050d",
+      "error": ""
+    },
+    {
+      "name": "muldiv-34-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xf266115d932ab2bc3ea513ba632475effd82ce3895b9767658c31de18020ee49",
+        "0x81b852d87305e0a56a4dc24c1a43d7195abbf0c588d556c4679743038994bdf0",
+        "0x879091096b9d660b59b4a2406dff072c7757cce274ac3b7a442492db9fd9912b"
+      ],
+      "roundUp": true,
+      "value": "0xe7f2afa9aabd92a4f6b00ff28e3d69bdc1696c3143707976260551ede790050e",
+      "error": ""
+    },
+    {
+      "name": "muldiv-35-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xa2fff27464a52c05d70375556a0cc7cefd3cc4e56f97b6bdf5529ecb67708fc6",
+        "0x504c0fab8356bf2e3eccda76a838be3290d301ff5a5894f540addde8563e4cfb",
+        "0x585f4f56ad42f20f550120a0001cb6b1cbbe426c3ffcceafc04dff7aa9a74095"
+      ],
+      "roundUp": false,
+      "value": "0x941af9a7189724f14eeb9541465529f6a052d9da5e9d83962ce967d3034867a2",
+      "error": ""
+    },
+    {
+      "name": "muldiv-35-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xa2fff27464a52c05d70375556a0cc7cefd3cc4e56f97b6bdf5529ecb67708fc6",
+        "0x504c0fab8356bf2e3eccda76a838be3290d301ff5a5894f540addde8563e4cfb",
+        "0x585f4f56ad42f20f550120a0001cb6b1cbbe426c3ffcceafc04dff7aa9a74095"
+      ],
+      "roundUp": true,
+      "value": "0x941af9a7189724f14eeb9541465529f6a052d9da5e9d83962ce967d3034867a3",
+      "error": ""
+    },
+    {
+      "name": "muldiv-36-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x6a1c6b7520c759aae40d37536d5c21d9bfd7adb4b7a6cb12abc0fc596cf9533",
+        "0xb78bfc7d68ca102bb0da4e07d0ff5192e90607a5c98303508aa5e68236cb59d2",
+        "0xca48842ec2b0dcc7d54d4fda509070506b94b38d47a7a104a6cc979aaa199faf"
+      ],
+      "roundUp": false,
+      "value": "0x6048522ef132fdf8458d235d501be9979de3fcab79e430b5293a6bc7e8132a3",
+      "error": ""
+    },
+    {
+      "name": "muldiv-36-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x6a1c6b7520c759aae40d37536d5c21d9bfd7adb4b7a6cb12abc0fc596cf9533",
+        "0xb78bfc7d68ca102bb0da4e07d0ff5192e90607a5c98303508aa5e68236cb59d2",
+        "0xca48842ec2b0dcc7d54d4fda509070506b94b38d47a7a104a6cc979aaa199faf"
+      ],
+      "roundUp": true,
+      "value": "0x6048522ef132fdf8458d235d501be9979de3fcab79e430b5293a6bc7e8132a4",
+      "error": ""
+    },
+    {
+      "name": "muldiv-37-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x5d586152105df28eb3ed594e5c3e4e5a53563b700f41fce92fe72e03f6111d0c",
+        "0x8016fa98709137561c73a15690684e73d11679dd91fb60cd64c73dcb3c5fd659",
+        "0x45ea23b89eb1359540f93bb7a383d9ce37692ea1302fdd43bd8614010a6085c9"
+      ],
+      "roundUp": false,
+      "value": "0xab0449a37786e7f5f5180ed70d06fa5d9f67fd09de6effda5222c261b383dac0",
+      "error": ""
+    },
+    {
+      "name": "muldiv-37-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x5d586152105df28eb3ed594e5c3e4e5a53563b700f41fce92fe72e03f6111d0c",
+        "0x8016fa98709137561c73a15690684e73d11679dd91fb60cd64c73dcb3c5fd659",
+        "0x45ea23b89eb1359540f93bb7a383d9ce37692ea1302fdd43bd8614010a6085c9"
+      ],
+      "roundUp": true,
+      "value": "0xab0449a37786e7f5f5180ed70d06fa5d9f67fd09de6effda5222c261b383dac1",
+      "error": ""
+    },
+    {
+      "name": "muldiv-38-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xa93887636047be890b6faa3ad048be8aefe86c47c5c2bd9df468870afc3811c7",
+        "0xa33a4edf23ed7809feecb15964cdbe022905c978b053960494696145673cacf8",
+        "0xf2d5f5a82e6e4c5047c1e18f30830ccaef3a797fa5fe1f01f210b1d77054004f"
+      ],
+      "roundUp": false,
+      "value": "0x71bee8e3eeaae42d44094a98c6ed2cde98c6b0e01747fe3e0ec0e2ebd2a8a921",
+      "error": ""
+    },
+    {
+      "name": "muldiv-38-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xa93887636047be890b6faa3ad048be8aefe86c47c5c2bd9df468870afc3811c7",
+        "0xa33a4edf23ed7809feecb15964cdbe022905c978b053960494696145673cacf8",
+        "0xf2d5f5a82e6e4c5047c1e18f30830ccaef3a797fa5fe1f01f210b1d77054004f"
+      ],
+      "roundUp": true,
+      "value": "0x71bee8e3eeaae42d44094a98c6ed2cde98c6b0e01747fe3e0ec0e2ebd2a8a922",
+      "error": ""
+    },
+    {
+      "name": "muldiv-39-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xa1b5264309b2b8cf6daf2a1e87b60ab977c44c0d262a3cab17326f6abbf61fd2",
+        "0xfcd1e1488ce4e31ec07f24cd283b879f9a764189daa45d59387eb129de2dac1",
+        "0xf4e747d42da9218ce63dfaafa5d910c4c43e72eb9f85e9b184bdbd586250045d"
+      ],
+      "roundUp": false,
+      "value": "0xa6ef4ba3f9ac801a37719fe4b47da613657f49925ac346fa946ff7f651d10c1",
+      "error": ""
+    },
+    {
+      "name": "muldiv-39-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xa1b5264309b2b8cf6daf2a1e87b60ab977c44c0d262a3cab17326f6abbf61fd2",
+        "0xfcd1e1488ce4e31ec07f24cd283b879f9a764189daa45d59387eb129de2dac1",
+        "0xf4e747d42da9218ce63dfaafa5d910c4c43e72eb9f85e9b184bdbd586250045d"
+      ],
+      "roundUp": true,
+      "value": "0xa6ef4ba3f9ac801a37719fe4b47da613657f49925ac346fa946ff7f651d10c2",
+      "error": ""
+    },
+    {
+      "name": "muldiv-40-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x76a0c669a5020e9c4f0bad2f4c2b3a2174a85cca3ee9562555dc9321c54d52",
+        "0x77e54103f40ebbf4fa69fc59e34ddb28aa58ba295e7bd25239a2680271d738ef",
+        "0x2b60bc72a66577f4bd4525db4c779513ae5d985bfe8cac221cb48d2fc929493f"
+      ],
+      "roundUp": false,
+      "value": "0x147e2a59fdbe3a8513bb8312e048e9d6bcbf4a7f9ee49b783b17bdd920e74ff",
+      "error": ""
+    },
+    {
+      "name": "muldiv-40-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x76a0c669a5020e9c4f0bad2f4c2b3a2174a85cca3ee9562555dc9321c54d52",
+        "0x77e54103f40ebbf4fa69fc59e34ddb28aa58ba295e7bd25239a2680271d738ef",
+        "0x2b60bc72a66577f4bd4525db4c779513ae5d985bfe8cac221cb48d2fc929493f"
+      ],
+      "roundUp": true,
+      "value": "0x147e2a59fdbe3a8513bb8312e048e9d6bcbf4a7f9ee49b783b17bdd920e7500",
+      "error": ""
+    },
+    {
+      "name": "muldiv-41-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xfce4af3711f62db328f4748e87ee37d03e8cb26f8651c0ce8a9404cc277856c1",
+        "0xad3aed02cc1e78e61c2348fab65e591ca9881d75e19e6d0fd88b95198ebca9d3",
+        "0xe502a3524c5ff4f9fe76ab51b24133dc288ed1e67a2454f10996a4c8c72399dd"
+      ],
+      "roundUp": false,
+      "value": "0xbf4bc58e166022eb04c808a6c99247e543da7dd3b8f681eb4eab10f48733d18a",
+      "error": ""
+    },
+    {
+      "name": "muldiv-41-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xfce4af3711f62db328f4748e87ee37d03e8cb26f8651c0ce8a9404cc277856c1",
+        "0xad3aed02cc1e78e61c2348fab65e591ca9881d75e19e6d0fd88b95198ebca9d3",
+        "0xe502a3524c5ff4f9fe76ab51b24133dc288ed1e67a2454f10996a4c8c72399dd"
+      ],
+      "roundUp": true,
+      "value": "0xbf4bc58e166022eb04c808a6c99247e543da7dd3b8f681eb4eab10f48733d18b",
+      "error": ""
+    },
+    {
+      "name": "muldiv-42-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x105dd52a88a528f1be3ff5ac77bd9d61f20dd7845bc22c88ed2fa2ebc3a5e14e",
+        "0x7b018588062bf1a5e18a71760e6a4c39163598e1e69ba894c0ae051f6518be8f",
+        "0x2554cd0210023d1b056635918fb90922d6317e54b7735b61537f36041e3851e2"
+      ],
+      "roundUp": false,
+      "value": "0x35ed70474726ebab917f9986e79d59bec6a14e062e38dd03c7155876c40e1541",
+      "error": ""
+    },
+    {
+      "name": "muldiv-42-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x105dd52a88a528f1be3ff5ac77bd9d61f20dd7845bc22c88ed2fa2ebc3a5e14e",
+        "0x7b018588062bf1a5e18a71760e6a4c39163598e1e69ba894c0ae051f6518be8f",
+        "0x2554cd0210023d1b056635918fb90922d6317e54b7735b61537f36041e3851e2"
+      ],
+      "roundUp": true,
+      "value": "0x35ed70474726ebab917f9986e79d59bec6a14e062e38dd03c7155876c40e1542",
+      "error": ""
+    },
+    {
+      "name": "muldiv-43-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xe902c912ca43a8d968bd3e9871f410176b7104a65799603ed9d83c482d78ef99",
+        "0x8187bc36fda941bbf82195eda5f0a01df814299095846ce700e90f7fa3c3303a",
+        "0x831091a10afcabeaf7cab5c17825e7ed9745e9648ebac6caa38a300b36ab13b3"
+      ],
+      "roundUp": false,
+      "value": "0xe64864cc14eb3a71882f3fc53fbb0912cd2255692b4e52ffe9eadcf482f79c6f",
+      "error": ""
+    },
+    {
+      "name": "muldiv-43-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xe902c912ca43a8d968bd3e9871f410176b7104a65799603ed9d83c482d78ef99",
+        "0x8187bc36fda941bbf82195eda5f0a01df814299095846ce700e90f7fa3c3303a",
+        "0x831091a10afcabeaf7cab5c17825e7ed9745e9648ebac6caa38a300b36ab13b3"
+      ],
+      "roundUp": true,
+      "value": "0xe64864cc14eb3a71882f3fc53fbb0912cd2255692b4e52ffe9eadcf482f79c70",
+      "error": ""
+    },
+    {
+      "name": "muldiv-44-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x96085977d86446a5375cac55d61a4d92b4f664b4918b999381fcc479b3d87da1",
+        "0x950c60277cad69173af02e3f458444ae082fbd44b1b5e44b4e4d1715124b65c5",
+        "0xd6a4cd9fe2be6a521b887bceb245f02052f409b361689da4c02c17f61c2df7"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-44-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x96085977d86446a5375cac55d61a4d92b4f664b4918b999381fcc479b3d87da1",
+        "0x950c60277cad69173af02e3f458444ae082fbd44b1b5e44b4e4d1715124b65c5",
+        "0xd6a4cd9fe2be6a521b887bceb245f02052f409b361689da4c02c17f61c2df7"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-45-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xbfaa3f3c3223cd449378c79d32bcf943e62391f3460c0d11b5aae5b8a5f0cc3b",
+        "0xb7afcfce228169cb1b5c169e706ac7dcf866990b01c002a11c68cf195eca65b0",
+        "0xe47b889cc4d363fd3280b0eebbd2489dd7e5471bbfc32d4ce7e2c36617be3076"
+      ],
+      "roundUp": false,
+      "value": "0x9a166d1835078691d8c07804b407755acf765f5f2cf58e3604a9a534faa2b295",
+      "error": ""
+    },
+    {
+      "name": "muldiv-45-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xbfaa3f3c3223cd449378c79d32bcf943e62391f3460c0d11b5aae5b8a5f0cc3b",
+        "0xb7afcfce228169cb1b5c169e706ac7dcf866990b01c002a11c68cf195eca65b0",
+        "0xe47b889cc4d363fd3280b0eebbd2489dd7e5471bbfc32d4ce7e2c36617be3076"
+      ],
+      "roundUp": true,
+      "value": "0x9a166d1835078691d8c07804b407755acf765f5f2cf58e3604a9a534faa2b296",
+      "error": ""
+    },
+    {
+      "name": "muldiv-46-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x2a1ae90c8a2953000073d8b074734ac4e28e824c89ccda9d5e5baaa773391efc",
+        "0x4c1f46a32644ff6c43533aecb91154140afc034380e55038157f86c3233be48",
+        "0x715b2c8544a07503d9b7bd591909fd39e5a073ed319b94b7234f933c1666007c"
+      ],
+      "roundUp": false,
+      "value": "0x1c465f722a0ca7553f313e199430819f35761bb730105a35632df3bd66ad8bb",
+      "error": ""
+    },
+    {
+      "name": "muldiv-46-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x2a1ae90c8a2953000073d8b074734ac4e28e824c89ccda9d5e5baaa773391efc",
+        "0x4c1f46a32644ff6c43533aecb91154140afc034380e55038157f86c3233be48",
+        "0x715b2c8544a07503d9b7bd591909fd39e5a073ed319b94b7234f933c1666007c"
+      ],
+      "roundUp": true,
+      "value": "0x1c465f722a0ca7553f313e199430819f35761bb730105a35632df3bd66ad8bc",
+      "error": ""
+    },
+    {
+      "name": "muldiv-47-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xba0d94e61f932d4200ae0db1059b4b65d15d1a5a74b76c4bb8784734b8f8b796",
+        "0x615da27c517eda9a2fbfe1f3658a23f24cfc9f5560c51bb7336848a328b91e39",
+        "0x4b48ae29e2e76d5ba30c9153d50f1395a515e6ae303e5bf2502cf0fe5fed4aa0"
+      ],
+      "roundUp": false,
+      "value": "0xf0a005e9961a7232042c4396b82946328eb14e52449a7899c7b0c5cb1307a7d1",
+      "error": ""
+    },
+    {
+      "name": "muldiv-47-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xba0d94e61f932d4200ae0db1059b4b65d15d1a5a74b76c4bb8784734b8f8b796",
+        "0x615da27c517eda9a2fbfe1f3658a23f24cfc9f5560c51bb7336848a328b91e39",
+        "0x4b48ae29e2e76d5ba30c9153d50f1395a515e6ae303e5bf2502cf0fe5fed4aa0"
+      ],
+      "roundUp": true,
+      "value": "0xf0a005e9961a7232042c4396b82946328eb14e52449a7899c7b0c5cb1307a7d2",
+      "error": ""
+    },
+    {
+      "name": "muldiv-48-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x2e60e2e0f40c1792432e931f0c56ce1eaac5433fb410a0271d22883efb4e6880",
+        "0xe6e406746df15ac1235dc2d523656506bcdae194690e271334d272537658a68a",
+        "0xf0c62f587e7d42fbe570c28903dc8d1a6d84a7bed9a35d056d4c70c9042386e8"
+      ],
+      "roundUp": false,
+      "value": "0x2c79856b5e5be31a4a4e7fe13f0e44b946bf63d105187b221626c3c1e66569a1",
+      "error": ""
+    },
+    {
+      "name": "muldiv-48-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x2e60e2e0f40c1792432e931f0c56ce1eaac5433fb410a0271d22883efb4e6880",
+        "0xe6e406746df15ac1235dc2d523656506bcdae194690e271334d272537658a68a",
+        "0xf0c62f587e7d42fbe570c28903dc8d1a6d84a7bed9a35d056d4c70c9042386e8"
+      ],
+      "roundUp": true,
+      "value": "0x2c79856b5e5be31a4a4e7fe13f0e44b946bf63d105187b221626c3c1e66569a2",
+      "error": ""
+    },
+    {
+      "name": "muldiv-49-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xb7692f49747eeb8043d85f993daf2063564f8251e8a5e588d041bc6912104dee",
+        "0xf99e49b523838c2489418e82173bf60dc03dd81eeda0ff02151902194cc1f7cb",
+        "0xe8c827e932587f6dd13b39df4f356dd814f22dbf551e81fb0e4e5dcf4473ba72"
+      ],
+      "roundUp": false,
+      "value": "0xc4ad2cfb47276dfefc473ac9daa98ff9144a2055f002088c268e27ced417f771",
+      "error": ""
+    },
+    {
+      "name": "muldiv-49-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xb7692f49747eeb8043d85f993daf2063564f8251e8a5e588d041bc6912104dee",
+        "0xf99e49b523838c2489418e82173bf60dc03dd81eeda0ff02151902194cc1f7cb",
+        "0xe8c827e932587f6dd13b39df4f356dd814f22dbf551e81fb0e4e5dcf4473ba72"
+      ],
+      "roundUp": true,
+      "value": "0xc4ad2cfb47276dfefc473ac9daa98ff9144a2055f002088c268e27ced417f772",
+      "error": ""
+    },
+    {
+      "name": "muldiv-50-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xd3cbdae77bbed1a44054e0aab14a77cc1ccb35163e028d85354576a7d740570c",
+        "0xdda4c9559b7a4964c9bea7805be20cab72f835ee5e4c72746606b0ca87803e86",
+        "0x881040c2759cb6ff548d126029456e294c4f66891a3285c4e91f96a5c8b4d9eb"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-50-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xd3cbdae77bbed1a44054e0aab14a77cc1ccb35163e028d85354576a7d740570c",
+        "0xdda4c9559b7a4964c9bea7805be20cab72f835ee5e4c72746606b0ca87803e86",
+        "0x881040c2759cb6ff548d126029456e294c4f66891a3285c4e91f96a5c8b4d9eb"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-51-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x9fda298fe728402c3aefafe152ed06784c01449e99cbd963f527d6f38aeaa05d",
+        "0x26a2a7177a2cd38585adcf4e2c2931b5fdcd953925f8fb149d679f9e13b60d80",
+        "0xd689ab5340e35a0967abbcc376dc01c9ca6ab93a132330b74dabdf30a11a4568"
+      ],
+      "roundUp": false,
+      "value": "0x1cc987b5df6a4222343ebf1c1f7a900fe0d44c48b9639191f246f0e2a7ec20a9",
+      "error": ""
+    },
+    {
+      "name": "muldiv-51-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x9fda298fe728402c3aefafe152ed06784c01449e99cbd963f527d6f38aeaa05d",
+        "0x26a2a7177a2cd38585adcf4e2c2931b5fdcd953925f8fb149d679f9e13b60d80",
+        "0xd689ab5340e35a0967abbcc376dc01c9ca6ab93a132330b74dabdf30a11a4568"
+      ],
+      "roundUp": true,
+      "value": "0x1cc987b5df6a4222343ebf1c1f7a900fe0d44c48b9639191f246f0e2a7ec20aa",
+      "error": ""
+    },
+    {
+      "name": "muldiv-52-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xb3fbe73df1271297e6e0c2b7dfed100819bdf6e47fb5df6af9d8e0bd69fac562",
+        "0x239d7497f967fd9dae5e6a3262b1fc3f952f6293f4364318bfd345233b8a3652",
+        "0x801cc3919bb3afb43648e01f8414fe9270ade79ce4c1d78eec469e4a796c0f3f"
+      ],
+      "roundUp": false,
+      "value": "0x320909b9bccb3236b457e5400b523ba5fab4e6fc1021e289a6a5fcde48b66d22",
+      "error": ""
+    },
+    {
+      "name": "muldiv-52-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xb3fbe73df1271297e6e0c2b7dfed100819bdf6e47fb5df6af9d8e0bd69fac562",
+        "0x239d7497f967fd9dae5e6a3262b1fc3f952f6293f4364318bfd345233b8a3652",
+        "0x801cc3919bb3afb43648e01f8414fe9270ade79ce4c1d78eec469e4a796c0f3f"
+      ],
+      "roundUp": true,
+      "value": "0x320909b9bccb3236b457e5400b523ba5fab4e6fc1021e289a6a5fcde48b66d23",
+      "error": ""
+    },
+    {
+      "name": "muldiv-53-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xc1493fa3219d2a3c969f06b911bb7c97735d784025e76f37df097c4fd7171c19",
+        "0xf3147c09c65fe699241c682db1301f6ab6b1ab5c7be6b88fcc82b34983f61edb",
+        "0xdd0d13af1a1431950caeda205a6b23dd63d12bb924047b41453c18a623d3ee5c"
+      ],
+      "roundUp": false,
+      "value": "0xd48c529adc6390ea28d136cd24f44ccecebda25eec075093ccb222b1031532a3",
+      "error": ""
+    },
+    {
+      "name": "muldiv-53-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xc1493fa3219d2a3c969f06b911bb7c97735d784025e76f37df097c4fd7171c19",
+        "0xf3147c09c65fe699241c682db1301f6ab6b1ab5c7be6b88fcc82b34983f61edb",
+        "0xdd0d13af1a1431950caeda205a6b23dd63d12bb924047b41453c18a623d3ee5c"
+      ],
+      "roundUp": true,
+      "value": "0xd48c529adc6390ea28d136cd24f44ccecebda25eec075093ccb222b1031532a4",
+      "error": ""
+    },
+    {
+      "name": "muldiv-54-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xc9d16b709bad79c5b8dfb10c3fed42659079d61b1e919c84245af1ad57e18c32",
+        "0x597e1e2e49106150d5283fb3fec795a93eda6d72851bbf39a254533c6e6ea276",
+        "0x38c3755c231f4734e6718bf5de57c20c47d2b0a30453cf02bc86fe45fc81034d"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-54-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xc9d16b709bad79c5b8dfb10c3fed42659079d61b1e919c84245af1ad57e18c32",
+        "0x597e1e2e49106150d5283fb3fec795a93eda6d72851bbf39a254533c6e6ea276",
+        "0x38c3755c231f4734e6718bf5de57c20c47d2b0a30453cf02bc86fe45fc81034d"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-55-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x19dbe48f3265152345670941e021f05c9152a5136e2e812ac21e43db2b17360",
+        "0x6433b3a01ec0031cc0cc3cf3f559a9c66bb60833de77d7a145857cdd3f59d58f",
+        "0x2ff87db51c1c29d41cbc3139ae4714e2b5a660292833960efbaf1ae4e6d9b6d"
+      ],
+      "roundUp": false,
+      "value": "0x3603bf11bbf7a7a5b2f60fcc29284f7129c73d04a205cda5f115c2fff9c4cd1d",
+      "error": ""
+    },
+    {
+      "name": "muldiv-55-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x19dbe48f3265152345670941e021f05c9152a5136e2e812ac21e43db2b17360",
+        "0x6433b3a01ec0031cc0cc3cf3f559a9c66bb60833de77d7a145857cdd3f59d58f",
+        "0x2ff87db51c1c29d41cbc3139ae4714e2b5a660292833960efbaf1ae4e6d9b6d"
+      ],
+      "roundUp": true,
+      "value": "0x3603bf11bbf7a7a5b2f60fcc29284f7129c73d04a205cda5f115c2fff9c4cd1e",
+      "error": ""
+    },
+    {
+      "name": "muldiv-56-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x8075654225a74241f1985d0e906ccb89f2d31448c2ceb3b5d4285ad352b2cf1d",
+        "0xbff082320c7fae869773fdea962e93ed44ee721ab5e03b6feddc1aba6b90ca18",
+        "0x16211bb254eca352a23b798d2cc6402305ce4042bb99aa5769692b0987ad135c"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-56-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x8075654225a74241f1985d0e906ccb89f2d31448c2ceb3b5d4285ad352b2cf1d",
+        "0xbff082320c7fae869773fdea962e93ed44ee721ab5e03b6feddc1aba6b90ca18",
+        "0x16211bb254eca352a23b798d2cc6402305ce4042bb99aa5769692b0987ad135c"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-57-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xfa81a92e59e2c6c107cbcfb28ca0658b46b533f84146133a3ff3e1b23b5d5de2",
+        "0x42deda6e4014f4871aa0dba22e9b13978449949fa9b0fa7b40fa5f5a3b8dd8a1",
+        "0xba230fe9eb83cec9f3df8da514bd34ddd5ff7d1d8020d9cde152f814beb7a865"
+      ],
+      "roundUp": false,
+      "value": "0x59fedcb6872c3fa5ebb4e26ddce3352db44d3bc9a9b2e42d2729137a41084e8e",
+      "error": ""
+    },
+    {
+      "name": "muldiv-57-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xfa81a92e59e2c6c107cbcfb28ca0658b46b533f84146133a3ff3e1b23b5d5de2",
+        "0x42deda6e4014f4871aa0dba22e9b13978449949fa9b0fa7b40fa5f5a3b8dd8a1",
+        "0xba230fe9eb83cec9f3df8da514bd34ddd5ff7d1d8020d9cde152f814beb7a865"
+      ],
+      "roundUp": true,
+      "value": "0x59fedcb6872c3fa5ebb4e26ddce3352db44d3bc9a9b2e42d2729137a41084e8f",
+      "error": ""
+    },
+    {
+      "name": "muldiv-58-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x500fc9dc8ba3945bc9966d0771f1678c7a0f82557feb241dcf9838b649d0c0fa",
+        "0x3728b4c03aeeeb30abc80978750bf3f638c85c5566d0bb5b825ed208f16ced4d",
+        "0x7ff5584813cb89440b5609ac13b520ba320a979af2946f41c8cd87ff3220c750"
+      ],
+      "roundUp": false,
+      "value": "0x22831e314db8e9454f6fcd30527b2e2a0de8ea55a548b03a91dd27fbb146c51c",
+      "error": ""
+    },
+    {
+      "name": "muldiv-58-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x500fc9dc8ba3945bc9966d0771f1678c7a0f82557feb241dcf9838b649d0c0fa",
+        "0x3728b4c03aeeeb30abc80978750bf3f638c85c5566d0bb5b825ed208f16ced4d",
+        "0x7ff5584813cb89440b5609ac13b520ba320a979af2946f41c8cd87ff3220c750"
+      ],
+      "roundUp": true,
+      "value": "0x22831e314db8e9454f6fcd30527b2e2a0de8ea55a548b03a91dd27fbb146c51d",
+      "error": ""
+    },
+    {
+      "name": "muldiv-59-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x7acd3cbb94f432ebcab706a185f7829de49e0af37344994b67f58a40521352a7",
+        "0xd855c9785466da98245158879c71f9e01b657be33a36e340a1956976dd553ebb",
+        "0xa26e9952d2ceab159e8e410ab0de1a2369fb38077c1dd0f33598e70707341190"
+      ],
+      "roundUp": false,
+      "value": "0xa38dafb7a1bdd87205845c78d3e7366566d5250ae4e4b96cef1ae10f817e4908",
+      "error": ""
+    },
+    {
+      "name": "muldiv-59-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x7acd3cbb94f432ebcab706a185f7829de49e0af37344994b67f58a40521352a7",
+        "0xd855c9785466da98245158879c71f9e01b657be33a36e340a1956976dd553ebb",
+        "0xa26e9952d2ceab159e8e410ab0de1a2369fb38077c1dd0f33598e70707341190"
+      ],
+      "roundUp": true,
+      "value": "0xa38dafb7a1bdd87205845c78d3e7366566d5250ae4e4b96cef1ae10f817e4909",
+      "error": ""
+    },
+    {
+      "name": "muldiv-60-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x6fb287d4a099ea5c451c9984cb2dcb4e62720a6a0f39a39862db8c4a7762315c",
+        "0x3d877adb46ab1532f6564301f71cb34f1815de7f43fdd52ba87d5239299b5710",
+        "0x1205acaa01d507303b94088a0f8ea67c39e729cb1fe26e732d65a627974a9b15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-60-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x6fb287d4a099ea5c451c9984cb2dcb4e62720a6a0f39a39862db8c4a7762315c",
+        "0x3d877adb46ab1532f6564301f71cb34f1815de7f43fdd52ba87d5239299b5710",
+        "0x1205acaa01d507303b94088a0f8ea67c39e729cb1fe26e732d65a627974a9b15"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-61-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xc79a79a6379bdce680c1353c28191b610c35717b4edd64f58d762f65776651e1",
+        "0xe831a0d8c5972ea55310fe06e384c4f97d6299aefd61f6934a9bf4bcbc7a91f1",
+        "0xe66b94c2e5c90c35e915eff2dc161e360fafb88fd99ab50312e58bc70580983b"
+      ],
+      "roundUp": false,
+      "value": "0xc923cc1c35a00aa69d09d752cfa3d61955ab80f4ccb8ddf36c4cf170d3a91d49",
+      "error": ""
+    },
+    {
+      "name": "muldiv-61-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xc79a79a6379bdce680c1353c28191b610c35717b4edd64f58d762f65776651e1",
+        "0xe831a0d8c5972ea55310fe06e384c4f97d6299aefd61f6934a9bf4bcbc7a91f1",
+        "0xe66b94c2e5c90c35e915eff2dc161e360fafb88fd99ab50312e58bc70580983b"
+      ],
+      "roundUp": true,
+      "value": "0xc923cc1c35a00aa69d09d752cfa3d61955ab80f4ccb8ddf36c4cf170d3a91d4a",
+      "error": ""
+    },
+    {
+      "name": "muldiv-62-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x92bd2955f9fcafec270fbd7263fcadba464be146436ec7dff4bc5c8e05259cef",
+        "0x35c7979a0bfa59bf1f5896d49a3ca13201b29db5fc4a6f5337d1db9a1752b151",
+        "0xeedbe734c13774bcbf7c0d5001312a9d0aa483575b7041b8a412d257d1e68089"
+      ],
+      "roundUp": false,
+      "value": "0x2109e21a85599ad5aa389be01999c3816d505ea6d54e3430da2c8a939fe34fd5",
+      "error": ""
+    },
+    {
+      "name": "muldiv-62-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x92bd2955f9fcafec270fbd7263fcadba464be146436ec7dff4bc5c8e05259cef",
+        "0x35c7979a0bfa59bf1f5896d49a3ca13201b29db5fc4a6f5337d1db9a1752b151",
+        "0xeedbe734c13774bcbf7c0d5001312a9d0aa483575b7041b8a412d257d1e68089"
+      ],
+      "roundUp": true,
+      "value": "0x2109e21a85599ad5aa389be01999c3816d505ea6d54e3430da2c8a939fe34fd6",
+      "error": ""
+    },
+    {
+      "name": "muldiv-63-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x3c72682c7e78d968d1bda1a8a936bd610930610d86354c59fefa3b46326a5fd9",
+        "0x4f826ce27977b7867d1d04bfcd8ffb6b0c2a0f230ac56c432b52a7f2314fd122",
+        "0x48eca225329819fbec5dade0c34fadc7439639de005f96b223f031f8258f9261"
+      ],
+      "roundUp": false,
+      "value": "0x41e7c1fd847af13f731084239161873f7c6d30ef88b93b9803406eb4b736391e",
+      "error": ""
+    },
+    {
+      "name": "muldiv-63-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x3c72682c7e78d968d1bda1a8a936bd610930610d86354c59fefa3b46326a5fd9",
+        "0x4f826ce27977b7867d1d04bfcd8ffb6b0c2a0f230ac56c432b52a7f2314fd122",
+        "0x48eca225329819fbec5dade0c34fadc7439639de005f96b223f031f8258f9261"
+      ],
+      "roundUp": true,
+      "value": "0x41e7c1fd847af13f731084239161873f7c6d30ef88b93b9803406eb4b736391f",
+      "error": ""
+    },
+    {
+      "name": "muldiv-64-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x6dfd24b70cb9dea7db91870e85622e24352f3cb4580e2ed43ee75662c2b67e33",
+        "0x2c15a54df575b4adca6b62c3d766947a9fa8a55b7141177c930187d68b920bee",
+        "0xde4d96f0f1b569073fbdb168587e5f4b0634a3a0ab6b0423e79ac79b7f5f49e4"
+      ],
+      "roundUp": false,
+      "value": "0x15cfcbcde2d9c2f66b9035f03f2480ace13245ea3416aee04c8a7419e65b912f",
+      "error": ""
+    },
+    {
+      "name": "muldiv-64-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x6dfd24b70cb9dea7db91870e85622e24352f3cb4580e2ed43ee75662c2b67e33",
+        "0x2c15a54df575b4adca6b62c3d766947a9fa8a55b7141177c930187d68b920bee",
+        "0xde4d96f0f1b569073fbdb168587e5f4b0634a3a0ab6b0423e79ac79b7f5f49e4"
+      ],
+      "roundUp": true,
+      "value": "0x15cfcbcde2d9c2f66b9035f03f2480ace13245ea3416aee04c8a7419e65b9130",
+      "error": ""
+    },
+    {
+      "name": "muldiv-65-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xeff93a12455b4d39bffeaaebd2fe4d0799d2a8bb1304068bd48e380f70638010",
+        "0x628a7a47e45f8d255559267e5a244ac9839dd883a808908485abc12e5d8ff64c",
+        "0xe9c79da90007e3e2141b6059a9711cd3f26f4477408a7203c9c7be2271bf3e81"
+      ],
+      "roundUp": false,
+      "value": "0x6526d4d8e74237d696258a116f3c7cf257b44a190aab5d5b1310228cbdff2029",
+      "error": ""
+    },
+    {
+      "name": "muldiv-65-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xeff93a12455b4d39bffeaaebd2fe4d0799d2a8bb1304068bd48e380f70638010",
+        "0x628a7a47e45f8d255559267e5a244ac9839dd883a808908485abc12e5d8ff64c",
+        "0xe9c79da90007e3e2141b6059a9711cd3f26f4477408a7203c9c7be2271bf3e81"
+      ],
+      "roundUp": true,
+      "value": "0x6526d4d8e74237d696258a116f3c7cf257b44a190aab5d5b1310228cbdff202a",
+      "error": ""
+    },
+    {
+      "name": "muldiv-66-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x6845f01098d0ce0a693335a4d6150c938cb596f10c72e258e1538776dd31fd2c",
+        "0xd24464eeeb69c261a2ab48d3206271ea84d4da811448e286b8badb7623eed5c",
+        "0x459de99ed7cc63f8fd3f77dbf3fd468894a9b01a627fcf84e4b47328e19ba5d"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-66-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x6845f01098d0ce0a693335a4d6150c938cb596f10c72e258e1538776dd31fd2c",
+        "0xd24464eeeb69c261a2ab48d3206271ea84d4da811448e286b8badb7623eed5c",
+        "0x459de99ed7cc63f8fd3f77dbf3fd468894a9b01a627fcf84e4b47328e19ba5d"
+      ],
+      "roundUp": true,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "muldiv-67-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x5ad8c1a519a6f0eb25648984f44ca85ff9738da487e83acffa87b9748d64aeb7",
+        "0xd4752741fe728e63feef2c71e0a3ace3ae68e7a11745185c43df7881c554ee29",
+        "0xab817497328c88d1b6273e846aa2bdc214e4e88f3081e0957643c48e951cf057"
+      ],
+      "roundUp": false,
+      "value": "0x7089fadf743e1723b5703fc575f9ee4b948ce85405e259996200b46255d569fa",
+      "error": ""
+    },
+    {
+      "name": "muldiv-67-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x5ad8c1a519a6f0eb25648984f44ca85ff9738da487e83acffa87b9748d64aeb7",
+        "0xd4752741fe728e63feef2c71e0a3ace3ae68e7a11745185c43df7881c554ee29",
+        "0xab817497328c88d1b6273e846aa2bdc214e4e88f3081e0957643c48e951cf057"
+      ],
+      "roundUp": true,
+      "value": "0x7089fadf743e1723b5703fc575f9ee4b948ce85405e259996200b46255d569fb",
+      "error": ""
+    },
+    {
+      "name": "muldiv-68-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x68177c8e9432e0ab8553b1909703863c181eac67d43c163ed41fef40be468222",
+        "0x94fc1af26cf21db45c754cceca12b65fd5e647b09f21aba7a4ca063e6ae88d75",
+        "0x487f56dc96461395946d216205f7b1b0460bac7bbe445efb85d77d9644682bdb"
+      ],
+      "roundUp": false,
+      "value": "0xd5e9896ad7fdad082b8e334b9d2ec19dd29181a87bbe663552fa7e608f885123",
+      "error": ""
+    },
+    {
+      "name": "muldiv-68-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x68177c8e9432e0ab8553b1909703863c181eac67d43c163ed41fef40be468222",
+        "0x94fc1af26cf21db45c754cceca12b65fd5e647b09f21aba7a4ca063e6ae88d75",
+        "0x487f56dc96461395946d216205f7b1b0460bac7bbe445efb85d77d9644682bdb"
+      ],
+      "roundUp": true,
+      "value": "0xd5e9896ad7fdad082b8e334b9d2ec19dd29181a87bbe663552fa7e608f885124",
+      "error": ""
+    },
+    {
+      "name": "muldiv-69-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x120711cc5dcded27413ef4b6890fb7de76a2e793494fb34ef00f8b0f673a3ffd",
+        "0x64d6829864f4cc5c1b62de307dc35f3296fab1e292f27ac454ca1729b6dd34fc",
+        "0xfb77f3207443c2bf8f9b1f4a3be5f99417f7ae4cecacca1dfccc1e1f09b82eed"
+      ],
+      "roundUp": false,
+      "value": "0x73aa011662e9cb0bf2495fabd98c096130ab6247bfca1b392d1f09d1f20d91e",
+      "error": ""
+    },
+    {
+      "name": "muldiv-69-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x120711cc5dcded27413ef4b6890fb7de76a2e793494fb34ef00f8b0f673a3ffd",
+        "0x64d6829864f4cc5c1b62de307dc35f3296fab1e292f27ac454ca1729b6dd34fc",
+        "0xfb77f3207443c2bf8f9b1f4a3be5f99417f7ae4cecacca1dfccc1e1f09b82eed"
+      ],
+      "roundUp": true,
+      "value": "0x73aa011662e9cb0bf2495fabd98c096130ab6247bfca1b392d1f09d1f20d91f",
+      "error": ""
+    },
+    {
+      "name": "muldiv-70-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x1d0e2b0fcc678563183e7c41675b05f130f39fe80e163a5068e78dc253987518",
+        "0x74787b864e1e4aa8e1ab23a7fe17073279b6d9b4fb7432b659970afb95b2e4f",
+        "0x9e64aa3f8df59a10ff517947a35a200ba895feaae14d53ccb84b3cb3ed7445a9"
+      ],
+      "roundUp": false,
+      "value": "0x155d7a3f9d5a75933dbdf5fdc562c2863a6a3e2bbd306b685ac2659b2f1511a",
+      "error": ""
+    },
+    {
+      "name": "muldiv-70-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x1d0e2b0fcc678563183e7c41675b05f130f39fe80e163a5068e78dc253987518",
+        "0x74787b864e1e4aa8e1ab23a7fe17073279b6d9b4fb7432b659970afb95b2e4f",
+        "0x9e64aa3f8df59a10ff517947a35a200ba895feaae14d53ccb84b3cb3ed7445a9"
+      ],
+      "roundUp": true,
+      "value": "0x155d7a3f9d5a75933dbdf5fdc562c2863a6a3e2bbd306b685ac2659b2f1511b",
+      "error": ""
+    },
+    {
+      "name": "muldiv-71-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xcb62fd1f597e02f9d35c5f00c11533a990223c6fafe3995465a602c563c90682",
+        "0x71aaef0294f9987b0a6e24f84726e2e0ba21a3456da9482568ef6beb35b7a7a0",
+        "0xa780f7e6f383015f7d18845343f4803b20059af1c2ce68dc5416075ed94d4133"
+      ],
+      "roundUp": false,
+      "value": "0x8a048c26f65317590e161cece7d25c5e74bb55efa90da79efa5763f9be2b133e",
+      "error": ""
+    },
+    {
+      "name": "muldiv-71-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xcb62fd1f597e02f9d35c5f00c11533a990223c6fafe3995465a602c563c90682",
+        "0x71aaef0294f9987b0a6e24f84726e2e0ba21a3456da9482568ef6beb35b7a7a0",
+        "0xa780f7e6f383015f7d18845343f4803b20059af1c2ce68dc5416075ed94d4133"
+      ],
+      "roundUp": true,
+      "value": "0x8a048c26f65317590e161cece7d25c5e74bb55efa90da79efa5763f9be2b133f",
+      "error": ""
+    },
+    {
+      "name": "muldiv-72-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x609c2e36b23e726b7f36c6f4217ae2d60a0fb5e3739220e4e210f2ea0af4dd6c",
+        "0x7becc91ab9c14e1caf1bc184925e567922d3be7c6e1bc8e6c3a856c1bd95fe53",
+        "0xa8ffdcfe9030b238b73b21f3f818bc147a033cc79d1c584bc005b78b20fcdcb6"
+      ],
+      "roundUp": false,
+      "value": "0x46d7c30cdcccd343061e6769cc9a87a795100c49241db8433f739813544cdce7",
+      "error": ""
+    },
+    {
+      "name": "muldiv-72-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x609c2e36b23e726b7f36c6f4217ae2d60a0fb5e3739220e4e210f2ea0af4dd6c",
+        "0x7becc91ab9c14e1caf1bc184925e567922d3be7c6e1bc8e6c3a856c1bd95fe53",
+        "0xa8ffdcfe9030b238b73b21f3f818bc147a033cc79d1c584bc005b78b20fcdcb6"
+      ],
+      "roundUp": true,
+      "value": "0x46d7c30cdcccd343061e6769cc9a87a795100c49241db8433f739813544cdce8",
+      "error": ""
+    },
+    {
+      "name": "muldiv-73-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x3cba9a65e576460425540955ad3b9714607bb5afc7162ee47fc135e6ce9b0862",
+        "0xdaa33e771f53f491a06cd48510a68f95277f3f63b4e78c1756e304c72ace3f5d",
+        "0x85bb07f3ef54b348ed3745c6fdced66c3a70677cad3e9a6da33efef001c7ef4a"
+      ],
+      "roundUp": false,
+      "value": "0x634951bef3e41c251832ced8fc789339bf315265e5840a6f1626fd14b0959bab",
+      "error": ""
+    },
+    {
+      "name": "muldiv-73-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x3cba9a65e576460425540955ad3b9714607bb5afc7162ee47fc135e6ce9b0862",
+        "0xdaa33e771f53f491a06cd48510a68f95277f3f63b4e78c1756e304c72ace3f5d",
+        "0x85bb07f3ef54b348ed3745c6fdced66c3a70677cad3e9a6da33efef001c7ef4a"
+      ],
+      "roundUp": true,
+      "value": "0x634951bef3e41c251832ced8fc789339bf315265e5840a6f1626fd14b0959bac",
+      "error": ""
+    },
+    {
+      "name": "muldiv-74-floor",
+      "op": "mulDiv",
+      "args": [
+        "0x7eb4749d78660af6e0cb1c53e9ef00f71b2633e0a67d58b4581539dae6fba41f",
+        "0x454c1c4d7d3d10ca5119c589f798a53474cde1ca367affe1c781a038cadb1a22",
+        "0x36249117e98ea2b610e4847ac2f0bef3792ce15a32fd5883519823c5a048510e"
+      ],
+      "roundUp": false,
+      "value": "0xa22b5a16ab68724857b62ac1109ecf225438c1770f04820c3f50234ea068f0e2",
+      "error": ""
+    },
+    {
+      "name": "muldiv-74-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0x7eb4749d78660af6e0cb1c53e9ef00f71b2633e0a67d58b4581539dae6fba41f",
+        "0x454c1c4d7d3d10ca5119c589f798a53474cde1ca367affe1c781a038cadb1a22",
+        "0x36249117e98ea2b610e4847ac2f0bef3792ce15a32fd5883519823c5a048510e"
+      ],
+      "roundUp": true,
+      "value": "0xa22b5a16ab68724857b62ac1109ecf225438c1770f04820c3f50234ea068f0e3",
+      "error": ""
+    },
+    {
+      "name": "muldiv-75-floor",
+      "op": "mulDiv",
+      "args": [
+        "0xcc81ec45e1949d99eed45a76c34afc31cd662c5ddd81dd5cf8b87328beb956f5",
+        "0xa8b2d537ba5f4573f0a3340355ef65682e2b80dfee09380cd860b2b5d1be791",
+        "0xf7978512dfcfd7549d09cd3947a673f3e730d2ab43f3234c0250b07a465dd609"
+      ],
+      "roundUp": false,
+      "value": "0x8b57bc274edac2dd54fe17bd196d920b769a56d8313a1a2cf8910b63282b8ef",
+      "error": ""
+    },
+    {
+      "name": "muldiv-75-ceil",
+      "op": "mulDiv",
+      "args": [
+        "0xcc81ec45e1949d99eed45a76c34afc31cd662c5ddd81dd5cf8b87328beb956f5",
+        "0xa8b2d537ba5f4573f0a3340355ef65682e2b80dfee09380cd860b2b5d1be791",
+        "0xf7978512dfcfd7549d09cd3947a673f3e730d2ab43f3234c0250b07a465dd609"
+      ],
+      "roundUp": true,
+      "value": "0x8b57bc274edac2dd54fe17bd196d920b769a56d8313a1a2cf8910b63282b8f0",
+      "error": ""
+    }
+  ]
+}
