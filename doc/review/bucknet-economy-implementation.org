@@ -42,6 +42,10 @@ household roles now initialize actual ordinary accounts and distinct facilities
 in both languages. Their shared SDK credit mark separates principal, cash,
 guarded relief and each facility's own insurer-pool refund value; normal
 decisions still fail explicitly before income until issuance/exits migrate.
+Both languages now report complete personal financial portfolios: all ordinary
+custody accounts, actual receipt basis/marks, premiums, claims and liabilities,
+with exact integer USD conversion. Python captures these books daily; both
+interactive and batch drivers refuse unported decisions before completion.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -50,8 +54,8 @@ five-year evidence and Notes/release checks remain separate gates below.
 The browser-only wallet sandbox now uses canonical Buck, with separate cash
 and liability displays and verified format-4 restoration. The five-year
 economy, Python savings sandbox and JavaScript leveraged equilibrium demo
-still have legacy household/persistence assumptions, with JS reporting integration
-also pending. Their deployment
+still have legacy household/persistence assumptions. Personal JS records are
+migrated; the complete action lifecycle and restoration remain open. Their deployment
 and bootstrap now use Buck's explicit Jubilee dependency and linked libraries. No five-year campaign
 has validated the corrected accounting, and the
 canonical cash-only diagnostic is not the leveraged household economy. Changing
@@ -773,14 +777,28 @@ implementation sequence, before changing the primary economy builder.
   provenance. The retained legacy K-change test now checks typed
   InsufficientCoverage rather than obsolete revert text. Session/legacy
   compatibility passes 51 cases; canonical Python client smoke passes 35.
+- [X] Report each existing household's complete personal financial portfolio
+  in Python and JS at a pinned block. Count USDC, ordinary net BUCK and all
+  constituent TOKENs across borrower/savings/working accounts; exact receipt
+  valueOf, remaining basis, actual principal, per-pool premium refunds and
+  guarded Jubilee claims stay separate. Combine scaled BUCK values before
+  exact rational USD conversion, truncating signed values toward zero.
+  Deduct mortgage and arrears; the common insured asset is excluded from
+  both financial comparisons. Mark returns before exit costs, preserve
+  zero-basis live receipt value without inventing ROI, and reject duplicate
+  custody or unavailable required marks. Partial redemptions cannot be
+  overwritten by stale local shares. Canonical Python books are daily like
+  JS. Reading does not pay the bank or modify trades/counterfactuals, and an
+  unimplemented decision propagates through the interactive driver before
+  income, day completion or a misleading completed run.
 - [ ] Complete the existing adaptive household and saver using corrected Buck:
   actual cash versus capacity, mortgage counterfactual/carry costs, issuance,
   real BUCK/USDC and TOKEN routes, mortgage settlement, protected issuance
   reserve, discounted buyback and explicit NFT retirement. Preserve arrivals,
   randomized thresholds and always-invest/always-retire comparisons. Resolve
   unused retire_disc and overlapping borrow/paydown decisions.
-  Next connect the SDK books to complete personal net-worth/receipt marks;
-  retain actual cash and actual principal without a synthetic signed alias.
+  Next connect guarded market operations, bounded issuance candidates and
+  confirmed USDC mortgage payments to these personal books.
   Replace the duplicated legacy mint/gate helpers using the shared bounded
   issuance-candidate quotes, and account for the full-value premium as issued
   principal. Guarded market buys must deliver net BUCK; bank retirement is a
@@ -840,8 +858,8 @@ Continue in this order:
    private-keeper rewards now pass. The existing JS bootstrap now wires the
    canonical graph and real opening pools. Python now does likewise, including
    its separate desk, without disabled comparison advisers. Canonical Python
-   observations and a short bootstrap-only JSON/PDF run now pass; complete
-   household actions and JS reports remain open. Qualify actual
+   observations and a short bootstrap-only JSON/PDF run now pass; personal
+   Python/JS reports also pass. Complete household actions remain open. Qualify actual
    canonical arbitrage inventory/fees before enabling those routes. Receiving
    cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
@@ -850,8 +868,9 @@ Continue in this order:
    issuance, asset exits, basket redemption, personal marks and persistent
    outcomes rather than adding another economy runner.
    Household setup and same-block selected-facility books now work in both
-   languages; normal decisions remain explicitly gated. Finish portfolio
-   marks and guarded market/issuance wiring before enabling those decisions.
+   languages, including complete personal portfolio marks; normal decisions
+   remain explicitly gated. Finish guarded market/issuance wiring, confirmed
+   mortgage payments and exits before enabling those decisions.
 3. Run identical operation vectors and a short real-contract household world,
    then the five-year baselines/policy comparisons and retained shocks. Save
    raw JSON, adjacent PDFs and campaign metadata for every completed long run.
@@ -1031,4 +1050,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-06 | Publish the guarded Jubilee source after normal keeper work | Found the short worlds configured a source but never published it: once the fund held an LP receipt, guarded relief quotes were unavailable. The existing built-in Python keeper, BasketWheelAgent and JS turnWheel now invoke refreshValuation after normal maintenance through the same wheel/source. No new contract, valuation engine, LP sale, work unit or reward; reporting remains read-only, and agent gas includes publication. Guarded refusals use explicit either expectations, preserve the previous publication and leave the fund quote guards intact. Focused Python acceptance: five passed across both keeper paths, machine/component bootstrap and JSON/PDF output. A real V3 excursion refuses publication without changing principal, fund flows, receipt holdings, reserve or the prior publication. JS primary bootstrap/setup plus actual fund investment/publication: three passed. No Solidity behavior changed. Updated guide/checklist/pre-post invariants. Next complete personal portfolio marks with those guarded credit books, then issuance/USDC mortgage settlement, exits/persistence, five-year campaigns and Notes. | =6a3dc210= |
 
-| 2026-11-07 | Preserve typed Python proxy-failure data | A monetary refusal through SimLP lost provider revert data after its mined receipt, preventing existing target-ABI classification of InsufficientCoverage. TransactionReverted now carries available structured data from the post-block eth_call replay; Session retains/clears that diagnostic with its normal send lifecycle. Existing three-argument construction, receipt/hash handling and journal messages remain supported. Tests reject message-only classification and unknown/malformed selectors, preserve target-vs-proxy ABI distinction, and clear stale data after success. Legacy K-change assertions now use typed data instead of obsolete revert strings. Session plus retained pro-rata household compatibility: 51 passed (labelled legacy cases are not canonical evidence). The full Python canonical client-smoke set: 35 passed. No contract, K guard, liquidity check or monetary authorization changed. Updated API guide and pre/post invariants. Personal portfolio integration remains the next commit. | This commit |
+| 2026-11-07 | Preserve typed Python proxy-failure data | A monetary refusal through SimLP lost provider revert data after its mined receipt, preventing existing target-ABI classification of InsufficientCoverage. TransactionReverted now carries available structured data from the post-block eth_call replay; Session retains/clears that diagnostic with its normal send lifecycle. Existing three-argument construction, receipt/hash handling and journal messages remain supported. Tests reject message-only classification and unknown/malformed selectors, preserve target-vs-proxy ABI distinction, and clear stale data after success. Legacy K-change assertions now use typed data instead of obsolete revert strings. Session plus retained pro-rata household compatibility: 51 passed (labelled legacy cases are not canonical evidence). The full Python canonical client-smoke set: 35 passed. No contract, K guard, liquidity check or monetary authorization changed. Updated API guide and pre/post invariants. Personal portfolio integration remains the next commit. | =a965366e= |
+
+| 2026-11-07 | Restore complete personal financial portfolios in both languages | Existing households now report all ordinary custody accounts, USDC/constituent TOKENs, exact receipt basis/marks, actual facility debt, per-pool insurer refund marks and guarded Jubilee claims at one pinned block. Integer rational prices and Q-scaled BUCK preserve negative and full-width values through the final signed USD division. Partial redemptions override stale local trade shares; main-owned investor receipts and live zero-basis marks remain visible, with undefined ROI at zero basis. Canonical Python records are daily like JS; records do not pay the bank, change trades or alter counterfactual cash flow. The interactive Python driver propagates the existing decision migration gate before income/day completion. Actual Anvil/Tevm cases include multiple custody accounts, aged pools, genuine credit-issued transfers above Number precision, unavailable publications and actual exits with gain/conversion costs. Combined Make accounting acceptance: 21 Python and five JS passed; the final Python phase also passes 21 after compatibility fixes. Existing JS equilibrium sandbox builds. Latest short JSON/PDF artifacts remain under build/test/economy-accounting; no five-year campaign or enabled household lifecycle is claimed. No Solidity behavior changed. Updated Make, root/detail/package guides and pre/post invariants. Next guarded market wiring, bounded issuance and confirmed USDC mortgage retirement, then saving/paydown, exits/persistence, canonical arb qualification, five-year JSON/PDF campaigns and Notes. | This commit |

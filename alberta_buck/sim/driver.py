@@ -180,6 +180,10 @@ class SimDriver:
         for a in order:
             try:
                 a.act(d, s, self.day, self.tick, ctr)
+            except NotImplementedError:
+                # Migration gates are fatal: readable account books do not
+                # make an unimplemented economy a completed simulation.
+                raise
             except Exception as e:        # one bad agent must not stall the UI
                 self.last_error = f"{type(a).__name__}-{a.idx}: {e!r}"[:300]
 

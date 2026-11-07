@@ -159,7 +159,13 @@ and guarded publication, and each observed depositor's remaining basis/mark.
 The PDF shows open-position mark-to-market returns even without redemptions.
 Both household role setups and same-block SDK credit books are also covered,
 including insurer-pool replacement and actual pending authorizations. Their
-normal decision loop is still gated before new income or borrowing.
+personal portfolio readers include all custody cash/TOKENs, exact receipt
+basis/marks, actual NFT debt, premium-pool marks and guarded Jubilee claims;
+full-width and negative values remain integer money through USD conversion.
+The real tests include partial redemptions and deliberately stale local
+trade shares. Normal decisions remain gated before new income or borrowing;
+the interactive driver propagates an unimplemented action rather than
+allowing readable books to become a false completed economy.
 This is reporting integration coverage, not household-policy or five-year
 stability evidence. No extra economy runner is introduced.
 Pytest owns =build/test/economy-accounting/=: each target run replaces that

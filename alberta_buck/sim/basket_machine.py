@@ -258,5 +258,3 @@ def publish_jubilee_valuation(d, proxy=None):
     if proxy is not None:
         fn = proxy.functions.exec(d.wheel.address, d.wheel.encode_abi("refreshValuation", args=[]))
     return d.chain.send(fn, expect=Expect.EITHER)
-
-

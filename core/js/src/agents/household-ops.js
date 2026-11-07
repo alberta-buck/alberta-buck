@@ -2,6 +2,7 @@
 import { encodeFunctionData, keccak256, toBytes } from "viem";
 import { Q96, MIN_SQRT_RATIO, MAX_SQRT_RATIO } from "../v3.js";
 import { MINT_MAX } from "../buckworld.js";
+import { markNetBasketPositions } from "../basket.js";
 
 const E6 = 1_000_000n, E18 = 10n ** 18n;
 const min = (...xs) => xs.reduce((a, b) => a < b ? a : b);
@@ -138,6 +139,7 @@ export function installHouseholdOps(world) {
     } catch (e) { return { ...out, error: String(e).slice(0, 200) }; }
   };
   const mark = async (agent) => {
+    if (world.accounting === "net") return netMark(agent);
     const st = await read(agent.account);
     const basketMark = world.basketKind === "machine" && agent.shares
       ? agent.shares * (await s.call(basket, "sharePrice")) / E18 : agent.basketPrincipal;
@@ -152,6 +154,66 @@ export function installHouseholdOps(world) {
     return { ...st, basketMark, pending, wallet, nw: st.cash + pending - agent.mortgage - agent.livingArrears
       - agent.premiumArrears + BigInt(Math.trunc(Number(basketMark + st.deposit - st.insuranceAge - st.drawn
         + min(st.jub, st.drawn) + max(0n, st.signed) + savedBucks + wallet) * st.spot)) };
+  };
+  // The same book as Python net_snapshot.household_mark. Every read is
+  // pinned; financial amounts stay integers through the final USD division.
+  // Reference spot marks exclude exit costs, and relief remains a guarded
+  // last-publication claim rather than immediately spendable money.
+  const netMark = async (agent) => {
+    const Q = 10n ** 36n, blockNumber = (await s.client.getBlock()).number;
+    const at = (c, functionName, args = []) => s.client.readContract({
+      address: c.address, abi: c.abi, functionName, args, blockNumber });
+    const owner = world.holderAddress(agent.account);
+    const book = await world.netCreditOps.markHousehold(owner,
+      world._credits.get(agent.account.address) ?? [], { blockNumber });
+    const accounts = [owner, ...[agent.savings, agent.wallet].filter(Boolean).map((p) => p.address)];
+    if (new Set(accounts.map((a) => a.toLowerCase())).size !== accounts.length) {
+      throw new Error("household custody accounts must be distinct");
+    }
+    const cashValues = [], buckValues = [];
+    for (const account of accounts) {
+      if (await at(world.reg, "isCarrying", [account]) || !await at(world.reg, "isVerified", [account])) {
+        throw new Error("household custody must be verified and non-Carrying");
+      }
+      cashValues.push(await at(usdc, "balanceOf", [account]));
+      buckValues.push(await at(buck, "netBalanceScaled", [account]));
+    }
+    const priceRatio = async (pool, token) => {
+      const t0 = (await at(pool, "token0")).toLowerCase(), t1 = (await at(pool, "token1")).toLowerCase();
+      const asset = token.address.toLowerCase(), usd = usdc.address.toLowerCase();
+      if (!(t0 === asset && t1 === usd || t1 === asset && t0 === usd)) {
+        throw new Error("household mark requires a canonical settlement pair");
+      }
+      const [sqrt] = await at(pool, "slot0");
+      if (sqrt <= 0n || !await at(pool, "liquidity")) throw new Error("household mark price unavailable");
+      return t0 === asset ? [sqrt * sqrt, 1n << 192n] : [1n << 192n, sqrt * sqrt];
+    };
+    let pending = 0n;
+    for (const token of world.tokens) {
+      let amount = 0n;
+      for (const account of accounts) amount += await at(token.erc20, "balanceOf", [account]);
+      if (amount) {
+        const [num, den] = await priceRatio(token.poolUsdc, token.erc20);
+        pending += amount * num / den;
+      }
+    }
+    const [num, den] = await priceRatio(world.poolUB, buck);
+    const receiptOwner = agent.savings?.address ?? owner;
+    const positions = await markNetBasketPositions(s, basket, buck, receiptOwner, agent.receipts, { blockNumber });
+    const cashTotal = cashValues.reduce((sum, v) => sum + v, 0n);
+    const scaled = buckValues.reduce((sum, v) => sum + v, 0n) + positions.mark * Q + book.premiumNetScaled
+      - book.state.issued * Q + book.reliefScaled;
+    return { blockNumber, cash: cashValues[0], auxCash: cashTotal - cashValues[0],
+      held: buckValues[0] / Q, savedBucks: agent.savings ? buckValues[1] / Q : 0n,
+      wallet: agent.wallet ? buckValues.at(-1) / Q : 0n,
+      drawn: book.state.issued, limit: book.creditLimit, deposit: book.state.premiumNominal,
+      premiumNet: book.premiumNetScaled / Q, insuranceAge: book.state.premiumNominal - book.premiumNetScaled / Q,
+      jub: book.reliefScaled / Q, reliefScaled: book.reliefScaled,
+      reliefLiquidityLimited: book.exceedsLiquidityLimit, availableReliefScaled: book.availableReliefScaled,
+      basketBasis: positions.basis, basketMark: positions.mark, basketRoi: positions.roi,
+      basketShares: positions.positions.reduce((sum, p) => sum + p.shares, 0n), basketReceipts: positions.positions.length,
+      pending, nw: cashTotal + pending + scaled * num / (Q * den) - agent.mortgage
+        - agent.livingArrears - agent.premiumArrears };
   };
   // The investor deposits the BUCKs it holds. When the basket's price guard refuses, it offers half,
   // up to four times; what is still refused stays for the next decision.

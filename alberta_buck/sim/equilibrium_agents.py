@@ -2431,19 +2431,20 @@ class _HouseholdAccounts(_ProxyAgent):
         except Exception:
             deposit = self.premium_paid
         nw = cash + held + basket + deposit - self.mortgage - drawn + jub
-        return {"idx": self.idx, "theta": round(self.theta, 2),
-                "pattern": self.pattern, "nw": nw,
+        return {**self._household_fields(), "nw": nw,
                 "hypo": self.hypo_cash - self.hypo_mortgage, "cash": cash,
                 "basket": basket, "basket_in": self._basket_in,
                 "basket_mark": basket_mark, "basket_receipts": len(self._basket_receipts),
-                "savings_held": savings_held, "surplus_policy": self.surplus_policy,
-                "joined": self.joined, "refis": self.refis, "ext_premium": self.ext_premium,
-                "switch_paid": self.switch_paid, "penalty_paid": self.penalty_paid,
-                "limit": limit, "mortgage": self.mortgage, "drawn": drawn,
-                "jub": jub, "deploys": self.deploys,
-                "throttled": self.throttled,
+                "savings_held": savings_held, "limit": limit, "drawn": drawn,
+                "jub": jub, "deposit": deposit}
+
+    def _household_fields(self):
+        """In-memory profile and cash-flow history, independent of token accounting."""
+        return {"idx": self.idx, "theta": round(self.theta, 2), "pattern": self.pattern,
+                "surplus_policy": self.surplus_policy, "joined": self.joined, "refis": self.refis,
+                "ext_premium": self.ext_premium, "switch_paid": self.switch_paid, "penalty_paid": self.penalty_paid,
+                "mortgage": self.mortgage, "deploys": self.deploys, "throttled": self.throttled,
                 "premium_paid": self.premium_paid,
-                "deposit": deposit,
                 "hypo_premium": self.hypo_premium,
                 "trade_loss": self.trade_loss,
                 "unwound": self.unwound,

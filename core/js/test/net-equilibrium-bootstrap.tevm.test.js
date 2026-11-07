@@ -72,6 +72,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   assert.equal(before.issued, 0n);
   assert.equal(await s.call(buck, "totalIssued"), supply + 50_000_000n);
   assert.equal((await s.call(buck, "facilityPool", [id])).toLowerCase(), world.poolAcct.toLowerCase());
+  let family;
   await t.test("existing household roles set up separate facilities and insurer-specific marks", async () => {
     const Q = 10n ** 36n, RAW = 1_000_000n;
     const agents = [];
@@ -138,6 +139,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(debtor.lastAction, "repay-pending");
     assert.equal(debtor.started, false);
     await world.netCreditOps.cancelReduction(owner, first);
+    family = agents;
   });
   await t.test("normal keeper work publishes the fund's guarded LP mark", async () => {
     for (let day = 0; day < 3; day++) {
@@ -150,6 +152,99 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(publication[1], await s.call(net.fund, "reliefPositionMark"));
     assert.ok((await world.netCreditOps.markHousehold(basket.address,
       [await s.call(basket, "creditId")])).reliefScaled > 0n);
+  });
+  await t.test("personal records use actual portfolios and exact integer money", async () => {
+    const Q = 10n ** 36n, RAW = 1_000_000n;
+    const [debtor, saver, investor] = family;
+    const owner = world.holderAddress(debtor.account), proxy = await world.proxyFor(debtor.account);
+    const execute = (p, c, name, args) => s.send(p, "exec", [c.address,
+      encodeFunctionData({ abi: c.abi, functionName: name, args })]);
+    const transfer = (p, to, amount) => execute(p, buck, "transfer", [to, amount]);
+    await transfer(proxy, world.simlp.address, 50n * RAW);
+    debtor.savings = await world.proxyFor({ address: `savings:${debtor.account.address}` });
+    debtor.wallet = await world.proxyFor({ address: `wallet:${debtor.account.address}` });
+    await transfer(world.simlp, debtor.savings.address, 20n * RAW);
+    await transfer(world.simlp, debtor.wallet.address, 5n * RAW);
+    await transfer(world.simlp, world.holderAddress(investor.account), 7n * RAW);
+    debtor.book_(await world.households.depositBuck(debtor, true));
+    investor.book_(await world.households.depositBuck(investor));
+    assert.ok(debtor.receipts.length && investor.receipts.length);
+    for (const [address, amount] of [[owner, 3n], [debtor.savings.address, 13n * RAW], [debtor.wallet.address, 17n * RAW]]) {
+      await s.send(world.usdc, "mint", [address, amount]);
+    }
+    for (const [i, address, whole] of [[0, owner, 1n], [0, debtor.savings.address, 2n], [1, debtor.wallet.address, 3n]]) {
+      await s.send(world.tokens[i].erc20, "mint", [address, whole * 10n ** BigInt(world.tokens[i].dec)]);
+    }
+    debtor.livingArrears = 19n; debtor.premiumArrears = 23n;
+    debtor.hypoLivingArrears = 3n; debtor.hypoPremiumArrears = 4n;
+    for (const a of family) a.started = true; // component observations, not an enabled decision loop
+    const priceRatio = async (pool, token) => {
+      const [sqrt] = await s.call(pool, "slot0");
+      return (await s.call(pool, "token0")).toLowerCase() === token.address.toLowerCase()
+        ? [sqrt * sqrt, 1n << 192n] : [1n << 192n, sqrt * sqrt];
+    };
+    const check = async (agent) => {
+      const holder = world.holderAddress(agent.account);
+      const addresses = [holder, ...[agent.savings, agent.wallet].filter(Boolean).map((p) => p.address)];
+      const book = await world.netCreditOps.markHousehold(holder, world._credits.get(agent.account.address) ?? []);
+      const holdings = await Promise.all(agent.receipts.map((rid) => s.call(basket, "holdings", [rid])));
+      const marks = await Promise.all(agent.receipts.map((rid) => s.call(basket, "valueOf", [rid])));
+      const basis = holdings.reduce((sum, h) => sum + h[1], 0n), mark = marks.reduce((sum, v) => sum + v, 0n);
+      const cash = (await Promise.all(addresses.map((a) => s.call(world.usdc, "balanceOf", [a])))).reduce((sum, v) => sum + v, 0n);
+      const bucks = (await Promise.all(addresses.map((a) => s.call(buck, "netBalanceScaled", [a])))).reduce((sum, v) => sum + v, 0n);
+      let pending = 0n;
+      for (const token of world.tokens) {
+        const amount = (await Promise.all(addresses.map((a) => s.call(token.erc20, "balanceOf", [a])))).reduce((sum, v) => sum + v, 0n);
+        const [num, den] = await priceRatio(token.poolUsdc, token.erc20);
+        pending += amount * num / den;
+      }
+      const [num, den] = await priceRatio(world.poolUB, buck);
+      const valued = (bucks + mark * Q + book.premiumNetScaled + book.reliefScaled - book.state.issued * Q) * num / (Q * den);
+      const block = (await s.client.getBlock()).number;
+      const tradeBook = [agent.externalPaid, agent.hypoPaid, agent.basketPrincipal, agent.shares,
+        [...agent.book].map(([id, terms]) => [id, { ...terms }])];
+      await agent.record(world, 370);
+      const row = agent.ledger.at(-1);
+      assert.equal((await s.client.getBlock()).number, block);
+      assert.equal(row.markBlock, block);
+      assert.equal(row.nw, cash + pending + valued - agent.mortgage - agent.livingArrears - agent.premiumArrears);
+      assert.equal(row.drawn, book.state.issued);
+      assert.equal(row.held, book.state.spendable);
+      assert.equal(row.premiumNet, book.premiumNetScaled / Q);
+      assert.equal(row.reliefScaled, book.reliefScaled);
+      assert.equal(row.basketAtRisk, basis);
+      assert.equal(row.basketMark, mark);
+      assert.equal(row.basketRoi, basis ? Number(mark - basis) / Number(basis) : null);
+      assert.equal(row.pending, pending);
+      assert.equal(row.hypo, agent.hypoCash - agent.hypoMortgage - agent.hypoLivingArrears - agent.hypoPremiumArrears);
+      assert.deepEqual([agent.externalPaid, agent.hypoPaid, agent.basketPrincipal, agent.shares,
+        [...agent.book].map(([id, terms]) => [id, { ...terms }])], tradeBook);
+      return row;
+    };
+    const before = await check(debtor);
+    assert.equal(before.auxCash, 30n * RAW);
+    assert.ok(before.insuranceAge > 0n && before.nw < 0n && before.pending > 0n);
+    assert.equal((await check(saver)).basketRoi, null);
+    assert.notEqual((await check(investor)).basketRoi, null);
+    const [rid] = debtor.receipts, [shares] = await s.call(basket, "holdings", [rid]);
+    await execute(debtor.savings, basket, "redeemShares", [rid, shares / 2n, 0n]);
+    assert.ok((await check(debtor)).basketAtRisk < debtor.basketPrincipal, "stale local trade shares do not override actual holdings");
+    await s.send(world.usdc, "mint", [owner, 2n ** 100n + 123n]);
+    await check(debtor);
+    const sourceId = await s.call(credit, "totalSupply");
+    await s.send(credit, "createCredit", [world.simlp.address, 0, 2n ** 62n, 0n, 0, 0, 0, 0], { account: world.operator.account });
+    await world.netCreditOps.issue(world.simlp.address, sourceId, 2n ** 62n, 2n ** 60n + 17n, 0n,
+      "0x0000000000000000000000000000000000000000");
+    await transfer(world.simlp, owner, 2n ** 60n + 17n);
+    assert.ok((await check(debtor)).held > 2n ** 53n);
+    await s.send(wheel, "setValuationSource", [net.fund.address]);
+    await assert.rejects(debtor.record(world, 371), /MarkUnavailable|0x417c0238/);
+    await s.send(wheel, "refreshValuation");
+    await check(debtor);
+    const wallet = debtor.wallet;
+    debtor.wallet = debtor.savings;
+    await assert.rejects(debtor.record(world, 371), /distinct/);
+    debtor.wallet = wallet;
   });
   assert.equal(s.mismatches.length, 0);
   assert.throws(() => worldRecord(world), /equilibrium save\/restore/);

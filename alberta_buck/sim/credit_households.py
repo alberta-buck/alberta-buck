@@ -1188,33 +1188,36 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                              mortgage0=self._mortgage0)
 
     def octl_state(self, d):
-        if getattr(d, "buck_accounting", "") == "net":
-            raise NotImplementedError("BuckNet household financial marks are not yet integrated")
-        st                      = super().octl_state(d)
-        if st is None:
-            return None
-        spot                    = buck_usd6(d.chain, d.pool_ub, d.buck) / PARITY
-        pending                 = 0
-        if self._savings_proxy is not None:
-            token               = d.tokens[self._token_idx]
-            held                = d.chain.balance_of(token, self._savings_proxy.address)
-            ru, rt              = active_reserves(d.chain, d.pool_usdc[self._token_idx], d.usdc, token)
-            pending             = int(held * ru / rt) if rt else 0
-        basket                  = st["basket_mark"] if st["basket_mark"] is not None else st["basket"]
-        insurance_age           = 0
-        if st["deposit"]:
-            raw                 = d.buck.functions.rawBalanceOf(d.pool_acct).call()
-            fee                 = d.buck.functions.feeOwing(d.pool_acct).call()
-            insurance_age       = min(st["deposit"], fee * st["deposit"] // raw) if raw else st["deposit"]
-        held                    = max(0, d.buck.functions.signedBalanceOf(self.proxy.address).call())
-        wallet                  = (d.buck.functions.balanceOf(self._wallet.address).call()
-                                   if self._wallet is not None else 0)
-        financial               = st["cash"] + pending - self.mortgage + int(
-            (basket + st["deposit"] - insurance_age - st["drawn"] + st["jub"] + st["savings_held"] + held + wallet)
-            * spot)
         arrears                 = self.living_arrears + self.premium_arrears
         hypo_arrears            = self.hypo_living_arrears + self.hypo_premium_arrears
-        st.update(nw=financial - arrears, hypo=self.hypo_cash - self.hypo_mortgage - hypo_arrears,
+        if getattr(d, "buck_accounting", "") == "net":
+            from alberta_buck.sim.net_snapshot import household_mark
+            st                  = self._household_fields() | household_mark(d, self)
+            pending, held       = st["pending_usd"], st["held_buck"]
+            wallet, insurance_age = st["wallet_buck"], st["insurance_age"]
+            financial           = st["nw"]
+        else:
+            st                  = super().octl_state(d)
+            if st is None:
+                return None
+            spot                = buck_usd6(d.chain, d.pool_ub, d.buck) / PARITY
+            pending             = 0
+            if self._savings_proxy is not None:
+                token           = d.tokens[self._token_idx]
+                held            = d.chain.balance_of(token, self._savings_proxy.address)
+                ru, rt          = active_reserves(d.chain, d.pool_usdc[self._token_idx], d.usdc, token)
+                pending         = int(held * ru / rt) if rt else 0
+            basket              = st["basket_mark"] if st["basket_mark"] is not None else st["basket"]
+            insurance_age       = 0
+            if st["deposit"]:
+                raw             = d.buck.functions.rawBalanceOf(d.pool_acct).call()
+                fee             = d.buck.functions.feeOwing(d.pool_acct).call()
+                insurance_age   = min(st["deposit"], fee * st["deposit"] // raw) if raw else st["deposit"]
+            held                = max(0, d.buck.functions.signedBalanceOf(self.proxy.address).call())
+            wallet              = (d.buck.functions.balanceOf(self._wallet.address).call() if self._wallet is not None else 0)
+            financial           = st["cash"] + pending - self.mortgage - arrears + int(
+                (basket + st["deposit"] - insurance_age - st["drawn"] + st["jub"] + st["savings_held"] + held + wallet) * spot)
+        st.update(nw=financial, hypo=self.hypo_cash - self.hypo_mortgage - hypo_arrears,
                   hypo_cash=self.hypo_cash, hypo_mortgage=self.hypo_mortgage, arrears=arrears,
                   hypo_arrears=hypo_arrears, external_paid=self.external_paid, hypo_paid=self.hypo_paid,
                   insurance_age=insurance_age, exited=self.exited, withdrawn_usd=self.withdrawn_usd, held_buck=held,
@@ -1237,7 +1240,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                     action=self.last_action, error=self.last_error)
 
     def basket_position(self, share_price):
-        """Open receipt basis and TWAP share mark, in BUCK; this is not a realized return."""
+        """Legacy cached share-price view; canonical octl_state reads exact receipts."""
         basis                   = self._basket_in
         mark                    = (self._basket_shares * share_price // 10**18
                                    if self._basket_shares and share_price is not None else

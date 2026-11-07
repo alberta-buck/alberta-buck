@@ -20,7 +20,7 @@ help:
 	  '  make nix-venv-core-net-math-test   # canonical uint256 math: Solidity, Rust, Python and JS' \
 	  '  make nix-core-equilibrium-bootstrap-test  # canonical JS world deployment and pool bootstrap' \
 	  '  make nix-venv-economy-bootstrap-test  # canonical Python + JS deployment and pool bootstrap' \
-	  '  make nix-venv-economy-accounting-test # bootstraps + short real economy, receipt marks and JSON/PDF' \
+	  '  make nix-venv-economy-accounting-test # bootstraps, personal marks, short real economy and JSON/PDF' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
@@ -1705,7 +1705,10 @@ economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 # Reuse those builders and the EXISTING loop/report writer. The integration
 # test shortens only its local PDF threshold: no five-year policy evidence.
 # Exact receipt marks run in Python/Anvil and JS/Tevm, including one-unit
-# double-rounding counterexamples. Full household actions remain gated.
+# double-rounding counterexamples. Household portfolios use actual cash,
+# principal, insurer pools and all custody assets at one block. Full normal
+# household actions remain gated; the interactive driver cannot mark an
+# unimplemented decision loop complete just because its books are readable.
 # Pytest owns build/test/economy-accounting: each run replaces that scratch
 # directory and leaves the latest canonical.json/PDF there for inspection.
 #   make nix-venv-economy-accounting-test

@@ -22,7 +22,10 @@ Python builder, bootstrap agents, desk and component comparisons.
 marks and a short Python loop through JSON/PDF reporting. Both complete
 household lifecycles and full economy save/restore still await conversion.
 Existing debtor/saver/investor account and facility setup now works in both
-languages, with matching SDK credit books; normal decisions remain gated
+languages, with matching SDK credit books and personal portfolio records.
+These records include all custody cash/TOKENs, actual NFT debt, each insurer
+pool's refund mark and exact receipt basis/mark/ROI, without changing the
+underlying cash-flow history. Normal decisions remain gated
 before new income until issuance/exits are ported. The
 [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] records that boundary. Wallet success is not
 five-year household evidence. The cash-only basket in the wallet world is not

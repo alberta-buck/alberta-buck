@@ -39,7 +39,9 @@ binding and tests for actual net delivery of nominal BUCK rewards. Canonical
 Both existing machine builders now bootstrap the same monetary graph. A short
 Python economy also records actual cash, NFT principal and investor receipt marks
 through the completed JSON/PDF path (=make nix-venv-economy-accounting-test=); full
-Python/JavaScript household worlds, five-year campaigns and corrected-token Notes proofs remain in the
+personal portfolio marks are now tested in both languages, including custody
+cash, insurer pools and remaining receipt basis. Normal household decisions,
+five-year campaigns and corrected-token Notes proofs remain in the
 [[file:doc/review/bucknet-economy-implementation.org][unified accounting plan]]. Hosted examples below are separate deployments;
 local build commands use this checkout. The savings economy still needs its accounting migration.
 

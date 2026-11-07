@@ -101,6 +101,16 @@ remaining basis before exit costs, avoiding a second rounding of
 reader. `make nix-venv-economy-accounting-test` covers both role setups,
 actual insurer-pool changes, receipt marks and the short JSON/PDF path.
 
+An initialized household's `record()` now reads its complete personal book:
+all ordinary custody accounts' USDC, net BUCK and constituent TOKENs, exact
+receipt marks/basis, insurer refunds and guarded Jubilee claims, less actual
+principal, external mortgage and arrears. Amounts stay `BigInt` through the
+signed USD division; the mark precedes exit costs. Records retain their
+`markBlock`, auxiliary cash and relief-liquidity status. Python captures the
+matching book daily. Missing required marks refuse the record, and reading
+it does not execute a mortgage payment or update the trade book. Normal
+household decisions and complete saved-world restoration remain gated.
+
 Subpaths map onto the modules directly: `alberta-buck-core/session`,
 `/journal`, `/identity`, `/wallet`, `/buckworld`, `/observer`, `/v3`, and
 so on.

@@ -34,7 +34,7 @@ def household_summary(states):
     """
     members                     = [a for a in states if "member" in a]
     active                      = [a for a in members if a.get("active")]
-    fields                      = ("nw", "hypo", "mortgage", "hypo_mortgage", "cash", "hypo_cash", "drawn",
+    fields                      = ("nw", "hypo", "mortgage", "hypo_mortgage", "cash", "aux_cash", "hypo_cash", "drawn",
                                    "basket", "invested_usd", "issued_invest", "pending_usd", "unwound",
                                    "external_interest", "hypo_interest", "external_paid", "hypo_paid",
                                    "arrears", "hypo_arrears", "basket_receipts")
@@ -47,8 +47,10 @@ def household_summary(states):
                basket_mark=sum(a["basket_mark"] if a.get("basket_mark") is not None else a["basket"] for a in active),
                mark_basis="shares" if all(a.get("basket_mark") is not None or not a["basket"] for a in active)
                else "principal fallback")
-    positions                   = [a for a in active if a.get("basket_at_risk", 0)]
-    basis                       = sum(a["basket_at_risk"] for a in positions)
+    if active and all("mark_block" in a for a in active):
+        out["mark_basis"] = "receipts"
+    positions                   = [a for a in active if a.get("basket_at_risk", 0) or a.get("basket_receipts", 0)]
+    basis                       = sum(a.get("basket_at_risk", a.get("basket", 0)) for a in positions)
     marked                      = (sum(a["basket_mark"] for a in positions)
                                    if all(a.get("basket_mark") is not None for a in positions) else None)
     out.update(basket_at_risk=basis, basket_mtm=marked,
@@ -717,14 +719,21 @@ class Snapshotter:
             held = self._octl_held = {}
         for ag in agents:
             if hasattr(ag, "octl_state"):
-                stride = max(1, int(getattr(ag, "OCTL_STRIDE", 1)))
+                # Canonical books pin cash, NFT debt and exact receipts to
+                # one block each day, matching JS. Legacy diagnostics keep
+                # their older sampling; do not splice a fresh share-price
+                # estimate into an older canonical financial book.
+                canonical = getattr(d, "buck_accounting", "") == "net"
+                stride = 1 if canonical else max(1, int(getattr(ag, "OCTL_STRIDE", 1)))
                 if stride == 1 or day % stride == 0 or day >= last_day or id(ag) not in held:
                     held[id(ag)] = ag.octl_state(d)
                 st = held[id(ag)]
                 if st:
                     # Lifecycle and errors are in memory: sample them even between account marks.
                     if hasattr(ag, "exit_state"):
-                        st = st | ag.exit_state() | ag.basket_position(eqsave.get("eq_share_price"))
+                        st = st | ag.exit_state()
+                        if not canonical:
+                            st = st | ag.basket_position(eqsave.get("eq_share_price"))
                     octl.append(st)
         # Discount-BUCK time arbs (holder/basketeer A/B): per-agent
         # inventory so PnL and parked positions chart per frame.

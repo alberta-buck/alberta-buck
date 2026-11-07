@@ -634,8 +634,8 @@ export class CreditHouseholdAgent {
   }
 
   async record(world, day) {
-    if (world.accounting === "net") throw new Error("BuckNet household financial marks are not yet integrated");
     const s = await world.households.mark(this);
+    const net = world.accounting === "net", basis = net ? s.basketBasis : this.basketPrincipal;
     this.usdc = s.cash;
     this.ledger.push({ day, drawn: s.drawn, limit: s.limit, jub: min(s.jub, s.drawn),
       mortgageOwing: this.mortgage, hypoOwing: this.hypoMortgage, banked: s.cash, hypoBanked: this.hypoCash,
@@ -643,10 +643,13 @@ export class CreditHouseholdAgent {
       arrears: this.livingArrears + this.premiumArrears, hypoArrears: this.hypoLivingArrears + this.hypoPremiumArrears,
       externalPaid: this.externalPaid, hypoPaid: this.hypoPaid, issuedInvest: this.issuedInvest,
       insuranceAge: s.insuranceAge,
-      basket: this.basketPrincipal, basketAtRisk: this.basketPrincipal, basketMark: s.basketMark,
-      basketMarkAvailable: world.basketKind === "machine" && (this.shares > 0n || this.basketPrincipal === 0n),
-      basketRoi: this.basketPrincipal > 0n && this.shares > 0n && world.basketKind === "machine"
-        ? Number(s.basketMark - this.basketPrincipal) / Number(this.basketPrincipal) : null,
+      basket: basis, basketAtRisk: basis, basketMark: s.basketMark,
+      basketMarkAvailable: net || world.basketKind === "machine" && (this.shares > 0n || basis === 0n),
+      basketRoi: net ? s.basketRoi : basis > 0n && this.shares > 0n && world.basketKind === "machine"
+        ? Number(s.basketMark - basis) / Number(basis) : null,
+      ...(net ? { markBlock: s.blockNumber, auxCash: s.auxCash, held: s.held, savingsHeld: s.savedBucks,
+        premiumNet: s.premiumNet, reliefScaled: s.reliefScaled, availableReliefScaled: s.availableReliefScaled,
+        reliefLiquidityLimited: s.reliefLiquidityLimited, basketShares: s.basketShares } : {}),
       pending: s.pending, premiumPaid: this.premiumPaid, extPremium: this.extPremium, hypoPremium: this.hypoPremium,
       switchPaid: this.switchPaid, penaltyPaid: this.penaltyPaid, tradeLoss: this.tradeLoss, unwound: this.unwound,
       externalInterest: this.externalInterest, hypoInterest: this.hypoInterest, investedUsd: this.investedUsd,

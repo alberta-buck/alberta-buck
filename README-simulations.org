@@ -85,8 +85,31 @@ allowance. Each nominal premium uses its facility's actual insurer pool,
 including after the insurer changes its pool for future issuance. These
 current BUCK-pool marks exclude unobserved insurer strategies/future funding;
 they do not promise an immediately payable refund. Missing guarded marks or
-required maturity aggregates propagate. Full personal portfolio reporting
-still needs to consume these books instead of the legacy signed logic.
+required maturity aggregates propagate.
+
+Python =octl_state= and JS =record= now use these books for complete personal
+financial marks. They count net BUCK and USDC in distinct main, savings and
+working wallets, every constituent TOKEN in those accounts, and exact open
+receipt marks/basis. Financial net worth adds premium-pool and marked Jubilee
+claims and subtracts actual NFT principal, the external mortgage and unpaid
+living/insurance bills. The insured asset is excluded from both financial
+mortgage comparisons. TOKENs and full-value BUCK are valued at the reference
+USDC spot before execution fees/impact; amounts/prices remain integers until
+the final signed division, including balances above JS Number precision.
+The returns are mark-to-market before exit costs: an actual redemption may
+crystallize gain fees and the existing BUCK conversion charge.
+
+Each canonical daily Python book has =mark_block= (JS =markBlock=); snapshots
+do not overwrite its exact receipt values with a rounded or older share-price
+estimate. =cash=/JS =banked= is main-account USDC; =aux_cash=/JS =auxCash=
+records auxiliary USDC, also included in net worth. =pending_usd=/JS =pending=
+marks all constituent TOKENs in all custody accounts. A live zero-basis
+receipt still has a marked value; its open-position ROI is undefined.
+Reading/recording never makes a bank payment, retires debt or edits the trade
+receipt book. Required missing marks and ambiguous custody fail visibly.
+Readable books do not enable normal actions: unimplemented decisions still
+abort both batch and interactive completion rather than producing false
+five-year evidence.
 
 =basket_positions= records each observed agent owner's live receipt IDs,
 remaining basis, exact =valueOf= mark and nonannualized ROI before exit costs.

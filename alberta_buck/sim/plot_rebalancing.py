@@ -62,7 +62,7 @@ def _i(v):
 def household_position(frame):
     """Open household/observed receipt basis and mark; never invent a missing mark."""
     people = [a for a in frame.get("octl", []) if a.get("member") and a.get("active")]
-    positions = [a for a in people if a.get("basket_at_risk", a.get("basket", 0))]
+    positions = [a for a in people if a.get("basket_at_risk", a.get("basket", 0)) or a.get("basket_receipts", 0)]
     if not people and "basket_positions" in frame:
         positions = frame["basket_positions"]
         basis = sum(a["basis"] for a in positions)

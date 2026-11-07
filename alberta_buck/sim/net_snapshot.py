@@ -104,9 +104,9 @@ def observe(d, agents):
         savings = getattr(ag, "_savings_proxy", None)
         household_ids = list(getattr(ag, "_basket_receipts", []))
         if household_ids:
-            if ids or savings is None:
+            if ids:
                 raise ValueError("ambiguous basket receipt owner")
-            owner, ids = savings.address, household_ids
+            owner, ids = (savings.address if savings is not None else ag.address), household_ids
         if not ids:
             continue
         if seen.intersection(ids):
@@ -114,3 +114,73 @@ def observe(d, agents):
         seen.update(ids)
         positions.append({"agent": f"{type(ag).__name__}#{ag.idx}", **marks(owner, ids)})
     return out, positions
+
+
+def household_mark(d, agent):
+    """Mark one household's financial portfolio at one block, before exits.
+
+    Pre: distinct ordinary custody accounts, tracked owned NFT/receipt IDs,
+    liquid initialized reference pools and available guarded relief quotes.
+    Post: no state changes; exact integer money/price arithmetic. Count all
+    constituent TOKENs and USDC in borrower, savings and working wallets.
+    Separate full-value BUCK cash, actual principal, marked relief and each
+    insurer-pool refund mark. The insured asset is common to both mortgage
+    comparisons and excluded from financial net worth; arrears are deducted.
+    """
+    block = d.w3.eth.block_number
+    read = lambda fn: fn.call(block_identifier=block)
+    owner = agent.address
+    book = d.net_credit_ops.mark_household(owner, agent._token_ids, block_number=block)
+    savings, wallet = agent._savings_proxy, agent._wallet
+    accounts = [owner] + [p.address for p in (savings, wallet) if p is not None]
+    if len(set(a.lower() for a in accounts)) != len(accounts):
+        raise ValueError("household custody accounts must be distinct")
+    cash, bucks = {}, {}
+    for address in accounts:
+        if read(d.reg.functions.isCarrying(address)) or not read(d.reg.functions.isVerified(address)):
+            raise ValueError("household custody must be verified and non-Carrying")
+        cash[address] = int(read(d.usdc.functions.balanceOf(address)))
+        bucks[address] = int(read(d.buck.functions.netBalanceScaled(address)))
+
+    def price_ratio(pool, token):
+        venue = d.chain.at("UniswapV3Pool", pool)
+        t0, t1 = read(venue.functions.token0()), read(venue.functions.token1())
+        if {t0.lower(), t1.lower()} != {token.address.lower(), d.usdc.address.lower()}:
+            raise ValueError("household mark requires a canonical settlement pair")
+        sqrt = int(read(venue.functions.slot0())[0])
+        if sqrt <= 0 or not read(venue.functions.liquidity()):
+            raise ValueError("household mark price unavailable")
+        # Raw USDC per raw token; no per-unit rounding or floating point.
+        return (sqrt * sqrt, 1 << 192) if t0.lower() == token.address.lower() else (1 << 192, sqrt * sqrt)
+
+    pending = 0
+    for token, pool in zip(d.tokens, d.pool_usdc):
+        amount = sum(int(read(token.functions.balanceOf(a))) for a in accounts)
+        if amount:
+            numerator, denominator = price_ratio(pool, token)
+            pending += amount * numerator // denominator
+    numerator, denominator = price_ratio(d.pool_ub, d.buck)
+    receipt_owner = savings.address if savings is not None else owner
+    position = mark_net_basket_positions(d.chain, d.basket, d.buck, receipt_owner,
+                                         agent._basket_receipts, block_number=block)
+    scaled = sum(bucks.values()) + position.mark * Q + book.premium_net_scaled - book.state.issued * Q + book.relief_scaled
+    # Match JS BigInt's signed division (truncate toward zero) once, after
+    # combining full-precision BUCK values. A negative book is valid data.
+    valued = abs(scaled) * numerator // (Q * denominator)
+    if scaled < 0:
+        valued = -valued
+    arrears = agent.living_arrears + agent.premium_arrears
+    return {"mark_block": block, "cash": cash[owner], "aux_cash": sum(cash.values()) - cash[owner],
+            "held_buck": bucks[owner] // Q, "savings_held": bucks.get(receipt_owner, 0) // Q if savings else 0,
+            "wallet_buck": bucks[wallet.address] // Q if wallet else 0,
+            "drawn": book.state.issued, "limit": book.credit_limit,
+            "deposit": book.state.premium_nominal, "premium_net": book.premium_net_scaled // Q,
+            "insurance_age": book.state.premium_nominal - book.premium_net_scaled // Q,
+            "jub": book.relief_scaled // Q, "relief_scaled": str(book.relief_scaled),
+            "relief_liquidity_limited": book.exceeds_liquidity_limit,
+            "available_relief_scaled": str(book.available_relief_scaled),
+            "basket": position.basis, "basket_in": position.basis, "basket_at_risk": position.basis,
+            "basket_shares": str(sum(p.shares for p in position.positions)),
+            "basket_mark": position.mark, "basket_receipts": len(position.positions), "basket_roi": position.roi,
+            "pending_usd": pending,
+            "nw": sum(cash.values()) + pending + valued - agent.mortgage - arrears}

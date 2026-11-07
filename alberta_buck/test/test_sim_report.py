@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from alberta_buck.sim import report
-from alberta_buck.sim.snapshot import Snapshotter
+from alberta_buck.sim.snapshot import Snapshotter, household_summary
 from alberta_buck.sim.plot_rebalancing import household_position, machine_weights
 
 
@@ -27,6 +27,12 @@ def test_report_uses_machine_targets_and_open_positions_not_legacy_counters():
     assert household_position(f) == (50, 75, .5)
     f["basket_positions"][0]["mark"] = None
     assert household_position(f) == (50, None, None)
+    gift = dict(member="gift", role="investor", active=True, basket=0, basket_at_risk=0,
+                basket_mark=7, basket_receipts=1, mark_block=12, aux_cash=19)
+    assert household_position({"octl": [gift]}) == (0, 7, None)
+    summary = household_summary([gift])
+    assert summary["basket_mtm"] == 7 and summary["basket_roi"] is None
+    assert summary["aux_cash"] == 19 and summary["mark_basis"] == "receipts"
 
 
 @pytest.fixture
