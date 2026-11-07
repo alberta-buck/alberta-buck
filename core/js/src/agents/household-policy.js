@@ -175,6 +175,15 @@ export function arrivalsStep(state, seed, pop, day, days, bvib, k, p) {
 }
 
 // How far below the basket's value a BUCK can be bought, after the fee (household_policy.discount).
+/** Raw premium due on the uncovered nominal share at one common external
+ * rate. Round remaining cost up; cash, debt and the joined flag do not enter. */
+export function externalPremiumDue(fullPremium, face, activated) {
+  const max = (1n << 256n) - 1n;
+  if ([fullPremium, face, activated].some((v) => typeof v !== "bigint" || v < 0n || v > max)
+      || activated > face || face === 0n && fullPremium !== 0n) throw new Error("invalid external insurance coverage");
+  return face ? (fullPremium * (face - activated) + face - 1n) / face : 0n;
+}
+
 export const discount = (spot, basket, fee) => spot <= 0 || basket <= 0 ? 0
   : Math.max(0, 1 - spot / ((1 - fee) * basket));
 
@@ -245,18 +254,20 @@ export function refinance(t, usd, buck) {
   return scoreRefinance(t, usd, buck, cov, cov * e, newlyIssued, walletUsed);
 }
 
-function scoreRefinance(t, usd, buck, cov, dep, newlyIssued, walletUsed, reserveCosts = null) {
+function scoreRefinance(t, usd, buck, cov, dep, newlyIssued, walletUsed, reserveCosts = null, externalPremiumSaving = null) {
   const reliefRate = t.expected_relief_rate ?? .02, refundFraction = t.premium_refund_fraction ?? 1;
   const refundGrowth = t.expected_refund_growth ?? -.02, walletGrowth = t.expected_wallet_growth ?? 0;
   const value = buck * t.buck_value, valueDep = dep * t.buck_value;
   const refundValue = valueDep * refundFraction;
   const parts = {
     interest: usd * t.rate, relief: (newlyIssued * t.buck_value + valueDep) * reliefRate,
-    premium: t.joined ? 0 : t.face * t.premium_bp / 10000,
+    // The legacy whole-asset switch is comparison-only. Canonical callers
+    // pass only the annual USD saving on their newly activated coverage.
+    premium: externalPremiumSaving ?? (t.wallet_already_issued || t.joined ? 0 : t.face * t.premium_bp / 10000),
     deposit_opp: -refundValue * (t.opp_rate ?? t.rate), deposit_age: refundValue * refundGrowth,
     deposit_write_down: -(valueDep - refundValue),
     wallet_carry: -walletUsed * t.buck_value * walletGrowth,
-    risk: -value * t.risk, execution: -(value - usd), fixed: -t.fixed_cost,
+    risk: -value * t.risk, execution: -(value - usd), fixed: t.wallet_already_issued && newlyIssued === 0 ? 0 : -t.fixed_cost,
     penalty: -usd * t.rate * t.penalty_months / 12,
   };
   let carry = ["interest", "relief", "premium", "deposit_opp", "deposit_age", "wallet_carry", "risk"].reduce((s, k) => s + parts[k], 0);
@@ -279,7 +290,8 @@ function scoreRefinance(t, usd, buck, cov, dep, newlyIssued, walletUsed, reserve
  * owned reserve and costs already in wallet opportunity. This float forecast
  * does not replace integer contract feasibility or a guarded market quote. */
 export function refinanceQuoted(t, usd, walletUsed, newSpendable, presentCoverage, premium,
-  { reserveCost = 0, reserveCarry = 0, premiumRefundFraction = null, expectedRefundGrowth = null } = {}) {
+  { reserveCost = 0, reserveCarry = 0, premiumRefundFraction = null, expectedRefundGrowth = null,
+    externalPremiumSaving = 0 } = {}) {
   if ((premiumRefundFraction !== null && !Number.isFinite(premiumRefundFraction))
       || (expectedRefundGrowth !== null && !Number.isFinite(expectedRefundGrowth))) {
     throw new Error("invalid quoted refund forecast");
@@ -301,8 +313,13 @@ export function refinanceQuoted(t, usd, walletUsed, newSpendable, presentCoverag
   if (premium === 0 && (reserveCost || reserveCarry)) throw new Error("quoted refinance has reserve costs without a premium");
   if (t.issuance_limit == null || newSpendable + premium > t.issuance_limit) throw new Error("quoted refinance exceeds shared issuance limit");
   if (premium > presentCoverage) throw new Error("quoted refinance premium exceeds added coverage");
+  if (!Number.isFinite(externalPremiumSaving) || externalPremiumSaving < 0
+      || externalPremiumSaving > t.face * t.premium_bp / 10000
+      || externalPremiumSaving && (!presentCoverage || !newSpendable)) {
+    throw new Error("invalid incremental external premium saving");
+  }
   return scoreRefinance(t, usd, walletUsed + newSpendable, presentCoverage, premium, newSpendable, walletUsed,
-    { cost: reserveCost, carry: reserveCarry });
+    { cost: reserveCost, carry: reserveCarry }, externalPremiumSaving);
 }
 
 /** Choose among an explicit menu of already feasible candidates; do not infer
@@ -316,7 +333,8 @@ export function bestQuotedRefinance(t, candidates) {
       candidate.present_coverage, candidate.premium,
       { reserveCost: candidate.reserve_cost ?? 0, reserveCarry: candidate.reserve_carry ?? 0,
         premiumRefundFraction: candidate.premium_refund_fraction ?? null,
-        expectedRefundGrowth: candidate.expected_refund_growth ?? null });
+        expectedRefundGrowth: candidate.expected_refund_growth ?? null,
+        externalPremiumSaving: candidate.external_premium_saving ?? 0 });
     if (!v.go) return;
     if (selected === null || v.value > verdict.value || (v.value === verdict.value
         && (candidate.present_coverage < selected.present_coverage ||

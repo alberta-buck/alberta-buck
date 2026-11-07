@@ -432,7 +432,8 @@ export function netPurchaseFromReceipt(world, market, holder, receipt, expectedH
   if (!net.count || net.nominal !== purchase.args.nominal || net.netScaled !== purchase.args.netScaled)
     throw new Error("net BUCK transfer evidence mismatch");
   return { paid: purchase.args.paid, received: net.netScaled / (10n ** 36n),
-    receivedScaled: net.netScaled, nominalReceived: net.nominal, transactionHash: receipt.transactionHash };
+    receivedScaled: net.netScaled, nominalReceived: net.nominal, transactionHash: receipt.transactionHash,
+    blockNumber: receipt.blockNumber };
 }
 
 /** Authenticate one single-pool sale; a successful sale is not mortgage repayment.

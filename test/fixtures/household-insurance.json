@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "money": "raw decimal strings",
+  "coverage": [
+    {"name": "no BUCK insurance", "premium": "1000000", "face": "100000000", "activated": "0", "due": "1000000"},
+    {"name": "one percent insured", "premium": "1000000", "face": "100000000", "activated": "1000000", "due": "990000"},
+    {"name": "half insured", "premium": "1000000", "face": "100000000", "activated": "50000000", "due": "500000"},
+    {"name": "fully insured", "premium": "1000000", "face": "100000000", "activated": "100000000", "due": "0"},
+    {"name": "no insured asset", "premium": "0", "face": "0", "activated": "0", "due": "0"},
+    {"name": "round remaining cost up", "premium": "100", "face": "3", "activated": "1", "due": "67"},
+    {"name": "dust adds no free saving", "premium": "1", "face": "1000", "activated": "1", "due": "1"},
+    {"name": "full width premium", "premium": "1361129467683753853853498429727072845824", "face": "100", "activated": "25", "due": "1020847100762815390390123822295304634368"}
+  ],
+  "refinance": [
+    {"name": "first partial coverage", "joined": false, "coverage": 10000, "new_spendable": 5000, "premium": 1000, "saving": 50},
+    {"name": "further coverage still saves", "joined": true, "coverage": 10000, "new_spendable": 5000, "premium": 1000, "saving": 50},
+    {"name": "wallet payment buys no insurance", "joined": false, "coverage": 0, "new_spendable": 0, "premium": 0, "saving": 0},
+    {"name": "already activated room adds no saving", "joined": true, "coverage": 0, "new_spendable": 5000, "premium": 0, "saving": 0}
+  ]
+}

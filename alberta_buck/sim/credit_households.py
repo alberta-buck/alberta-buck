@@ -142,7 +142,16 @@ class CreditHouseholdAgent(_HouseholdAccounts):
     def bootstrap(self, d, scenario, ctr):
         pass  # arrivals use the live market; they are not an opening OTC placement
 
+    def _external_premium_due(self, d, full_premium):
+        if getattr(d, "buck_accounting", "") != "net":
+            return 0 if self.joined else full_premium  # labelled legacy comparison
+        block = d.w3.eth.block_number
+        activated = sum(d.credit.functions.creditInfo(t).call(block_identifier=block)[1] for t in self._token_ids)
+        return policy.external_premium_due(full_premium, self._face0, activated)
+
     def _monthly(self, d):
+        premium                 = 0 if self._sold else self._face0 * self.premium_rate // 10_000 // 12
+        actual_premium          = self._external_premium_due(d, premium)
         income                  = self.income_annual // 12
         d.chain.send(d.usdc.functions.mint(self.proxy.address, income))
         self.income_total      += income
@@ -157,9 +166,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self.hypo_living_arrears -= paid
         self.hypo_cash         -= paid
         self.hypo_living       += paid
-        premium                 = 0 if self._sold else self._face0 * self.premium_rate // 10_000 // 12
-        if not self.joined:
-            self.premium_arrears += premium
+        self.premium_arrears   += actual_premium
         paid                    = self._pay_bank(d, self.premium_arrears)
         self.premium_arrears   -= paid
         self.ext_premium       += paid

@@ -124,14 +124,24 @@ external mortgage or NFT principal by itself. The existing partial repayment
 adapter supplies the primary household's receipt recovery and selected-NFT
 operations; normal issuance/exit scheduling remains gated.
 
-`agent.startNetRefinance(world, plan, day)` now executes an assessed and
-already-funded plan as three receipt-backed phases: selected-facility issue,
+`agent.startNetRefinance(world, plan, day)` now executes an assessed plan
+through an optional net-reserve purchase followed by selected-facility issue,
 bounded export, exact USDC bank payment. That final payment combines mortgage
 principal, switch cost and a rational prepayment penalty; the agent records
 the allocations separately. Only confirmed principal reduces its mortgage.
 Lost replies preserve the phase/terms/hash and are reconciled before another
 action; an unknown or mismatched receipt cannot trigger a second send.
-This component does not yet select/fund the plan or enable normal decisions.
+`reserve_buy_net` and `reserve_buy_max_usdc` are optional BigInt bounds;
+both must be positive together. The purchase retains the cash buffer, and
+issuance rechecks the original terms after funding. An unavailable view
+waits without buying twice; changed economics refuse while retaining actual
+holdings. This component does not yet select the plan or enable normal decisions.
+
+Canonical calendar insurance uses only the uncovered nominal asset share;
+`externalPremiumDue` rounds the remaining raw cost up. `refinanceQuoted`
+accepts `externalPremiumSaving` (annual USD, default zero) for each candidate's
+new coverage; wallet-only prepayments have neither that saving nor a switch
+cost. Existing coverage does not earn the same saving twice.
 
 `agent.householdEventsSince(seq)` returns detached, JSON-safe transition
 records after the given cursor. Each has stable member/decision/sequence IDs,

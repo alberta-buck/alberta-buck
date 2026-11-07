@@ -1,5 +1,5 @@
 """Shared examples, economic boundaries, and Python/JavaScript conformance."""
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import math
 from pathlib import Path
@@ -11,6 +11,7 @@ from alberta_buck.sim import carry, household_policy as hp
 
 ROOT                            = Path(__file__).resolve().parents[2]
 FIXTURE                         = json.loads((ROOT / "test/fixtures/household-policy.json").read_text())
+INSURANCE                       = json.loads((ROOT / "test/fixtures/household-insurance.json").read_text())
 
 
 @pytest.mark.parametrize("case", FIXTURE["issuance"], ids=lambda c: c["name"])
@@ -33,6 +34,43 @@ def test_net_refinance_uses_explicit_forecasts_and_existing_wallet(case):
     assert v.parts["deposit_write_down"] == pytest.approx(-v.deposit * (1 - t.premium_refund_fraction))
     assert v.parts["deposit_age"] == pytest.approx(v.deposit * t.premium_refund_fraction * t.expected_refund_growth)
     assert v.parts["wallet_carry"] == pytest.approx(-min(case["buck"], t.headroom) * t.expected_wallet_growth)
+
+
+@pytest.mark.parametrize("case", INSURANCE["coverage"], ids=lambda c: c["name"])
+def test_external_premium_depends_on_actual_coverage(case):
+    premium, face, activated, due = (int(case[k]) for k in ("premium", "face", "activated", "due"))
+    assert hp.external_premium_due(premium, face, activated) == due
+    # Removing the active coverage restores the whole external premium.
+    assert hp.external_premium_due(premium, face, 0) == premium
+
+
+@pytest.mark.parametrize("case", INSURANCE["refinance"], ids=lambda c: c["name"])
+def test_net_refinance_scores_only_incremental_insurance(case):
+    t = replace(quoted_terms({"joined": case["joined"]}), fixed_cost=2000)
+    args = dict(usd=4900, wallet_used=0 if case["new_spendable"] else 5000,
+                new_spendable=case["new_spendable"], present_coverage=case["coverage"], premium=case["premium"])
+    baseline = carry.refinance_quoted(t, **args)
+    v = carry.refinance_quoted(t, **args, external_premium_saving=case["saving"])
+    assert baseline.parts["premium"] == 0
+    assert v.parts["premium"] == case["saving"]
+    assert v.carry - baseline.carry == pytest.approx(case["saving"])
+    assert v.value - baseline.value == pytest.approx(t.payback_y * case["saving"])
+    assert v.parts["fixed"] == (-2000 if case["new_spendable"] else 0)
+    assert carry.refinance(t, 4900, 5000).parts["premium"] == 0
+
+
+def test_external_premium_rejects_impossible_inputs():
+    for args in ((1, 0, 0), (1, 10, 11), (-1, 10, 0), (1, 10, -1), (True, 10, 0),
+                 (1, 10.5, 0), (2**256, 10, 0)):
+        with pytest.raises(ValueError, match="external insurance"):
+            hp.external_premium_due(*args)
+    for saving in (-1, float("nan"), True, 10001):
+        with pytest.raises(ValueError, match="incremental external"):
+            carry.refinance_quoted(quoted_terms(), 4900, 0, 5000, 10000, 1000, external_premium_saving=saving)
+    with pytest.raises(ValueError, match="incremental external"):
+        carry.refinance_quoted(quoted_terms(), 4900, 5000, 0, 0, 0, external_premium_saving=1)
+    with pytest.raises(ValueError, match="incremental external"):
+        carry.refinance_quoted(quoted_terms(), 4900, 0, 5000, 0, 0, external_premium_saving=1)
 
 
 def test_net_refinance_requires_available_explicit_forecasts():

@@ -203,16 +203,20 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
     a = make(23, CreditHouseholdAgent)
     b = {key: int(value) for key, value in REFINANCE["base"].items()}
     seed_usdc = int(case.get("seed_usdc", b["seed_usdc"]))
+    seed_buck = int(case.get("seed_buck", b["seed_buck"]))
+    reserve_buy_net, reserve_buy_max = (int(case.get(key, 0)) for key in ("reserve_buy_net", "reserve_buy_max_usdc"))
     d.chain.send(d.usdc.functions.mint(a.address, seed_usdc))
-    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, b["seed_buck"]])))
+    if seed_buck:
+        d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, seed_buck])))
+    a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("approve", args=[d.swap_guard.address, 2**256 - 1]))
     a._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1]))
     a._proxy_exec(d, d.permit2.address, d.permit2.encode_abi(
         "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
     c = d.net_credit_ops.assess_issue_candidate(a.address, a._token_ids[0], b["coverage"], b["new_spendable"], b["premium"])
-    assert c.reasons == ()
+    assert c.reasons == (("reserve-shortfall",) if reserve_buy_net else ())
     minimum = 5000 * RAW if case["fault"] == "revert" and case["phase"] == "export" else b["minimum_usdc"]
     plan = RefinancePlan(c, b["export_buck"], minimum, b["mortgage_limit"], b["cash_buffer"], b["reserve_floor"],
-                         b["switch_cost"], b["penalty_numerator"], b["penalty_denominator"])
+                         b["switch_cost"], b["penalty_numerator"], b["penalty_denominator"], reserve_buy_net, reserve_buy_max)
     machine, calls = a.refinance_machine, {}
     before = (a.mortgage, a.hypo_mortgage, a.hypo_cash, d.buck.functions.totalIssued().call())
     def wrap(dispatch):
@@ -230,6 +234,14 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
         return execute
     for ops in (d.net_credit_ops, d.net_market_ops, d.net_settlement_ops):
         monkeypatch.setattr(ops, "execute", wrap(ops.execute))
+    assess, read_failures = d.net_credit_ops.assess_issue_candidate, []
+    def reassess(*args, **kwargs):
+        if case["fault"] == "quote-unavailable" and not read_failures:
+            read_failures.append(True)
+            raise RuntimeError("quote endpoint unavailable after funded purchase")
+        fresh = assess(*args, **kwargs)
+        return replace(fresh, premium=fresh.premium + 1) if case["fault"] == "quote-changed" else fresh
+    monkeypatch.setattr(d.net_credit_ops, "assess_issue_candidate", reassess)
     ctr = {"directTrades": 0, "cycleTrades": 0}
     a.start_net_refinance(d, plan, 0, ctr, context={"reason": "shared execution vector", "wide": 2**100 + 7})
     if case["fault"] == "lost":
@@ -248,11 +260,17 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
         a.act(d, scenario, 1, 0, ctr)
         a.act(d, scenario, 2, 0, ctr)
         assert calls == sent and "hash unavailable" in a.last_error
+    elif case["fault"] == "quote-unavailable":
+        assert machine.status()["phase"] == "issue" and machine.status()["status"] == "running"
+        assert calls == {"fund": 1} and a.external_paid == a.premium_paid == 0
+        a.act(d, scenario, 1, 0, ctr)
     assert machine.status()["status"] == case["final"]
     assert all(n == 1 for n in calls.values()), "a recovered receipt must not send again"
     completed = case["final"] == "complete"
     principal = b["mortgage_limit"] if completed else 0
-    premium = 0 if case["fault"] == "unknown" else b["premium"]
+    expected_operations = case.get("confirmed", ["issue", "export", "mortgage"] if completed else
+        [] if case["fault"] == "unknown" else ["issue"] if case["phase"] == "export" else ["issue", "export"])
+    premium = b["premium"] if "issue" in expected_operations else 0
     assert a.mortgage == before[0] - principal and a.external_paid == principal
     assert a.hypo_mortgage == before[1] and a.hypo_cash == before[2]
     penalty = (principal * b["penalty_numerator"] + b["penalty_denominator"] - 1) // b["penalty_denominator"]
@@ -260,22 +278,28 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
     assert a.switch_paid == (b["switch_cost"] if completed else 0)
     assert d.usdc.functions.balanceOf(a.SINK).call() == principal + a.switch_paid + penalty
     assert a.refis == (1 if completed else 0)
-    issued = b["new_spendable"] + b["premium"] if case["fault"] != "unknown" else 0
+    issued = b["new_spendable"] + b["premium"] if "issue" in expected_operations else 0
     assert d.net_credit_ops.household(a.address, a._token_ids).issued == issued
     assert d.buck.functions.totalIssued().call() == before[3] + issued
-    assert d.buck.functions.balanceOf(a.address).call() >= b["reserve_floor"]
+    assert d.buck.functions.balanceOf(a.address).call() >= (b["reserve_floor"] if seed_buck or "fund" in expected_operations else 0)
     events = json.loads(json.dumps(machine.events))
     assert events[0]["context"]["wide"] == str(2**100 + 7)
     assert events[0]["limits"]["theta"] == a.p["theta"]
     assert events[0]["plan"]["export_buck"] == str(b["export_buck"])
     assert int(events[0]["market"]["k_wad"]) > 0
     assert int(events[0]["market"]["nominal_usdc_per_buck"]["denominator"]) > 0
-    assert events[0]["accounts"]["ratios"]["reserve_cover"] >= 1
+    assert events[0]["accounts"]["ratios"]["reserve_cover"] == pytest.approx(seed_buck / b["reserve_floor"])
     assert [event["seq"] for event in events] == list(range(1, len(events) + 1))
     assert all(event["accounts"]["usdc"].isdigit() for event in events)
     confirmed = [event for event in events if event["status"] == "confirmed"]
-    assert [e["operation"] for e in confirmed] == (["issue", "export", "mortgage"] if completed else
-        [] if case["fault"] == "unknown" else ["issue"] if case["phase"] == "export" else ["issue", "export"])
+    assert [e["operation"] for e in confirmed] == expected_operations
+    if "fund" in expected_operations:
+        payment = next(e for e in confirmed if e["operation"] == "fund")["amounts"]
+        assert 0 < int(payment["usdc"]) <= reserve_buy_max
+        assert int(payment["net_buck_scaled"]) >= reserve_buy_net * Q
+        bank = sum(int(e["amounts"]["usdc"]) for e in confirmed if e["operation"] == "mortgage")
+        proceeds = sum(int(e["amounts"]["usdc"]) for e in confirmed if e["operation"] == "export")
+        assert d.usdc.functions.balanceOf(a.address).call() == seed_usdc - int(payment["usdc"]) + proceeds - bank
     if not machine.active:
         count = len(events)
         assert machine.advance(d, 3, ctr) is False and len(machine.events) == count
@@ -305,6 +329,36 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
         assert "household_events" not in snap.frames[1]
 
 
+def test_external_insurance_tracks_real_activation_and_retirement(household_world, monkeypatch):
+    d, _, make = household_world
+    a = make(32, CreditHouseholdAgent)
+    full = a._face0 * a.premium_rate // 10_000 // 12
+    assert a._external_premium_due(d, full) == full
+    d.chain.send(d.usdc.functions.mint(a.address, 3000 * RAW))
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, 20 * RAW])))
+    tid = a._token_ids[0]
+    d.net_credit_ops.issue(a.address, tid, 100 * RAW, 40 * RAW, 10 * RAW, d.pool_acct)
+    a.joined = True
+    active = 100 * RAW
+    expected = (full * (a._face0 - active) + a._face0 - 1) // a._face0
+    assert full > a._external_premium_due(d, full) == expected > 0
+    # Isolate this calendar component from the as-yet unported working wallet.
+    a.income_annual, a.payment, a.hypo_cash = 0, 0, 2 * full
+    a.p["living_frac"] = 0
+    monkeypatch.setattr(a, "_tend_wallet", lambda _: None)
+    a._monthly(d)
+    assert a.ext_premium == expected and a.hypo_premium == full
+    deadline = d.w3.eth.get_block("latest")["timestamp"] + 3600
+    plan = d.net_credit_ops.plan_reduction(a.address, tid, 25 * RAW)
+    assert plan.reason == "ready" and plan.principal == 25 * RAW
+    d.net_credit_ops.settle_plan(a.address, plan, deadline)
+    assert d.credit.functions.creditInfo(tid).call()[1] == 50 * RAW
+    restored = a._external_premium_due(d, full)
+    assert restored > expected
+    a._monthly(d)
+    assert a.ext_premium == expected + restored and a.hypo_premium == 2 * full
+
+
 def test_refinance_rejects_reserve_buffer_and_pending_overlap_before_sends(household_world):
     from dataclasses import replace
     d, _, make = household_world
@@ -320,6 +374,11 @@ def test_refinance_rejects_reserve_buffer_and_pending_overlap_before_sends(house
                             (replace(plan, cash_buffer=0), "bounds"),
                             (replace(plan, export_buck=100 * RAW), "consume the BUCK reserve"),
                             (replace(plan, mortgage_limit=100 * RAW), "bounds"),
+                            (replace(plan, reserve_buy_net=RAW), "reserve funding"),
+                            (replace(plan, reserve_buy_max_usdc=RAW), "reserve funding"),
+                            (replace(plan, candidate=None, switch_cost=0, reserve_buy_net=RAW,
+                                     reserve_buy_max_usdc=RAW), "reserve funding"),
+                            (replace(plan, reserve_buy_net=RAW, reserve_buy_max_usdc=b["seed_usdc"]), "USDC buffer"),
                             (replace(plan, penalty_numerator=2**256 - 1, penalty_denominator=1), "overflows uint256")):
         with pytest.raises(ValueError, match=error):
             a.start_net_refinance(d, changed, 0, {})

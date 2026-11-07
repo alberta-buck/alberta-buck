@@ -18,10 +18,11 @@ does not move any other keyed random threshold or change total collateral.
 * Current execution boundary
 
 Setup, personal portfolio books, selected-facility operations and guarded
-markets are implemented. A funded, assessed refinancing plan can now execute
+markets are implemented. An assessed refinancing plan can now acquire a
+bounded net BUCK reserve when needed, then execute
 through =start_net_refinance= / =startNetRefinance= with a checkpoint after
 each authenticated receipt. Normal household decisions remain gated while
-economic plan selection, reserve acquisition, calendar cash flows,
+economic plan selection, complete calendar cash flows,
 saving/paydown and exits are ported. An isolated funded-plan test is not a
 completed household economy or five-year stability result.
 
@@ -61,11 +62,20 @@ prices can change execution. The household must retain a maximum USDC
 budget and use the actual net-output guard or positive sale minimum. A quote
 is neither a fair-value oracle nor evidence of an executed trade.
 
-The user-approved insurance rule for the next decision/calendar integration
-is proportional: external premiums decline only for activated BUCK coverage.
-The first small issuance must not remove a whole asset's external premium.
-Quoted refinancing will count the incremental saving; retiring coverage
-must restore the corresponding external insurance expense.
+External premiums decline only for the activated nominal share of the
+household's declared insured value. Both calendar implementations compute
+the remaining premium as =ceil(full premium * (face - activated) / face)=.
+The counterfactual keeps the full premium. The first small issuance no longer
+removes a whole asset's insurance expense; retiring coverage restores that
+expense proportionally. The current household uses one common insurance
+rate and a fixed declared asset value across its explicitly split facilities.
+
+Quoted refinancing accepts an explicit incremental annual USD insurance
+saving for that candidate. It defaults to zero: marked BUCK coverage alone
+cannot determine an external insurer's USD valuation. Existing coverage and
+wallet-only prepayments add no saving; top-ups can save on new coverage even
+after joining. A wallet-only prepayment also has no insurance switching cost.
+The legacy comparison retains its historical whole-asset switch separately.
 
 * Refinancing state machine
 
@@ -76,14 +86,23 @@ financial quantities are integers in raw six-decimal token units.
 
 | State | Requires | Confirmed effect |
 |-------+----------+------------------|
-| issue | Selected owned NFT; quoted premium/reserve/pool; existing SDK and on-chain authorization/K checks | Actual new NFT principal includes the full-value premium; record that premium. No mortgage payment. |
+| fund (optional) | A positive net BUCK target and maximum USDC budget, funded above the protected cash buffer | The existing guard buys full net reserve value directly from the Carrying pool. Receipt evidence commits the actual payment/delivery once; no NFT debt or mortgage payment. |
+| issue | Selected owned NFT; freshly rechecked premium/coverage/principal/pool and retained reserve; existing SDK and on-chain authorization/K checks | Actual new NFT principal includes the full-value premium; record that premium. No mortgage payment. |
 | export | Actual wallet money can satisfy the sale while retaining the BUCK reserve; positive USDC minimum | Direct user-paid sale produces authenticated USDC. NFT principal and external mortgage are unchanged. |
 | mortgage | Bank amount fits the remaining USDC above the cash buffer | One exact USDC transfer pays principal plus switching cost plus the rounded-up prepayment penalty. Only its principal allocation reduces the mortgage. |
 | pending | A send's outcome is uncertain | Save the phase, terms and hash if known. No new send or book entry until the matching successful receipt is authenticated. A missing/mismatched receipt stays pending. |
-| refused | A proven revert, or a changed balance violates a buffer | End this attempt. Earlier confirmed issuance, exports and payments remain real; do not claim a mortgage payment that did not occur. |
+| waiting | A pre-submission issuance observation is unavailable | Retry the read later without another reserve purchase or issue submission. |
+| refused | A proven revert, changed issuance terms, or a changed balance violates a buffer | End this attempt. Earlier confirmed purchases, issuance, exports and payments remain real; do not claim a mortgage payment that did not occur. |
 | complete | Every required phase was confirmed and applied | One refinancing count; actual principal/cost counters and remaining balances agree with receipts. A repeated recovery call does no work. |
 
-A wallet-only prepayment skips issuance and cannot claim a switch of insurance.
+Set =reserve_buy_net= and =reserve_buy_max_usdc= together for optional funding;
+both default to zero. A reserve-shortfall candidate is accepted only with
+enough planned net funding. After funding, the machine rechecks the exact
+selected terms. A change requires reassessment of the retained holdings,
+rather than silently broadening the original plan. Trading approvals must
+already be prepared; an invalid plan never submits an approval transaction.
+
+A wallet-only prepayment skips funding/issuance and cannot claim a switch of insurance.
 The bank leg combines costs in one simulated-bank transfer and records their
 allocations separately. This eliminates partial fee-payment states. The
 simulation's bank is a standard-USDC sink; this does not establish how an
@@ -110,7 +129,7 @@ The refinancing machine adds an exact append-only event stream:
 | day, block, phase, status | Calendar time, observation block and current transition posture |
 | plan, context, limits | Exact selected terms, caller's economic explanation and resolved randomized thresholds |
 | market | Pinned K/BVIB, exact nominal USDC/BUCK price fraction, fee tier and pool nominal/net balances; unavailable is explicit |
-| accounts | Wallet cash, issued principal, credit limit, premiums, reserve/buffer levels, custody cash, per-NFT principal/age and comparison ratios |
+| accounts | Wallet cash, issued principal, credit limit, premiums, reserve/buffer levels, custody cash, per-NFT face/activation/principal/age, actual/counterfactual monthly external insurance and comparison ratios |
 | basket | At decision start, actual receipt basis, mark, shares and ROI; no receipts is distinct from an unavailable mark |
 | operation, amounts, transaction_hash, receipt_block | A confirmed monetary transition and its evidence; bank principal/cost allocations remain separate |
 | reason | Why an attempt is pending or refused |
@@ -138,5 +157,5 @@ confirmed amounts and current books across the population. It must not count
 =planned=, =pending= or a sale as mortgage retirement.
 
 The current event scope is refinancing. Extend the same records to declined
-economic decisions, funding, saving, paydown and exits as those transitions
+economic decisions, saving, paydown and exits as those transitions
 are ported. No separate dashboard or second simulation runner is introduced.

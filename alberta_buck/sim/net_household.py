@@ -13,13 +13,14 @@ or reverses an already applied financial transition.
 """
 from dataclasses import asdict, dataclass
 import math
+from alberta_buck.sim.household_policy import external_premium_due
 
 from buck_core import (IssuancePending, IssueCandidate, TransactionReceiptPending, TransactionReverted,
                        mark_net_basket_positions, observe_net_market)
 from buck_core.session import _txhex
 
 RAW = 10**6
-PHASES = ("issue", "export", "mortgage")
+PHASES = ("fund", "issue", "export", "mortgage")
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,8 @@ class RefinancePlan:
     switch_cost: int = 0
     penalty_numerator: int = 0
     penalty_denominator: int = 1
+    reserve_buy_net: int = 0
+    reserve_buy_max_usdc: int = 0
 
 
 def _wire(value):
@@ -54,7 +57,8 @@ class HouseholdRefinance:
 
     Pre: an ordinary household, separately tracked debt, actual proxy SDK
     adapters and no other pending household operation. The caller supplies
-    an already funded assessed plan and serializes the owner's actions.
+    an assessed plan with existing reserves or a bounded reserve purchase,
+    and serializes the owner's actions.
     Post: confirmed phases apply once, in order; uncertain phases cannot
     be retried. Neither an issuance nor an export is mortgage repayment.
     This is local-EVM receipt evidence, not a chain-finality policy or a
@@ -85,13 +89,17 @@ class HouseholdRefinance:
             facilities = []
             for token_id in a._token_ids:
                 principal, seconds = read(d.credit.functions.issuanceOf(token_id))
+                face, active, _ = read(d.credit.functions.creditInfo(token_id))
                 facilities.append({"token_id": token_id, "issued": principal, "claim_seconds": seconds,
+                                   "face": face, "activated": active,
                                    "premium_nominal": read(d.buck.functions.premiumPrincipal(token_id))})
             issued = sum(f["issued"] for f in facilities)
             premium = sum(f["premium_nominal"] for f in facilities)
             limit = read(d.buck.functions.creditLimit(a.address))
             buffer = self.flow["plan"].cash_buffer if self.flow else a.cash_buffer
             reserve = self.flow["plan"].reserve_floor if self.flow else 0
+            monthly_premium = 0 if a._sold else a._face0 * a.premium_rate // 10_000 // 12
+            external_premium = external_premium_due(monthly_premium, a._face0, sum(f["activated"] for f in facilities))
             custody = {}
             for name, proxy in (("savings", a._savings_proxy), ("wallet", a._wallet)):
                 if proxy is not None:
@@ -102,6 +110,8 @@ class HouseholdRefinance:
                           "premium_nominal": premium, "mortgage": a.mortgage,
                           "external_paid": a.external_paid, "premium_paid": a.premium_paid,
                           "switch_paid": a.switch_paid, "penalty_paid": a.penalty_paid,
+                          "external_premium_monthly": external_premium,
+                          "counterfactual_premium_monthly": monthly_premium,
                           "cash_buffer": buffer, "reserve_floor": reserve,
                           "ratios": {"utilization": issued / limit if limit else None,
                                      "cash_buffer_cover": cash / buffer if buffer else None,
@@ -153,16 +163,23 @@ class HouseholdRefinance:
         if not isinstance(plan, RefinancePlan):
             raise ValueError("invalid household refinance plan")
         values = (plan.export_buck, plan.minimum_usdc, plan.mortgage_limit, plan.cash_buffer,
-                  plan.reserve_floor, plan.switch_cost, plan.penalty_numerator, plan.penalty_denominator)
+                  plan.reserve_floor, plan.switch_cost, plan.penalty_numerator, plan.penalty_denominator,
+                  plan.reserve_buy_net, plan.reserve_buy_max_usdc)
         if (any(type(v) is not int or not 0 <= v < 2**256 for v in values) or
                 min(plan.export_buck, plan.minimum_usdc, plan.mortgage_limit, plan.penalty_denominator) <= 0 or
                 plan.mortgage_limit > min(plan.minimum_usdc, self.agent.mortgage) or
                 plan.cash_buffer < self.agent.cash_buffer):
             raise ValueError("invalid household refinance bounds")
         c = plan.candidate
-        if c is not None and (not isinstance(c, IssueCandidate) or c.reasons or
+        funding = plan.reserve_buy_net > 0
+        if bool(plan.reserve_buy_max_usdc) != funding or funding and c is None:
+            raise ValueError("invalid household reserve funding")
+        if c is not None and (not isinstance(c, IssueCandidate) or
+                              any(reason != "reserve-shortfall" or not funding for reason in c.reasons) or
                               c.token_id not in self.agent._token_ids):
             raise ValueError("unavailable household issuance candidate")
+        if c is not None and plan.reserve_buy_net < c.reserve_shortfall:
+            raise ValueError("refinance reserve purchase is insufficient")
         if c is not None and plan.reserve_floor < c.reserve_required + c.reserve_buffer:
             raise ValueError("refinance must retain the quoted BUCK reserve")
         if c is None and plan.switch_cost:
@@ -171,17 +188,21 @@ class HouseholdRefinance:
         if any(d.buck.functions.reductionAuthorization(t).call()[0] for t in self.agent._token_ids):
             raise ValueError("household reduction authorization pending")
         fresh = c.requested_spendable if c else 0
-        if book.spendable + fresh < plan.export_buck + plan.reserve_floor:
+        if book.spendable + fresh + plan.reserve_buy_net < plan.export_buck + plan.reserve_floor:
             raise ValueError("refinance would consume the BUCK reserve")
         penalty = (plan.mortgage_limit * plan.penalty_numerator + plan.penalty_denominator - 1) // plan.penalty_denominator
         if plan.mortgage_limit + plan.switch_cost + penalty >= 2**256:
             raise ValueError("household bank allocation overflows uint256")
         cash = d.usdc.functions.balanceOf(self.agent.address).call()
-        if cash + plan.minimum_usdc < plan.cash_buffer + plan.switch_cost + plan.mortgage_limit + penalty:
+        if funding and cash < plan.cash_buffer + plan.reserve_buy_max_usdc:
+            raise ValueError("reserve purchase would consume the USDC buffer")
+        if cash + plan.minimum_usdc < (plan.cash_buffer + plan.reserve_buy_max_usdc + plan.switch_cost +
+                                        plan.mortgage_limit + penalty):
             raise ValueError("refinance would consume the USDC buffer")
         context = _wire(context or {})
         self.decisions += 1
-        self.flow = {"plan": plan, "phase": "issue" if c else "export", "status": "running", "hash": None,
+        self.flow = {"plan": plan, "phase": "fund" if funding else "issue" if c else "export",
+                     "status": "running", "hash": None, "issue_candidate": None,
                      "initial_joined": self.agent.joined, "terms": None}
         self.agent.funding_pending = True
         limits = {key: self.agent.p[key] for key in
@@ -201,7 +222,13 @@ class HouseholdRefinance:
         a, f = self.agent, self.flow
         phase, receipt = f["phase"], result.receipt
         moved = {}
-        if phase == "issue":
+        if phase == "fund":
+            p = f["plan"]
+            if not 0 < result.paid <= p.reserve_buy_max_usdc or result.received < p.reserve_buy_net:
+                raise ValueError("household reserve purchase does not match bounds")
+            a.trade_loss += result.paid - result.received
+            moved = {"usdc": result.paid, "net_buck_scaled": result.net_scaled, "nominal_buck": result.nominal_received}
+        elif phase == "issue":
             a.premium_paid += result.premium
             a.joined = True
             moved = {"principal": result.principal, "premium": result.premium, "spendable": result.spendable}
@@ -238,8 +265,11 @@ class HouseholdRefinance:
         if receipt.get("status") == 0:
             raise TransactionReverted(f["phase"], "household operation reverted", receipt)
         p = f["plan"]
+        if f["phase"] == "fund":
+            return d.net_market_ops.purchase_from_receipt(a.address, d.pool_ub, a.address, receipt,
+                                                          expected_hash=f["hash"])
         if f["phase"] == "issue":
-            return d.net_credit_ops.issuance_from_receipt(a.address, p.candidate, receipt, expected_hash=f["hash"])
+            return d.net_credit_ops.issuance_from_receipt(a.address, f["issue_candidate"], receipt, expected_hash=f["hash"])
         if f["phase"] == "export":
             return d.net_market_ops.sale_from_receipt(a.address, d.pool_ub, a.address, p.export_buck,
                                                       p.minimum_usdc, receipt, expected_hash=f["hash"])
@@ -247,7 +277,7 @@ class HouseholdRefinance:
                                                          expected_hash=f["hash"])
 
     def advance(self, d, day, ctr):
-        """Advance at most three sends, or reconcile the single pending phase.
+        """Advance at most four sends, or reconcile the single pending phase.
 
         A missing/hashless/mismatched receipt leaves the flow pending, with
         no new send and no book changes. A proved revert ends this attempt;
@@ -271,7 +301,29 @@ class HouseholdRefinance:
             self._apply(d, day, result, ctr)
         while f["phase"] != "complete":
             p, phase = f["plan"], f["phase"]
-            if phase == "mortgage":
+            if phase == "issue":
+                # Funding is a real prior transaction. A failed view can be
+                # retried here without buying twice or submitting an issue.
+                c = p.candidate
+                try:
+                    fresh = d.net_credit_ops.assess_issue_candidate(a.address, c.token_id, c.coverage,
+                        c.requested_spendable, c.max_premium, reserve_buffer=c.reserve_buffer)
+                except Exception as exc:
+                    a.last_error = f"refinance issuance observation unavailable: {exc}"[:200]
+                    self._event(d, day, "waiting", reason=a.last_error)
+                    return True
+                unchanged = ("prior_principal", "before_coverage", "after_coverage", "premium")
+                if (fresh.reasons or any(getattr(fresh, key) != getattr(c, key) for key in unchanged) or
+                        fresh.premium_pool.lower() != c.premium_pool.lower() or
+                        fresh.reserve_required + fresh.reserve_buffer > p.reserve_floor):
+                    self._refuse(d, day, "refinance issuance terms changed; reassess retained holdings")
+                    return True
+                f["issue_candidate"] = fresh
+            elif phase == "fund":
+                if d.usdc.functions.balanceOf(a.address).call() < p.reserve_buy_max_usdc + p.cash_buffer:
+                    self._refuse(d, day, "refinance reserve USDC buffer changed")
+                    return True
+            elif phase == "mortgage":
                 penalty = (p.mortgage_limit * p.penalty_numerator + p.penalty_denominator - 1) // p.penalty_denominator
                 amount = p.mortgage_limit + p.switch_cost + penalty
                 if d.usdc.functions.balanceOf(a.address).call() < amount + p.cash_buffer:
@@ -285,8 +337,11 @@ class HouseholdRefinance:
             # never turn an unknown outcome into permission to send again.
             f["status"], f["hash"] = "pending", None
             try:
-                if phase == "issue":
-                    result = d.net_credit_ops.issue_candidate(a.address, p.candidate)
+                if phase == "fund":
+                    result = d.net_market_ops.buy_exact_output(a.address, d.pool_ub, p.reserve_buy_net,
+                                                               p.reserve_buy_max_usdc, a.address)
+                elif phase == "issue":
+                    result = d.net_credit_ops.issue_candidate(a.address, f["issue_candidate"])
                 elif phase == "export":
                     result = d.net_market_ops.sell_exact_input(a.address, d.pool_ub, p.export_buck,
                                                                 p.minimum_usdc, a.address, d.fee_ub)

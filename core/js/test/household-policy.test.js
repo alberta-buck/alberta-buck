@@ -2,10 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { profile, issuance, terms, refinance, refinanceQuoted, bestQuotedRefinance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
-  ROLES } from "../src/agents/household-policy.js";
+  externalPremiumDue, ROLES } from "../src/agents/household-policy.js";
 import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 
 const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-policy.json", import.meta.url)));
+const insurance = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-insurance.json", import.meta.url)));
 for (const c of f.issuance) test(`household policy: ${c.name}`, () => {
   const [kind, v] = issuance({ ...f.state, ...c.state }, profile(f.seed, "0", { ...f.settings, ...c.settings }));
   assert.equal(kind, c.kind); assert.equal(v.go, c.go);
@@ -81,6 +82,31 @@ test("net activated capacity issues without another premium", () => {
 });
 const quotedTerms = (state = {}) => terms({ ...f.state, ...f.net_refinance.at(-1).state,
   spendable: 100000, expected_wallet_growth: .1, ...state }, profile(f.seed, "0", { ...f.settings, apr: .03, theta: 3 }));
+for (const c of insurance.coverage) test(`external insurance: ${c.name}`, () => {
+  const [premium, face, activated, due] = ["premium", "face", "activated", "due"].map((k) => BigInt(c[k]));
+  assert.equal(externalPremiumDue(premium, face, activated), due);
+  assert.equal(externalPremiumDue(premium, face, 0n), premium);
+});
+for (const c of insurance.refinance) test(`incremental insurance: ${c.name}`, () => {
+  const t = { ...quotedTerms({ joined: c.joined }), fixed_cost: 2000 };
+  const args = [t, 4900, c.new_spendable ? 0 : 5000, c.new_spendable, c.coverage, c.premium];
+  const baseline = refinanceQuoted(...args), v = refinanceQuoted(...args, { externalPremiumSaving: c.saving });
+  assert.equal(baseline.parts.premium, 0); assert.equal(v.parts.premium, c.saving);
+  assert.ok(Math.abs(v.carry - baseline.carry - c.saving) < 1e-8);
+  assert.ok(Math.abs(v.value - baseline.value - t.payback_y * c.saving) < 1e-8);
+  assert.equal(v.parts.fixed, c.new_spendable ? -2000 : 0);
+  assert.equal(refinance(t, 4900, 5000).parts.premium, 0);
+});
+test("external insurance refuses impossible coverage and unrelated savings", () => {
+  for (const args of [[1n, 0n, 0n], [1n, 10n, 11n], [-1n, 10n, 0n], [1n, 10n, -1n],
+    [true, 10n, 0n], [1n, 10.5, 0n], [1n << 256n, 10n, 0n]]) {
+    assert.throws(() => externalPremiumDue(...args), /external insurance/);
+  }
+  for (const saving of [-1, NaN, true, 10001]) assert.throws(() =>
+    refinanceQuoted(quotedTerms(), 4900, 0, 5000, 10000, 1000, { externalPremiumSaving: saving }), /incremental external/);
+  assert.throws(() => refinanceQuoted(quotedTerms(), 4900, 5000, 0, 0, 0, { externalPremiumSaving: 1 }), /incremental external/);
+  assert.throws(() => refinanceQuoted(quotedTerms(), 4900, 0, 5000, 0, 0, { externalPremiumSaving: 1 }), /incremental external/);
+});
 for (const c of f.quoted_refinance) test(`quoted refinance: ${c.name}`, () => {
   const t = quotedTerms(c.state), v = refinanceQuoted(t, c.usd, c.wallet, c.new_spendable, c.coverage, c.premium,
     { reserveCost: c.reserve_cost ?? 0, reserveCarry: c.reserve_carry ?? 0,

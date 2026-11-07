@@ -48,8 +48,14 @@ with exact integer USD conversion. Python captures these books daily; both
 interactive and batch drivers refuse unported decisions before completion.
 Their primary proxy markets now reuse guarded net buys, bounded user-paid
 sales and separate authenticated USDC payment helpers with real Permit2.
-JS reuses selected-NFT repayment/recovery. These primitives do not yet
-schedule/apply mortgage refinancing or enable the normal household loop.
+JS reuses selected-NFT repayment/recovery. Both households now execute an
+explicit assessed refinance with optional guarded reserve acquisition,
+rechecked selected-NFT issuance, bounded export and exact USDC bank payment.
+Confirmed phases apply once with exact public histories; missing evidence
+stops retries. Canonical external insurance costs track only the activated
+share, while the mortgage counterfactual keeps its full premium. Economic
+candidate selection, complete calendar/surplus/exit scheduling and full
+restoration still gate the normal household loop.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -828,8 +834,8 @@ implementation sequence, before changing the primary economy builder.
   reserve, discounted buyback and explicit NFT retirement. Preserve arrivals,
   randomized thresholds and always-invest/always-retire comparisons. Resolve
   unused retire_disc and overlapping borrow/paydown decisions.
-  Next select economically worthwhile bounded issuance candidates, acquire
-  and preserve their reserve, then connect calendar cash flows, savings,
+  Next select economically worthwhile bounded issuance candidates, preserve
+  their acquired reserve across later actions, then connect calendar cash flows, savings,
   discounted paydown and exits before removing the normal-decision gate.
   Replace the duplicated legacy mint/gate helpers using the shared bounded
   issuance-candidate quotes, and account for the full-value premium as issued
@@ -846,7 +852,8 @@ implementation sequence, before changing the primary economy builder.
   cursor reads and current status in personal rows. Failed required capture
   cannot discard these records. See README-households.org for the common
   fields and graph/table consumption. Extend the same stream to declined
-  choices, funding, saving, paydown and exits; a new dashboard is not the
+  choices, saving, paydown and exits; optional reserve funding now uses the
+  same stream. A new dashboard is not the
   prerequisite for restoring economic execution.
 - [X] Use one facility per asset as the household default, as approved on
   November 7. asset_count defaults to one for debtor/saver and resolves to
@@ -863,14 +870,28 @@ implementation sequence, before changing the primary economy builder.
   full-width/dust/zero-net vectors pass. Actual V3 execution agrees in both
   token orders; estimates remain advisory across ticks and time, with
   actual net guards and positive output bounds required.
-- [ ] Apply the November 7 insurance-cost decision throughout canonical
-  policy and calendar machinery: external premiums decline only for the
-  activated fraction of insured coverage. Count only incremental annual
-  savings in each candidate; wallet-only prepayment adds no coverage.
-  Retiring coverage restores the corresponding external expense. The
-  mortgage counterfactual keeps its full external premium. Remove the
-  whole-asset exemption triggered by the old joined flag before enabling
-  normal decisions; preserve explicit legacy comparison behavior.
+- [X] Extend the same refinance machine with optional guarded net reserve
+  funding. Preserve the USDC buffer before buying and after the worst-case
+  allocation; only a reserve-shortfall blocker may be funded. Save and
+  authenticate the actual purchase with the other phases, then freshly
+  recheck the selected principal/coverage/premium/pool and required reserve.
+  Failed pre-submission observations can be retried without another buy;
+  changed terms refuse and retain the actual holdings. Shared real-EVM cases
+  cover purchase success, lost/unknown replies, actual refusal, unavailable
+  post-funding quote and changed issuance economics. Normal decisions remain gated.
+- [X] Implement the November 7 insurance-cost rule in canonical scoring and
+  calendar cost calculations. Remaining external premium is rounded up on
+  the unactivated nominal share at the household's common rate; the old
+  joined-wide exemption remains only in explicit legacy comparisons.
+  Quoted scoring accepts incremental annual USD saving per candidate,
+  conservatively defaulting to zero rather than inferring an external USD
+  valuation from marked BUCK coverage. Wallet-only prepayments add neither
+  coverage savings nor switch costs; top-ups can save on additional coverage.
+  Actual retirement restores the proportional expense and the counterfactual
+  retains its full premium. Raw full-width/dust vectors and actual
+  activation/retirement/calendar-component checks cover both languages.
+  The pending economic selector must supply the exact incremental saving;
+  complete receipt-safe calendar scheduling is still part of the open lifecycle.
 - [ ] Persist pending outcomes, buyback targets/reserves, mortgage cash-flow
   timing, NFT/receipt state, random streams and actual fund/insurer wiring.
   Reconcile receipts before retries; never count authorization as repayment,
@@ -1127,4 +1148,41 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-07 | Implement checkpointed funded household refinancing and exact public histories | The existing Python/JS agents now execute an assessed, funded plan through selected-NFT issuance, bounded export and one exact USDC bank payment. The bank receipt is allocated between principal, switching cost and rounded-up prepayment penalty; only its confirmed principal reduces the mortgage. Saved phases/terms/hashes recover lost replies without a second send or application; unknown/mismatched evidence stays stopped and proven reverts preserve earlier effects. Buffers, pending buyback overlap and uint256 bank allocation are checked before sends. Eight shared actual-contract vectors cover normal/wide cash, loss at every phase, unknown hash and reverted sale/bank payment. Primary Python household suite: 13 passed; full existing JS primary acceptance: 14 passed without skips. Broader Python accounting: 30 passed in the venv; the one Anvil receipt-mark check skipped outside Nix was separately rerun under the documented Nix/venv target and passed, giving 31 distinct passing cases and fresh short JSON/PDFs. Exact event schema records stable IDs, actual money, NFT ages, custody/reserve ratios, sampled limits, K/BVIB/price/pool-net context, receipt basis/marks and transaction evidence. Failed observations are explicit; confirmed cursors advance before optional reads. Snapshot capture emits new events once, retains them in full/lite server streams and survives failed capture or SIM_ACTS=none. JS cursor reads are detached; personal rows expose machine status. Added README-households.org and updated Make/detail guides/plan/pre-post invariants. No Solidity behavior changed and no normal decision loop/five-year acceptance is claimed. User approved one facility per asset as the next simplification, keeping multiple-NFT cases in focused fixtures. Next that default, economic candidate selection and reserve funding, then calendar cash flows, saving/paydown, exits/persistence, five-year JSON/PDF campaigns and Notes. | =4446c477= |
 
-| 2026-11-07 | Default to one facility per asset and share net market estimates | User-approved asset_count defaults to one insured facility (zero for investors); explicit 1--32 asset portfolios preserve exact aggregate face and other keyed draws. Primary/refinance tests use the new default; four-asset fixtures retain distinct ages/pools. Existing SDKs now share pinned integer virtual-reserve estimates, net purchase delivery/cost and nominal sale proceeds; configured pair/fee and verified Carrying checks apply. Full-width, dust, aged/zero-net and local-liquidity cases use common vectors. Household market events reuse that source and include active reserves. Estimates assume constant active liquidity and do not replace atomic bounds/receipt evidence. Python policy/household/quote and supported comparison checks: 134 passed. Final canonical accounting/reporting phase: 40 passed and short JSON/PDFs regenerated; final pure quote edge checks: eight passed. Existing JS primary acceptance: 15 passed plus eight quote vectors; separate actual guarded V3 fixture passes in both token orders. JS policy/quote unit set: 45 passed. Existing equilibrium page rebuild passes. One overly broad earlier legacy test selector also included a known gated canonical-loop case; the supported comparison/current-model selections pass and normal decisions remain explicitly gated. Updated Make, SDK/detail guides and invariants. No Solidity behavior changed. User also approved proportional external-insurance savings based on activated coverage; implementation must replace the old joined-wide exemption in both candidate scoring and calendar cash flows. Next guarded reserve acquisition and exact economic plan selection, calendar flows, saving/paydown, exits/persistence, real five-year campaigns/PDFs and Notes. | This commit |
+| 2026-11-07 | Default to one facility per asset and share net market estimates | User-approved asset_count defaults to one insured facility (zero for investors); explicit 1--32 asset portfolios preserve exact aggregate face and other keyed draws. Primary/refinance tests use the new default; four-asset fixtures retain distinct ages/pools. Existing SDKs now share pinned integer virtual-reserve estimates, net purchase delivery/cost and nominal sale proceeds; configured pair/fee and verified Carrying checks apply. Full-width, dust, aged/zero-net and local-liquidity cases use common vectors. Household market events reuse that source and include active reserves. Estimates assume constant active liquidity and do not replace atomic bounds/receipt evidence. Python policy/household/quote and supported comparison checks: 134 passed. Final canonical accounting/reporting phase: 40 passed and short JSON/PDFs regenerated; final pure quote edge checks: eight passed. Existing JS primary acceptance: 15 passed plus eight quote vectors; separate actual guarded V3 fixture passes in both token orders. JS policy/quote unit set: 45 passed. Existing equilibrium page rebuild passes. One overly broad earlier legacy test selector also included a known gated canonical-loop case; the supported comparison/current-model selections pass and normal decisions remain explicitly gated. Updated Make, SDK/detail guides and invariants. No Solidity behavior changed. User also approved proportional external-insurance savings based on activated coverage; implementation must replace the old joined-wide exemption in both candidate scoring and calendar cash flows. Next guarded reserve acquisition and exact economic plan selection, calendar flows, saving/paydown, exits/persistence, real five-year campaigns/PDFs and Notes. | =d46a6bfc= |
+
+
+| 2026-11-07 | Acquire household issuance reserves and apply proportional external insurance | Extended the existing Python/JS refinancing machine with an optional exact-net reserve buy, protected USDC funding budget and fresh selected-issuance recheck. Receipt evidence applies each purchase once; lost/unknown hashes, actual refusal, unavailable post-funding reads and repriced terms have shared vectors. Previously confirmed holdings remain real when later work stops. The submitted fresh candidate authenticates issuance recovery. SDK purchase results retain receipt metadata. Canonical monthly external insurance now covers only the unactivated nominal asset share, rounded up, and actual retirement restores the cost; the mortgage counterfactual keeps full insurance. Quoted scoring accepts explicit incremental annual savings with a conservative zero default, including top-ups after joining; wallet-only prepayments add neither insurance savings nor switch costs. Added shared raw full-width/dust and scoring vectors, actual activation/retirement/calendar-component tests, exact insurance/coverage observations and Make acceptance coverage. Python policy/carry/primary-household/purchase-outcome set: 130 passed. JS policy/quote unit set: 58 passed. The full existing JS primary-world acceptance is still running at this checkpoint; its result is not yet claimed. No Solidity behavior changed. Normal household choices/calendar/surplus/exits remain gated; no corrected-accounting five-year acceptance is claimed. | This commit |
+
+** Compaction handoff: November 7 reserve/insurance checkpoint
+
+- Active worktree: =.claude/worktrees/buck-compound=; branch
+  =feature/buck-compound-demurrage=. Prior milestones are =4446c477=
+  (funded refinancing/history) and =d46a6bfc= (one asset/default and market quotes).
+- Latest Python command passed 130 tests:
+  =make nix-venv-test-python PYTEST_FILES='alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_carry.py core/python/tests/test_net_purchase_outcome.py' PYTEST_ARGS='-q'=.
+  Log: =/private/tmp/buck-household-reserve-insurance-py.log=.
+- =make nix-core-equilibrium-bootstrap-test= is running; unified-exec
+  session =91797=, log
+  =/private/tmp/buck-household-reserve-insurance-primary-js.log=.
+  Its 58 pure JS quote/policy checks passed; actual primary-world tests are
+  still pending. Poll that process/result before claiming JS qualification.
+  An earlier run was interrupted before results to correct the new fixture
+  to use the insurer's actual current pool after the existing rotation case.
+- Shared =household-refinance.json= now has fourteen cases. Optional funding
+  adds =fund -> issue -> export -> mortgage=; existing funded plans skip
+  =fund=. After a confirmed buy, unavailable issuance reads leave a running
+  =issue= phase (no send/hash), safe to retry. Changed exact terms refuse and
+  retain cash. Unknown submitted hashes remain pending without blind retry.
+  Trading approvals are prepared externally; invalid plans send nothing.
+- Insurance cost calculations are wired into the old monthly component,
+  with actual component tests; its entire income/payment calendar is not yet
+  receipt-safe. Do not remove the normal =act= migration gate on this basis.
+  The future economic selector must compute the explicit incremental annual
+  USD insurance saving from actual nominal activation. A zero saving is the
+  deliberate default when no external valuation is supplied.
+- Next: finish JS acceptance and record its result, then exact bounded
+  economic candidate selection, reserve preservation across later actions,
+  receipt-safe calendar, saving/discounted paydown and zero-principal exits.
+  Reuse the existing agents/SDKs/history rather than another runner. Full
+  saved-world recovery, short actual household worlds, five-year JSON/PDF
+  campaigns, arb qualification and Notes/proofs remain subsequent gates.

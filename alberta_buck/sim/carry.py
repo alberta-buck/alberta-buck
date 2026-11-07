@@ -218,7 +218,8 @@ def refinance(t: RefiTerms, usd: float, buck: float) -> RefiVerdict:
     return _score_refinance(t, usd, buck, cov, dep, newly_issued, wallet_used)
 
 
-def _score_refinance(t, usd, buck, cov, dep, newly_issued, wallet_used, reserve_costs=None):
+def _score_refinance(t, usd, buck, cov, dep, newly_issued, wallet_used, reserve_costs=None,
+                     external_premium_saving=None):
     """Common valuation; feasibility and token-unit rounding belong to the caller."""
     value_buck                  = buck * t.buck_value
     value_dep                   = dep * t.buck_value
@@ -232,8 +233,10 @@ def _score_refinance(t, usd, buck, cov, dep, newly_issued, wallet_used, reserve_
         # the Jubilee relief the new lien earns: the BUCK drawn and the
         # deposit drawn with it
         "relief": (newly_issued * t.buck_value + value_dep) * relief_rate,
-        # the external premium stops once the asset is insured through BUCK
-        "premium": 0.0 if t.joined else t.face * t.premium_bp / 10_000.0,
+        # Canonical candidates supply only the incremental saving on their
+        # actual activated share. The old whole-asset switch is comparison-only.
+        "premium": (external_premium_saving if external_premium_saving is not None else
+                    0.0 if t.wallet_already_issued or t.joined else t.face * t.premium_bp / 10_000.0),
         # the deposit: an outlay, whose cost is the opportunity it forgoes...
         "deposit_opp": -refund_value * opp,
         # ...and the expected change in the insurer's net refund value
@@ -248,7 +251,7 @@ def _score_refinance(t, usd, buck, cov, dep, newly_issued, wallet_used, reserve_
         "risk": -value_buck * t.risk,
         # execution: the liability, at par, beyond the USD it retired
         "execution": -(value_buck - usd),
-        "fixed": -t.fixed_cost,
+        "fixed": 0.0 if t.wallet_already_issued and newly_issued == 0 else -t.fixed_cost,
         "penalty": -usd * t.rate * t.penalty_months / 12.0,
     }
     carry = sum(parts[k] for k in ("interest", "relief", "premium",
@@ -269,7 +272,8 @@ def _score_refinance(t, usd, buck, cov, dep, newly_issued, wallet_used, reserve_
 def refinance_quoted(t: RefiTerms, usd: float, wallet_used: float, new_spendable: float,
                      present_coverage: float, premium: float, *, reserve_cost: float = 0.,
                      reserve_carry: float = 0., premium_refund_fraction: float | None = None,
-                     expected_refund_growth: float | None = None) -> RefiVerdict:
+                     expected_refund_growth: float | None = None,
+                     external_premium_saving: float = 0.) -> RefiVerdict:
     """Value a proposed split between already-held money and one quoted issue.
 
     Amounts use whole units; ``usd`` is the external mortgage principal the
@@ -280,6 +284,9 @@ def refinance_quoted(t: RefiTerms, usd: float, wallet_used: float, new_spendable
     anything already included in wallet opportunity. They can be negative if
     acquiring/holding the reserve has a net benefit. Refund fraction and growth
     can be overridden for this specific candidate's insurer and premium.
+    ``external_premium_saving`` is the annual USD saving from its actual new
+    nominal coverage, not from already insured coverage. The default is zero;
+    marked coverage alone cannot infer an external insurer's USD valuation.
 
     This is an economic forecast, not an issuance or trade check. The caller
     must first establish exact integer feasibility, reserve funding, a guarded
@@ -312,8 +319,12 @@ def refinance_quoted(t: RefiTerms, usd: float, wallet_used: float, new_spendable
         raise ValueError("quoted refinance exceeds shared issuance limit")
     if premium > present_coverage:
         raise ValueError("quoted refinance premium exceeds added coverage")
+    if (type(external_premium_saving) not in (int, float) or not math.isfinite(external_premium_saving) or
+            not 0 <= external_premium_saving <= t.face * t.premium_bp / 10_000.0 or
+            external_premium_saving and (not present_coverage or not new_spendable)):
+        raise ValueError("invalid incremental external premium saving")
     return _score_refinance(t, usd, wallet_used + new_spendable, present_coverage, premium,
-                            new_spendable, wallet_used, (reserve_cost, reserve_carry))
+                            new_spendable, wallet_used, (reserve_cost, reserve_carry), external_premium_saving)
 
 
 def best_quoted_refinance(t: RefiTerms, candidates):

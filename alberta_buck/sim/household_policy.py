@@ -208,6 +208,21 @@ def arrivals_step(state, seed, population, day, days, bvib, k, p):
     return arrived
 
 
+def external_premium_due(full_premium, face, activated):
+    """Raw external premium for coverage not activated through BuckCredit.
+
+    Pre: one premium period, aggregate face/activation in matching nominal
+    units, a common external insurance rate. Post: no activation means the
+    full cost; full activation means zero. Round the remaining cost up so
+    tiny coverage never earns an extra raw unit of savings. No debt, wallet
+    cash, Jubilee relief or historical 'joined' flag enters this calculation.
+    """
+    if (any(type(v) is not int or not 0 <= v < 2**256 for v in (full_premium, face, activated)) or
+            activated > face or face == 0 and full_premium != 0):
+        raise ValueError("invalid external insurance coverage")
+    return (full_premium * (face - activated) + face - 1) // face if face else 0
+
+
 def discount(spot, basket_usd, fee):
     """How far below the basket's value a BUCK can be bought, after the fee (0 when it cannot)."""
     if spot <= 0 or basket_usd <= 0:

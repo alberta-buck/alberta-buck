@@ -99,6 +99,14 @@ and separate facilities on canonical Buck. Their normal decision loop
 still refuses until issuance and exit migration is complete. These books
 are integration inputs, not a restored five-year economy.
 
+The existing household refinance machine can optionally acquire a net BUCK
+reserve before issuance using `reserve_buy_net` / `reserve_buy_max_usdc`.
+It protects the cash buffer, authenticates the purchase once and rechecks
+the original selected issuance terms after funding. `NetPurchase.receipt`
+retains that evidence without changing equality of its monetary fields.
+Economic selection and the complete normal household lifecycle remain open;
+see the checkout's `README-households.org` for state and event invariants.
+
 `TransactionReverted.data` preserves structured provider data from the
 post-block `eth_call` replay. A proxy may not declare its target's errors;
 use `custom_error_name(target.abi, error)` to classify a known selector

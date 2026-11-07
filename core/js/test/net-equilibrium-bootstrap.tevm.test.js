@@ -244,6 +244,34 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(await s.call(buck, "totalIssued"), supply);
     assert.equal((await debtor.state(world, 370)).drawn, Number(before.drawn) / 1e6);
   });
+  await t.test("external insurance follows actual coverage and restores costs after retirement", async () => {
+    const account = { address: "0x00000000000000000000000000000000000abe00" };
+    const a = new CreditHouseholdAgent({ account, member: "insurance-activation", settings: { home_k: 1000, premium_bp: 100 } });
+    await a.setup(world);
+    const owner = world.holderAddress(account), [id] = world._credits.get(account.address);
+    const full = a.face * 100n / 10000n / 12n;
+    assert.equal(await a.externalPremiumDue(world, full), full);
+    await s.send(world.usdc, "mint", [owner, 3000n * RAW]);
+    await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
+      functionName: "transfer", args: [owner, 20n * RAW] })]);
+    await world.netCreditOps.issue(owner, id, 100n * RAW, 40n * RAW, 10n * RAW,
+      await s.call(buck, "insurerPool", [world.operator]));
+    a.joined = true;
+    const expected = (full * (a.face - 100n * RAW) + a.face - 1n) / a.face;
+    assert.equal(await a.externalPremiumDue(world, full), expected); assert.ok(expected > 0n && expected < full);
+    a.incomeAnnual = 0n; a.payment = 0n; a.hypoCash = 2n * full; a.p.living_frac = 0;
+    a.tendWallet = async () => {}; // working-wallet migration is a separate calendar gate
+    await a.monthly(world);
+    assert.equal(a.extPremium, expected); assert.equal(a.hypoPremium, full);
+    const plan = await world.netCreditOps.planReduction(owner, id, 25n * RAW);
+    assert.equal(plan.reason, "ready"); assert.equal(plan.principal, 25n * RAW);
+    await world.netCreditOps.settlePlan(owner, plan, (await s.client.getBlock()).timestamp + 3600n);
+    assert.equal((await s.call(credit, "creditInfo", [id]))[1], 50n * RAW);
+    const restored = await a.externalPremiumDue(world, full);
+    assert.ok(restored > expected);
+    await a.monthly(world);
+    assert.equal(a.extPremium, expected + restored); assert.equal(a.hypoPremium, 2n * full);
+  });
   await t.test("household refinancing commits receipt-backed phases and exact public histories", async (t) => {
     const b = Object.fromEntries(Object.entries(REFINANCE.base).map(([k, v]) => [k, BigInt(v)]));
     for (const [index, vector] of REFINANCE.cases.entries()) await t.test(vector.name, async () => {
@@ -253,17 +281,22 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
       const owner = world.holderAddress(account), ids = world._credits.get(account.address), machine = a.refinanceMachine;
       await world.households.openTrading(account);
       await s.send(world.usdc, "mint", [owner, BigInt(vector.seed_usdc ?? b.seed_usdc)]);
-      await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
-        functionName: "transfer", args: [owner, b.seed_buck] })]);
+      const seedBuck = BigInt(vector.seed_buck ?? b.seed_buck);
+      if (seedBuck) await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
+        functionName: "transfer", args: [owner, seedBuck] })]);
       const candidate = await world.netCreditOps.assessIssueCandidate(owner, ids[0], b.coverage, b.new_spendable, b.premium);
-      assert.deepEqual(candidate.reasons, []);
+      assert.deepEqual(candidate.reasons, vector.reserve_buy_net ? ["reserve-shortfall"] : []);
       const plan = { candidate, ...Object.fromEntries(["export_buck", "minimum_usdc", "mortgage_limit", "cash_buffer",
-        "reserve_floor", "switch_cost", "penalty_numerator", "penalty_denominator"].map((k) => [k, b[k]])) };
+        "reserve_floor", "switch_cost", "penalty_numerator", "penalty_denominator"].map((k) => [k, b[k]])),
+        reserve_buy_net: BigInt(vector.reserve_buy_net ?? 0), reserve_buy_max_usdc: BigInt(vector.reserve_buy_max_usdc ?? 0) };
       if (vector.fault === "revert" && vector.phase === "export") plan.minimum_usdc = 5_000_000_000n;
       if (vector.name === "confirmed") {
         const head = (await s.client.getBlock()).number;
         for (const [changed, reason] of [[{ reserve_floor: 0n }, /quoted BUCK reserve/], [{ cash_buffer: 0n }, /bounds/],
           [{ export_buck: 100_000_000n }, /consume the BUCK reserve/], [{ mortgage_limit: 100_000_000n }, /bounds/],
+          [{ reserve_buy_net: RAW }, /reserve funding/], [{ reserve_buy_max_usdc: RAW }, /reserve funding/],
+          [{ candidate: null, switch_cost: 0n, reserve_buy_net: RAW, reserve_buy_max_usdc: RAW }, /reserve funding/],
+          [{ reserve_buy_net: RAW, reserve_buy_max_usdc: b.seed_usdc }, /USDC buffer/],
           [{ penalty_numerator: (1n << 256n) - 1n, penalty_denominator: 1n }, /overflows uint256/]]) {
           await assert.rejects(a.startNetRefinance(world, { ...plan, ...changed }, 0), reason);
         }
@@ -277,7 +310,13 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
         issued: (await world.netCreditOps.household(owner, ids)).issued, supply: await s.call(buck, "totalIssued"),
         bank: await s.call(world.usdc, "balanceOf", ["0x000000000000000000000000000000000000dEaD"]), seq: machine.events.length };
       const calls = {}, originalIssue = world.netCreditOps.issue, originalExecute = world.netMarket.execute;
-      const originalPay = world.netSettlementOps.payExact;
+      const originalPay = world.netSettlementOps.payExact, originalAssess = world.netCreditOps.assessIssueCandidate;
+      let readFailures = 0;
+      world.netCreditOps.assessIssueCandidate = async (...args) => {
+        if (vector.fault === "quote-unavailable" && readFailures++ === 0) throw new Error("quote endpoint unavailable after funded purchase");
+        const fresh = await originalAssess(...args);
+        return vector.fault === "quote-changed" ? { ...fresh, premium: fresh.premium + 1n } : fresh;
+      };
       const bankOps = settlementOps(s, world.usdc, { execute: (who, c, name, args) =>
         originalExecute(who, c, name, args, { expect: "either" }) });
       const intercept = (fn, receiptOf = (r) => r) => async (...args) => {
@@ -308,15 +347,21 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
           const sent = { ...calls };
           await a.act(world, 1, 0); await a.act(world, 2, 0);
           assert.deepEqual(calls, sent); assert.match(a.lastError, /hash unavailable/);
+        } else if (vector.fault === "quote-unavailable") {
+          assert.equal(machine.status().phase, "issue"); assert.equal(machine.status().status, "running");
+          assert.deepEqual(calls, { fund: 1 }); assert.equal(a.externalPaid, before.paid); assert.equal(a.premiumPaid, before.premium);
+          await a.act(world, 1, 0);
         }
         assert.equal(machine.status().status, vector.final);
         assert.ok(Object.values(calls).every((n) => n === 1));
         const complete = vector.final === "complete", principal = complete ? b.mortgage_limit : 0n;
-        const issued = vector.fault === "unknown" ? 0n : b.new_spendable + b.premium;
+        const expected = vector.confirmed ?? (complete ? ["issue", "export", "mortgage"]
+          : vector.fault === "unknown" ? [] : vector.phase === "export" ? ["issue"] : ["issue", "export"]);
+        const issued = expected.includes("issue") ? b.new_spendable + b.premium : 0n;
         const penalty = (principal * b.penalty_numerator + b.penalty_denominator - 1n) / b.penalty_denominator;
         assert.equal(a.mortgage, before.mortgage - principal); assert.equal(a.externalPaid, before.paid + principal);
         assert.equal(a.hypoMortgage, before.hypo); assert.equal(a.hypoCash, before.hypoCash);
-        assert.equal(a.premiumPaid, before.premium + (vector.fault === "unknown" ? 0n : b.premium));
+        assert.equal(a.premiumPaid, before.premium + (expected.includes("issue") ? b.premium : 0n));
         assert.equal(a.switchPaid, before.switch + (complete ? b.switch_cost : 0n)); assert.equal(a.penaltyPaid, before.penalty + penalty);
         assert.equal(a.refis, before.refis + (complete ? 1 : 0));
         assert.equal(ctr.rtrUsdRetired ?? 0n, principal / 1_000_000n);
@@ -324,18 +369,28 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
           before.bank + principal + (complete ? b.switch_cost : 0n) + penalty);
         assert.equal((await world.netCreditOps.household(owner, ids)).issued, before.issued + issued);
         assert.equal(await s.call(buck, "totalIssued"), before.supply + issued);
-        assert.ok(await s.call(buck, "balanceOf", [owner]) >= b.reserve_floor);
+        assert.ok(await s.call(buck, "balanceOf", [owner]) >= (seedBuck || expected.includes("fund") ? b.reserve_floor : 0n));
         const events = JSON.parse(JSON.stringify(a.householdEventsSince(before.seq)));
         assert.equal(events[0].context.wide, String(2n ** 100n + 7n));
         assert.equal(events[0].limits.theta, a.p.theta); assert.equal(events[0].plan.export_buck, String(b.export_buck));
-        assert.ok(BigInt(events[0].market.k_wad) > 0n); assert.ok(events[0].accounts.ratios.reserve_cover >= 1);
+        assert.ok(BigInt(events[0].market.k_wad) > 0n);
+        assert.equal(events[0].accounts.ratios.reserve_cover, Number(seedBuck) / Number(b.reserve_floor));
         assert.ok(events.every((e) => /^\d+$/.test(e.accounts.usdc)));
-        assert.deepEqual(events.filter((e) => e.status === "confirmed").map((e) => e.operation), complete ? ["issue", "export", "mortgage"]
-          : vector.fault === "unknown" ? [] : vector.phase === "export" ? ["issue"] : ["issue", "export"]);
+        const confirmed = events.filter((e) => e.status === "confirmed");
+        assert.deepEqual(confirmed.map((e) => e.operation), expected);
+        if (expected.includes("fund")) {
+          const amounts = confirmed.find((e) => e.operation === "fund").amounts;
+          assert.ok(BigInt(amounts.usdc) > 0n && BigInt(amounts.usdc) <= plan.reserve_buy_max_usdc);
+          assert.ok(BigInt(amounts.net_buck_scaled) >= plan.reserve_buy_net * 10n ** 36n);
+          const bank = confirmed.filter((e) => e.operation === "mortgage").reduce((sum, e) => sum + BigInt(e.amounts.usdc), 0n);
+          const proceeds = confirmed.filter((e) => e.operation === "export").reduce((sum, e) => sum + BigInt(e.amounts.usdc), 0n);
+          assert.equal(await s.call(world.usdc, "balanceOf", [owner]), BigInt(vector.seed_usdc ?? b.seed_usdc) - BigInt(amounts.usdc) + proceeds - bank);
+        }
         assert.throws(() => a.householdEventsSince(-1), /cursor/);
         if (!machine.active) assert.equal(await machine.advance(world, 3), false);
       } finally {
         world.netCreditOps.issue = originalIssue; world.netMarket.execute = originalExecute; world.netSettlementOps.payExact = originalPay;
+        world.netCreditOps.assessIssueCandidate = originalAssess;
       }
       if (vector.final === "pending") {
         // Unknown-hash cases intentionally remain stopped; isolate the next

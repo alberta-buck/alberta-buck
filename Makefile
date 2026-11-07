@@ -1696,10 +1696,12 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 
 # Bootstrap the EXISTING machine world on canonical Buck; this is not the
 # household lifecycle or a completed economy. Includes actual portfolio and
-# guarded proxy market operations; no silent legacy fallback.
+# guarded proxy market operations, optional reserve acquisition and
+# receipt-backed refinancing. Shared policy cases include proportional
+# external insurance; normal income/surplus/exit decisions remain gated.
 core-equilibrium-bootstrap-test: sim-build core-build-wasm
 	node core/js/bin/bundle-artifacts.mjs
-	cd core/js && node --test test/net-market-quote.test.js
+	cd core/js && node --test test/net-market-quote.test.js test/household-policy.test.js
 	cd core/js && node --test test/net-equilibrium-bootstrap.tevm.test.js
 
 # Both EXISTING builders, not the household loop or a five-year campaign.
@@ -1724,7 +1726,7 @@ economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 #   make nix-venv-economy-accounting-test
 economy-accounting-test: economy-bootstrap-test
 	mkdir -p build/test
-	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py --basetemp=build/test/economy-accounting -q
+	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py --basetemp=build/test/economy-accounting -q
 	cd core/js && node --test test/net-basket-mark.tevm.test.js
 
 # Each published crate carries its OWN copy of the vectors it replays:

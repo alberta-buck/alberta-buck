@@ -8,7 +8,7 @@ the token recomputes all authorization, K, funding and liquidity checks.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from buck_core.artifacts import load_artifact
@@ -343,6 +343,7 @@ class NetPurchase:
     paid: int
     nominal_received: int
     net_scaled: int
+    receipt: Any = field(default=None, compare=False, repr=False)
 
     @property
     def received(self) -> int:
@@ -439,7 +440,7 @@ class NetMarketOps:
         transfer = net_transfer_value(self.token, receipt, pool, recipient)
         if not transfer.count or transfer.nominal != event["nominal"] or transfer.net_scaled != event["netScaled"]:
             raise ValueError("net BUCK transfer evidence mismatch")
-        return NetPurchase(event["paid"], transfer.nominal, transfer.net_scaled)
+        return NetPurchase(event["paid"], transfer.nominal, transfer.net_scaled, receipt)
 
     def buy_exact_input(self, owner, pool: str, amount_in: int, minimum_net: int,
                         recipient: str, price_limit: int = 0) -> NetPurchase:

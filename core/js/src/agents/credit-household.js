@@ -1,6 +1,6 @@
 // The same household as alberta_buck/sim/credit_households.py. No independent income agent is needed.
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
-  arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, ROLES } from "./household-policy.js";
+  arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, externalPremiumDue, ROLES } from "./household-policy.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 import { HouseholdRefinance } from "./net-household.js";
 
@@ -96,7 +96,21 @@ export class CreditHouseholdAgent {
       { tag: "household:pledge" });
   }
 
+  async externalPremiumDue(world, fullPremium) {
+    if (world.accounting !== "net") return this.joined ? 0n : fullPremium; // legacy comparison
+    const blockNumber = (await world.session.client.getBlock()).number;
+    let activated = 0n;
+    for (const id of world._credits.get(this.account.address) ?? []) {
+      const info = await world.session.client.readContract({ address: world.credit.address, abi: world.credit.abi,
+        functionName: "creditInfo", args: [id], blockNumber });
+      activated += info[1];
+    }
+    return externalPremiumDue(fullPremium, this.face, activated);
+  }
+
   async monthly(world) {
+    const premium = this.sold ? 0n : this.face * BigInt(this.p.premium_bp) / 10000n / 12n;
+    const actualPremium = await this.externalPremiumDue(world, premium);
     const ops = world.households, income = this.incomeAnnual / 12n;
     await world.fiatIn(this.account, income, { tag: "household:income" });
     this.incomeTotal += income; this.hypoCash += income;
@@ -108,8 +122,7 @@ export class CreditHouseholdAgent {
     paid = min(this.hypoLivingArrears, this.hypoCash);
     this.hypoLivingArrears -= paid;
     this.hypoCash -= paid; this.hypoLiving += paid;
-    const premium = this.sold ? 0n : this.face * BigInt(this.p.premium_bp) / 10000n / 12n;
-    if (!this.joined) this.premiumArrears += premium;
+    this.premiumArrears += actualPremium;
     paid = await ops.pay(this.account, this.premiumArrears, "household:insurance");
     this.premiumArrears -= paid; this.extPremium += paid;
     this.hypoPremiumArrears += premium;
