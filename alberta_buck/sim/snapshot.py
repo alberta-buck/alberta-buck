@@ -1093,6 +1093,22 @@ class Snapshotter:
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t
+        # Exact append-only household transitions are independent of the
+        # optional compact action log and daily portfolio sampling. Commit
+        # cursors only after the required frame has been captured successfully.
+        cursors = self.__dict__.setdefault("_household_event_cursors", {})
+        events = []
+        for ag in agents:
+            machine = getattr(ag, "refinance_machine", None)
+            if machine is None:
+                continue
+            ident = f"{type(ag).__name__}#{ag.idx}"
+            events.extend({"agent": ident, **event} for event in machine.events[cursors.get(ident, 0):])
+            cursors[ident] = len(machine.events)
+        if events:
+            self.frames[-1]["household_events"] = events
+            self.meta["household_events"] = {"schema": 1, "scope": "refinance", "money": "raw decimal strings",
+                                             "identity": "agent/member", "ordering": "per-household seq"}
 
     def write(self, path=None) -> Path:
         p = Path(path) if path else (

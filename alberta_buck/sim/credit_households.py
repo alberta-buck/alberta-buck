@@ -7,6 +7,7 @@ from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
+from alberta_buck.sim.net_household import HouseholdRefinance
 from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted
 from buck_core.session import _txhex, custom_error_name
 
@@ -68,6 +69,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._net_cancel_hash = None
         self._net_trade_uncertain = False               # uncertain guarded buy must be reconciled
         self._net_pending_buy_hash = None
+        self.refinance_machine  = HouseholdRefinance(self)
         self.wallet_bought      = 0
         self._sold              = False                 # the insured asset has been sold
         self._released          = False                 # its coverage has been released
@@ -322,7 +324,16 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 return True
         return False
 
-    def _recover_pending_operations(self, d, ctr):
+    def start_net_refinance(self, d, plan, day, ctr, *, context=None):
+        """Execute a funded, assessed plan; economic plan selection is separate."""
+        if getattr(d, "buck_accounting", "") != "net":
+            raise ValueError("canonical refinancing requires net accounting")
+        if (self._pending_repayment(d) or self._net_repayment_reserve is not None or
+                self._net_repayment_target is not None):
+            raise ValueError("household buyback must finish before refinancing")
+        return self.refinance_machine.start(d, plan, day, ctr, context=context)
+
+    def _recover_pending_operations(self, d, ctr, day=None):
         """Reconcile one known receipt before this household submits more work.
 
         A recovered outcome consumes this turn. Unknown hashes, an untracked
@@ -333,6 +344,9 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         if getattr(d, "buck_accounting", "") != "net":
             return False
         try:
+            machine = getattr(self, "refinance_machine", None)
+            if machine is not None and machine.active:
+                return machine.advance(d, self._last_day if day is None else day, ctr)
             if getattr(self, "_net_trade_uncertain", False):
                 if getattr(self, "_net_pending_buy_hash", None):
                     self.reconcile_pending_buy(d)
@@ -1133,7 +1147,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
     def act(self, d, scenario, day, tick, ctr):
         if tick or day < self.arrive_day or self.exited:
             return
-        if self._recover_pending_operations(d, ctr):
+        if self._recover_pending_operations(d, ctr, day):
             return
         if getattr(d, "buck_accounting", "") == "net":
             raise NotImplementedError("canonical household decisions await issuance and exit migration")
@@ -1231,6 +1245,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                   income_total=self.income_total, living_paid=self.living_paid, hypo_living=self.hypo_living,
                   decision=self._last_verdict, error=self.last_error, arrive_day=self.arrive_day)
         st.update(self.exit_state())
+        if getattr(d, "buck_accounting", "") == "net":
+            st["machine"] = self.refinance_machine.status()
         return st
 
     def exit_state(self):

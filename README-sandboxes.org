@@ -22,8 +22,11 @@ Python builder, bootstrap agents, desk and component comparisons.
 marks and a short Python loop through JSON/PDF reporting. Both complete
 household lifecycles and full economy save/restore still await conversion.
 The primary worlds also expose the existing guarded market and exact USDC
-payment helpers through their ordinary proxies. These component operations
-do not yet schedule household refinancing or apply mortgage payments.
+payment helpers through their ordinary proxies. The [[file:README-households.org][household refinancing machine]]
+can apply a funded plan's confirmed bank principal/costs and recover interrupted
+phases once. Normal economic decision/calendar/savings/exit scheduling remains
+gated. Its exact event stream is already retained by both server frame modes
+for a future individual/aggregate status view.
 Existing debtor/saver/investor account and facility setup now works in both
 languages, with matching SDK credit books and personal portfolio records.
 These records include all custody cash/TOKENs, actual NFT debt, each insurer

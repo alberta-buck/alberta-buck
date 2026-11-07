@@ -173,7 +173,11 @@ USDC payments and saved-receipt recovery. Tests use aged Carrying pools and
 distinct payers/recipients. The JS primary adapter reuses selected-facility
 repayment recovery instead of duplicating it. Sales do not implicitly retire
 either mortgage or NFT principal. Complete household scheduling is still
-gated; these primitives do not yet apply pending bank payments to its ledger.
+gated. The [[file:README-households.org][household refinancing machine]] now applies a funded plan's
+authenticated bank principal and costs once, including recovery after a lost
+reply. Economic selection, reserve acquisition and the rest of its lifecycle
+remain separate gates. Tests stream exact histories through full/lite JSON
+without depending on the optional compact action log.
 The sim-build dependency now includes the vendored Permit2 build.
 This is component/reporting integration coverage, not household-policy or five-year
 stability evidence. No extra economy runner is introduced.

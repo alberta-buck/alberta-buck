@@ -1,6 +1,8 @@
 """Existing household setup, credit/portfolio books and the remaining decision gate."""
 from dataclasses import replace
 from fractions import Fraction
+import json
+from pathlib import Path
 import random
 from types import SimpleNamespace
 
@@ -12,12 +14,14 @@ from alberta_buck.sim import experiment as expmod, identity as idmod
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.credit_households import CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent
 from alberta_buck.sim.deploy import deploy
+from alberta_buck.sim.net_household import RefinancePlan
 from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
 from alberta_buck.sim.scenario import ROUTING
 
 RAW = 10**6
 Q = 10**36
 YEAR = 365 * 86400 + 6 * 3600
+REFINANCE = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-refinance.json").read_text())
 
 
 @pytest.fixture
@@ -168,6 +172,141 @@ def test_primary_proxy_market_uses_net_guard_bounded_sales_and_exact_payments(ho
     assert payment.amount == 20 * RAW
     assert d.usdc.functions.balanceOf(a.SINK).call() == payment.amount
     assert d.buck.functions.totalIssued().call() == supply
+
+
+@pytest.mark.parametrize("case", REFINANCE["cases"], ids=lambda c: c["name"])
+def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatch, case):
+    from alberta_buck.sim.snapshot import Snapshotter
+    from buck_core.session import _txhex
+    d, scenario, make = household_world
+    a = make(23, CreditHouseholdAgent)
+    b = {key: int(value) for key, value in REFINANCE["base"].items()}
+    seed_usdc = int(case.get("seed_usdc", b["seed_usdc"]))
+    d.chain.send(d.usdc.functions.mint(a.address, seed_usdc))
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, b["seed_buck"]])))
+    a._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1]))
+    a._proxy_exec(d, d.permit2.address, d.permit2.encode_abi(
+        "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
+    c = d.net_credit_ops.assess_issue_candidate(a.address, a._token_ids[0], b["coverage"], b["new_spendable"], b["premium"])
+    assert c.reasons == ()
+    minimum = 5000 * RAW if case["fault"] == "revert" and case["phase"] == "export" else b["minimum_usdc"]
+    plan = RefinancePlan(c, b["export_buck"], minimum, b["mortgage_limit"], b["cash_buffer"], b["reserve_floor"],
+                         b["switch_cost"], b["penalty_numerator"], b["penalty_denominator"])
+    machine, calls = a.refinance_machine, {}
+    before = (a.mortgage, a.hypo_mortgage, a.hypo_cash, d.buck.functions.totalIssued().call())
+    def wrap(dispatch):
+        def execute(owner, target, method, args):
+            phase = machine.flow["phase"]
+            calls[phase] = calls.get(phase, 0) + 1
+            if phase == case["phase"] and case["fault"] == "unknown":
+                raise RuntimeError("submission outcome unknown")
+            if phase == case["phase"] and case["fault"] == "revert" and phase == "mortgage":
+                args = [a.SINK, 2**256 - 1]
+            receipt = dispatch(owner, target, method, args)
+            if phase == case["phase"] and case["fault"] == "lost":
+                raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
+            return receipt
+        return execute
+    for ops in (d.net_credit_ops, d.net_market_ops, d.net_settlement_ops):
+        monkeypatch.setattr(ops, "execute", wrap(ops.execute))
+    ctr = {"directTrades": 0, "cycleTrades": 0}
+    a.start_net_refinance(d, plan, 0, ctr, context={"reason": "shared execution vector", "wide": 2**100 + 7})
+    if case["fault"] == "lost":
+        assert machine.status()["status"] == "pending" and machine.status()["phase"] == case["phase"]
+        assert a.external_paid == a.switch_paid == a.penalty_paid == 0
+        supply, sent = d.buck.functions.totalIssued().call(), dict(calls)
+        actual_receipt = d.w3.eth.get_transaction_receipt
+        with monkeypatch.context() as patch:
+            patch.setattr(d.w3.eth, "get_transaction_receipt", lambda h: {**actual_receipt(h), "transactionHash": bytes(32)})
+            a.act(d, scenario, 1, 0, ctr)
+        assert machine.status()["status"] == "pending" and calls == sent
+        assert d.buck.functions.totalIssued().call() == supply and a.mortgage == before[0]
+        a.act(d, scenario, 2, 0, ctr)
+    elif case["fault"] == "unknown":
+        sent = dict(calls)
+        a.act(d, scenario, 1, 0, ctr)
+        a.act(d, scenario, 2, 0, ctr)
+        assert calls == sent and "hash unavailable" in a.last_error
+    assert machine.status()["status"] == case["final"]
+    assert all(n == 1 for n in calls.values()), "a recovered receipt must not send again"
+    completed = case["final"] == "complete"
+    principal = b["mortgage_limit"] if completed else 0
+    premium = 0 if case["fault"] == "unknown" else b["premium"]
+    assert a.mortgage == before[0] - principal and a.external_paid == principal
+    assert a.hypo_mortgage == before[1] and a.hypo_cash == before[2]
+    penalty = (principal * b["penalty_numerator"] + b["penalty_denominator"] - 1) // b["penalty_denominator"]
+    assert a.premium_paid == premium and a.penalty_paid == penalty
+    assert a.switch_paid == (b["switch_cost"] if completed else 0)
+    assert d.usdc.functions.balanceOf(a.SINK).call() == principal + a.switch_paid + penalty
+    assert a.refis == (1 if completed else 0)
+    issued = b["new_spendable"] + b["premium"] if case["fault"] != "unknown" else 0
+    assert d.net_credit_ops.household(a.address, a._token_ids).issued == issued
+    assert d.buck.functions.totalIssued().call() == before[3] + issued
+    assert d.buck.functions.balanceOf(a.address).call() >= b["reserve_floor"]
+    events = json.loads(json.dumps(machine.events))
+    assert events[0]["context"]["wide"] == str(2**100 + 7)
+    assert events[0]["limits"]["theta"] == a.p["theta"]
+    assert events[0]["plan"]["export_buck"] == str(b["export_buck"])
+    assert int(events[0]["market"]["k_wad"]) > 0
+    assert int(events[0]["market"]["nominal_usdc_per_buck"]["denominator"]) > 0
+    assert events[0]["accounts"]["ratios"]["reserve_cover"] >= 1
+    assert [event["seq"] for event in events] == list(range(1, len(events) + 1))
+    assert all(event["accounts"]["usdc"].isdigit() for event in events)
+    confirmed = [event for event in events if event["status"] == "confirmed"]
+    assert [e["operation"] for e in confirmed] == (["issue", "export", "mortgage"] if completed else
+        [] if case["fault"] == "unknown" else ["issue"] if case["phase"] == "export" else ["issue", "export"])
+    if not machine.active:
+        count = len(events)
+        assert machine.advance(d, 3, ctr) is False and len(machine.events) == count
+    if case["name"] == "confirmed":
+        # Mandatory public transitions survive failed capture and SIM_ACTS=none,
+        # then stream once through the existing JSON/full/lite frame paths.
+        from alberta_buck.sim import acts, net_snapshot
+        from alberta_buck.sim.server import Session
+        monkeypatch.setattr(acts, "MODE", "none")
+        snap = Snapshotter(d, scenario)
+        with monkeypatch.context() as patch:
+            def unavailable(*_):
+                raise ValueError("required observation unavailable")
+            patch.setattr(net_snapshot, "observe", unavailable)
+            with pytest.raises(ValueError, match="required observation"):
+                snap.capture(0, ctr, [a], 0)
+        assert not snap.frames
+        snap.capture(0, ctr, [a], 0)
+        assert len(snap.frames[0]["household_events"]) == len(events)
+        import time
+        session = Session.__new__(Session)
+        session._last_day_ts, session.sid, session.paused, session._sv = time.monotonic(), "flow-vector", True, {}
+        full, lite = (json.loads(payload) for payload in session._payloads(snap.frames[0]))
+        assert full["household_events"] == lite["household_events"]
+        assert "ag" not in lite
+        snap.capture(1, ctr, [a], 0)
+        assert "household_events" not in snap.frames[1]
+
+
+def test_refinance_rejects_reserve_buffer_and_pending_overlap_before_sends(household_world):
+    from dataclasses import replace
+    d, _, make = household_world
+    a = make(31, CreditHouseholdAgent)
+    b = {key: int(value) for key, value in REFINANCE["base"].items()}
+    d.chain.send(d.usdc.functions.mint(a.address, b["seed_usdc"]))
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, b["seed_buck"]])))
+    candidate = d.net_credit_ops.assess_issue_candidate(a.address, a._token_ids[0], b["coverage"], b["new_spendable"], b["premium"])
+    plan = RefinancePlan(candidate, b["export_buck"], b["minimum_usdc"], b["mortgage_limit"], b["cash_buffer"],
+                         b["reserve_floor"], b["switch_cost"], b["penalty_numerator"], b["penalty_denominator"])
+    head = d.w3.eth.block_number
+    for changed, error in ((replace(plan, reserve_floor=0), "quoted BUCK reserve"),
+                            (replace(plan, cash_buffer=0), "bounds"),
+                            (replace(plan, export_buck=100 * RAW), "consume the BUCK reserve"),
+                            (replace(plan, mortgage_limit=100 * RAW), "bounds"),
+                            (replace(plan, penalty_numerator=2**256 - 1, penalty_denominator=1), "overflows uint256")):
+        with pytest.raises(ValueError, match=error):
+            a.start_net_refinance(d, changed, 0, {})
+    a._net_repayment_target, a._net_repayment_reserve = RAW, RAW
+    with pytest.raises(ValueError, match="buyback must finish"):
+        a.start_net_refinance(d, plan, 0, {})
+    assert d.w3.eth.block_number == head
+    assert a.refinance_machine.events == [] and a.premium_paid == a.external_paid == 0
 
 
 def test_personal_portfolio_marks_use_actual_cash_debt_receipts_and_all_custody(household_world):

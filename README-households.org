@@ -1,0 +1,110 @@
+#+TITLE: Household decisions, settlement and observations
+#+OPTIONS: ^:nil toc:2
+
+The Python and JavaScript households share the policy in
+=household_policy.py= / =household-policy.js= and operate on the same canonical
+Buck contracts. The adaptive policy is the default; always-invest and
+retirement policies remain explicit comparisons. The savings sandbox and
+five-year runner use these existing households and population arrivals.
+The [[file:doc/review/bucknet-economy-implementation.org][accounting implementation plan]] is the authoritative completion checklist.
+
+* Current execution boundary
+
+Setup, personal portfolio books, selected-facility operations and guarded
+markets are implemented. A funded, assessed refinancing plan can now execute
+through =start_net_refinance= / =startNetRefinance= with a checkpoint after
+each authenticated receipt. Normal household decisions remain gated while
+economic plan selection, reserve acquisition, calendar cash flows,
+saving/paydown and exits are ported. An isolated funded-plan test is not a
+completed household economy or five-year stability result.
+
+Use the existing acceptance target; it builds the contracts/kernels and runs
+the primary-world, household, receipt and reporting tests:
+
+#+begin_src sh
+make nix-venv-economy-accounting-test
+#+end_src
+
+For focused work on the existing primary fixtures:
+
+#+begin_src sh
+make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py
+make nix-core-equilibrium-bootstrap-test
+#+end_src
+
+The shared interruption cases are in =test/fixtures/household-refinance.json=.
+They exercise actual contracts, not a substitute monetary model.
+
+* Refinancing state machine
+
+The plan selects one assessed NFT, new spendable issuance, a bounded BUCK
+export, protected BUCK/USDC buffers and a maximum external principal payment.
+It includes switching costs and an exact rational prepayment penalty. All
+financial quantities are integers in raw six-decimal token units.
+
+| State | Requires | Confirmed effect |
+|-------+----------+------------------|
+| issue | Selected owned NFT; quoted premium/reserve/pool; existing SDK and on-chain authorization/K checks | Actual new NFT principal includes the full-value premium; record that premium. No mortgage payment. |
+| export | Actual wallet money can satisfy the sale while retaining the BUCK reserve; positive USDC minimum | Direct user-paid sale produces authenticated USDC. NFT principal and external mortgage are unchanged. |
+| mortgage | Bank amount fits the remaining USDC above the cash buffer | One exact USDC transfer pays principal plus switching cost plus the rounded-up prepayment penalty. Only its principal allocation reduces the mortgage. |
+| pending | A send's outcome is uncertain | Save the phase, terms and hash if known. No new send or book entry until the matching successful receipt is authenticated. A missing/mismatched receipt stays pending. |
+| refused | A proven revert, or a changed balance violates a buffer | End this attempt. Earlier confirmed issuance, exports and payments remain real; do not claim a mortgage payment that did not occur. |
+| complete | Every required phase was confirmed and applied | One refinancing count; actual principal/cost counters and remaining balances agree with receipts. A repeated recovery call does no work. |
+
+A wallet-only prepayment skips issuance and cannot claim a switch of insurance.
+The bank leg combines costs in one simulated-bank transfer and records their
+allocations separately. This eliminates partial fee-payment states. The
+simulation's bank is a standard-USDC sink; this does not establish how an
+external lender credits a real loan.
+
+The caller serializes each owner's work. Existing pending buybacks and
+authorizations block a new refinance. Recovery runs before new household
+income or decisions. Receipt evidence assumes the local EVM's immediate
+finality; full saved-world/pending-state import remains separate work.
+
+* Data for charts and decision tables
+
+Daily personal books provide cash, actual issued principal, remaining basket
+basis/mark/ROI, insurer refund marks, Jubilee claims, the external mortgage
+counterfactual and cash-flow totals. They retain their observation block.
+The insured asset is common to both financial comparisons and is excluded
+from financial net worth; basket returns precede exit costs.
+
+The refinancing machine adds an exact append-only event stream:
+
+| Field | Meaning |
+|-------+---------|
+| schema, member, decision, seq | Format version and stable per-household decision/event identifiers |
+| day, block, phase, status | Calendar time, observation block and current transition posture |
+| plan, context, limits | Exact selected terms, caller's economic explanation and resolved randomized thresholds |
+| market | Pinned K/BVIB, exact nominal USDC/BUCK price fraction, fee tier and pool nominal/net balances; unavailable is explicit |
+| accounts | Wallet cash, issued principal, credit limit, premiums, reserve/buffer levels, custody cash, per-NFT principal/age and comparison ratios |
+| basket | At decision start, actual receipt basis, mark, shares and ROI; no receipts is distinct from an unavailable mark |
+| operation, amounts, transaction_hash, receipt_block | A confirmed monetary transition and its evidence; bank principal/cost allocations remain separate |
+| reason | Why an attempt is pending or refused |
+
+Money, scaled values, NFT IDs, shares, rational numerators/denominators and
+BUCK-seconds use decimal strings. Only finite comparison ratios and threshold
+estimates use floating point. Undefined ratios are null; a failed observation
+is an explicit =unavailable= record. Ratios and marks do not authorize a
+transaction. In a confirmed event, =operation= names the completed action and
+=phase= names the next state.
+
+Python emits only new events in =frames[].household_events=. This field is
+retained in both the savings server's full and lite JSON streams and their
+existing replay history. Successful frame capture advances its event cursors;
+a failed required capture cannot discard transitions. =SIM_ACTS=none= only
+disables the older compact action log, not these monetary records. Join
+=agent/member= to =meta.telemetry.agents[].knobs= for the resolved profile.
+The frame's per-member =machine= field exposes current phase/status/cursor.
+
+JavaScript exposes =agent.householdEventsSince(seq)=, returning a detached
+copy of events after that cursor. Store the last returned =seq= and request
+only new rows. Personal daily ledger rows include the current =machine=
+status. A UI can group by member for an individual timeline or aggregate
+confirmed amounts and current books across the population. It must not count
+=planned=, =pending= or a sale as mortgage retirement.
+
+The current event scope is refinancing. Extend the same records to declined
+economic decisions, funding, saving, paydown and exits as those transitions
+are ported. No separate dashboard or second simulation runner is introduced.

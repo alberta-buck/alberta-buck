@@ -487,6 +487,8 @@ class Session:
         full = {**frame, "pace": pace, "sid": self.sid, "paused": self.paused,
                 "sv": self._sv}
         lite = {k: v for k, v in full.items() if k not in self.HEAVY}
+        # household_events stays in both streams: exact, incremental public
+        # decisions/receipts for a household history, independent of heavy ag.
         # The savings page needs each household's open basket position, not its full account history.
         lite["household_positions"] = [
             {k: a.get(k) for k in ("member", "role", "basket_at_risk", "basket_mark", "basket_roi")}

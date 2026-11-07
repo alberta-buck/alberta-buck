@@ -2,6 +2,7 @@
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
   arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, ROLES } from "./household-policy.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
+import { HouseholdRefinance } from "./net-household.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -72,11 +73,18 @@ export class CreditHouseholdAgent {
     this.netCancelHash = null;
     this.netTradeUncertain = false;
     this.netPendingBuyHash = null;
+    this.refinanceMachine = new HouseholdRefinance(this);
   }
 
   get mortgageOwing() { return this.mortgage; }
   get hypoOwing() { return this.hypoMortgage; }
   get hypoBanked() { return this.hypoCash; }
+  householdEventsSince(seq = 0) {
+    if (!Number.isSafeInteger(seq) || seq < 0 || seq > this.refinanceMachine.events.length) {
+      throw new Error("invalid household event cursor");
+    }
+    return structuredClone(this.refinanceMachine.events.slice(seq));
+  }
 
   async setup(world) {
     this.tokenIdx = Math.trunc(uniform(this.seed, this.member, "token") * world.tokens.length);
@@ -187,9 +195,18 @@ export class CreditHouseholdAgent {
   // authorizations remain stopped. Confirmed authorization/reverted settlement
   // can be canceled by this dispatcher. The simulation assumes one dispatcher
   // and immediate finality; a live client needs nonce serialization and finality.
-  async recoverPendingOperations(world) {
+  async startNetRefinance(world, plan, day, ctr = {}, options = {}) {
+    if (world.accounting !== "net") throw new Error("canonical refinancing requires net accounting");
+    if (await this.pendingRepayment(world) || this.netRepaymentReserve !== null || this.netRepaymentTarget !== null) {
+      throw new Error("household buyback must finish before refinancing");
+    }
+    return this.refinanceMachine.start(world, plan, day, ctr, options);
+  }
+
+  async recoverPendingOperations(world, day = this.lastDay) {
     if (world.accounting !== "net") return false;
     try {
+      if (this.refinanceMachine.active) return this.refinanceMachine.advance(world, day);
       if (this.netTradeUncertain) {
         if (this.netPendingBuyHash) await this.reconcilePendingBuy(world);
         else await this.pendingRepayment(world);
@@ -649,7 +666,8 @@ export class CreditHouseholdAgent {
         ? Number(s.basketMark - basis) / Number(basis) : null,
       ...(net ? { markBlock: s.blockNumber, auxCash: s.auxCash, held: s.held, savingsHeld: s.savedBucks,
         premiumNet: s.premiumNet, reliefScaled: s.reliefScaled, availableReliefScaled: s.availableReliefScaled,
-        reliefLiquidityLimited: s.reliefLiquidityLimited, basketShares: s.basketShares } : {}),
+        reliefLiquidityLimited: s.reliefLiquidityLimited, basketShares: s.basketShares,
+        machine: this.refinanceMachine.status() } : {}),
       pending: s.pending, premiumPaid: this.premiumPaid, extPremium: this.extPremium, hypoPremium: this.hypoPremium,
       switchPaid: this.switchPaid, penaltyPaid: this.penaltyPaid, tradeLoss: this.tradeLoss, unwound: this.unwound,
       externalInterest: this.externalInterest, hypoInterest: this.hypoInterest, investedUsd: this.investedUsd,
@@ -666,7 +684,7 @@ export class CreditHouseholdAgent {
 
   async act(world, day, tick) {
     if (tick || day < this.arrive_day || this.exited) return;
-    if (await this.recoverPendingOperations(world)) return;
+    if (await this.recoverPendingOperations(world, day)) return;
     if (world.accounting === "net") throw new Error("canonical household decisions await issuance and exit migration");
     if (!this.started) {
       const cash = units((this.investor ? this.p.invest_cash_k : this.p.cash_k) * 1000);

@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "money": "raw decimal strings",
+  "base": {
+    "coverage": "10000000", "new_spendable": "5000000", "premium": "1000000",
+    "seed_buck": "4000000", "seed_usdc": "20000000000",
+    "export_buck": "4000000", "minimum_usdc": "3800000", "mortgage_limit": "3500000",
+    "cash_buffer": "10000000000", "reserve_floor": "3000000",
+    "switch_cost": "100000", "penalty_numerator": "1", "penalty_denominator": "100"
+  },
+  "cases": [
+    {"name": "confirmed", "fault": null, "phase": null, "final": "complete"},
+    {"name": "wide cash book", "fault": null, "phase": null, "final": "complete", "seed_usdc": "1237940039285380274899124231"},
+    {"name": "lost issuance reply", "fault": "lost", "phase": "issue", "final": "complete"},
+    {"name": "lost export reply", "fault": "lost", "phase": "export", "final": "complete"},
+    {"name": "lost bank reply", "fault": "lost", "phase": "mortgage", "final": "complete"},
+    {"name": "unknown issuance hash", "fault": "unknown", "phase": "issue", "final": "pending"},
+    {"name": "reverted export", "fault": "revert", "phase": "export", "final": "refused"},
+    {"name": "reverted bank payment", "fault": "revert", "phase": "mortgage", "final": "refused"}
+  ]
+}

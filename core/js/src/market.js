@@ -461,7 +461,7 @@ export function netSaleFromReceipt(world, market, holder, receipt,
     throw new Error("net sale transfer evidence does not match bounds");
   }
   return { paid: net.netScaled / (10n ** 36n), paidScaled: net.netScaled, nominalPaid, received,
-    transactionHash: receipt.transactionHash };
+    transactionHash: receipt.transactionHash, blockNumber: receipt.blockNumber };
 }
 
 /** Buy BUCK with exactly `usdcIn`; returns {paid, received}. */

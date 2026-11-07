@@ -15,6 +15,9 @@ import { CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent } from "
 import { advanceTime, DAY } from "../src/buckworld.js";
 import { buyBuck, sellBuck, netPurchaseFromReceipt, netSaleFromReceipt, tradingOpen } from "../src/market.js";
 import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
+import { settlementOps } from "../src/settlement.js";
+
+const REFINANCE = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-refinance.json", import.meta.url)));
 
 test("canonical equilibrium bootstrap reuses one fund/basket and issues actual pool money", async (t) => {
   const s = await tevmSession();
@@ -217,6 +220,106 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(debtor.externalPaid, initialPaid);
     assert.equal(await s.call(buck, "totalIssued"), supply);
     assert.equal((await debtor.state(world, 370)).drawn, Number(before.drawn) / 1e6);
+  });
+  await t.test("household refinancing commits receipt-backed phases and exact public histories", async (t) => {
+    const b = Object.fromEntries(Object.entries(REFINANCE.base).map(([k, v]) => [k, BigInt(v)]));
+    for (const [index, vector] of REFINANCE.cases.entries()) await t.test(vector.name, async () => {
+      const account = { address: `0x${(0xabd00n + BigInt(index)).toString(16).padStart(40, "0")}` };
+      const a = new CreditHouseholdAgent({ account, member: `refinance-vectors-${index}`, settings: { home_k: 1000, premium_bp: 100 } });
+      await a.setup(world);
+      const owner = world.holderAddress(account), ids = world._credits.get(account.address), machine = a.refinanceMachine;
+      await world.households.openTrading(account);
+      await s.send(world.usdc, "mint", [owner, BigInt(vector.seed_usdc ?? b.seed_usdc)]);
+      await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
+        functionName: "transfer", args: [owner, b.seed_buck] })]);
+      const candidate = await world.netCreditOps.assessIssueCandidate(owner, ids[0], b.coverage, b.new_spendable, b.premium);
+      assert.deepEqual(candidate.reasons, []);
+      const plan = { candidate, ...Object.fromEntries(["export_buck", "minimum_usdc", "mortgage_limit", "cash_buffer",
+        "reserve_floor", "switch_cost", "penalty_numerator", "penalty_denominator"].map((k) => [k, b[k]])) };
+      if (vector.fault === "revert" && vector.phase === "export") plan.minimum_usdc = 5_000_000_000n;
+      if (vector.name === "confirmed") {
+        const head = (await s.client.getBlock()).number;
+        for (const [changed, reason] of [[{ reserve_floor: 0n }, /quoted BUCK reserve/], [{ cash_buffer: 0n }, /bounds/],
+          [{ export_buck: 100_000_000n }, /consume the BUCK reserve/], [{ mortgage_limit: 100_000_000n }, /bounds/],
+          [{ penalty_numerator: (1n << 256n) - 1n, penalty_denominator: 1n }, /overflows uint256/]]) {
+          await assert.rejects(a.startNetRefinance(world, { ...plan, ...changed }, 0), reason);
+        }
+        a.netRepaymentReserve = 1_000_000n; a.netRepaymentTarget = 1_000_000n;
+        await assert.rejects(a.startNetRefinance(world, plan, 0), /buyback must finish/);
+        a.netRepaymentReserve = null; a.netRepaymentTarget = null;
+        assert.equal((await s.client.getBlock()).number, head); assert.equal(machine.events.length, 0);
+      }
+      const before = { mortgage: a.mortgage, hypo: a.hypoMortgage, hypoCash: a.hypoCash, paid: a.externalPaid,
+        premium: a.premiumPaid, switch: a.switchPaid, penalty: a.penaltyPaid, refis: a.refis,
+        issued: (await world.netCreditOps.household(owner, ids)).issued, supply: await s.call(buck, "totalIssued"),
+        bank: await s.call(world.usdc, "balanceOf", ["0x000000000000000000000000000000000000dEaD"]), seq: machine.events.length };
+      const calls = {}, originalIssue = world.netCreditOps.issue, originalExecute = world.netMarket.execute;
+      const originalPay = world.netSettlementOps.payExact;
+      const bankOps = settlementOps(s, world.usdc, { execute: (who, c, name, args) =>
+        originalExecute(who, c, name, args, { expect: "either" }) });
+      const intercept = (fn, receiptOf = (r) => r) => async (...args) => {
+        const phase = machine.flow.phase;
+        calls[phase] = (calls[phase] ?? 0) + 1;
+        if (phase === vector.phase && vector.fault === "unknown") throw new Error("submission outcome unknown");
+        const result = await fn(...args), receipt = receiptOf(result);
+        if (phase === vector.phase && vector.fault === "lost") throw new TransactionReceiptPending(receipt.transactionHash);
+        return result;
+      };
+      world.netCreditOps.issue = intercept(originalIssue);
+      world.netMarket.execute = intercept(originalExecute);
+      world.netSettlementOps.payExact = intercept((who, bank, amount) => bankOps.payExact(who, bank,
+        vector.fault === "revert" && vector.phase === "mortgage" ? (1n << 256n) - 1n : amount), (r) => r.receipt);
+      try {
+        const ctr = {};
+        await a.startNetRefinance(world, plan, 0, ctr, { context: { reason: "shared execution vector", wide: 2n ** 100n + 7n } });
+        if (vector.fault === "lost") {
+          assert.equal(machine.status().status, "pending"); assert.equal(machine.status().phase, vector.phase);
+          assert.equal(a.externalPaid, before.paid); assert.equal(a.switchPaid, before.switch); assert.equal(a.penaltyPaid, before.penalty);
+          const sent = { ...calls }, actualReceipt = s.client.getTransactionReceipt;
+          s.client.getTransactionReceipt = async (params) => ({ ...await actualReceipt(params), transactionHash: `0x${"00".repeat(32)}` });
+          try { await a.act(world, 1, 0); } finally { s.client.getTransactionReceipt = actualReceipt; }
+          assert.equal(machine.status().status, "pending"); assert.deepEqual(calls, sent);
+          assert.equal(a.mortgage, before.mortgage);
+          await a.act(world, 2, 0);
+        } else if (vector.fault === "unknown") {
+          const sent = { ...calls };
+          await a.act(world, 1, 0); await a.act(world, 2, 0);
+          assert.deepEqual(calls, sent); assert.match(a.lastError, /hash unavailable/);
+        }
+        assert.equal(machine.status().status, vector.final);
+        assert.ok(Object.values(calls).every((n) => n === 1));
+        const complete = vector.final === "complete", principal = complete ? b.mortgage_limit : 0n;
+        const issued = vector.fault === "unknown" ? 0n : b.new_spendable + b.premium;
+        const penalty = (principal * b.penalty_numerator + b.penalty_denominator - 1n) / b.penalty_denominator;
+        assert.equal(a.mortgage, before.mortgage - principal); assert.equal(a.externalPaid, before.paid + principal);
+        assert.equal(a.hypoMortgage, before.hypo); assert.equal(a.hypoCash, before.hypoCash);
+        assert.equal(a.premiumPaid, before.premium + (vector.fault === "unknown" ? 0n : b.premium));
+        assert.equal(a.switchPaid, before.switch + (complete ? b.switch_cost : 0n)); assert.equal(a.penaltyPaid, before.penalty + penalty);
+        assert.equal(a.refis, before.refis + (complete ? 1 : 0));
+        assert.equal(ctr.rtrUsdRetired ?? 0n, principal / 1_000_000n);
+        assert.equal(await s.call(world.usdc, "balanceOf", ["0x000000000000000000000000000000000000dEaD"]),
+          before.bank + principal + (complete ? b.switch_cost : 0n) + penalty);
+        assert.equal((await world.netCreditOps.household(owner, ids)).issued, before.issued + issued);
+        assert.equal(await s.call(buck, "totalIssued"), before.supply + issued);
+        assert.ok(await s.call(buck, "balanceOf", [owner]) >= b.reserve_floor);
+        const events = JSON.parse(JSON.stringify(a.householdEventsSince(before.seq)));
+        assert.equal(events[0].context.wide, String(2n ** 100n + 7n));
+        assert.equal(events[0].limits.theta, a.p.theta); assert.equal(events[0].plan.export_buck, String(b.export_buck));
+        assert.ok(BigInt(events[0].market.k_wad) > 0n); assert.ok(events[0].accounts.ratios.reserve_cover >= 1);
+        assert.ok(events.every((e) => /^\d+$/.test(e.accounts.usdc)));
+        assert.deepEqual(events.filter((e) => e.status === "confirmed").map((e) => e.operation), complete ? ["issue", "export", "mortgage"]
+          : vector.fault === "unknown" ? [] : vector.phase === "export" ? ["issue"] : ["issue", "export"]);
+        assert.throws(() => a.householdEventsSince(-1), /cursor/);
+        if (!machine.active) assert.equal(await machine.advance(world, 3), false);
+      } finally {
+        world.netCreditOps.issue = originalIssue; world.netMarket.execute = originalExecute; world.netSettlementOps.payExact = originalPay;
+      }
+      if (vector.final === "pending") {
+        // Unknown-hash cases intentionally remain stopped; isolate the next
+        // vector's household instead of clearing a live operation for reuse.
+        assert.equal(machine.status().status, "pending");
+      }
+    });
   });
   await t.test("personal records use actual portfolios and exact integer money", async () => {
     const Q = 10n ** 36n, RAW = 1_000_000n;

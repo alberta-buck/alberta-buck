@@ -810,19 +810,47 @@ implementation sequence, before changing the primary economy builder.
   No sale is an implicit mortgage payment or NFT
   retirement; exact-payment primitives still need household scheduling,
   pending records and application-once bookkeeping.
+- [X] Implement checkpointed funded refinancing in both languages:
+  selected-NFT issue, bounded export, then one exact USDC bank transfer
+  allocated between principal/switching cost/prepayment penalty. Matching
+  fixture cases cover each lost reply, unknown hash, proven reverts, wide
+  cash, reserve/buffer rejection and overlap with an unfinished buyback.
+  Python primary household suite passes 13; the full matching JS primary
+  acceptance passes 14, including all eight shared refinance cases. Recovery
+  applies a phase once and precedes new household work;
+  an issuance/export alone never reduces the mortgage. No normal decision
+  loop is enabled by the explicit funded-plan component API.
 - [ ] Complete the existing adaptive household and saver using corrected Buck:
   actual cash versus capacity, mortgage counterfactual/carry costs, issuance,
   real BUCK/USDC and TOKEN routes, mortgage settlement, protected issuance
   reserve, discounted buyback and explicit NFT retirement. Preserve arrivals,
   randomized thresholds and always-invest/always-retire comparisons. Resolve
   unused retire_disc and overlapping borrow/paydown decisions.
-  Next select bounded issuance candidates and schedule confirmed USDC
-  mortgage payments using these market primitives and personal books.
+  Next select economically worthwhile bounded issuance candidates, acquire
+  and preserve their reserve, then connect calendar cash flows, savings,
+  discounted paydown and exits before removing the normal-decision gate.
   Replace the duplicated legacy mint/gate helpers using the shared bounded
   issuance-candidate quotes, and account for the full-value premium as issued
   principal. Guarded market buys must deliver net BUCK; bank retirement is a
   separate confirmed USDC payment. Complete unused-facility release as well
   as principal retirement; burn(0) remains an invalid closure shortcut.
+- [X] Qualify exact refinancing status and transition records in both
+  languages. The refinancing stream carries stable decision/event IDs,
+  exact monetary terms, current K/BVIB/price/pool-net context, sampled limits,
+  custody cash, actual NFT principal/age, receipt marks and balance ratios.
+  Undefined/unavailable observations are explicit. Money uses decimal
+  strings; comparison ratios are finite estimates. Python captures events
+  once in full/lite frames independently of SIM_ACTS; JS exposes detached
+  cursor reads and current status in personal rows. Failed required capture
+  cannot discard these records. See README-households.org for the common
+  fields and graph/table consumption. Extend the same stream to declined
+  choices, funding, saving, paydown and exits; a new dashboard is not the
+  prerequisite for restoring economic execution.
+- [ ] Use one facility per asset as the canonical household default,
+  as approved on November 7. The current artificial four-way split is
+  unnecessary now that partial issue/retire works within one NFT. Retain
+  multiple-facility/mixed-age/pool coverage in explicit component fixtures
+  while reducing repeated primary-household bookkeeping and quote reads.
 - [ ] Persist pending outcomes, buyback targets/reserves, mortgage cash-flow
   timing, NFT/receipt state, random streams and actual fund/insurer wiring.
   Reconcile receipts before retries; never count authorization as repayment,
@@ -1075,4 +1103,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-07 | Restore complete personal financial portfolios in both languages | Existing households now report all ordinary custody accounts, USDC/constituent TOKENs, exact receipt basis/marks, actual facility debt, per-pool insurer refund marks and guarded Jubilee claims at one pinned block. Integer rational prices and Q-scaled BUCK preserve negative and full-width values through the final signed USD division. Partial redemptions override stale local trade shares; main-owned investor receipts and live zero-basis marks remain visible, with undefined ROI at zero basis. Canonical Python records are daily like JS; records do not pay the bank, change trades or alter counterfactual cash flow. The interactive Python driver propagates the existing decision migration gate before income/day completion. Actual Anvil/Tevm cases include multiple custody accounts, aged pools, genuine credit-issued transfers above Number precision, unavailable publications and actual exits with gain/conversion costs. Combined Make accounting acceptance: 21 Python and five JS passed; the final Python phase also passes 21 after compatibility fixes. Existing JS equilibrium sandbox builds. Latest short JSON/PDF artifacts remain under build/test/economy-accounting; no five-year campaign or enabled household lifecycle is claimed. No Solidity behavior changed. Updated Make, root/detail/package guides and pre/post invariants. Next guarded market wiring, bounded issuance and confirmed USDC mortgage retirement, then saving/paydown, exits/persistence, canonical arb qualification, five-year JSON/PDF campaigns and Notes. | =b09c0c3c= |
 
-| 2026-11-07 | Connect primary household markets to shared guarded trading and exact-payment operations | Both existing builders now deploy real Permit2 and the matching net-output guard on their own token/USDC/factory and dispatch existing SDK operations through the household proxies. JS market helpers accept an explicit dispatcher and optional recipient while authenticating payer, pool, recipient, amounts and saved hash; ordinary EOA dispatch remains supported. Public proxies use the token's existing identity fallback, private holders retain their proof, and the primary JS reader uses actual cash/NFT books. The primary JS household reuses the selected-facility repayment/recovery adapter instead of duplicating its pending checks. Actual aged-pool tests cover premium-bearing issuance, direct user-paid bounded exports, guarded net delivery to a distinct recipient, atomic refusal and lost-sale-reply recovery. A trade does not implicitly repay either the external bank or a BuckCredit; separate exact USDC payment evidence is exposed, without yet scheduling/applying a household mortgage ledger. Python canonical accounting acceptance: 22 passed, regenerating short JSON/PDFs. JS primary world: five passed; focused market-record/repayment-target/settlement SDK: seven passed. Current wallet controller plus actual Chromium: all 15 passed, zero skips. Existing equilibrium page rebuild passes. sim-build now requires the vendored Permit2 artifact; Make/README distinguish runnable wallet acceptance from gated household/savings worlds. Updated pre/post invariants and checklist. No Solidity behavior changed. Next candidate-specific economic issuance, reserve preservation, application-once mortgage payments and pending state, then saving/paydown, exits/persistence, canonical arb qualification, real five-year campaigns/PDFs and Notes. | This commit |
+| 2026-11-07 | Connect primary household markets to shared guarded trading and exact-payment operations | Both existing builders now deploy real Permit2 and the matching net-output guard on their own token/USDC/factory and dispatch existing SDK operations through the household proxies. JS market helpers accept an explicit dispatcher and optional recipient while authenticating payer, pool, recipient, amounts and saved hash; ordinary EOA dispatch remains supported. Public proxies use the token's existing identity fallback, private holders retain their proof, and the primary JS reader uses actual cash/NFT books. The primary JS household reuses the selected-facility repayment/recovery adapter instead of duplicating its pending checks. Actual aged-pool tests cover premium-bearing issuance, direct user-paid bounded exports, guarded net delivery to a distinct recipient, atomic refusal and lost-sale-reply recovery. A trade does not implicitly repay either the external bank or a BuckCredit; separate exact USDC payment evidence is exposed, without yet scheduling/applying a household mortgage ledger. Python canonical accounting acceptance: 22 passed, regenerating short JSON/PDFs. JS primary world: five passed; focused market-record/repayment-target/settlement SDK: seven passed. Current wallet controller plus actual Chromium: all 15 passed, zero skips. Existing equilibrium page rebuild passes. sim-build now requires the vendored Permit2 artifact; Make/README distinguish runnable wallet acceptance from gated household/savings worlds. Updated pre/post invariants and checklist. No Solidity behavior changed. Next candidate-specific economic issuance, reserve preservation, application-once mortgage payments and pending state, then saving/paydown, exits/persistence, canonical arb qualification, real five-year campaigns/PDFs and Notes. | =d66eb712= |
+
+| 2026-11-07 | Implement checkpointed funded household refinancing and exact public histories | The existing Python/JS agents now execute an assessed, funded plan through selected-NFT issuance, bounded export and one exact USDC bank payment. The bank receipt is allocated between principal, switching cost and rounded-up prepayment penalty; only its confirmed principal reduces the mortgage. Saved phases/terms/hashes recover lost replies without a second send or application; unknown/mismatched evidence stays stopped and proven reverts preserve earlier effects. Buffers, pending buyback overlap and uint256 bank allocation are checked before sends. Eight shared actual-contract vectors cover normal/wide cash, loss at every phase, unknown hash and reverted sale/bank payment. Primary Python household suite: 13 passed; full existing JS primary acceptance: 14 passed without skips. Broader Python accounting: 30 passed in the venv; the one Anvil receipt-mark check skipped outside Nix was separately rerun under the documented Nix/venv target and passed, giving 31 distinct passing cases and fresh short JSON/PDFs. Exact event schema records stable IDs, actual money, NFT ages, custody/reserve ratios, sampled limits, K/BVIB/price/pool-net context, receipt basis/marks and transaction evidence. Failed observations are explicit; confirmed cursors advance before optional reads. Snapshot capture emits new events once, retains them in full/lite server streams and survives failed capture or SIM_ACTS=none. JS cursor reads are detached; personal rows expose machine status. Added README-households.org and updated Make/detail guides/plan/pre-post invariants. No Solidity behavior changed and no normal decision loop/five-year acceptance is claimed. User approved one facility per asset as the next simplification, keeping multiple-NFT cases in focused fixtures. Next that default, economic candidate selection and reserve funding, then calendar cash flows, saving/paydown, exits/persistence, five-year JSON/PDF campaigns and Notes. | This commit |

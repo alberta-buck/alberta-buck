@@ -124,6 +124,24 @@ external mortgage or NFT principal by itself. The existing partial repayment
 adapter supplies the primary household's receipt recovery and selected-NFT
 operations; normal issuance/exit scheduling remains gated.
 
+`agent.startNetRefinance(world, plan, day)` now executes an assessed and
+already-funded plan as three receipt-backed phases: selected-facility issue,
+bounded export, exact USDC bank payment. That final payment combines mortgage
+principal, switch cost and a rational prepayment penalty; the agent records
+the allocations separately. Only confirmed principal reduces its mortgage.
+Lost replies preserve the phase/terms/hash and are reconciled before another
+action; an unknown or mismatched receipt cannot trigger a second send.
+This component does not yet select/fund the plan or enable normal decisions.
+
+`agent.householdEventsSince(seq)` returns detached, JSON-safe transition
+records after the given cursor. Each has stable member/decision/sequence IDs,
+current status, accounts/ratios, selected terms and actual receipt evidence.
+Money is a decimal string; unavailable readings and undefined ratios remain
+explicit. Daily personal records expose `machine` status. Python emits the
+matching `household_events` in saved and both live frame modes. See the
+checkout's `README-households.org` for the state invariants and data contract;
+no new dashboard or runner is required to use these observations.
+
 Subpaths map onto the modules directly: `alberta-buck-core/session`,
 `/journal`, `/identity`, `/wallet`, `/buckworld`, `/observer`, `/v3`, and
 so on.

@@ -282,3 +282,19 @@ reads v1 and v2 alike: v1 vectors get class tabs from the scenario's
 populations with blank frames for the uncounted instances; v2 vectors
 get every instance named, and the three acts nearest the clock under
 each agent's pens.
+
+## Exact household transitions
+
+Canonical households also expose `frames[].household_events` (schema 1,
+currently scoped to refinancing). This append-only monetary history is
+independent of the compact `acts` notes and survives `SIM_ACTS=none`.
+Both savings-server frame modes retain it. Money/IDs/scaled values are
+decimal strings, undefined ratios are null, and unavailable observations
+are explicit. A failed required frame capture does not advance its cursor.
+
+Join `agent/member` to the telemetry roster's resolved knobs. Use `decision`
+and `seq` to reconstruct a household's choices, phase transitions, receipts,
+account levels and ratios. Only confirmed bank principal is external debt
+retirement. See [README-households.org](../../README-households.org) for the
+state invariants, fields and JavaScript cursor interface. This data contract
+does not yet restore the entire household loop or implement a dashboard.

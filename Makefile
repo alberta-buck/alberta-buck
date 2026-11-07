@@ -20,7 +20,7 @@ help:
 	  '  make nix-venv-core-net-math-test   # canonical uint256 math: Solidity, Rust, Python and JS' \
 	  '  make nix-core-equilibrium-bootstrap-test  # canonical JS bootstrap, portfolios and guarded market' \
 	  '  make nix-venv-economy-bootstrap-test  # canonical Python + JS deployment and pool bootstrap' \
-	  '  make nix-venv-economy-accounting-test # bootstraps, portfolios, market and short JSON/PDF' \
+	  '  make nix-venv-economy-accounting-test # bootstrap, household phases, portfolios and JSON/PDF' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
@@ -1715,6 +1715,9 @@ economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 # unimplemented decision loop complete just because its books are readable.
 # Primary proxy markets use real Permit2, net-output guards, positive sale
 # bounds and authenticated separate USDC payments, not implicit debt burns.
+# Funded household refinancing uses shared interruption vectors and exact
+# transition histories (README-households.org). Normal economic scheduling,
+# reserve acquisition, savings/paydown and exits remain migration gates.
 # Pytest owns build/test/economy-accounting: each run replaces that scratch
 # directory and leaves the latest canonical.json/PDF there for inspection.
 #   make nix-venv-economy-accounting-test
