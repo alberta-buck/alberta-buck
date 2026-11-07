@@ -35,6 +35,11 @@ const E18 = 10n ** 18n;
 const g = (p) => ({ X: p.x, Y: p.y });
 const ct = (E) => ({ R: g(E.R), C: g(E.C) });
 const acctOf = (who) => who.account ?? who;
+// A proxy world can supply the same authenticated market operations with
+// its own dispatch. The holder remains the actual payer, not the relayer.
+const sendMarket = (world, market, holder, contract, name, args, opts) => market.execute
+  ? market.execute(acctOf(holder), contract, name, args, opts)
+  : world.session.send(contract, name, args, { ...opts, account: acctOf(holder) });
 
 export const OPERATOR_FIELDS = {
   given_name: "Market", family_name: "Operator",
@@ -272,7 +277,7 @@ export async function tradingOpen(world, market, address) {
   const s = world.session;
   if (world.accounting === "net" && !market.guard) return false;
   const frag = await s.call(world.buck, "receiptFragment", [address, market.pool.address]);
-  if (/^0x0*$/.test(frag)) return false;
+  if (/^0x0*$/.test(frag) && !await s.call(world.reg, "isPublicIdentity", [address])) return false;
   for (const token of [world.buck, market.usdc]) {
     if (await s.call(token, "allowance", [address, market.permit2.address]) < UNLIMITED_ERC20) {
       return false;
@@ -297,7 +302,7 @@ export async function openTrading(world, market, holder, opts = {}) {
   const s = world.session;
   const h = acctOf(holder);
   const frag = await s.call(world.buck, "receiptFragment", [h.address, market.pool.address]);
-  if (/^0x0*$/.test(frag)) {
+  if (/^0x0*$/.test(frag) && !await s.call(world.reg, "isPublicIdentity", [h.address])) {
     const pk = await s.call(world.reg, "pkOf", [market.pool.address]);
     await identityApprove(world, holder, {
       account: { address: market.pool.address },
@@ -308,22 +313,22 @@ export async function openTrading(world, market, holder, opts = {}) {
   for (const token of [world.buck, market.usdc]) {
     const sym = token === world.buck ? "BUCK" : "USDC";
     if (await s.call(token, "allowance", [h.address, market.permit2.address]) < UNLIMITED_ERC20) {
-      await s.send(token, "approve", [market.permit2.address, maxUint256],
-        { account: h, tag: `trade:approve-permit2:${sym}` });
+      await sendMarket(world, market, h, token, "approve", [market.permit2.address, maxUint256],
+        { tag: `trade:approve-permit2:${sym}` });
     }
     const [amount] = await s.call(market.permit2, "allowance",
       [h.address, token.address, market.router.address]);
     if (amount < UNLIMITED_PERMIT2) {
-      await s.send(market.permit2, "approve",
+      await sendMarket(world, market, h, market.permit2, "approve",
         [token.address, market.router.address, maxUint160, maxUint48],
-        { account: h, tag: `trade:permit2-router:${sym}` });
+        { tag: `trade:permit2-router:${sym}` });
     }
   }
   if (world.accounting === "net") {
     if (!market.guard) throw new Error("net market guard is missing");
     if (await s.call(market.usdc, "allowance", [h.address, market.guard.address]) < UNLIMITED_ERC20) {
-      await s.send(market.usdc, "approve", [market.guard.address, maxUint256],
-        { account: h, tag: "trade:approve-net-guard" });
+      await sendMarket(world, market, h, market.usdc, "approve", [market.guard.address, maxUint256],
+        { tag: "trade:approve-net-guard" });
     }
   }
 }
@@ -334,11 +339,12 @@ export async function openTrading(world, market, holder, opts = {}) {
 async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
   const s = world.session;
   const h = acctOf(holder);
+  const recipient = o.recipient ?? h.address;
   const netBuckOutput = world.accounting === "net" && same(tokenOut.address, world.buck.address);
   const netBuckInput = world.accounting === "net" && same(tokenIn.address, world.buck.address);
   if (netBuckInput) {
     if (o.exactOut) throw new Error("net BUCK exact-output sales are not implemented");
-    if (!h?.address || same(h.address, ZERO_ADDR) || same(h.address, market.pool.address)) {
+    if (!h?.address || !recipient || same(recipient, ZERO_ADDR) || same(recipient, market.pool.address)) {
       throw new Error("invalid net sale recipient");
     }
     if (typeof o.amount !== "bigint" || o.amount <= 0n || o.amount > maxUint160
@@ -355,17 +361,18 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
   if (netBuckOutput) {
     if (!market.guard) throw new Error("net market guard is missing");
     const name = o.exactOut ? "buyExactOutput" : "buyExactInput";
-    const args = [market.pool.address, o.amount, o.limit, h.address, 0n];
+    const args = [market.pool.address, o.amount, o.limit, recipient, 0n];
     let rcpt;
     try {
-      rcpt = await s.send(market.guard, name, args, { account: h, gas: 2_000_000n, tag, expect: "either" });
+      rcpt = await sendMarket(world, market, h, market.guard, name, args,
+        { gas: 2_000_000n, tag, expect: "either" });
       if (rcpt?.status === "reverted" && rcpt.transactionHash) {
         throw new TransactionReverted(name, s.lastRevertReason || "net purchase reverted", rcpt);
       }
       if (rcpt?.status !== "success" || !rcpt.transactionHash) {
         throw new TransactionReceiptPending(rcpt?.transactionHash ?? null);
       }
-      return netPurchaseFromReceipt(world, market, h, rcpt, rcpt.transactionHash);
+      return netPurchaseFromReceipt(world, market, h, rcpt, rcpt.transactionHash, recipient);
     }
     catch (err) {
       if (err instanceof TransactionReceiptPending) throw err;
@@ -376,11 +383,11 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
   const path = o.exactOut
     ? encodePath([tokenOut.address, market.fee, tokenIn.address])
     : encodePath([tokenIn.address, market.fee, tokenOut.address]);
-  const [commands, inputs] = urSwapArgs({ ...o, recipient: h.address, path, payerIsUser: true });
+  const [commands, inputs] = urSwapArgs({ ...o, recipient, path, payerIsUser: true });
   let rcpt;
   try {
-    rcpt = await s.send(market.router, "execute", [commands, inputs],
-      { account: h, gas: 1_500_000n, tag, ...(netBuckInput ? { expect: "either" } : {}) });
+    rcpt = await sendMarket(world, market, h, market.router, "execute", [commands, inputs],
+      { gas: 1_500_000n, tag, ...(netBuckInput ? { expect: "either" } : {}) });
   } catch (err) {
     if (!netBuckInput || err instanceof TransactionReceiptPending) throw err;
     if (err instanceof TransactionReverted && err.receipt?.status === "reverted" && err.transactionHash) throw err;
@@ -391,7 +398,7 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
       throw new TransactionReverted("execute", s.lastRevertReason || "net sale reverted", rcpt);
     }
     try { return netSaleFromReceipt(world, market, h, rcpt,
-      { expectedHash: rcpt?.transactionHash, expectedInput: o.amount, minimumOut: o.limit }); }
+      { expectedHash: rcpt?.transactionHash, expectedInput: o.amount, minimumOut: o.limit, recipient }); }
     catch (err) { throw new TransactionReceiptPending(rcpt?.transactionHash ?? null, err); }
   }
   const moved = (token, from, to) => parseEventLogs({ abi: token.abi, logs: rcpt.logs,
@@ -400,14 +407,14 @@ async function swap(world, market, holder, tokenIn, tokenOut, o, tag) {
                    && same(e.args.to, to))
     .reduce((sum, e) => sum + e.args.value, 0n);
   const paid = moved(tokenIn, h.address, market.pool.address);
-  const received = moved(tokenOut, market.pool.address, h.address);
+  const received = moved(tokenOut, market.pool.address, recipient);
   return { paid, received };
 }
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 
 /** Authenticate one guarded net purchase, optionally against a saved transaction hash. */
-export function netPurchaseFromReceipt(world, market, holder, receipt, expectedHash = null) {
+export function netPurchaseFromReceipt(world, market, holder, receipt, expectedHash = null, recipient = null) {
   if (world.accounting !== "net" || !market.guard || receipt?.status !== "success") {
     throw new Error("net purchase receipt is not successful");
   }
@@ -415,12 +422,13 @@ export function netPurchaseFromReceipt(world, market, holder, receipt, expectedH
     throw new Error("net purchase transaction hash mismatch");
   }
   const raw = acctOf(holder), h = typeof raw === "string" ? { address: raw } : raw;
+  recipient ??= h.address;
   const purchases = parseEventLogs({ abi: market.guard.abi, logs: receipt.logs, eventName: "NetBuckPurchased" })
     .filter((e) => same(e.address, market.guard.address) && same(e.args.buyer, h.address)
-      && same(e.args.recipient, h.address) && same(e.args.pool, market.pool.address));
+      && same(e.args.recipient, recipient) && same(e.args.pool, market.pool.address));
   if (purchases.length !== 1) throw new Error("net BUCK purchase event missing or ambiguous");
   const [purchase] = purchases;
-  const net = netTransferValue(world.buck, receipt, market.pool.address, h.address);
+  const net = netTransferValue(world.buck, receipt, market.pool.address, recipient);
   if (!net.count || net.nominal !== purchase.args.nominal || net.netScaled !== purchase.args.netScaled)
     throw new Error("net BUCK transfer evidence mismatch");
   return { paid: purchase.args.paid, received: net.netScaled / (10n ** 36n),
@@ -430,7 +438,7 @@ export function netPurchaseFromReceipt(world, market, holder, receipt, expectedH
 /** Authenticate one single-pool sale; a successful sale is not mortgage repayment.
  *  The caller must apply its saved transaction hash once and handle finality. */
 export function netSaleFromReceipt(world, market, holder, receipt,
-  { expectedHash = null, expectedInput = null, minimumOut = null } = {}) {
+  { expectedHash = null, expectedInput = null, minimumOut = null, recipient = null } = {}) {
   if (world.accounting !== "net" || receipt?.status !== "success" || !receipt.transactionHash) {
     throw new Error("net sale receipt is not successful or lacks a hash");
   }
@@ -440,10 +448,11 @@ export function netSaleFromReceipt(world, market, holder, receipt,
   if (typeof expectedInput !== "bigint" || expectedInput <= 0n
       || typeof minimumOut !== "bigint" || minimumOut <= 0n) throw new Error("invalid net sale bounds");
   const raw = acctOf(holder), h = typeof raw === "string" ? { address: raw } : raw;
+  recipient ??= h.address;
   const transfers = parseEventLogs({ abi: world.buck.abi, logs: receipt.logs, eventName: "Transfer" })
     .filter((e) => same(e.address, world.buck.address) && same(e.args.from, h.address) && same(e.args.to, market.pool.address));
   const payouts = parseEventLogs({ abi: market.usdc.abi, logs: receipt.logs, eventName: "Transfer" })
-    .filter((e) => same(e.address, market.usdc.address) && same(e.args.from, market.pool.address) && same(e.args.to, h.address));
+    .filter((e) => same(e.address, market.usdc.address) && same(e.args.from, market.pool.address) && same(e.args.to, recipient));
   if (transfers.length !== 1 || payouts.length !== 1) throw new Error("net sale transfer evidence missing or ambiguous");
   const nominalPaid = transfers[0].args.value, received = payouts[0].args.value;
   const net = netTransferValue(world.buck, receipt, h.address, market.pool.address);
@@ -456,19 +465,19 @@ export function netSaleFromReceipt(world, market, holder, receipt,
 }
 
 /** Buy BUCK with exactly `usdcIn`; returns {paid, received}. */
-export function buyBuck(world, market, holder, usdcIn, { minOut = 0n } = {}) {
+export function buyBuck(world, market, holder, usdcIn, { minOut = 0n, recipient = null } = {}) {
   return swap(world, market, holder, market.usdc, world.buck,
-    { amount: usdcIn, limit: minOut }, "trade:buy");
+    { amount: usdcIn, limit: minOut, recipient }, "trade:buy");
 }
 
 /** Buy exactly `buckOut` BUCK, paying at most `maxUsdcIn`. */
-export function buyBuckExact(world, market, holder, buckOut, maxUsdcIn) {
+export function buyBuckExact(world, market, holder, buckOut, maxUsdcIn, { recipient = null } = {}) {
   return swap(world, market, holder, market.usdc, world.buck,
-    { exactOut: true, amount: buckOut, limit: maxUsdcIn }, "trade:buy-exact");
+    { exactOut: true, amount: buckOut, limit: maxUsdcIn, recipient }, "trade:buy-exact");
 }
 
 /** Sell up to `buckIn` BUCK for USDC; net mode requires a positive `minOut`. */
-export function sellBuck(world, market, holder, buckIn, { minOut = 0n } = {}) {
+export function sellBuck(world, market, holder, buckIn, { minOut = 0n, recipient = null } = {}) {
   return swap(world, market, holder, world.buck, market.usdc,
-    { amount: buckIn, limit: minOut }, "trade:sell");
+    { amount: buckIn, limit: minOut, recipient }, "trade:sell");
 }

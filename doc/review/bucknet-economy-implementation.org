@@ -46,6 +46,10 @@ Both languages now report complete personal financial portfolios: all ordinary
 custody accounts, actual receipt basis/marks, premiums, claims and liabilities,
 with exact integer USD conversion. Python captures these books daily; both
 interactive and batch drivers refuse unported decisions before completion.
+Their primary proxy markets now reuse guarded net buys, bounded user-paid
+sales and separate authenticated USDC payment helpers with real Permit2.
+JS reuses selected-NFT repayment/recovery. These primitives do not yet
+schedule/apply mortgage refinancing or enable the normal household loop.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -791,14 +795,29 @@ implementation sequence, before changing the primary economy builder.
   JS. Reading does not pay the bank or modify trades/counterfactuals, and an
   unimplemented decision propagates through the interactive driver before
   income, day completion or a misleading completed run.
+- [X] Qualify the existing primary-world market and external-payment
+  plumbing. Both builders now deploy real Permit2 and the matching
+  BuckNetSwapGuard on their existing token/USDC/factory; shared SDK market
+  and exact-payment operations dispatch through the same public proxies.
+  JS reuses the partial selected-NFT repayment/recovery adapter, while its
+  primary state reader uses actual cash/principal/claims without signed
+  wallet APIs. Optional trade recipients remain separate from payers in
+  event authentication; public identities use the token's normal fallback,
+  and private holders retain their proof requirement. Python primary
+  accounting acceptance passes 22 cases and the wallet controller/Chromium
+  acceptance passes all 15 without skips. Matching JS primary-world
+  acceptance passes five cases; seven focused JS SDK cases also pass.
+  No sale is an implicit mortgage payment or NFT
+  retirement; exact-payment primitives still need household scheduling,
+  pending records and application-once bookkeeping.
 - [ ] Complete the existing adaptive household and saver using corrected Buck:
   actual cash versus capacity, mortgage counterfactual/carry costs, issuance,
   real BUCK/USDC and TOKEN routes, mortgage settlement, protected issuance
   reserve, discounted buyback and explicit NFT retirement. Preserve arrivals,
   randomized thresholds and always-invest/always-retire comparisons. Resolve
   unused retire_disc and overlapping borrow/paydown decisions.
-  Next connect guarded market operations, bounded issuance candidates and
-  confirmed USDC mortgage payments to these personal books.
+  Next select bounded issuance candidates and schedule confirmed USDC
+  mortgage payments using these market primitives and personal books.
   Replace the duplicated legacy mint/gate helpers using the shared bounded
   issuance-candidate quotes, and account for the full-value premium as issued
   principal. Guarded market buys must deliver net BUCK; bank retirement is a
@@ -869,8 +888,10 @@ Continue in this order:
    outcomes rather than adding another economy runner.
    Household setup and same-block selected-facility books now work in both
    languages, including complete personal portfolio marks; normal decisions
-   remain explicitly gated. Finish guarded market/issuance wiring, confirmed
-   mortgage payments and exits before enabling those decisions.
+   remain explicitly gated. Primary guarded-market/repayment adapters and
+   exact-payment primitives now pass in both languages. Finish bounded
+   economic issuance selection, confirmed mortgage-payment scheduling and
+   exits before enabling those decisions.
 3. Run identical operation vectors and a short real-contract household world,
    then the five-year baselines/policy comparisons and retained shocks. Save
    raw JSON, adjacent PDFs and campaign metadata for every completed long run.
@@ -1052,4 +1073,6 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-07 | Preserve typed Python proxy-failure data | A monetary refusal through SimLP lost provider revert data after its mined receipt, preventing existing target-ABI classification of InsufficientCoverage. TransactionReverted now carries available structured data from the post-block eth_call replay; Session retains/clears that diagnostic with its normal send lifecycle. Existing three-argument construction, receipt/hash handling and journal messages remain supported. Tests reject message-only classification and unknown/malformed selectors, preserve target-vs-proxy ABI distinction, and clear stale data after success. Legacy K-change assertions now use typed data instead of obsolete revert strings. Session plus retained pro-rata household compatibility: 51 passed (labelled legacy cases are not canonical evidence). The full Python canonical client-smoke set: 35 passed. No contract, K guard, liquidity check or monetary authorization changed. Updated API guide and pre/post invariants. Personal portfolio integration remains the next commit. | =a965366e= |
 
-| 2026-11-07 | Restore complete personal financial portfolios in both languages | Existing households now report all ordinary custody accounts, USDC/constituent TOKENs, exact receipt basis/marks, actual facility debt, per-pool insurer refund marks and guarded Jubilee claims at one pinned block. Integer rational prices and Q-scaled BUCK preserve negative and full-width values through the final signed USD division. Partial redemptions override stale local trade shares; main-owned investor receipts and live zero-basis marks remain visible, with undefined ROI at zero basis. Canonical Python records are daily like JS; records do not pay the bank, change trades or alter counterfactual cash flow. The interactive Python driver propagates the existing decision migration gate before income/day completion. Actual Anvil/Tevm cases include multiple custody accounts, aged pools, genuine credit-issued transfers above Number precision, unavailable publications and actual exits with gain/conversion costs. Combined Make accounting acceptance: 21 Python and five JS passed; the final Python phase also passes 21 after compatibility fixes. Existing JS equilibrium sandbox builds. Latest short JSON/PDF artifacts remain under build/test/economy-accounting; no five-year campaign or enabled household lifecycle is claimed. No Solidity behavior changed. Updated Make, root/detail/package guides and pre/post invariants. Next guarded market wiring, bounded issuance and confirmed USDC mortgage retirement, then saving/paydown, exits/persistence, canonical arb qualification, five-year JSON/PDF campaigns and Notes. | This commit |
+| 2026-11-07 | Restore complete personal financial portfolios in both languages | Existing households now report all ordinary custody accounts, USDC/constituent TOKENs, exact receipt basis/marks, actual facility debt, per-pool insurer refund marks and guarded Jubilee claims at one pinned block. Integer rational prices and Q-scaled BUCK preserve negative and full-width values through the final signed USD division. Partial redemptions override stale local trade shares; main-owned investor receipts and live zero-basis marks remain visible, with undefined ROI at zero basis. Canonical Python records are daily like JS; records do not pay the bank, change trades or alter counterfactual cash flow. The interactive Python driver propagates the existing decision migration gate before income/day completion. Actual Anvil/Tevm cases include multiple custody accounts, aged pools, genuine credit-issued transfers above Number precision, unavailable publications and actual exits with gain/conversion costs. Combined Make accounting acceptance: 21 Python and five JS passed; the final Python phase also passes 21 after compatibility fixes. Existing JS equilibrium sandbox builds. Latest short JSON/PDF artifacts remain under build/test/economy-accounting; no five-year campaign or enabled household lifecycle is claimed. No Solidity behavior changed. Updated Make, root/detail/package guides and pre/post invariants. Next guarded market wiring, bounded issuance and confirmed USDC mortgage retirement, then saving/paydown, exits/persistence, canonical arb qualification, five-year JSON/PDF campaigns and Notes. | =b09c0c3c= |
+
+| 2026-11-07 | Connect primary household markets to shared guarded trading and exact-payment operations | Both existing builders now deploy real Permit2 and the matching net-output guard on their own token/USDC/factory and dispatch existing SDK operations through the household proxies. JS market helpers accept an explicit dispatcher and optional recipient while authenticating payer, pool, recipient, amounts and saved hash; ordinary EOA dispatch remains supported. Public proxies use the token's existing identity fallback, private holders retain their proof, and the primary JS reader uses actual cash/NFT books. The primary JS household reuses the selected-facility repayment/recovery adapter instead of duplicating its pending checks. Actual aged-pool tests cover premium-bearing issuance, direct user-paid bounded exports, guarded net delivery to a distinct recipient, atomic refusal and lost-sale-reply recovery. A trade does not implicitly repay either the external bank or a BuckCredit; separate exact USDC payment evidence is exposed, without yet scheduling/applying a household mortgage ledger. Python canonical accounting acceptance: 22 passed, regenerating short JSON/PDFs. JS primary world: five passed; focused market-record/repayment-target/settlement SDK: seven passed. Current wallet controller plus actual Chromium: all 15 passed, zero skips. Existing equilibrium page rebuild passes. sim-build now requires the vendored Permit2 artifact; Make/README distinguish runnable wallet acceptance from gated household/savings worlds. Updated pre/post invariants and checklist. No Solidity behavior changed. Next candidate-specific economic issuance, reserve preservation, application-once mortgage payments and pending state, then saving/paydown, exits/persistence, canonical arb qualification, real five-year campaigns/PDFs and Notes. | This commit |

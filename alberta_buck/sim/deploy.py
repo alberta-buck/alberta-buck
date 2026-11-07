@@ -12,14 +12,15 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from web3 import Web3
-from buck_core import NetCreditOps, deploy_net_basket, deploy_net_stack
+from buck_core import NetCreditOps, NetMarketOps, SettlementOps, deploy_net_basket, deploy_net_stack
 
 from alberta_buck.sim import identity as idmod
-from alberta_buck.sim.chain import Chain, load_artifact
+from alberta_buck.sim.chain import Chain, Expect, load_artifact
 from alberta_buck.sim.router import (
     sqrt_price_x96, full_range_ticks, MIN_SQRT_RATIO, MAX_SQRT_RATIO,
 )
@@ -168,7 +169,10 @@ class Deployment:
     equity_upkeep: Any = None
     bootstrap_pool_meta: list = field(default_factory=list)  # independent SimLP seed positions
     net_credit_ops: Any = None    # actual selected-NFT operations through simulation proxies
-    net_market_ops: Any = None    # guarded household purchase wiring remains pending
+    net_market_ops: Any = None    # guarded buys and bounded user-paid sales, through the same proxies
+    net_settlement_ops: Any = None  # authenticated USDC payments; caller owns loan/pending bookkeeping
+    permit2: Any = None
+    swap_guard: Any = None
     venue: Any = None             # currently installed venue facet
     director: Any = None          # rebalance director (prorata only)
     director_impl: str = "pairs"  # "pairs": the one signal engine left
@@ -529,8 +533,12 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     _, pool_bc = load_artifact("UniswapV3Pool")
     pool_init_hash = Web3.keccak(hexstr=pool_bc if pool_bc.startswith("0x") else "0x" + pool_bc)
     Z = "0x" + "0" * 40
+    permit2 = None
+    if stack is not None:
+        permit_art = json.loads((REPO / "alberta_buck/sim/artifacts/Permit2.json").read_text())
+        permit2 = chain.deploy("Permit2", abi=permit_art["abi"], bytecode=permit_art["bytecode"]["object"])
     ur_params = (
-        Web3.to_checksum_address("0x" + "be" * 20),  # permit2 (unused)
+        permit2.address if permit2 is not None else Web3.to_checksum_address("0x" + "be" * 20),
         weth.address, Z, v3f.address,
         b"\x00" * 32, pool_init_hash,
         Z, Z, Z, Z,
@@ -539,6 +547,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     router = chain.deploy("UniversalRouter", ur_params,
                           abi=ur_art["abi"], bytecode=ur_art["bytecode"]["object"])
     idmod.bind_as_operator(chain, reg, router.address, True, True, sender=deployer)
+    swap_guard = chain.deploy("BuckNetSwapGuard", buck.address, usdc.address, v3f.address) if stack else None
 
     d = Deployment(w3, chain, anvil, gov, pool_acct, issuer_addr, issuer_kp,
                    reg, buck, credit, kctrl, basket, router, simlp, usdc,
@@ -547,16 +556,20 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
                    buck_accounting="net" if credit_holder else "legacy-signed",
                    net_stack=stack, net_basket=basket_stack, v3_factory=v3f,
                    equity_upkeep=eq_facet if credit_holder else None, venue=venue,
+                   permit2=permit2, swap_guard=swap_guard,
                    controller_impl=controller_impl, observer=observer, desk=desk,
                    deposited_topic=deposited_topic, redeemed_topic=redeemed_topic)
     d.equity_machine = machine
     if stack is not None:
-        def execute_credit(owner, target, method, args):
+        def execute_credit(owner, target, method, args, *, expect=Expect.OK):
             # Household credit belongs to its public simulation proxy. These
             # fixture proxies have unrestricted exec; this is not a wallet.
             proxy = chain.at("SimLP", getattr(owner, "address", owner))
-            return chain.send(proxy.functions.exec(target.address, target.encode_abi(method, args=args)))
+            return chain.send(proxy.functions.exec(target.address, target.encode_abi(method, args=args)), expect=expect)
         d.net_credit_ops = NetCreditOps(chain, stack, execute_credit)
+        dispatch_market = partial(execute_credit, expect=Expect.EITHER)
+        d.net_market_ops = NetMarketOps(chain, buck, swap_guard, dispatch_market, router=router, settlement=usdc)
+        d.net_settlement_ops = SettlementOps(chain, usdc, dispatch_market)
 
     # --- pools: TOKEN/USDC (truth) + TOKEN/BUCK (basket) ------------- #
     pool_v3_abi, _ = load_artifact("UniswapV3Pool")

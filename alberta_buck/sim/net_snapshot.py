@@ -31,7 +31,8 @@ def deployment_manifest(d):
 
     roles = {name: getattr(d, name, None) for name in
              ("buck", "credit", "reg", "kctrl", "basket", "desk", "wheel", "venue",
-              "equity_upkeep", "v3_factory", "pair_policy", "monetary_policy", "signals")}
+              "equity_upkeep", "v3_factory", "pair_policy", "monetary_policy", "signals",
+              "router", "permit2", "swap_guard", "usdc")}
     roles.update(jubilee=stack.fund, quoter=stack.quoter)
     addresses = {name: contract.address for name, contract in roles.items() if contract is not None}
     addresses.update(claim_book=d.buck.functions.claimBook().call(), receipt=d.basket.functions.receipt().call())

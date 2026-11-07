@@ -18,9 +18,9 @@ help:
 	  '  make nix-venv-setup                # create/repair .venv; install editable Python packages' \
 	  '  make nix-venv-core-build-py        # compiled Python kernels' \
 	  '  make nix-venv-core-net-math-test   # canonical uint256 math: Solidity, Rust, Python and JS' \
-	  '  make nix-core-equilibrium-bootstrap-test  # canonical JS world deployment and pool bootstrap' \
+	  '  make nix-core-equilibrium-bootstrap-test  # canonical JS bootstrap, portfolios and guarded market' \
 	  '  make nix-venv-economy-bootstrap-test  # canonical Python + JS deployment and pool bootstrap' \
-	  '  make nix-venv-economy-accounting-test # bootstraps, personal marks, short real economy and JSON/PDF' \
+	  '  make nix-venv-economy-accounting-test # bootstraps, portfolios, market and short JSON/PDF' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
@@ -58,8 +58,8 @@ help:
 	  '  make nix-venv-control-lab-plan      # diagnostic stages; separate from economic acceptance' \
 	  'Interactive views (README-sandboxes.org):' \
 	  '  make nix-sandbox SANDBOX_PORT=8980  # browser EVM, no Python economy' \
-	  '  make nix-venv-sim-savings SIM_SAVINGS_PORT=8981  # Python economy plus browser wallet' \
-	  '  make nix-core-demo-eqworld          # JS household loop and charts' \
+	  '  make nix-venv-sim-savings SIM_SAVINGS_PORT=8981  # server/page; household decisions still gated' \
+	  '  make nix-core-demo-eqworld          # build JS economy page; household decisions still gated' \
 	  'Contract packages (README-build.org; local build only):' \
 	  '  make nix-contracts-dist            # emit npm and Python ABI/bytecode bundles' \
 	  '  make nix-contracts-dist-check      # compiler and size checks on built artifacts' \
@@ -870,7 +870,7 @@ sim-report:
 # No historical Uniswap compiler/profile is needed.
 # The simulation loaders and Uniswap staging also expect out/; FOUNDRY_OUT
 # alone does not redirect them. Use a separate worktree for isolated builds.
-sim-build:	$(ROUTING_ARTIFACT) $(ROUTING_PRICES) stage-uniswap
+sim-build:	$(ROUTING_ARTIFACT) $(PERMIT2_ARTIFACT) $(ROUTING_PRICES) stage-uniswap
 	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
 
 # ── Uniswap V2 init-code-hash patch ──────────────────────────────────────
@@ -1550,6 +1550,9 @@ sim-server:	sim-build
 # point its origin at http://127.0.0.1:$(SIM_SAVINGS_PORT).
 #
 #   make nix-venv-sim-savings             # then open http://127.0.0.1:8797/
+# The page/server starts, but corrected-accounting household decisions are
+# still explicitly gated. Use wallet-sandbox-test for the runnable browser
+# wallet; economy-accounting-test checks the migrated economy components.
 SIM_SAVINGS_HOST     ?= 127.0.0.1
 SIM_SAVINGS_PORT     ?= 8797
 SIM_SAVINGS_SESSIONS ?= 4
@@ -1692,7 +1695,8 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 	cd core/js && BUCK_REQUIRE_NET_MATH_BROWSER=1 node --test test/net-math.test.js test/net-math.browser.test.js test/math.vectors.test.js
 
 # Bootstrap the EXISTING machine world on canonical Buck; this is not the
-# household lifecycle or a completed economy. No silent legacy fallback.
+# household lifecycle or a completed economy. Includes actual portfolio and
+# guarded proxy market operations; no silent legacy fallback.
 core-equilibrium-bootstrap-test: sim-build core-build-wasm
 	node core/js/bin/bundle-artifacts.mjs
 	cd core/js && node --test test/net-equilibrium-bootstrap.tevm.test.js
@@ -1709,6 +1713,8 @@ economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 # principal, insurer pools and all custody assets at one block. Full normal
 # household actions remain gated; the interactive driver cannot mark an
 # unimplemented decision loop complete just because its books are readable.
+# Primary proxy markets use real Permit2, net-output guards, positive sale
+# bounds and authenticated separate USDC payments, not implicit debt burns.
 # Pytest owns build/test/economy-accounting: each run replaces that scratch
 # directory and leaves the latest canonical.json/PDF there for inspection.
 #   make nix-venv-economy-accounting-test

@@ -13,6 +13,8 @@ import { createNetMath } from "../src/net-math.js";
 import * as identity from "../src/identity.js";
 import { CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent } from "../src/agents/credit-household.js";
 import { advanceTime, DAY } from "../src/buckworld.js";
+import { buyBuck, sellBuck, netPurchaseFromReceipt, netSaleFromReceipt, tradingOpen } from "../src/market.js";
+import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
 
 test("canonical equilibrium bootstrap reuses one fund/basket and issues actual pool money", async (t) => {
   const s = await tevmSession();
@@ -152,6 +154,69 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(publication[1], await s.call(net.fund, "reliefPositionMark"));
     assert.ok((await world.netCreditOps.markHousehold(basket.address,
       [await s.call(basket, "creditId")])).reliefScaled > 0n);
+  });
+  await t.test("primary proxy market authenticates net buys, bounded sales and separate bank payments", async () => {
+    const RAW = 1_000_000n, debtor = family[0], account = debtor.account;
+    const owner = world.holderAddress(account), holder = { address: owner };
+    const ids = world._credits.get(account.address);
+    await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
+      functionName: "transfer", args: [owner, 200n * RAW] })]);
+    await world.households.openTrading(account);
+    assert.equal(await tradingOpen(world, world.netMarket, owner), true, "public proxies use BUCK's identity fallback");
+    const candidate = await world.netCreditOps.assessIssueCandidate(owner, ids[2], 1000n * RAW, 500n * RAW, 100n * RAW);
+    assert.deepEqual(candidate.reasons, []);
+    const issued = await world.netCreditOps.issueCandidate(owner, candidate);
+    assert.equal(issued.principal, 600n * RAW);
+    assert.equal(issued.premium, 100n * RAW);
+    const initialMortgage = debtor.mortgage, initialPaid = debtor.externalPaid;
+    const supply = await s.call(buck, "totalIssued"), before = await world.households.read(account);
+    const sold = await sellBuck(world, world.netMarket, holder, 100n * RAW, { minOut: 90n * RAW });
+    assert.equal(sold.nominalPaid, 100n * RAW);
+    assert.equal(await world.households.cash(account) - before.cash, sold.received);
+    assert.equal((await world.netCreditOps.household(owner, ids)).issued, before.drawn);
+    assert.equal(await s.call(buck, "totalIssued"), supply);
+    assert.equal(debtor.mortgage, initialMortgage);
+    assert.equal(debtor.externalPaid, initialPaid, "sale proceeds are not an external-debt payment");
+    const receiver = await world.proxyFor({ address: `market-recipient:${account.address}` });
+    const bought = await buyBuck(world, world.netMarket, holder, 10n * RAW,
+      { minOut: 9n * RAW, recipient: receiver.address });
+    assert.ok(bought.nominalReceived > bought.received && bought.received >= 9n * RAW);
+    assert.equal(await s.call(buck, "netBalanceScaled", [receiver.address]), bought.receivedScaled);
+    const boughtReceipt = await s.client.getTransactionReceipt({ hash: bought.transactionHash });
+    assert.throws(() => netPurchaseFromReceipt(world, world.netMarket, holder, boughtReceipt, bought.transactionHash),
+      /missing or ambiguous/);
+    const guarded = await world.households.buy(account, RAW, { minNet: RAW / 2n });
+    assert.ok(guarded.spent > 0n && guarded.got >= RAW / 2n);
+    for (const c of [world.router, world.swapGuard]) assert.equal(await s.call(buck, "balanceOf", [c.address]), 0n);
+    assert.equal(await s.call(world.usdc, "balanceOf", [world.swapGuard.address]), 0n);
+    for (const c of [world.permit2, world.swapGuard]) assert.equal(await s.call(world.reg, "isVerified", [c.address]), false);
+    const cash = await world.households.cash(account);
+    await assert.rejects(buyBuck(world, world.netMarket, holder, RAW, { minOut: 2n * RAW }), TransactionReverted);
+    assert.equal(await world.households.cash(account), cash);
+    await assert.rejects(sellBuck(world, world.netMarket, holder, RAW, { minOut: 0n }), /positive input and minimum output/);
+    const dispatch = world.netMarket.execute;
+    let lost;
+    world.netMarket.execute = async (...args) => {
+      const receipt = await dispatch(...args);
+      throw new TransactionReceiptPending(receipt.transactionHash);
+    };
+    try { await sellBuck(world, world.netMarket, holder, RAW, { minOut: 1n, recipient: receiver.address }); }
+    catch (err) { assert.ok(err instanceof TransactionReceiptPending); lost = err; }
+    finally { world.netMarket.execute = dispatch; }
+    assert.ok(lost?.transactionHash);
+    const receipt = await s.client.getTransactionReceipt({ hash: lost.transactionHash });
+    const recovered = netSaleFromReceipt(world, world.netMarket, holder, receipt,
+      { expectedHash: lost.transactionHash, expectedInput: RAW, minimumOut: 1n, recipient: receiver.address });
+    assert.equal(recovered.received, await s.call(world.usdc, "balanceOf", [receiver.address]));
+    assert.throws(() => netSaleFromReceipt(world, world.netMarket, holder, receipt,
+      { expectedHash: lost.transactionHash, expectedInput: RAW, minimumOut: 1n }), /missing or ambiguous/);
+    const bank = "0x000000000000000000000000000000000000dEaD";
+    assert.equal((await world.netSettlementOps.payExact(owner, bank, 20n * RAW)).amount, 20n * RAW);
+    assert.equal(await s.call(world.usdc, "balanceOf", [bank]), 20n * RAW);
+    assert.equal(debtor.mortgage, initialMortgage);
+    assert.equal(debtor.externalPaid, initialPaid);
+    assert.equal(await s.call(buck, "totalIssued"), supply);
+    assert.equal((await debtor.state(world, 370)).drawn, Number(before.drawn) / 1e6);
   });
   await t.test("personal records use actual portfolios and exact integer money", async () => {
     const Q = 10n ** 36n, RAW = 1_000_000n;

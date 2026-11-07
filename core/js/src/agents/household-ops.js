@@ -3,6 +3,8 @@ import { encodeFunctionData, keccak256, toBytes } from "viem";
 import { Q96, MIN_SQRT_RATIO, MAX_SQRT_RATIO } from "../v3.js";
 import { MINT_MAX } from "../buckworld.js";
 import { markNetBasketPositions } from "../basket.js";
+import { openTrading } from "../market.js";
+import { netHouseholdRepaymentOps } from "./net-repayment.js";
 
 const E6 = 1_000_000n, E18 = 10n ** 18n;
 const min = (...xs) => xs.reduce((a, b) => a < b ? a : b);
@@ -46,6 +48,12 @@ export function installHouseholdOps(world) {
   };
   const read = async (account) => {
     const cs = await world.creditState(account), [ru, rb] = await reserves(world.poolUB, usdc);
+    if (world.accounting === "net") {
+      const [k, bv, spot] = await Promise.all([world.K(), world.bvib(), world.spotUB()]);
+      return { ...cs, k: Number(k) / 1e18, ru: whole(ru), rb: whole(rb),
+        fee: world.fees.ub / 1e6, basket_usd: Number(bv) / 1e18 * whole(spot), spot: whole(spot),
+        cash: await cash(account) };
+    }
     const [k, bv, spot, signed] = await Promise.all([world.K(), world.bvib(), world.spotUB(),
       s.call(buck, "signedBalanceOf", [world.holderAddress(account)])]);
     let deposit = 0n;
@@ -421,14 +429,13 @@ export function installHouseholdOps(world) {
   world.households = { cash, pay, read, buy, issue, invest, mark, reserves, depositBuck, withdraw, redeemToRetire,
                        divest, saveBucks, tendWallet, emptyWallet };
   if (world.accounting === "net") {
-    // Recovery must inspect real authorizations before the still-gated
-    // decision loop. Never let a missing adapter look like idle economics.
-    world.households.pending = async (account) => {
-      const ids = world._credits.get(account.address) ?? [];
-      await world.netCreditOps.household(world.holderAddress(account), ids);
-      for (const id of ids) if ((await s.call(buck, "reductionAuthorization", [id]))[0]) return true;
-      return false;
-    };
+    // Reuse receipt recovery and selected-NFT repayment rather than another
+    // primary-world implementation. Preserve the price-bearing read above.
+    Object.assign(world.households, netHouseholdRepaymentOps(world, world.netMarket, {
+      facilityIds: (account) => world._credits.get(account.address) ?? [],
+      ownerFor: (account) => ({ address: world.holderAddress(account) }), creditOps: world.netCreditOps,
+    }), { read, openTrading: (account) => openTrading(world, world.netMarket,
+      { address: world.holderAddress(account) }) });
   }
   return world;
 }

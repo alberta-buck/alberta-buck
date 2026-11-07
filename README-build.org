@@ -166,7 +166,16 @@ The real tests include partial redemptions and deliberately stale local
 trade shares. Normal decisions remain gated before new income or borrowing;
 the interactive driver propagates an unimplemented action rather than
 allowing readable books to become a false completed economy.
-This is reporting integration coverage, not household-policy or five-year
+Both primary builders deploy real Permit2 and the matching single-pool net
+guard. The existing SDK market/settlement helpers dispatch through the same
+public household proxies: guarded net buys, user-paid bounded sales, separate
+USDC payments and saved-receipt recovery. Tests use aged Carrying pools and
+distinct payers/recipients. The JS primary adapter reuses selected-facility
+repayment recovery instead of duplicating it. Sales do not implicitly retire
+either mortgage or NFT principal. Complete household scheduling is still
+gated; these primitives do not yet apply pending bank payments to its ledger.
+The sim-build dependency now includes the vendored Permit2 build.
+This is component/reporting integration coverage, not household-policy or five-year
 stability evidence. No extra economy runner is introduced.
 Pytest owns =build/test/economy-accounting/=: each target run replaces that
 scratch directory and leaves the latest integration =canonical.json= and

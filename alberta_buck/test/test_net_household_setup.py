@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from web3.logs import DISCARD
+from buck_core import TransactionReceiptPending, TransactionReverted
 
 from alberta_buck.sim import experiment as expmod, identity as idmod
 from alberta_buck.sim.chain import Chain
@@ -100,6 +101,73 @@ def test_primary_household_setup_and_per_facility_credit_marks(household_world):
     assert debtor.last_action == "repay-pending" and not debtor._started
     d.net_credit_ops.cancel_reduction(debtor.address, first)
     assert not chain.mismatches
+
+
+def test_primary_proxy_market_uses_net_guard_bounded_sales_and_exact_payments(household_world):
+    d, _, make = household_world
+    a = make(19, CreditHouseholdAgent)
+    owner, chain = a.address, d.chain
+    d.anvil.warp_to(d.w3.eth.get_block("latest")["timestamp"] + YEAR)
+    a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("approve", args=[d.swap_guard.address, 2**256 - 1]))
+    a._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1]))
+    a._proxy_exec(d, d.permit2.address, d.permit2.encode_abi(
+        "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
+    chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[owner, 200 * RAW])))
+    candidate = d.net_credit_ops.assess_issue_candidate(owner, a._token_ids[0], 1000 * RAW, 500 * RAW, 100 * RAW)
+    assert candidate.reasons == ()
+    issued = d.net_credit_ops.issue_candidate(owner, candidate)
+    assert issued.principal == 600 * RAW and issued.premium == 100 * RAW
+    initial_mortgage, initial_paid = a.mortgage, a.external_paid
+    supply = d.buck.functions.totalIssued().call()
+    held = d.buck.functions.balanceOf(owner).call()
+    cash = d.usdc.functions.balanceOf(owner).call()
+    sale = d.net_market_ops.sell_exact_input(owner, d.pool_ub, 100 * RAW, 90 * RAW, owner, d.fee_ub)
+    assert sale.nominal_paid == 100 * RAW
+    assert d.usdc.functions.balanceOf(owner).call() - cash == sale.received >= 90 * RAW
+    assert held - d.buck.functions.balanceOf(owner).call() == sale.paid
+    assert d.net_credit_ops.household(owner, a._token_ids).issued == issued.principal
+    assert d.buck.functions.totalIssued().call() == supply
+    assert (a.mortgage, a.external_paid) == (initial_mortgage, initial_paid), "export is not bank payment"
+
+    receiver = a._new_proxy(d)
+    purchase = d.net_market_ops.buy_exact_input(owner, d.pool_ub, 10 * RAW, 9 * RAW, receiver.address)
+    assert purchase.nominal_received > purchase.received >= 9 * RAW
+    assert d.buck.functions.netBalanceScaled(receiver.address).call() == purchase.net_scaled
+    assert d.buck.functions.balanceOf(d.router.address).call() == 0
+    assert d.buck.functions.balanceOf(d.swap_guard.address).call() == 0
+    assert d.usdc.functions.balanceOf(d.swap_guard.address).call() == 0
+    assert not d.reg.functions.isVerified(d.permit2.address).call()
+    assert not d.reg.functions.isVerified(d.swap_guard.address).call()
+
+    cash = d.usdc.functions.balanceOf(owner).call()
+    with pytest.raises(TransactionReverted):
+        d.net_market_ops.buy_exact_input(owner, d.pool_ub, RAW, 2 * RAW, owner)
+    assert d.usdc.functions.balanceOf(owner).call() == cash
+    assert d.buck.functions.totalIssued().call() == supply
+    with pytest.raises(ValueError, match="bounds"):
+        d.net_market_ops.sell_exact_input(owner, d.pool_ub, RAW, 0, owner, d.fee_ub)
+
+    # A lost proxy reply preserves the real sale hash for reconciliation;
+    # neither a sale nor its recovered receipt applies a mortgage payment.
+    dispatch = d.net_market_ops.execute
+    def lose_reply(*args):
+        receipt = dispatch(*args)
+        raise TransactionReceiptPending(d.w3.to_hex(receipt["transactionHash"]))
+    d.net_market_ops.execute = lose_reply
+    with pytest.raises(TransactionReceiptPending) as lost:
+        d.net_market_ops.sell_exact_input(owner, d.pool_ub, RAW, 1, receiver.address, d.fee_ub)
+    receipt = d.w3.eth.get_transaction_receipt(lost.value.transaction_hash)
+    recovered = d.net_market_ops.sale_from_receipt(owner, d.pool_ub, receiver.address, RAW, 1,
+                                                  receipt, expected_hash=lost.value.transaction_hash)
+    assert recovered.received == d.usdc.functions.balanceOf(receiver.address).call() > 0
+    with pytest.raises(ValueError, match="missing or ambiguous"):
+        d.net_market_ops.sale_from_receipt(owner, d.pool_ub, owner, RAW, 1, receipt,
+                                           expected_hash=lost.value.transaction_hash)
+    assert (a.mortgage, a.external_paid) == (initial_mortgage, initial_paid)
+    payment = d.net_settlement_ops.pay_exact(owner, a.SINK, 20 * RAW)
+    assert payment.amount == 20 * RAW
+    assert d.usdc.functions.balanceOf(a.SINK).call() == payment.amount
+    assert d.buck.functions.totalIssued().call() == supply
 
 
 def test_personal_portfolio_marks_use_actual_cash_debt_receipts_and_all_custody(household_world):

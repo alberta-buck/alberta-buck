@@ -40,6 +40,7 @@ import { encodeFunctionData, keccak256, toBytes } from "viem";
 import { installHouseholdOps } from "../agents/household-ops.js";
 import { linkArtifact } from "../artifacts.js";
 import { netCreditOps } from "../net-world.js";
+import { settlementOps } from "../settlement.js";
 
 import { advanceTime, buildBuckWorld, DAY, identityApprove, identityOf, onboard }
   from "../buckworld.js";
@@ -415,10 +416,14 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
 
   // --- the real router, identity-bound ---------------------------------
   const weth = await session.deploy(artifacts("WETH9"), [], { name: "WETH9", gas });
+  const permit2 = machine ? await session.deploy(artifacts("Permit2"), [], { name: "Permit2", gas }) : null;
   const router = await deployUniversalRouter(session, opts.urArtifact,
     { weth: weth.address, v3Factory: v3f.address,
+      ...(permit2 ? { permit2: permit2.address } : {}),
       poolInitCode: artifacts("UniswapV3Pool").bytecode });
   await bind(router.address, true, "eq:bind:router");
+  const swapGuard = machine ? await session.deploy(artifacts("BuckNetSwapGuard"),
+    [buck.address, usdc.address, v3f.address], { name: "BuckNetSwapGuard", gas }) : null;
 
   // --- reference feeds (the whales' walks; refUsd's ground truth) ------
   const feeds = tokens.map((t, i) => seededWalk({
@@ -426,7 +431,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     stepBp: opts.stepBp ?? 80, steps: opts.feedDays ?? 4000 }));
 
   Object.assign(world, {
-    v3f, basket, usdc, simlp, tokens, poolUB, router, weth, feeds,
+    v3f, basket, usdc, simlp, tokens, poolUB, router, weth, permit2, swapGuard, feeds,
     fees: FEES, series: [], _proxies: new Map(),
     receipts: tokens.length,        // the bootstrap deposits' receipts
     basketKind: kind,
@@ -434,9 +439,13 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     wheel: parts?.wheel ?? null,
   });
   if (machine) {
-    world.netCreditOps = netCreditOps(session, world.net, (owner, contract, name, args) =>
+    const execute = (owner, contract, name, args, opts = {}) =>
       session.send(session.contractAt(artifacts("SimLP").abi, owner.address ?? owner), "exec",
-        [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })], { gas: 5_000_000n }));
+        [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })],
+        { gas: 5_000_000n, ...opts });
+    world.netCreditOps = netCreditOps(session, world.net, execute);
+    world.netMarket = { usdc, v3f, pool: poolUB, router, permit2, guard: swapGuard, fee: FEES.ub, execute };
+    world.netSettlementOps = settlementOps(session, usdc, { execute });
   }
 
   // ==== agent-facing op helpers (the doctrine's plumbing layer) ========
@@ -532,6 +541,15 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   world.creditState = async (account) => {
     const me = world.holderAddress(account);
     const ids = world._credits.get(account.address) ?? [];
+    if (machine) {
+      const book = await world.netCreditOps.markHousehold(me, ids);
+      const available = await world.netCreditOps.quoteHouseholdActivatedCapacity(me, ids);
+      return { drawn: book.state.issued, limit: book.creditLimit, held: book.state.spendable,
+        spendable: book.state.spendable, unactivated: available.unactivatedPresent,
+        capacity: available.capacity, headroom: book.state.spendable + available.capacity,
+        jub: book.reliefScaled / (10n ** 36n), deposit: book.state.premiumNominal,
+        insuranceAge: book.state.premiumNominal - book.premiumNetScaled / (10n ** 36n) };
+    }
     const [signed, limit, jub, k] = await Promise.all([
       session.call(buck, "signedBalanceOf", [me]),
       session.call(buck, "creditLimit", [me]),

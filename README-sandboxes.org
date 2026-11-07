@@ -21,6 +21,9 @@ Python builder, bootstrap agents, desk and component comparisons.
 =make nix-venv-economy-accounting-test= also validates exact Python/JS receipt
 marks and a short Python loop through JSON/PDF reporting. Both complete
 household lifecycles and full economy save/restore still await conversion.
+The primary worlds also expose the existing guarded market and exact USDC
+payment helpers through their ordinary proxies. These component operations
+do not yet schedule household refinancing or apply mortgage payments.
 Existing debtor/saver/investor account and facility setup now works in both
 languages, with matching SDK credit books and personal portfolio records.
 These records include all custody cash/TOKENs, actual NFT debt, each insurer
@@ -53,8 +56,8 @@ an explicit identity harness; they do not establish production basket binding.
 | Interface | Execution | Start | What to inspect |
 |-----------+-----------+-------+-----------------|
 | Wallet sandbox | JavaScript/Tevm in the browser | =make nix-sandbox SANDBOX_PORT=8980= | Identities, credit quotes, payments, market transactions and observer view |
-| Savings sandbox | Python/pyrevm economy, browser controls and wallet | =make nix-venv-sim-savings SIM_SAVINGS_PORT=8981= | Live population, K/BVIB, basket holdings, household/counterfactual charts |
-| Equilibrium demo | JavaScript household loop in the browser | =make nix-core-demo-eqworld-serve EQWORLD_PORT=8983= | Small interactive household/market loop |
+| Savings sandbox | Python/pyrevm economy, browser controls and wallet | =make nix-venv-sim-savings SIM_SAVINGS_PORT=8981= | Page/server available; household stepping still gated |
+| Equilibrium demo | JavaScript household loop in the browser | =make nix-core-demo-eqworld-serve EQWORLD_PORT=8983= | Bootstrap/portfolios available; household decisions still gated |
 | Vector viewer | Saved Python JSON, no live EVM | =make nix-venv-viewer VIEWER_PORT=8982= | One run's accounts, trades and time series |
 | Campaign index/PDFs | Saved results, no EVM | =make nix-venv-economy-report CAMPAIGN=NAME= | Cross-run acceptance and portable figures |
 
@@ -75,6 +78,13 @@ make nix-wallet-sandbox-test
 #+end_src
 
 * Savings sandbox (accounting migration pending)
+
+This page uses a Python economy behind JavaScript controls and wallet views.
+The server and page can start, but normal household stepping still reaches
+the explicit issuance/exit migration gate. Its end-to-end savings acceptance
+is not yet restored. =make nix-venv-economy-accounting-test= checks the
+available role setup, portfolio, market and short reporting components;
+=make nix-wallet-sandbox-test= checks the runnable browser-only wallet.
 
 The household-position selector shows each arrived household's remaining open basket basis,
 its current BUCK share mark and marked ROI. The return is the mark divided by remaining basis
@@ -108,7 +118,9 @@ for report recovery and interpretation.
 make nix-venv-sandbox-savings-test SAVINGS_TEST_PORT=8987
 #+end_src
 
-This owns its temporary server and stops that process afterwards. Nix supplies the Chromium
+This is the full savings acceptance target to restore after the household
+decision migration; a successful page build alone does not pass it.
+It owns its temporary server and stops that process afterwards. Nix supplies the Chromium
 matching =playwright-core=. =make nix-core-test-js= also runs available browser tests; it
 reports a skip when an external savings page is not supplied. See the test output rather
 than treating a skipped browser test as coverage.
@@ -122,7 +134,8 @@ make nix-core-equilibrium-bootstrap-test
 #+end_src
 
 It creates the opening weighted pools and checks actual premium-bearing
-issuance. The commands below build the existing interface, whose household
+issuance, personal portfolios and guarded proxy-market transactions. The
+commands below build the existing interface, whose household
 execution remains gated while its cash/debt operations are migrated.
 
 #+begin_src sh

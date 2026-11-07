@@ -21,8 +21,9 @@
 //     Proven on Tevm against an unbound router (test/buckmarket.tevm.test.js).
 //   * The pre-fund route (transfer the input to the router, payerIsUser=
 //     false) puts a BUCK input on the router: the Python sim and the
-//     equilibrium world still use it with a DUMMY permit2 and an
-//     identity-bound router, pending their move to Permit2.
+//     retained comparison routes use it with an identity-bound router.
+//     The canonical Python/JS household markets now deploy real Permit2
+//     and use the direct user-paid path; older routes remain separate.
 //   * poolInitCodeHash = keccak of OUR compiled UniswapV3Pool creation
 //     bytecode -- the router computes pool addresses via CREATE2, and the
 //     locally-built pool hash differs from mainnet's canonical one.

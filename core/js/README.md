@@ -111,6 +111,19 @@ matching book daily. Missing required marks refuse the record, and reading
 it does not execute a mortgage payment or update the trade book. Normal
 household decisions and complete saved-world restoration remain gated.
 
+The primary economy's `netMarket` reuses the wallet's guarded buy and
+bounded user-paid sale helpers, with real Permit2 and an explicit `execute`
+dispatcher for its public simulation proxies. `openTrading` uses BUCK's
+public-identity fallback for those accounts; private holders still need the
+normal identity proof. `buyBuck`, `buyBuckExact` and `sellBuck` accept an
+optional `recipient`; receipt authentication checks that recipient separately
+from the payer. EOA callers retain the ordinary session dispatcher. These
+dispatchers are not serialized wallet authority. `netSettlementOps` verifies
+exact USDC payments separately; a confirmed sale never reduces either
+external mortgage or NFT principal by itself. The existing partial repayment
+adapter supplies the primary household's receipt recovery and selected-NFT
+operations; normal issuance/exit scheduling remains gated.
+
 Subpaths map onto the modules directly: `alberta-buck-core/session`,
 `/journal`, `/identity`, `/wallet`, `/buckworld`, `/observer`, `/v3`, and
 so on.
