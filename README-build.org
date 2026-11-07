@@ -176,7 +176,9 @@ either mortgage or NFT principal. Complete household scheduling is still
 gated. The [[file:README-households.org][household refinancing machine]] now acquires a bounded net reserve when needed and applies an assessed plan's
 authenticated bank principal and costs once, including recovery after a lost
 reply. Shared insurance vectors and real activation/retirement tests verify
-proportional external premium costs. Economic selection and the rest of its lifecycle
+proportional external premium costs. Explicit read-only economic assessment
+now selects actual bounded candidates with supplied forecasts. Automatic
+forecast/calendar scheduling and the rest of its lifecycle
 remain separate gates. Tests stream exact histories through full/lite JSON
 without depending on the optional compact action log.
 The sim-build dependency now includes the vendored Permit2 build.

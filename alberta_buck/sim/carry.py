@@ -102,6 +102,15 @@ def discounted_buyback(cash: float, drawn: float, r_usdc: float, r_buck: float,
     return min(drawn, r_buck * (spend * net) / (r_usdc + spend * net))
 
 
+def _finite_forecast(value):
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 @dataclass(frozen=True)
 class RefiTerms:
     """One household's refinance question, in USD.
@@ -136,18 +145,18 @@ class RefiTerms:
 
     def __post_init__(self):
         if (self.expected_relief_rate is not None and
-                (not math.isfinite(self.expected_relief_rate) or self.expected_relief_rate < 0)):
+                (not _finite_forecast(self.expected_relief_rate) or self.expected_relief_rate < 0)):
             raise ValueError("invalid expected relief rate")
-        if not math.isfinite(self.premium_refund_fraction) or not 0 <= self.premium_refund_fraction <= 1:
+        if not _finite_forecast(self.premium_refund_fraction) or not 0 <= self.premium_refund_fraction <= 1:
             raise ValueError("invalid premium refund fraction")
         if (self.expected_refund_growth is not None and
-                (not math.isfinite(self.expected_refund_growth) or self.expected_refund_growth < -1)):
+                (not _finite_forecast(self.expected_refund_growth) or self.expected_refund_growth < -1)):
             raise ValueError("invalid expected refund growth")
-        if not math.isfinite(self.expected_wallet_growth) or self.expected_wallet_growth < -1:
+        if not _finite_forecast(self.expected_wallet_growth) or self.expected_wallet_growth < -1:
             raise ValueError("invalid expected wallet growth")
-        if not math.isfinite(self.activated_capacity) or self.activated_capacity < 0:
+        if not _finite_forecast(self.activated_capacity) or self.activated_capacity < 0:
             raise ValueError("invalid activated credit capacity")
-        if self.issuance_limit is not None and (not math.isfinite(self.issuance_limit) or self.issuance_limit < 0):
+        if self.issuance_limit is not None and (not _finite_forecast(self.issuance_limit) or self.issuance_limit < 0):
             raise ValueError("invalid shared issuance limit")
 
     @property

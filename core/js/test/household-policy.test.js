@@ -42,7 +42,11 @@ test("net refinance requires valid explicit forecasts", () => {
     ["expected_refund_growth", -1.01, /growth/], ["expected_wallet_growth", -1.01, /wallet/],
     ["premium_refund_fraction", NaN, /fraction/], ["activated_capacity", -1, /activated credit/],
     ["activated_capacity", NaN, /activated credit/], ["issuance_limit", -1, /issuance limit/],
-    ["issuance_limit", NaN, /issuance limit/]]) {
+    ["issuance_limit", NaN, /issuance limit/], ["expected_relief_rate", true, /relief/],
+    ["premium_refund_fraction", true, /fraction/], ["expected_refund_growth", true, /growth/],
+    ["expected_wallet_growth", true, /wallet/], ["activated_capacity", true, /activated credit/],
+    ["issuance_limit", true, /issuance limit/], ["expected_relief_rate", "0.02", /relief/],
+    ["expected_wallet_growth", Infinity, /wallet/]]) {
     assert.throws(() => terms({ ...f.state, ...f.net_refinance[0].state, [field]: value }, p), error);
   }
 });

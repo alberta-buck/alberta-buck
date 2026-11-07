@@ -360,6 +360,19 @@ export function netCreditOps(session, stack, execute = null) {
       exceedsLiquidityLimit: exceeds, annualRateWad: selected ? relief * YEAR * WAD / (selected * Q) : null,
       capped: selected > 0n && relief === principal * Q };
   };
+  // Unlike a selected NFT sample, the global ratio is not principal-capped.
+  // It observes the same guarded fund assets/aggregate claim age even for a
+  // new owner's NFT. No age has no rate; stale maturity/mark reads propagate.
+  ops.quoteGlobalReliefRate = async ({ blockNumber: requestedBlock = null } = {}) => {
+    if (requestedBlock !== null && (typeof requestedBlock !== "bigint" || requestedBlock < 0n)) throw new Error("invalid global relief block");
+    const blockNumber = requestedBlock ?? (await session.client.getBlock()).number;
+    const read = (c, functionName) => session.client.readContract({ address: c.address, abi: c.abi, functionName, blockNumber });
+    const totalSeconds = await read(token, "claimSeconds");
+    const [, cashScaled] = await read(token, "fundBalancesScaled");
+    const positionMark = await read(fund, "reliefPositionMark"), availableReliefScaled = await read(token, "availableReliefScaled");
+    const annualRateWad = totalSeconds ? (cashScaled + positionMark * Q) * YEAR * WAD / (totalSeconds * Q) : null;
+    return { blockNumber, totalSeconds, cashScaled, positionMark, availableReliefScaled, annualRateWad };
+  };
   // A proposed full-value premium dilutes only the current pool account in
   // this estimate. Outside positions and later liquidity actions are unknown.
   ops.quotePremiumRefund = async (tokenId, coverage, { blockNumber: requestedBlock = null } = {}) => {

@@ -95,6 +95,11 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert fresh_mark.relief_scaled == fresh_mark.premium_net_scaled == 0
         fresh = ops.quote_relief_rate(0, RAW)
         assert fresh.selected_seconds == 0 and fresh.annual_rate_wad is None
+        fresh_global = ops.quote_global_relief_rate()
+        assert fresh_global.total_seconds == fresh_global.cash_scaled == fresh_global.position_mark == 0
+        assert fresh_global.annual_rate_wad is None
+        with pytest.raises(ValueError, match="global relief block"):
+            ops.quote_global_relief_rate(block_number=True)
         assert ops.quote_premium_refund(0, 0).reason == "no-premium"
         model = DemurrageLedger()
         model.issue_unspent("facility", 100, "owner", credit_limit=100)
@@ -124,6 +129,12 @@ def test_linked_net_issuance_and_reduction_match_reference():
         # year is 1 - exp(-.02), not the full linear 2% target.
         assert observed.annual_rate_wad / 10**18 == pytest.approx(1 - math.exp(-.02), abs=1e-8)
         assert not observed.capped and not observed.exceeds_liquidity_limit
+        global_rate = ops.quote_global_relief_rate()
+        assert global_rate.total_seconds == 100 * RAW * YEAR
+        assert global_rate.cash_scaled == cash and global_rate.position_mark == 0
+        assert abs(global_rate.annual_rate_wad - observed.annual_rate_wad) <= 1
+        assert global_rate.available_relief_scaled == buck.functions.availableReliefScaled().call()
+        assert ops.quote_global_relief_rate(block_number=fresh_global.block_number) == fresh_global
         too_large = ops.quote_relief_rate(0, 100 * RAW)
         assert too_large.exceeds_liquidity_limit and not too_large.capped
         marked = ops.mark_household(actor.address, [0])
@@ -154,6 +165,7 @@ def test_linked_net_issuance_and_reduction_match_reference():
         _exec(chain, actor, buck, "transfer", [fund.address, 40 * RAW])
         capped = ops.quote_relief_rate(0, RAW)
         assert capped.capped and capped.relief_scaled == RAW * Q and capped.annual_rate_wad is not None
+        assert ops.quote_global_relief_rate().annual_rate_wad > capped.annual_rate_wad
         anvil.warp_to(issued_at + 51 * YEAR)
         assert buck.functions.maturitiesPending().call()
         capacity = ops.quote_household_activated_capacity(actor.address, [0, 1])
@@ -163,6 +175,8 @@ def test_linked_net_issuance_and_reduction_match_reference():
         assert ops.issue_coverage_menu(actor.address, 1, RAW, 0) == (pending,)
         with pytest.raises(Exception):
             ops.quote_relief_rate(0, RAW)  # stale claim denominator must not become a forecast
+        with pytest.raises(Exception):
+            ops.quote_global_relief_rate()
         with pytest.raises(Exception):
             ops.mark_household(actor.address, [0, 1])
         chain.send(buck.functions.processMaturities(10))

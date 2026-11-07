@@ -135,13 +135,32 @@ action; an unknown or mismatched receipt cannot trigger a second send.
 both must be positive together. The purchase retains the cash buffer, and
 issuance rechecks the original terms after funding. An unavailable view
 waits without buying twice; changed economics refuse while retaining actual
-holdings. This component does not yet select the plan or enable normal decisions.
+holdings. Normal decision scheduling and the complete calendar/exit lifecycle
+remain gated.
+
+`agent.assessNetRefinance(world, day, forecasts)` now reads a bounded
+per-facility menu and returns `{plan, verdict, context}` without transactions.
+Supply explicit `expected_relief_rate`, `expected_refund_growth` and
+`expected_wallet_growth`. It compares wallet/new/mixed funding, actual
+insurer refund values, incremental insurance savings and reserve costs;
+raw budgets retain utilization, market-impact and cash limits. Exact
+activated room is included even below the usual size grid. An ordinary
+reserve's age does not create a new premium-buffer requirement for a
+zero-premium issue. Pass a selected plan and context to `startNetRefinance`.
 
 Canonical calendar insurance uses only the uncovered nominal asset share;
 `externalPremiumDue` rounds the remaining raw cost up. `refinanceQuoted`
 accepts `externalPremiumSaving` (annual USD, default zero) for each candidate's
 new coverage; wallet-only prepayments have neither that saving nor a switch
 cost. Existing coverage does not earn the same saving twice.
+
+`world.netCreditOps.quoteGlobalReliefRate({blockNumber})` observes the whole
+fund even when a household's own NFT is new. `totalSeconds`, `cashScaled`,
+guarded raw `positionMark` and `annualRateWad` use BigInt (`null` rate at zero
+aggregate age); `availableReliefScaled` is separate. Deferred matured debt
+stays in the age denominator. Missing/unsafe publications and pending
+maturity checkpoints fail instead of supplying a fabricated rate. This
+uncapped global ratio is an observation for forecasting, not a promised ROI.
 
 `agent.householdEventsSince(seq)` returns detached, JSON-safe transition
 records after the given cursor. Each has stable member/decision/sequence IDs,

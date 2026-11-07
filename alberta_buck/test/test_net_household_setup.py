@@ -34,9 +34,9 @@ def household_world(monkeypatch):
     with PyrevmAnvil(port=0) as evm:
         chain = Chain(evm.w3, evm.w3.eth.accounts[0])
         d = deploy(chain, evm, scenario, rng, verbose=False, basket_impl="equity-ops", equity_machine=True)
-        def make(i, cls, *, assets=1):
+        def make(i, cls, *, assets=1, settings=None):
             agent = cls(i)
-            agent.settings = dict(home_k=1000, premium_bp=100, asset_count=assets)
+            agent.settings = dict(home_k=1000, premium_bp=100, asset_count=assets) | (settings or {})
             agent.setup(d, scenario, rng)
             return agent
         yield d, scenario, make
@@ -327,6 +327,74 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
         assert "ag" not in lite
         snap.capture(1, ctr, [a], 0)
         assert "household_events" not in snap.frames[1]
+
+
+@pytest.mark.parametrize("cash_k,will_issue", [(40, True), (10, False)])
+def test_refinance_assessment_chooses_actual_affordable_issuance_without_transactions(household_world, cash_k, will_issue):
+    d, _, make = household_world
+    a = make(33, CreditHouseholdAgent, settings=dict(apr=.06, ltv=.4, theta=3, risk=0,
+                                                   switch_k=0, max_impact_bp=100, divest_rate=0))
+    d.chain.send(d.usdc.functions.mint(a.address, cash_k * 1000 * RAW))
+    a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("approve", args=[d.swap_guard.address, 2**256 - 1]))
+    a._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1]))
+    a._proxy_exec(d, d.permit2.address, d.permit2.encode_abi(
+        "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
+    before = (d.w3.eth.block_number, a.mortgage, a.hypo_mortgage, a.hypo_cash, d.buck.functions.totalIssued().call())
+    assessed = a.assess_net_refinance(d, 1, expected_relief_rate=.02, expected_refund_growth=-.02, expected_wallet_growth=-.02)
+    assert (d.w3.eth.block_number, a.mortgage, a.hypo_mortgage, a.hypo_cash, d.buck.functions.totalIssued().call()) == before
+    assert a.refinance_machine.events == [] and not a.funding_pending
+    plan, verdict, context = (assessed[k] for k in ("plan", "verdict", "context"))
+    assert (plan is not None) == will_issue and verdict.go == will_issue
+    if not will_issue:
+        assert context["rejections"]["cash-buffer"] > 0 and context["reason"] == "no-worthwhile-refinance"
+        assert d.credit.functions.issuanceOf(a._token_ids[0]).call() == [0, 0]
+        return
+    assert plan.candidate is not None and plan.reserve_buy_net > 0
+    assert set(plan.candidate.reasons) <= {"reserve-shortfall"}
+    expected_saving = (a._face0 * a.premium_rate // 10_000) * plan.candidate.coverage // a._face0
+    assert verdict.parts["premium"] == pytest.approx(expected_saving / RAW)
+    assert context["feasible"] > 1 and context["selected"]["economics"]["new_spendable"] > 0
+    assert plan.mortgage_limit == plan.minimum_usdc <= a.mortgage
+    a.start_net_refinance(d, plan, 1, {}, context=context)
+    assert a.refinance_machine.status()["status"] == "complete"
+    assert [e["operation"] for e in a.refinance_machine.events if e["status"] == "confirmed"] == ["fund", "issue", "export", "mortgage"]
+    assert a.mortgage == before[1] - plan.mortgage_limit and a.hypo_mortgage == before[2] and a.hypo_cash == before[3]
+    assert d.usdc.functions.balanceOf(a.address).call() >= a.cash_buffer
+    assert d.buck.functions.balanceOf(a.address).call() >= plan.reserve_floor
+
+
+@pytest.mark.parametrize("keep_reserve", [True, False])
+def test_refinance_assessment_uses_existing_room_without_redundant_reserve_buys(household_world, keep_reserve):
+    d, _, make = household_world
+    a = make(34, CreditHouseholdAgent, settings=dict(apr=.06, ltv=.4, theta=3, risk=0,
+        switch_k=0, max_impact_bp=100, penalty_months=0, utilization=.0001, divest_rate=0))
+    d.chain.send(d.usdc.functions.mint(a.address, a.cash_buffer))
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, 20 * RAW])))
+    tid = a._token_ids[0]
+    d.net_credit_ops.issue(a.address, tid, 100 * RAW, 40 * RAW, 10 * RAW, d.pool_acct)
+    a.joined = True
+    if not keep_reserve:
+        held = d.buck.functions.balanceOf(a.address).call()
+        a._proxy_exec(d, d.buck.address, d.buck.encode_abi("transfer", args=[d.simlp.address, held]))
+    old_reserve = d.buck.functions.balanceOf(a.address).call()
+    d.anvil.warp_to(d.w3.eth.get_block("latest")["timestamp"] + YEAR)
+    d.chain.send(d.kctrl.functions.compute())  # keeper/control work precedes the read-only decision
+    actual_reserve = d.buck.functions.balanceOf(a.address).call()
+    assert actual_reserve < old_reserve if keep_reserve else actual_reserve == old_reserve == 0
+    a._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1]))
+    a._proxy_exec(d, d.permit2.address, d.permit2.encode_abi(
+        "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
+    book = d.net_credit_ops.household(a.address, a._token_ids)
+    assessed = a.assess_net_refinance(d, 1, expected_relief_rate=.02, expected_refund_growth=-.02,
+                                     expected_wallet_growth=-.02, reserve_floor=old_reserve)
+    plan = assessed["plan"]
+    assert plan is not None and plan.candidate.coverage == plan.candidate.premium == 0
+    assert plan.reserve_buy_net == plan.reserve_buy_max_usdc == 0
+    assert plan.reserve_floor == actual_reserve and plan.export_buck > 0
+    a.start_net_refinance(d, plan, 1, {}, context=assessed["context"])
+    assert a.refinance_machine.status()["status"] == "complete"
+    assert d.net_credit_ops.household(a.address, a._token_ids).issued == book.issued + plan.export_buck
+    assert d.buck.functions.balanceOf(a.address).call() >= actual_reserve
 
 
 def test_external_insurance_tracks_real_activation_and_retirement(household_world, monkeypatch):

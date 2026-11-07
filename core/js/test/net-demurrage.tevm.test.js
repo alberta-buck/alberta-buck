@@ -88,6 +88,10 @@ test("linked Buck issues, accrues and retires cash-only credit", { skip }, async
   const fresh = await ops.quoteReliefRate(0n, RAW);
   assert.equal(fresh.selectedSeconds, 0n);
   assert.equal(fresh.annualRateWad, null);
+  const freshGlobal = await ops.quoteGlobalReliefRate();
+  assert.equal(freshGlobal.totalSeconds + freshGlobal.cashScaled + freshGlobal.positionMark, 0n);
+  assert.equal(freshGlobal.annualRateWad, null);
+  await assert.rejects(ops.quoteGlobalReliefRate({ blockNumber: true }), /global relief block/);
   assert.equal((await ops.quotePremiumRefund(0n, 0n)).reason, "no-premium");
   assert.equal(await s.call(buck, "balanceOf", [actor.address]), 100n * RAW);
   assert.equal(await s.call(buck, "totalIssued"), 100n * RAW);
@@ -108,6 +112,12 @@ test("linked Buck issues, accrues and retires cash-only credit", { skip }, async
   assert.ok(Math.abs(Number(observed.annualRateWad) / 1e18 - (1 - Math.exp(-.02))) < 1e-8);
   assert.equal(observed.capped, false);
   assert.equal(observed.exceedsLiquidityLimit, false);
+  const globalRate = await ops.quoteGlobalReliefRate();
+  assert.equal(globalRate.totalSeconds, 100n * RAW * BigInt(YEAR));
+  assert.equal(globalRate.cashScaled, cash); assert.equal(globalRate.positionMark, 0n);
+  assert.ok(globalRate.annualRateWad >= observed.annualRateWad && globalRate.annualRateWad - observed.annualRateWad <= 1n);
+  assert.equal(globalRate.availableReliefScaled, await s.call(buck, "availableReliefScaled"));
+  assert.deepEqual(await ops.quoteGlobalReliefRate({ blockNumber: freshGlobal.blockNumber }), freshGlobal);
   const tooLarge = await ops.quoteReliefRate(0n, 100n * RAW);
   assert.equal(tooLarge.exceedsLiquidityLimit, true);
   assert.equal(tooLarge.capped, false);
@@ -133,6 +143,7 @@ test("linked Buck issues, accrues and retires cash-only credit", { skip }, async
   assert.equal(capped.capped, true);
   assert.equal(capped.reliefScaled, RAW * 10n ** 36n);
   assert.notEqual(capped.annualRateWad, null);
+  assert.ok((await ops.quoteGlobalReliefRate()).annualRateWad > capped.annualRateWad);
   await advanceTime({ session: s }, 2 * YEAR);
   assert.equal(await s.call(buck, "maturitiesPending"), true);
   const capacity = await ops.quoteHouseholdActivatedCapacity(actor.address, [0n, 1n]);
@@ -142,6 +153,7 @@ test("linked Buck issues, accrues and retires cash-only credit", { skip }, async
   assert.ok((await ops.assessIssueCandidate(actor.address, 1n, 0n, RAW, 0n)).reasons.includes("maturities-pending"));
   assert.equal((await ops.issueCoverageMenu(actor.address, 1n, RAW, 0n)).length, 1);
   await assert.rejects(ops.quoteReliefRate(0n, RAW)); // stale denominator must not become a forecast
+  await assert.rejects(ops.quoteGlobalReliefRate());
   await s.send(buck, "processMaturities", [10n]);
   assert.equal(await s.call(buck, "maturitiesPending"), false);
   assert.ok(await s.call(credit, "depreciatedFaceValue", [0n]) > await s.call(credit, "currentValue", [0n]));

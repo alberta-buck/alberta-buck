@@ -7,7 +7,7 @@ from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
-from alberta_buck.sim.net_household import HouseholdRefinance
+from alberta_buck.sim.net_household import HouseholdRefinance, assess_refinance
 from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted
 from buck_core.session import _txhex, custom_error_name
 
@@ -336,8 +336,11 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 return True
         return False
 
+    def assess_net_refinance(self, d, day, **forecasts):
+        return assess_refinance(self, d, day, **forecasts)
+
     def start_net_refinance(self, d, plan, day, ctr, *, context=None):
-        """Execute a funded, assessed plan; economic plan selection is separate."""
+        """Execute an assessed plan, including its optional bounded reserve buy."""
         if getattr(d, "buck_accounting", "") != "net":
             raise ValueError("canonical refinancing requires net accounting")
         if (self._pending_repayment(d) or self._net_repayment_reserve is not None or

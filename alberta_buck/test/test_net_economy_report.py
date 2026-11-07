@@ -60,6 +60,12 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
         assert net["jubilee"]["relief_position_mark"] == fund.functions.reliefPositionMark().call()
         credit_mark = d.net_credit_ops.mark_household(basket.address, [basket.functions.creditId().call()])
         assert credit_mark.state.issued == frame["eq_lien"] and credit_mark.relief_scaled > 0
+        global_rate = d.net_credit_ops.quote_global_relief_rate(block_number=net["block"])
+        assert global_rate.position_mark == net["jubilee"]["relief_position_mark"]
+        assert global_rate.cash_scaled == int(net["jubilee"]["net_scaled"])
+        assert global_rate.total_seconds == int(net["claim_seconds"])
+        selected = d.net_credit_ops.quote_relief_rate(basket.functions.creditId().call(), 10**6)
+        assert not selected.capped and abs(global_rate.annual_rate_wad - selected.annual_rate_wad) <= 1
         assert int(net["claim_seconds"]) == buck.functions.claimSeconds().call()
         assert int(net["available_relief_scaled"]) == buck.functions.availableReliefScaled().call()
         assert frame["basketNav"] == basket.functions.gross().call() + basket.functions.liquidity().call()
@@ -112,6 +118,8 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
                  d.buck.functions.totalIssued().call(), d.buck.functions.fundFlows().call(),
                  d.basket.functions.holdings(position).call())
         assert after == before
+        with pytest.raises(Exception):
+            d.net_credit_ops.quote_global_relief_rate()  # unsafe LP mark cannot become a forecast
         assert not d.chain.mismatches
     assert data["meta"]["run"]["completed"] and len(observations) == len(data["frames"]) == 3
     assert any(f["net"]["jubilee"]["position"]["positions"] for f in observations)

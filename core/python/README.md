@@ -85,6 +85,15 @@ the nested `state` uses raw six-decimal BUCK. `exceeds_liquidity_limit`
 compares the total claim with the shared block allowance: marked relief
 does not imply it can all be paid now.
 
+`quote_global_relief_rate(block_number=...)` returns `GlobalReliefRateQuote`:
+aggregate eligible `total_seconds`, Jubilee `cash_scaled` (`1e36`), guarded
+raw `position_mark`, the separate `available_relief_scaled`, and
+`annual_rate_wad` (`1e18`, `None` at zero aggregate age). It uses marked
+assets divided by the token's whole claim-age denominator, including deferred
+matured principal; a selected NFT's principal cap cannot distort the sample.
+Unsafe/missing wheel marks and maturity checkpoint failures propagate. This
+is a same-block observation, not a future-return or payment guarantee.
+
 Each refund uses its facility's actual insurer pool, including when the
 insurer has changed its pool for new facilities. Unobserved insurer
 strategy assets and future funding are excluded. Missing guarded marks
@@ -104,8 +113,13 @@ reserve before issuance using `reserve_buy_net` / `reserve_buy_max_usdc`.
 It protects the cash buffer, authenticates the purchase once and rechecks
 the original selected issuance terms after funding. `NetPurchase.receipt`
 retains that evidence without changing equality of its monetary fields.
-Economic selection and the complete normal household lifecycle remain open;
-see the checkout's `README-households.org` for state and event invariants.
+`agent.assess_net_refinance(d, day, **forecasts)` now builds a read-only,
+bounded menu from actual NFT/pool books and returns `plan`, `verdict` and
+`context`. Supply explicit annual relief/refund/wallet forecasts; the
+assessment includes wallet/new/mixed funding, premium refund values,
+incremental insurance savings and reserve acquisition/carry costs. The
+normal calendar/surplus/exit lifecycle remains open; see the checkout's
+`README-households.org` for state and event invariants.
 
 `TransactionReverted.data` preserves structured provider data from the
 post-block `eth_call` replay. A proxy may not declare its target's errors;

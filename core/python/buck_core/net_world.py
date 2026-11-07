@@ -299,6 +299,17 @@ class ReliefRateQuote:
 
 
 @dataclass(frozen=True)
+class GlobalReliefRateQuote:
+    """Observed marked fund value per eligible BUCK-second, not a promise."""
+    block_number: int
+    total_seconds: int
+    cash_scaled: int
+    position_mark: int
+    available_relief_scaled: int
+    annual_rate_wad: int | None
+
+
+@dataclass(frozen=True)
 class PremiumRefundQuote:
     block_number: int
     premium: int
@@ -870,6 +881,27 @@ class NetCreditOps:
         rate = relief * YEAR * WAD // (selected * Q) if selected else None
         return ReliefRateQuote(block, selected, total, relief, cash, exceeds, rate,
                                bool(selected and relief == principal * Q))
+
+    def quote_global_relief_rate(self, *, block_number: int | None = None) -> GlobalReliefRateQuote:
+        """Read the fund-wide rate, including when this owner's NFT is new.
+
+        Uncapped marked assets / aggregate eligible age annualizes the same
+        ratio used by relief. Deferred matured principal stays in the token's
+        age denominator. No age means no observed rate; an unpaid maturity
+        checkpoint or missing/unsafe wheel publication fails rather than
+        inventing a forecast. The separate block allowance is not a mark.
+        """
+        if block_number is not None and (type(block_number) is not int or block_number < 0):
+            raise ValueError("invalid global relief block")
+        block = self.chain.w3.eth.block_number if block_number is None else block_number
+        read = lambda fn: fn.call(block_identifier=block)
+        token, fund = self.stack.token, self.stack.fund
+        seconds = read(token.functions.claimSeconds())
+        _, cash = read(token.functions.fundBalancesScaled())
+        mark = read(fund.functions.reliefPositionMark())
+        available = read(token.functions.availableReliefScaled())
+        rate = (cash + mark * Q) * YEAR * WAD // (seconds * Q) if seconds else None
+        return GlobalReliefRateQuote(block, seconds, cash, mark, available, rate)
 
     def quote_premium_refund(self, token_id: int, coverage: int, *, block_number: int | None = None) -> PremiumRefundQuote:
         """Estimate the immediate mixed-pool refund fraction for new coverage.

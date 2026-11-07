@@ -849,6 +849,9 @@ economy-smoke: sim-build core-build-py
 	python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy.toml \
 		--backend pyrevm --days $(ECONOMY_SMOKE_DAYS) --out "$(ECONOMY_SMOKE_OUT)"
 	python -m alberta_buck.sim.report "$(ECONOMY_SMOKE_OUT)"
+# Full household lifecycle gate, including currently unported canonical
+# action cases. Use economy-accounting-test for completed migration blocks;
+# its passing component checks do not imply this full lifecycle is enabled.
 economy-test: sim-build core-build-py core-build-wasm
 	python -m pytest alberta_buck/test/test_carry.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_credit_households.py \
 		alberta_buck/test/test_economy.py alberta_buck/test/test_sim_report.py $(PYTEST_ARGS)
@@ -1699,10 +1702,11 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 # guarded proxy market operations, optional reserve acquisition and
 # receipt-backed refinancing. Shared policy cases include proportional
 # external insurance; normal income/surplus/exit decisions remain gated.
+CORE_EQUILIBRIUM_TEST_ARGS ?=
 core-equilibrium-bootstrap-test: sim-build core-build-wasm
 	node core/js/bin/bundle-artifacts.mjs
 	cd core/js && node --test test/net-market-quote.test.js test/household-policy.test.js
-	cd core/js && node --test test/net-equilibrium-bootstrap.tevm.test.js
+	cd core/js && node --test $(CORE_EQUILIBRIUM_TEST_ARGS) test/net-equilibrium-bootstrap.tevm.test.js
 
 # Both EXISTING builders, not the household loop or a five-year campaign.
 # The Python path also configures the separate canonical desk.

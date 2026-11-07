@@ -6,12 +6,13 @@ import { IssuancePending } from "../net-world.js";
 import { buyBuckExact, netPurchaseFromReceipt, sellBuck, netSaleFromReceipt } from "../market.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 import { markNetBasketPositions } from "../basket.js";
-import { observeNetMarket } from "../net-market-quote.js";
-import { externalPremiumDue } from "./household-policy.js";
+import { observeNetMarket, netPurchaseCost, netSaleExpected } from "../net-market-quote.js";
+import { externalPremiumDue, terms, bestQuotedRefinance } from "./household-policy.js";
 
 const RAW = 1_000_000n, MAX = (1n << 256n) - 1n;
 const PHASES = ["fund", "issue", "export", "mortgage"];
 const BANK = "0x000000000000000000000000000000000000dEaD";
+const reserveFor = (c) => c.reserveRequired + (c.premium ? c.reserveBuffer : 0n);
 const snake = (key) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 const wire = (value) => {
   if (typeof value === "bigint") return String(value);
@@ -21,6 +22,110 @@ const wire = (value) => {
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, wire(v)]));
   throw new Error("unsupported household event value");
 };
+
+/** Read an actual, finite candidate menu without submitting or changing books.
+ * Normal external keeper/controller work precedes the read-only assessment.
+ * Annual forecasts are explicit. Bank costs use old USDC above the buffer;
+ * the sale minimum is mortgage principal, avoiding a second cost deduction.
+ * Execution still rechecks the selected issuance and actual trade bounds. */
+export async function assessRefinance(a, world, day, { expected_relief_rate, expected_refund_growth,
+  expected_wallet_growth, reserve_floor = null, slippage_bp = 50 } = {}) {
+  if (world.accounting !== "net" || a.refinanceMachine.active) throw new Error("household refinance assessment needs idle canonical accounting");
+  reserve_floor ??= a.refinanceMachine.flow?.plan.reserve_floor ?? 0n;
+  if (typeof reserve_floor !== "bigint" || reserve_floor < 0n || reserve_floor > MAX
+      || !Number.isInteger(slippage_bp) || slippage_bp < 0 || slippage_bp > 1000) throw new Error("invalid household assessment reserve or slippage");
+  const s = world.session, owner = world.holderAddress(a.account), ids = world._credits.get(a.account.address) ?? [];
+  const blockNumber = (await s.client.getBlock()).number;
+  const at = (c, functionName, args = []) => s.client.readContract({ address: c.address, abi: c.abi, functionName, args, blockNumber });
+  const market = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber });
+  const book = await world.netCreditOps.household(owner, ids, { blockNumber });
+  const retained = reserve_floor < book.spendable ? reserve_floor : book.spendable;
+  const available = await world.netCreditOps.quoteHouseholdActivatedCapacity(owner, ids);
+  if (available.blockNumber !== blockNumber) throw new Error("household assessment block changed");
+  const cash = await at(world.usdc, "balanceOf", [owner]), k = await at(world.kctrl, "currentBuckK");
+  const bvib = await at(world.basket, "basketValueInBuck"), month = Math.floor((day - a.arrive_day) / 30);
+  const state = { accounting: "net", mortgage: Number(a.mortgage) / 1e6, face: Number(a.face) / 1e6,
+    joined: a.joined, k: Number(k) / 1e18, spendable: Number(book.spendable) / 1e6,
+    unactivated: available.maturitiesPending ? 0 : Number(available.unactivatedPresent) / 1e6,
+    activated_capacity: Number(available.capacity) / 1e6,
+    issuance_limit: available.maturitiesPending ? 0 : Number(available.sharedLimit) / 1e6,
+    at_renewal: (month - a.p.renew_in) % a.p.term_months === 0,
+    basket_usd: Number(bvib) / 1e18 * (Number(market.price_num) / Number(market.price_den)),
+    expected_relief_rate, expected_refund_growth, expected_wallet_growth, premium_refund_fraction: 1 };
+  const t = terms(state, a.p);
+  const utilization = a.face * k * BigInt(Math.trunc(a.p.utilization * 1e9)) / (10n ** 18n * 10n ** 9n);
+  const impactPpm = BigInt(Math.trunc(a.p.max_impact_bp * 50));
+  const min = (...v) => v.reduce((x, y) => x < y ? x : y), max = (x, y) => x > y ? x : y;
+  let buckCap = market.reserve_buck * impactPpm / 1_000_000n;
+  const cashCap = market.reserve_usdc * impactPpm / 1_000_000n;
+  if (a.mortgage < market.reserve_usdc) buckCap = min(buckCap, market.reserve_buck * a.mortgage * 1_000_000n /
+    ((market.reserve_usdc - a.mortgage) * (1_000_000n - market.fee_ppm)));
+  const fractions = [20n, 15n, 10n, 5n, 2n], sizes = (cap) => [...new Set(fractions.map((f) => cap * f / 20n))]
+    .sort((x, y) => x > y ? -1 : x < y ? 1 : 0);
+  const context = { block: blockNumber, considered: 0, issuance_quotes: 0, rejections: {}, feasible: 0,
+    forecasts: { relief_rate: expected_relief_rate, refund_growth: expected_refund_growth, wallet_growth: expected_wallet_growth }, protected_buck: reserve_floor };
+  const plans = [], values = [], refunds = new Map(), active = book.facilities.reduce((n, f) => n + f.activated, 0n);
+  const annual = a.face * BigInt(a.p.premium_bp) / 10000n;
+  const reject = (reason) => { context.rejections[reason] = (context.rejections[reason] ?? 0) + 1; };
+  const option = async (candidate, wallet) => {
+    context.considered++;
+    const newly = candidate?.requestedSpendable ?? 0n, premium = candidate?.premium ?? 0n;
+    const floor = candidate ? max(retained, reserveFor(candidate)) : retained;
+    const buy = candidate ? max(0n, floor - book.spendable) : 0n, cost = netPurchaseCost(market, buy);
+    if (cost === null) { reject("reserve-liquidity"); return; }
+    const maximum = (cost * BigInt(10000 + slippage_bp) + 9999n) / 10000n, exported = newly + wallet;
+    if (exported < RAW || exported > buckCap || maximum > cashCap || buy * market.gross_scaled > buckCap * market.net_scaled) {
+      reject("trade-size"); return;
+    }
+    const minimum = netSaleExpected(market, exported) * BigInt(10000 - slippage_bp) / 10000n;
+    if (minimum <= 0n || minimum > a.mortgage) { reject("mortgage-size"); return; }
+    const fixed = candidate ? BigInt(Math.trunc(t.fixed_cost * 1e6)) : 0n;
+    const pn = state.at_renewal ? 0n : BigInt(Math.ceil(a.p.apr * a.p.penalty_months / 12 * 1e12));
+    const penalty = (minimum * pn + 10n ** 12n - 1n) / 10n ** 12n;
+    if (cash < a.buffer + maximum + fixed + penalty) { reject("cash-buffer"); return; }
+    const coverage = candidate ? candidate.afterCoverage - candidate.beforeCoverage : 0n;
+    let fraction = 1, saved = 0n;
+    if (candidate && premium) {
+      const key = `${candidate.tokenId}:${candidate.coverage}`;
+      if (!refunds.has(key)) refunds.set(key, await world.netCreditOps.quotePremiumRefund(candidate.tokenId, candidate.coverage, { blockNumber }));
+      const q = refunds.get(key);
+      if (q.refundFractionWad === null) { reject("insurer-refund-unavailable"); return; }
+      fraction = Number(q.refundFractionWad) / 1e18;
+    }
+    if (candidate?.coverage) saved = externalPremiumDue(annual, a.face, active) - externalPremiumDue(annual, a.face, active + candidate.coverage);
+    plans.push({ candidate, export_buck: exported, minimum_usdc: minimum, mortgage_limit: minimum,
+      cash_buffer: a.buffer, reserve_floor: floor, switch_cost: fixed, penalty_numerator: pn, penalty_denominator: 10n ** 12n,
+      reserve_buy_net: buy, reserve_buy_max_usdc: maximum });
+    values.push({ usd: Number(minimum) / 1e6, wallet_used: Number(wallet) / 1e6, new_spendable: Number(newly) / 1e6,
+      present_coverage: Number(coverage) / 1e6, premium: Number(premium) / 1e6, premium_refund_fraction: fraction,
+      external_premium_saving: Number(saved) / 1e6, reserve_cost: (Number(maximum) - Number(buy) * t.buck_value) / 1e6,
+      reserve_carry: Number(buy) / 1e6 * t.buck_value * (a.p.apr - expected_wallet_growth) });
+  };
+  const walletLimit = min(max(0n, book.spendable - retained), buckCap);
+  for (const wallet of sizes(walletLimit)) await option(null, wallet);
+  const maximumNew = min(max(0n, utilization - book.issued), available.sharedLimit, buckCap);
+  const activated = new Map(available.facilities.map(({ tokenId, maxSpendable }) => [String(tokenId), maxSpendable]));
+  for (const facility of book.facilities) for (const amount of [...new Set([...sizes(maximumNew), min(maximumNew, activated.get(String(facility.tokenId)) ?? 0n)])]
+    .filter((v) => v >= RAW).sort((x, y) => x > y ? -1 : x < y ? 1 : 0)) {
+    const menu = await world.netCreditOps.issueCoverageMenu(owner, facility.tokenId, amount,
+      facility.face * BigInt(facility.premiumRate) * 10n / 10000n, { reserveBuffer: RAW });
+    context.issuance_quotes += menu.length;
+    for (const candidate of menu) {
+      if (candidate.blockNumber !== blockNumber) throw new Error("household assessment block changed");
+      if (candidate.reasons.some((r) => r !== "reserve-shortfall")) { candidate.reasons.forEach(reject); continue; }
+      if (book.issued + amount + candidate.premium > utilization) { reject("utilization"); continue; }
+      const floor = max(retained, reserveFor(candidate));
+      const wallet = min(max(0n, book.spendable - floor), max(0n, buckCap - amount));
+      for (const spent of [...new Set([0n, wallet])].sort((x, y) => x < y ? -1 : x > y ? 1 : 0)) await option(candidate, spent);
+    }
+  }
+  if ((await s.client.getBlock()).number !== blockNumber) throw new Error("household assessment block changed");
+  const { index, verdict } = bestQuotedRefinance(t, values);
+  context.feasible = plans.length;
+  context.selected = index === null ? null : { economics: values[index], score: verdict };
+  context.reason = index === null ? "no-worthwhile-refinance" : "worthwhile-refinance";
+  return { plan: index === null ? null : plans[index], verdict, context };
+}
 
 /** One serialized local-EVM operation and append-only public event stream.
  * It is neither an economic optimizer nor a complete saved-world importer.
@@ -113,7 +218,7 @@ export class HouseholdRefinance {
       throw new Error("unavailable household issuance candidate");
     }
     if (c && p.reserve_buy_net < c.reserveShortfall) throw new Error("refinance reserve purchase is insufficient");
-    if (c && p.reserve_floor < c.reserveRequired + c.reserveBuffer) throw new Error("refinance must retain the quoted BUCK reserve");
+    if (c && p.reserve_floor < reserveFor(c)) throw new Error("refinance must retain the quoted BUCK reserve");
     if (!c && p.switch_cost) throw new Error("wallet prepayment cannot switch insurance");
     const book = await world.netCreditOps.household(owner, ids);
     for (const id of ids) if ((await world.session.call(world.buck, "reductionAuthorization", [id]))[0]) {
@@ -222,7 +327,7 @@ export class HouseholdRefinance {
         }
         if (fresh.reasons.length || ["priorPrincipal", "beforeCoverage", "afterCoverage", "premium"].some((key) => fresh[key] !== c[key])
             || fresh.premiumPool.toLowerCase() !== c.premiumPool.toLowerCase()
-            || fresh.reserveRequired + fresh.reserveBuffer > p.reserve_floor) {
+            || reserveFor(fresh) > p.reserve_floor) {
           await this.refuse(world, day, "refinance issuance terms changed; reassess retained holdings"); return true;
         }
         f.issue_candidate = fresh;

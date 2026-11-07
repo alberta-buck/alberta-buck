@@ -96,7 +96,15 @@ def test_net_refinance_requires_available_explicit_forecasts():
                                                 ("activated_capacity", -1, "activated credit"),
                                                 ("activated_capacity", float("nan"), "activated credit"),
                                                 ("issuance_limit", -1, "issuance limit"),
-                                                ("issuance_limit", float("nan"), "issuance limit")])
+                                                ("issuance_limit", float("nan"), "issuance limit"),
+                                                ("expected_relief_rate", True, "relief"),
+                                                ("premium_refund_fraction", True, "fraction"),
+                                                ("expected_refund_growth", True, "growth"),
+                                                ("expected_wallet_growth", True, "wallet"),
+                                                ("activated_capacity", True, "activated credit"),
+                                                ("issuance_limit", True, "issuance limit"),
+                                                ("expected_relief_rate", "0.02", "relief"),
+                                                ("expected_wallet_growth", 10**400, "wallet")])
 def test_net_refinance_rejects_invalid_forecasts(field, value, error):
     p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"])
     with pytest.raises(ValueError, match=error):

@@ -2,7 +2,7 @@
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
   arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, externalPremiumDue, ROLES } from "./household-policy.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
-import { HouseholdRefinance } from "./net-household.js";
+import { HouseholdRefinance, assessRefinance } from "./net-household.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -210,6 +210,10 @@ export class CreditHouseholdAgent {
   // authorizations remain stopped. Confirmed authorization/reverted settlement
   // can be canceled by this dispatcher. The simulation assumes one dispatcher
   // and immediate finality; a live client needs nonce serialization and finality.
+  async assessNetRefinance(world, day, forecasts) {
+    return assessRefinance(this, world, day, forecasts);
+  }
+
   async startNetRefinance(world, plan, day, ctr = {}, options = {}) {
     if (world.accounting !== "net") throw new Error("canonical refinancing requires net accounting");
     if (await this.pendingRepayment(world) || this.netRepaymentReserve !== null || this.netRepaymentTarget !== null) {

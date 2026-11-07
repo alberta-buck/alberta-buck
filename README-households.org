@@ -22,7 +22,7 @@ markets are implemented. An assessed refinancing plan can now acquire a
 bounded net BUCK reserve when needed, then execute
 through =start_net_refinance= / =startNetRefinance= with a checkpoint after
 each authenticated receipt. Normal household decisions remain gated while
-economic plan selection, complete calendar cash flows,
+automatic decision scheduling/forecasts, complete calendar cash flows,
 saving/paydown and exits are ported. An isolated funded-plan test is not a
 completed household economy or five-year stability result.
 
@@ -77,7 +77,71 @@ wallet-only prepayments add no saving; top-ups can save on new coverage even
 after joining. A wallet-only prepayment also has no insurance switching cost.
 The legacy comparison retains its historical whole-asset switch separately.
 
+* Observed Jubilee rate
+
+=net_credit_ops.quote_global_relief_rate()= /
+=netCreditOps.quoteGlobalReliefRate()= now supplies the fund-wide observation
+needed by a fresh issuer. At one pinned block it reads aggregate eligible
+claim seconds, Jubilee net cash, the guarded last-published position mark
+and the separate shared block allowance. The annualized ratio is
+=fund marked net value * seconds/year / eligible BUCK-seconds=.
+Deferred matured principal remains in that denominator, as defined by Buck.
+
+No aggregate age means no observed rate. Missing/unsafe marks and an unpaid
+maturity checkpoint propagate as failures. A selected older NFT can have its
+relief capped at principal; this global ratio avoids mistaking that capped
+sample for the whole fund's rate. The current ratio is an input to a future
+forecast, while the block allowance remains the actual liquidity constraint.
+
 * Refinancing state machine
+
+The read-only =assess_net_refinance= / =assessNetRefinance= entry point now
+chooses a plan from actual per-NFT quotes. It requires explicit annual
+=expected_relief_rate=, =expected_refund_growth= and
+=expected_wallet_growth= forecasts. These are assumptions for the cost
+comparison, not guaranteed fund payments or investment returns. It returns
+=plan= (or null/None), =verdict= and =context=; assessment changes neither
+accounts nor the household's ledger. Normal external keeper/controller work
+must precede a decision, especially after a time jump. Otherwise Buck's
+own K refresh can invalidate a boundary quote; an atomic refusal is the
+correct result, and does not justify relaxing K.
+
+The menu tries the existing five size fractions, each facility's exact
+remaining activated capacity, and the SDK's bounded coverage options. It
+compares new issuance, existing-wallet prepayment and mixed funding. The
+configured utilization and price-impact allowance bound all choices. Each
+premium uses its own observed cash-based insurer refund fraction, and each
+coverage increment saves only its corresponding external insurance cost.
+The policy can refinance at a modest trading loss when the interest and
+insurance saving justify it; a mortgage refinance does not require BUCK to
+be trading at a premium.
+
+A reserve purchase counts its acquisition friction and annual opportunity /
+demurrage cost, while retaining the reserve's owned mark value. A previously
+held ordinary reserve can have declined through demurrage: retain its still
+available net value, and replenish only when a current issuance quote
+requires it. Zero-premium activated-room issuance does not acquire another
+premium buffer. Switching cost and penalty must fit old USDC above the cash
+buffer; the sale minimum goes to mortgage principal. This keeps bank costs
+separate from the forecast trading loss. The actual payment is rounded up
+in raw units; forecasts remain whole-unit floating-point comparisons.
+
+The context supplies rejection counts, quote/option counts, explicit
+forecasts and the selected cost breakdown for a decision table. The pinned
+books/market are reused; a changed observation block aborts assessment.
+This finite menu is not an exhaustive optimizer. The normal household loop
+still needs its default observed forecasts and calendar/surplus/exit wiring.
+An assessed plan can be reviewed or passed to the same execution machine:
+
+#+begin_src python
+result = agent.assess_net_refinance(d, day,
+    expected_relief_rate=relief_forecast,
+    expected_refund_growth=insurer_forecast,
+    expected_wallet_growth=wallet_forecast)
+if result["plan"] is not None:
+    agent.start_net_refinance(d, result["plan"], day, counters,
+                             context=result["context"])
+#+end_src
 
 The plan selects one assessed NFT, new spendable issuance, a bounded BUCK
 export, protected BUCK/USDC buffers and a maximum external principal payment.
@@ -112,6 +176,15 @@ The caller serializes each owner's work. Existing pending buybacks and
 authorizations block a new refinance. Recovery runs before new household
 income or decisions. Receipt evidence assumes the local EVM's immediate
 finality; full saved-world/pending-state import remains separate work.
+
+For a focused JS fixture while iterating, the Make target accepts Node
+arguments. Filtering is diagnostic only; its unfiltered run remains the
+primary acceptance check:
+
+#+begin_src sh
+make nix-core-equilibrium-bootstrap-test \
+  CORE_EQUILIBRIUM_TEST_ARGS="--test-skip-pattern='personal records'"
+#+end_src
 
 * Data for charts and decision tables
 
