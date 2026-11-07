@@ -89,6 +89,14 @@ and separate facilities on canonical Buck. Their normal decision loop
 still refuses until issuance and exit migration is complete. These books
 are integration inputs, not a restored five-year economy.
 
+`TransactionReverted.data` preserves structured provider data from the
+post-block `eth_call` replay. A proxy may not declare its target's errors;
+use `custom_error_name(target.abi, error)` to classify a known selector
+without inspecting message text. Unknown/malformed data remains unknown,
+and successful sends clear `last_revert_data`. This replay is diagnostic,
+not proof of the original transaction's revert or its call origin. The
+mined receipt, events and fresh monetary checks still determine outcomes.
+
 ## Status
 
 0.4.0, prototype. Unaudited software for a monetary system, published so

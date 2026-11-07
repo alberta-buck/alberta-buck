@@ -96,9 +96,12 @@ class TransactionReceiptPending(RuntimeError):
 class TransactionReverted(RuntimeError):
     """A mined transaction reverted; its receipt is available for reconciliation."""
 
-    def __init__(self, function: str, reason: str, receipt):
+    def __init__(self, function: str, reason: str, receipt, *, data=None):
         self.receipt = receipt
         self.transaction_hash = _txhex(receipt.get("transactionHash"))
+        # Structured eth_call replay data, if available. It is diagnostic,
+        # not proof of the original transaction's revert or its call origin.
+        self.data = data
         super().__init__(f"tx reverted: {function} :: {reason}")
 
 
@@ -165,6 +168,7 @@ class Web3Session:
             else Journal(journal)
         self.mismatches: list[dict] = []
         self.last_revert_reason: str = ""
+        self.last_revert_data: str | bytes | None = None
 
     # -- hot read cache ------------------------------------------------ #
 
@@ -251,6 +255,8 @@ class Web3Session:
             fn.call({"from": from_addr, "gas": gas, "value": value},
                     block_identifier=block)
         except Exception as e:
+            data = getattr(e, "data", None)
+            self.last_revert_data = data if isinstance(data, (str, bytes)) else None
             decoded = custom_error_name(getattr(fn, "contract_abi", None), e)
             if decoded is not None:
                 return decoded
@@ -277,6 +283,7 @@ class Web3Session:
         hash. Every mined outcome is journaled when a journal is set.
         """
         fn = contract_fn_call
+        self.last_revert_data = None
         sender = sender if sender is not None else self.deployer
         from_addr = sender.address if isinstance(sender, LocalAccount) \
             else Web3.to_checksum_address(sender)
@@ -300,7 +307,7 @@ class Web3Session:
         if not ok:
             if expect is Expect.OK:
                 self.mismatches.append(entry)
-                raise TransactionReverted(fname, reason, rcpt)
+                raise TransactionReverted(fname, reason, rcpt, data=self.last_revert_data)
         return rcpt
 
     def call(self, contract_fn_call):

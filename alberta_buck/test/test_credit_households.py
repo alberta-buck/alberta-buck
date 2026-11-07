@@ -12,6 +12,7 @@ from alberta_buck.sim.direct_mint import BootstrapDMAgent, bootstrap_tickets
 from alberta_buck.sim.household_policy import issuance
 from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
 from alberta_buck.sim.scenario import ROUTING
+from buck_core.session import custom_error_name
 
 M6                              = 10 ** 6
 
@@ -230,7 +231,7 @@ def test_exit_requotes_after_k_moves_and_closes_every_credit(household_world, mo
             try:
                 return original(d, target, data, **kwargs)
             except Exception as exc:
-                failures.append(str(exc))
+                failures.append(exc)
                 raise
         return original(d, target, data, **kwargs)
     monkeypatch.setattr(a, "_proxy_exec", moving_k)
@@ -240,7 +241,7 @@ def test_exit_requotes_after_k_moves_and_closes_every_credit(household_world, mo
         assert not a.last_error
         if a.exited:
             break
-    assert len(failures) == 1 and "insufficient coverage to unwind" in failures[0]
+    assert len(failures) == 1 and custom_error_name(d.buck.abi, failures[0]) == "InsufficientCoverage"
     assert a.exit_retries == 1 and a.exited and a._released
     assert d.buck.functions.signedBalanceOf(a.proxy.address).call() >= 0
     assert all(d.credit.functions.creditInfo(t).call()[1] == 0

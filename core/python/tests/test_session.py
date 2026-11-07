@@ -63,6 +63,35 @@ def test_typed_revert_is_decoded_for_journal_and_callers():
     assert session._revert_reason(FailedFn(), DEPLOYER, 1_000_000, 0, 1) == "InsufficientCoverage"
 
 
+def test_proxy_revert_preserves_provider_data_for_the_target_abi():
+    raw = Web3.to_hex(Web3.keccak(text="InsufficientCoverage()")[:4])
+
+    class TypedFailure(Exception):
+        data = raw
+
+    class ProxyFn(_Fn):
+        contract_abi = []  # The proxy does not declare its target's errors.
+
+        def call(self, *args, **kwargs):
+            raise TypedFailure("opaque provider error")
+
+    class ProxySession(StubSession):
+        _revert_reason = Web3Session._revert_reason
+
+    session = ProxySession(status=0)
+    with pytest.raises(TransactionReverted) as failed:
+        session.send(ProxyFn())
+    assert failed.value.data == raw and failed.value.receipt["status"] == 0
+    assert custom_error_name([], failed.value) is None
+    target_abi = [{"type": "error", "name": "InsufficientCoverage", "inputs": []}]
+    assert custom_error_name(target_abi, failed.value) == "InsufficientCoverage"
+    # A reason string without provider data cannot select a monetary retry.
+    assert custom_error_name(target_abi, TransactionReverted("exec", raw, failed.value.receipt)) is None
+    session._status = 1
+    session.send(_Fn())
+    assert session.last_revert_data is None
+
+
 @pytest.mark.parametrize("data", [None, {}, "0x", "0x00", "not hex", "0xdeadbeef"])
 def test_unknown_or_malformed_typed_revert_is_not_misclassified(data):
     abi = [{"type": "error", "name": "InsufficientCoverage", "inputs": []}]
