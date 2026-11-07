@@ -8,6 +8,13 @@ retirement policies remain explicit comparisons. The savings sandbox and
 five-year runner use these existing households and population arrivals.
 The [[file:doc/review/bucknet-economy-implementation.org][accounting implementation plan]] is the authoritative completion checklist.
 
+An insured household now defaults to one asset and one BuckCredit NFT.
+An explicit =asset_count= portfolio (1--32) divides its declared aggregate
+collateral across that many facilities; the last receives the integer
+remainder. Investors have no insured asset/NFT. Four-asset fixtures retain
+mixed-age and distinct insurer-pool accounting coverage. Changing the count
+does not move any other keyed random threshold or change total collateral.
+
 * Current execution boundary
 
 Setup, personal portfolio books, selected-facility operations and guarded
@@ -34,6 +41,31 @@ make nix-core-equilibrium-bootstrap-test
 
 The shared interruption cases are in =test/fixtures/household-refinance.json=.
 They exercise actual contracts, not a substitute monetary model.
+
+* Market estimates for reserve funding
+
+The Python SDK's =observe_net_market= / =NetMarketQuote= and JavaScript's
+=observeNetMarket= / =netPurchaseExpected= / =netPurchaseCost= /
+=netSaleExpected= share integer vectors. They pin price, active virtual
+reserves, pool nominal/net cash and fee to one block, and require the expected
+pair, fee and verified Carrying mode. The refinancing event uses this same
+reader rather than another valuation implementation.
+
+Sales estimate nominal input and USDC output. A buy estimate discounts
+nominal output by the pool's current net/gross ratio. Exact-net acquisition
+cost first grosses up for carried fees, then rounds input/trading fees up
+with a small raw-unit cushion. No local quote is represented by null/None,
+including exhausted active reserves or zero deliverable net value.
+These are constant-active-liquidity estimates; crossed ticks and subsequent
+prices can change execution. The household must retain a maximum USDC
+budget and use the actual net-output guard or positive sale minimum. A quote
+is neither a fair-value oracle nor evidence of an executed trade.
+
+The user-approved insurance rule for the next decision/calendar integration
+is proportional: external premiums decline only for activated BUCK coverage.
+The first small issuance must not remove a whole asset's external premium.
+Quoted refinancing will count the incremental saving; retiring coverage
+must restore the corresponding external insurance expense.
 
 * Refinancing state machine
 

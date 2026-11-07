@@ -14,7 +14,8 @@ or reverses an already applied financial transition.
 from dataclasses import asdict, dataclass
 import math
 
-from buck_core import IssuancePending, IssueCandidate, TransactionReceiptPending, TransactionReverted, mark_net_basket_positions
+from buck_core import (IssuancePending, IssueCandidate, TransactionReceiptPending, TransactionReverted,
+                       mark_net_basket_positions, observe_net_market)
 from buck_core.session import _txhex
 
 RAW = 10**6
@@ -113,16 +114,12 @@ class HouseholdRefinance:
         try:
             block = d.w3.eth.block_number
             read = lambda fn: fn.call(block_identifier=block)
-            pool = d.chain.at("UniswapV3Pool", d.pool_ub)
-            sqrt = int(read(pool.functions.slot0())[0])
-            numerator, denominator = (sqrt * sqrt, 1 << 192)
-            if read(pool.functions.token0()).lower() != d.buck.address.lower():
-                numerator, denominator = denominator, numerator
-            gross, net = read(d.buck.functions.accountBalancesScaled(d.pool_ub))
+            quote = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
             return _wire({"block": block, "k_wad": read(d.kctrl.functions.currentBuckK()),
                           "bvib_wad": read(d.basket.functions.basketValueInBuck()),
-                          "nominal_usdc_per_buck": {"numerator": numerator, "denominator": denominator},
-                          "pool_nominal_scaled": gross, "pool_net_scaled": net, "fee_ppm": d.fee_ub})
+                          "nominal_usdc_per_buck": {"numerator": quote.price_num, "denominator": quote.price_den},
+                          "active_reserves": {"usdc": quote.reserve_usdc, "buck": quote.reserve_buck},
+                          "pool_nominal_scaled": quote.gross_scaled, "pool_net_scaled": quote.net_scaled, "fee_ppm": d.fee_ub})
         except Exception as exc:
             return {"unavailable": str(exc)[:200]}
 

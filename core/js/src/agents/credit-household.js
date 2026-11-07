@@ -89,8 +89,10 @@ export class CreditHouseholdAgent {
   async setup(world) {
     this.tokenIdx = Math.trunc(uniform(this.seed, this.member, "token") * world.tokens.length);
     if (this.investor) { await world.proxyFor(this.account); return; }   // its dollars arrive at the proxy
-    const per = this.face / 4n;
-    await world.pledgeInsured(this.account, [per, per, per, this.face - 3n * per], BigInt(this.p.premium_bp),
+    const count = this.p.asset_count, per = this.face / BigInt(count);
+    if (!per) throw new Error("asset_count exceeds raw insured value");
+    const faces = Array.from({ length: count }, (_, i) => i < count - 1 ? per : this.face - BigInt(count - 1) * per);
+    await world.pledgeInsured(this.account, faces, BigInt(this.p.premium_bp),
       { tag: "household:pledge" });
   }
 

@@ -11,7 +11,7 @@ DEFAULTS                        = dict(
     risk=[0., .01], switch_k=[1., 3.], penalty_months=3., term_months=60., renew_frac=[0., 1.],
     retire_disc=[.005, .03], issue_premium=[.005, .025], utilization=[.65, .85],
     buffer_k=10., max_impact_bp=[25., 100.], decision_days=[5., 20.], surplus_policy="adaptive",
-    role="debtor", credit_invest=True,
+    role="debtor", credit_invest=True, asset_count=1,
     # Share of the K-scaled limit a household with no mortgage keeps drawn and invested while the BUCK
     # is not cheap (0: it borrows only at a premium).
     carry_utilization=0.,
@@ -89,6 +89,11 @@ def profile(seed, member, overrides=None):
         raise ValueError("unknown household surplus_policy")
     if result["role"] not in ROLES:
         raise ValueError("unknown household role")
+    count = result["asset_count"]
+    if (type(count) not in (int, float) or not math.isfinite(count) or count != int(count)
+            or not 0 <= count <= 32 or result["role"] != "investor" and count == 0):
+        raise ValueError("asset_count must be a whole number from 1 to 32 for insured households")
+    result["asset_count"] = 0 if result["role"] == "investor" else int(count)
     if not 0 <= result["retire_disc"] < 1 or result["issue_premium"] < 0:
         raise ValueError("invalid household price thresholds")
     if (not 0 < result["utilization"] <= 1 or not 0 <= result["living_frac"] <= 1

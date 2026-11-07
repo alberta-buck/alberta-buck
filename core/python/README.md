@@ -66,6 +66,16 @@ Rust, Python, Node and browser agreement.
 
 ## Selected household credit books
 
+`observe_net_market(chain, buck, settlement, pool, fee_ppm)` reads a known
+verified Carrying V3 pair at one block. Its `NetMarketQuote` exposes integer
+`buy_expected(usdc)`, `buy_cost(net_buck)` and `sell_expected(buck)` estimates
+with current carried fees and separate input/fee rounding. A missing local
+cost is `None`, including zero deliverable net value. These estimates assume
+constant active liquidity; execute with the existing on-chain net guard or
+positive sale minimum and authenticate actual receipts. Price fractions may
+need more than 256 bits; money remains raw uint256 token units. No new
+Solidity quote engine is deployed.
+
 `NetCreditOps(chain, stack).mark_household(owner, token_ids)` returns one
 block's ordinary wallet cash and selected NFT principal separately, plus
 the credit limit, marked Jubilee relief and the current cash-based value

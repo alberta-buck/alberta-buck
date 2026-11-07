@@ -9,6 +9,7 @@ export { markNetBasketPositions } from "./basket.js";
 export { createNetMath } from "./net-math.js";
 export { boundActivatedCapacity, deployNetStack, deployNetBasket, issueCoverageCandidates, netCreditOps, netTransferValue, IssuancePending, ReductionPending } from "./net-world.js";
 export { settlementOps, settlementPaymentFromReceipt } from "./settlement.js";
+export { observeNetMarket, netSaleExpected, netPurchaseExpected, netPurchaseCost } from "./net-market-quote.js";
 export { buildBuckWorld, worldRecord, attachBuckWorld, attachNetBuckWorld } from "./buckworld.js";
 export { DEV_KEYS, devAccount, anvilSession, tevmSession } from "./backends.js";
 export { MIN_SQRT_RATIO, MAX_SQRT_RATIO, HUGE, Q96, isqrt, sqrtPriceX96,

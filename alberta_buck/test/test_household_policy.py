@@ -256,6 +256,18 @@ def test_profiles_are_keyed_and_settings_separate():
         hp.profile(41404, "0/investor/0", {"role": "investor", "hold_years": 0})
 
 
+def test_one_facility_per_asset_and_bounded_asset_portfolios():
+    for role in hp.ROLES:
+        p = hp.profile(41404, "assets", {"role": role})
+        assert p["asset_count"] == (0 if role == "investor" else 1)
+    single = hp.profile(41404, "assets")
+    portfolio = hp.profile(41404, "assets", {"asset_count": 4})
+    assert {k: v for k, v in single.items() if k != "asset_count"} == {k: v for k, v in portfolio.items() if k != "asset_count"}
+    for count in (0, -1, 1.5, 33, True, float("nan"), "4"):
+        with pytest.raises(ValueError, match="asset_count"):
+            hp.profile(41404, "assets", {"asset_count": count})
+
+
 def test_paydown_urgency_compounds_with_the_discount():
     p                           = hp.profile(41404, "0/debtor/0")
     assert hp.paydown(0, p) == 0 and hp.paydown(-.01, p) == 0

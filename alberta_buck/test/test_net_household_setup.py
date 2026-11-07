@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from web3.logs import DISCARD
-from buck_core import TransactionReceiptPending, TransactionReverted
+from buck_core import TransactionReceiptPending, TransactionReverted, observe_net_market
 
 from alberta_buck.sim import experiment as expmod, identity as idmod
 from alberta_buck.sim.chain import Chain
@@ -34,9 +34,9 @@ def household_world(monkeypatch):
     with PyrevmAnvil(port=0) as evm:
         chain = Chain(evm.w3, evm.w3.eth.accounts[0])
         d = deploy(chain, evm, scenario, rng, verbose=False, basket_impl="equity-ops", equity_machine=True)
-        def make(i, cls):
+        def make(i, cls, *, assets=1):
             agent = cls(i)
-            agent.settings = dict(home_k=1000, premium_bp=100)
+            agent.settings = dict(home_k=1000, premium_bp=100, asset_count=assets)
             agent.setup(d, scenario, rng)
             return agent
         yield d, scenario, make
@@ -47,7 +47,7 @@ def test_primary_household_setup_and_per_facility_credit_marks(household_world):
     chain, evm = d.chain, d.anvil
     agents = []
     for i, cls in enumerate((CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent)):
-        a = make(i, cls)
+        a = make(i, cls, assets=4)  # explicit multiple-asset/pool bookkeeping fixture
         agents.append(a)
         assert d.reg.functions.isVerified(a.address).call() and not d.reg.functions.isCarrying(a.address).call()
         assert len(a._token_ids) == (0 if a.investor else 4)
@@ -107,6 +107,16 @@ def test_primary_household_setup_and_per_facility_credit_marks(household_world):
     assert not chain.mismatches
 
 
+def test_household_defaults_use_one_facility_per_insured_asset(household_world):
+    d, _, make = household_world
+    for i, cls in enumerate((CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent)):
+        a = make(60 + i, cls)
+        assert len(a._token_ids) == a.p["asset_count"] == (0 if a.investor else 1)
+        if not a.investor:
+            assert d.credit.functions.creditInfo(a._token_ids[0]).call()[0] == a._face0
+        assert d.net_credit_ops.household(a.address, a._token_ids).issued == 0
+
+
 def test_primary_proxy_market_uses_net_guard_bounded_sales_and_exact_payments(household_world):
     d, _, make = household_world
     a = make(19, CreditHouseholdAgent)
@@ -125,7 +135,10 @@ def test_primary_proxy_market_uses_net_guard_bounded_sales_and_exact_payments(ho
     supply = d.buck.functions.totalIssued().call()
     held = d.buck.functions.balanceOf(owner).call()
     cash = d.usdc.functions.balanceOf(owner).call()
+    quote = observe_net_market(chain, d.buck, d.usdc, d.pool_ub, d.fee_ub)
+    assert quote.net_scaled < quote.gross_scaled
     sale = d.net_market_ops.sell_exact_input(owner, d.pool_ub, 100 * RAW, 90 * RAW, owner, d.fee_ub)
+    assert abs(sale.received - quote.sell_expected(100 * RAW)) <= 4
     assert sale.nominal_paid == 100 * RAW
     assert d.usdc.functions.balanceOf(owner).call() - cash == sale.received >= 90 * RAW
     assert held - d.buck.functions.balanceOf(owner).call() == sale.paid
@@ -134,7 +147,9 @@ def test_primary_proxy_market_uses_net_guard_bounded_sales_and_exact_payments(ho
     assert (a.mortgage, a.external_paid) == (initial_mortgage, initial_paid), "export is not bank payment"
 
     receiver = a._new_proxy(d)
+    quote = observe_net_market(chain, d.buck, d.usdc, d.pool_ub, d.fee_ub)
     purchase = d.net_market_ops.buy_exact_input(owner, d.pool_ub, 10 * RAW, 9 * RAW, receiver.address)
+    assert abs(purchase.received - quote.buy_expected(10 * RAW)) <= 4
     assert purchase.nominal_received > purchase.received >= 9 * RAW
     assert d.buck.functions.netBalanceScaled(receiver.address).call() == purchase.net_scaled
     assert d.buck.functions.balanceOf(d.router.address).call() == 0
@@ -142,6 +157,12 @@ def test_primary_proxy_market_uses_net_guard_bounded_sales_and_exact_payments(ho
     assert d.usdc.functions.balanceOf(d.swap_guard.address).call() == 0
     assert not d.reg.functions.isVerified(d.permit2.address).call()
     assert not d.reg.functions.isVerified(d.swap_guard.address).call()
+    quote = observe_net_market(chain, d.buck, d.usdc, d.pool_ub, d.fee_ub)
+    budget = quote.buy_cost(RAW) * 101 // 100
+    exact = d.net_market_ops.buy_exact_output(owner, d.pool_ub, RAW, budget, receiver.address)
+    assert exact.received >= RAW and exact.paid <= budget
+    with pytest.raises(ValueError, match="fee mismatch"):
+        observe_net_market(chain, d.buck, d.usdc, d.pool_ub, 3000)
 
     cash = d.usdc.functions.balanceOf(owner).call()
     with pytest.raises(TransactionReverted):

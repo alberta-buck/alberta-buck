@@ -5,7 +5,7 @@ export const DEFAULTS = {
   risk: [0, .01], switch_k: [1, 3], penalty_months: 3, term_months: 60, renew_frac: [0, 1],
   retire_disc: [.005, .03], issue_premium: [.005, .025], utilization: [.65, .85],
   buffer_k: 10, max_impact_bp: [25, 100], decision_days: [5, 20], surplus_policy: "adaptive",
-  role: "debtor", credit_invest: true,
+  role: "debtor", credit_invest: true, asset_count: 1,
   // Share of the K-scaled limit a household with no mortgage keeps drawn and invested while the BUCK
   // is not cheap (0: it borrows only at a premium).
   carry_utilization: 0,
@@ -69,6 +69,11 @@ export function profile(seed, member, overrides = {}) {
   }
   if (!POLICIES.includes(p.surplus_policy)) throw new Error("unknown household surplus_policy");
   if (!ROLES.includes(p.role)) throw new Error("unknown household role");
+  if (!Number.isSafeInteger(p.asset_count) || p.asset_count < 0 || p.asset_count > 32
+      || p.role !== "investor" && p.asset_count === 0) {
+    throw new Error("asset_count must be a whole number from 1 to 32 for insured households");
+  }
+  p.asset_count = p.role === "investor" ? 0 : p.asset_count;
   if (!(p.retire_disc >= 0 && p.retire_disc < 1 && p.issue_premium >= 0)) throw new Error("invalid household price thresholds");
   if (!(p.utilization > 0 && p.utilization <= 1 && p.living_frac >= 0 && p.living_frac <= 1
     && p.carry_utilization >= 0 && p.carry_utilization <= 1)) {

@@ -129,10 +129,15 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._proxy_exec(d, d.credit.address, d.credit.encode_abi(
             "setCreditIssuer", args=[getattr(d.chain.deployer, "address", d.chain.deployer), True]))
         now                     = d.w3.eth.get_block("latest")["timestamp"]
-        per                     = self._face0 // 4
-        for face in (per, per, per, self._face0 - 3 * per):
+        # One facility per insured asset. An explicit asset portfolio shares
+        # this household's aggregate collateral; a single home needs one NFT.
+        count                   = p["asset_count"]
+        per                     = self._face0 // count
+        if not per:
+            raise ValueError("asset_count exceeds raw insured value")
+        for face in [per] * (count - 1) + [self._face0 - (count - 1) * per]:
             d.chain.send(d.credit.functions.createCredit(self.proxy.address, 0, face, 0, 0, 0, now, self.premium_rate))
-        self._token_ids         = [d.credit.functions.tokenOfOwnerByIndex(self.proxy.address, i).call() for i in range(4)]
+        self._token_ids         = [d.credit.functions.tokenOfOwnerByIndex(self.proxy.address, i).call() for i in range(count)]
 
     def bootstrap(self, d, scenario, ctr):
         pass  # arrivals use the live market; they are not an opening OTC placement

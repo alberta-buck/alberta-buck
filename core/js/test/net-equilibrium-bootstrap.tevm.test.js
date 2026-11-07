@@ -16,6 +16,8 @@ import { advanceTime, DAY } from "../src/buckworld.js";
 import { buyBuck, sellBuck, netPurchaseFromReceipt, netSaleFromReceipt, tradingOpen } from "../src/market.js";
 import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
 import { settlementOps } from "../src/settlement.js";
+import { observeNetMarket, netSaleExpected, netPurchaseExpected, netPurchaseCost } from "../src/net-market-quote.js";
+import { buyBuckExact } from "../src/market.js";
 
 const REFINANCE = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-refinance.json", import.meta.url)));
 
@@ -83,7 +85,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     const agents = [];
     for (const [i, Agent] of [CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent].entries()) {
       const account = { address: `0x${(0xabc00n + BigInt(i)).toString(16).padStart(40, "0")}` };
-      const a = new Agent({ account, member: `books-${i}`, settings: { home_k: 1000, premium_bp: 100 } });
+      const a = new Agent({ account, member: `books-${i}`, settings: { home_k: 1000, premium_bp: 100, asset_count: 4 } });
       await a.setup(world);
       agents.push(a);
       const owner = world.holderAddress(account), ids = world._credits.get(account.address) ?? [];
@@ -146,6 +148,17 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     await world.netCreditOps.cancelReduction(owner, first);
     family = agents;
   });
+  await t.test("one facility per insured asset is the household default", async () => {
+    for (const [i, Agent] of [CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent].entries()) {
+      const account = { address: `0x${(0xabc60n + BigInt(i)).toString(16).padStart(40, "0")}` };
+      const a = new Agent({ account, member: `default-assets-${i}`, settings: { home_k: 1000, premium_bp: 100 } });
+      await a.setup(world);
+      const owner = world.holderAddress(account), ids = world._credits.get(account.address) ?? [];
+      assert.equal(ids.length, a.investor ? 0 : 1); assert.equal(a.p.asset_count, ids.length);
+      if (!a.investor) assert.equal((await s.call(credit, "creditInfo", [ids[0]]))[0], a.face);
+      assert.equal((await world.netCreditOps.household(owner, ids)).issued, 0n);
+    }
+  });
   await t.test("normal keeper work publishes the fund's guarded LP mark", async () => {
     for (let day = 0; day < 3; day++) {
       await advanceTime(world, DAY);
@@ -173,7 +186,10 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(issued.premium, 100n * RAW);
     const initialMortgage = debtor.mortgage, initialPaid = debtor.externalPaid;
     const supply = await s.call(buck, "totalIssued"), before = await world.households.read(account);
+    let quote = await observeNetMarket(s, buck, world.usdc, world.poolUB, world.fees.ub);
+    assert.ok(quote.net_scaled < quote.gross_scaled);
     const sold = await sellBuck(world, world.netMarket, holder, 100n * RAW, { minOut: 90n * RAW });
+    assert.ok(sold.received - netSaleExpected(quote, 100n * RAW) <= 4n && netSaleExpected(quote, 100n * RAW) - sold.received <= 4n);
     assert.equal(sold.nominalPaid, 100n * RAW);
     assert.equal(await world.households.cash(account) - before.cash, sold.received);
     assert.equal((await world.netCreditOps.household(owner, ids)).issued, before.drawn);
@@ -181,8 +197,10 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(debtor.mortgage, initialMortgage);
     assert.equal(debtor.externalPaid, initialPaid, "sale proceeds are not an external-debt payment");
     const receiver = await world.proxyFor({ address: `market-recipient:${account.address}` });
+    quote = await observeNetMarket(s, buck, world.usdc, world.poolUB, world.fees.ub);
     const bought = await buyBuck(world, world.netMarket, holder, 10n * RAW,
       { minOut: 9n * RAW, recipient: receiver.address });
+    assert.ok(bought.received - netPurchaseExpected(quote, 10n * RAW) <= 4n && netPurchaseExpected(quote, 10n * RAW) - bought.received <= 4n);
     assert.ok(bought.nominalReceived > bought.received && bought.received >= 9n * RAW);
     assert.equal(await s.call(buck, "netBalanceScaled", [receiver.address]), bought.receivedScaled);
     const boughtReceipt = await s.client.getTransactionReceipt({ hash: bought.transactionHash });
@@ -193,6 +211,11 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     for (const c of [world.router, world.swapGuard]) assert.equal(await s.call(buck, "balanceOf", [c.address]), 0n);
     assert.equal(await s.call(world.usdc, "balanceOf", [world.swapGuard.address]), 0n);
     for (const c of [world.permit2, world.swapGuard]) assert.equal(await s.call(world.reg, "isVerified", [c.address]), false);
+    quote = await observeNetMarket(s, buck, world.usdc, world.poolUB, world.fees.ub);
+    const budget = netPurchaseCost(quote, RAW) * 101n / 100n;
+    const exact = await buyBuckExact(world, world.netMarket, holder, RAW, budget, { recipient: receiver.address });
+    assert.ok(exact.received >= RAW && exact.paid <= budget);
+    await assert.rejects(observeNetMarket(s, buck, world.usdc, world.poolUB, 3000), /fee mismatch/);
     const cash = await world.households.cash(account);
     await assert.rejects(buyBuck(world, world.netMarket, holder, RAW, { minOut: 2n * RAW }), TransactionReverted);
     assert.equal(await world.households.cash(account), cash);

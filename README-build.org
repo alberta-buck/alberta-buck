@@ -179,6 +179,11 @@ reply. Economic selection, reserve acquisition and the rest of its lifecycle
 remain separate gates. Tests stream exact histories through full/lite JSON
 without depending on the optional compact action log.
 The sim-build dependency now includes the vendored Permit2 build.
+Ordinary households use one facility per asset; explicit multi-asset fixtures
+retain the distinct age/pool cases. Shared full-width market-estimate vectors
+run before the slower JS primary-world acceptance and in the Python phase.
+Actual V3 checks compare estimates with guarded delivery and bounded exact-net
+reserve acquisition; the two-token-order SDK fixture retains both directions.
 This is component/reporting integration coverage, not household-policy or five-year
 stability evidence. No extra economy runner is introduced.
 Pytest owns =build/test/economy-accounting/=: each target run replaces that

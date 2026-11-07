@@ -12,6 +12,7 @@ import { netHouseholdRepaymentOps } from "../src/agents/net-repayment.js";
 import { Q96 } from "../src/v3.js";
 import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
 import { settlementOps } from "../src/settlement.js";
+import { observeNetMarket, netPurchaseExpected, netPurchaseCost } from "../src/net-market-quote.js";
 import { buildMarket, marketRecord, attachMarket, attachNetMarket, openTrading, fiatIn, buyBuck, buyBuckExact, sellBuck,
   netPurchaseFromReceipt, netSaleFromReceipt }
   from "../src/market.js";
@@ -122,7 +123,11 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     const poolNet = await s.call(world.buck, "netBalanceOf", [market.pool.address]);
     assert.ok(poolNet < poolNominal);
     assert.ok(await s.call(world.buck, "balanceOf", [buyer.account.address]) < 2_000_000n);
+    const quote = await observeNetMarket(s, world.buck, market.usdc, market.pool, market.fee);
+    assert.ok(quote.net_scaled < quote.gross_scaled);
     const result = await buyBuck(world, market, buyer, 100_000_000n, { minOut: 80_000_000n });
+    const predicted = netPurchaseExpected(quote, 100_000_000n);
+    assert.ok(result.received - predicted <= 4n && predicted - result.received <= 4n);
     assert.equal(result.paid, 100_000_000n);
     assert.ok(result.received > 0n && result.received < result.nominalReceived);
     assert.ok(await s.call(world.buck, "balanceOf", [buyer.account.address]) >= result.received);
@@ -138,7 +143,10 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     assert.equal(settled.ownerCostScaled + settled.reliefScaled, settled.principal * 10n ** 36n);
     assert.equal((await creditOps.facility(buyerId)).issued, 90_000_000n);
     const beforeExact = await s.call(market.usdc, "balanceOf", [buyer.account.address]);
-    const exact = await buyBuckExact(world, market, buyer, 20_000_000n, 40_000_000n);
+    const beforeExactQuote = await observeNetMarket(s, world.buck, market.usdc, market.pool, market.fee);
+    const maximumExact = netPurchaseCost(beforeExactQuote, 20_000_000n) * 101n / 100n;
+    const exact = await buyBuckExact(world, market, buyer, 20_000_000n, maximumExact);
+    assert.ok(exact.paid <= maximumExact);
     assert.ok(exact.received >= 20_000_000n);
     assert.ok(exact.nominalReceived > exact.received && exact.paid < 40_000_000n);
     assert.equal(await s.call(market.usdc, "balanceOf", [buyer.account.address]), beforeExact - exact.paid);

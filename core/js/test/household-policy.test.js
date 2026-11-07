@@ -20,6 +20,13 @@ for (const c of f.net_refinance) test(`net refinance: ${c.name}`, () => {
   assert.ok(Math.abs(v.parts.deposit_age - v.deposit * t.premium_refund_fraction * t.expected_refund_growth) < 1e-8);
   assert.ok(Math.abs(v.parts.wallet_carry + Math.min(c.buck, t.headroom) * t.expected_wallet_growth) < 1e-8);
 });
+test("one facility per asset and bounded portfolios preserve the other keyed thresholds", () => {
+  for (const role of ROLES) assert.equal(profile(41404, "assets", { role }).asset_count, role === "investor" ? 0 : 1);
+  const { asset_count: single, ...a } = profile(41404, "assets");
+  const { asset_count: multiple, ...b } = profile(41404, "assets", { asset_count: 4 });
+  assert.equal(single, 1); assert.equal(multiple, 4); assert.deepEqual(a, b);
+  for (const count of [0, -1, 1.5, 33, true, NaN, "4"]) assert.throws(() => profile(41404, "assets", { asset_count: count }), /asset_count/);
+});
 test("net refinance requires valid explicit forecasts", () => {
   const p = profile(f.seed, "0", f.settings);
   assert.throws(() => terms({ ...f.state, accounting: "net" }, p), /explicit/);

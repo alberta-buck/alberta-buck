@@ -6,6 +6,7 @@ import { IssuancePending } from "../net-world.js";
 import { sellBuck, netSaleFromReceipt } from "../market.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 import { markNetBasketPositions } from "../basket.js";
+import { observeNetMarket } from "../net-market-quote.js";
 
 const RAW = 1_000_000n, MAX = (1n << 256n) - 1n;
 const PHASES = ["issue", "export", "mortgage"];
@@ -63,15 +64,12 @@ export class HouseholdRefinance {
     try {
       const s = world.session, blockNumber = (await s.client.getBlock()).number;
       const at = (c, functionName, args = []) => s.client.readContract({ address: c.address, abi: c.abi, functionName, args, blockNumber });
-      const [sqrt] = await at(world.poolUB, "slot0");
-      let numerator = sqrt * sqrt, denominator = 1n << 192n;
-      if ((await at(world.poolUB, "token0")).toLowerCase() !== world.buck.address.toLowerCase()) {
-        [numerator, denominator] = [denominator, numerator];
-      }
-      const [gross, net] = await at(world.buck, "accountBalancesScaled", [world.poolUB.address]);
+      const quote = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber });
       return wire({ block: blockNumber, k_wad: await at(world.kctrl, "currentBuckK"),
-        bvib_wad: await at(world.basket, "basketValueInBuck"), nominal_usdc_per_buck: { numerator, denominator },
-        pool_nominal_scaled: gross, pool_net_scaled: net, fee_ppm: BigInt(world.fees.ub) });
+        bvib_wad: await at(world.basket, "basketValueInBuck"),
+        nominal_usdc_per_buck: { numerator: quote.price_num, denominator: quote.price_den },
+        active_reserves: { usdc: quote.reserve_usdc, buck: quote.reserve_buck },
+        pool_nominal_scaled: quote.gross_scaled, pool_net_scaled: quote.net_scaled, fee_ppm: BigInt(world.fees.ub) });
     } catch (err) { return { unavailable: String(err).slice(0, 200) }; }
   }
   async basket(world) {

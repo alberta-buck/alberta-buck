@@ -142,6 +142,19 @@ matching `household_events` in saved and both live frame modes. See the
 checkout's `README-households.org` for the state invariants and data contract;
 no new dashboard or runner is required to use these observations.
 
+Households default to one facility per insured asset (`asset_count: 1`);
+explicit portfolios retain multiple-facility coverage. Investors resolve
+their asset count to zero. The same keyed draws for all other thresholds
+are preserved.
+
+`observeNetMarket(session, buck, settlement, pool, feePpm)` returns a pinned
+integer snapshot. `netPurchaseExpected`, `netPurchaseCost` and
+`netSaleExpected` apply current pool carried fees and trading fees to its
+active virtual reserves. Cost returns `null` when no local quote exists.
+These estimates can change at crossed ticks and require bounded actual
+execution; they do not replace the net-output guard or receipt evidence.
+The primary household's market event reuses this reader.
+
 Subpaths map onto the modules directly: `alberta-buck-core/session`,
 `/journal`, `/identity`, `/wallet`, `/buckworld`, `/observer`, `/v3`, and
 so on.
