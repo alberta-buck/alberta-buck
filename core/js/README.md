@@ -140,8 +140,11 @@ remain gated.
 
 `agent.assessNetRefinance(world, day, forecasts)` now reads a bounded
 per-facility menu and returns `{plan, verdict, context}` without transactions.
-Supply explicit `expected_relief_rate`, `expected_refund_growth` and
-`expected_wallet_growth`. It compares wallet/new/mixed funding, actual
+The default uses the observed global fund/age ratio and modeled idle-cash
+annual decline for wallet/insurer carry, recording the source and basis.
+No age uses labeled conservative zero relief; unsafe marks fail. Supply all
+three `expected_relief_rate`, `expected_refund_growth` and
+`expected_wallet_growth` values for an explicit comparison. It compares wallet/new/mixed funding, actual
 insurer refund values, incremental insurance savings and reserve costs;
 raw budgets retain utilization, market-impact and cash limits. Exact
 activated room is included even below the usual size grid. An ordinary

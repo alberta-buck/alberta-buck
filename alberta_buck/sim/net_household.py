@@ -44,6 +44,24 @@ def _reserve_for(candidate):
     return candidate.reserve_required + (candidate.reserve_buffer if candidate.premium else 0)
 
 
+def observe_refinance_forecasts(d):
+    """Current fund/age ratio and the explicitly modeled idle-cash baseline.
+
+    This estimates annual opportunity/carry, never actual token balances.
+    Main cash and the simulation's uninvested insurer pool decline at 2%
+    compounded continuously. Active insurer strategies need another explicit
+    forecast. At zero claim age use a conservative zero relief forecast,
+    recording that there was no observed rate; never invent a fund mark.
+    """
+    observed = d.net_credit_ops.quote_global_relief_rate()
+    idle_growth = math.expm1(-.02)
+    return dict(values=dict(expected_relief_rate=(observed.annual_rate_wad / 10**18
+                           if observed.annual_rate_wad is not None else 0.),
+        expected_refund_growth=idle_growth, expected_wallet_growth=idle_growth),
+        observation=asdict(observed), basis="marked-fund/idle-cash" if observed.annual_rate_wad is not None
+        else "no-claim-age/zero-relief/idle-cash")
+
+
 def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_growth,
                      expected_wallet_growth, reserve_floor=None, slippage_bp=50):
     """Read a bounded menu of actual NFT quotes; select a conservative forecast.

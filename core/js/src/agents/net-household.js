@@ -23,6 +23,17 @@ const wire = (value) => {
   throw new Error("unsupported household event value");
 };
 
+/** Forecast inputs for the modeled idle main cash/insurer pool, not monetary
+ * balance calculations or promised future ROI. Missing guarded marks fail;
+ * no claim age uses a labelled conservative zero relief forecast. */
+export async function observeRefinanceForecasts(world) {
+  const observation = await world.netCreditOps.quoteGlobalReliefRate(), idleGrowth = Math.expm1(-.02);
+  return { values: { expected_relief_rate: observation.annualRateWad === null ? 0 : Number(observation.annualRateWad) / 1e18,
+    expected_refund_growth: idleGrowth, expected_wallet_growth: idleGrowth }, observation,
+    source: Object.fromEntries(Object.entries(observation).map(([key, value]) => [snake(key), value])),
+    basis: observation.annualRateWad === null ? "no-claim-age/zero-relief/idle-cash" : "marked-fund/idle-cash" };
+}
+
 /** Read an actual, finite candidate menu without submitting or changing books.
  * Normal external keeper/controller work precedes the read-only assessment.
  * Annual forecasts are explicit. Bank costs use old USDC above the buffer;

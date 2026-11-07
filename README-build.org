@@ -177,8 +177,8 @@ gated. The [[file:README-households.org][household refinancing machine]] now acq
 authenticated bank principal and costs once, including recovery after a lost
 reply. Shared insurance vectors and real activation/retirement tests verify
 proportional external premium costs. Explicit read-only economic assessment
-now selects actual bounded candidates with supplied forecasts. Automatic
-forecast/calendar scheduling and the rest of its lifecycle
+now selects actual bounded candidates with observed default forecasts or
+explicit comparisons. Automatic calendar scheduling and the rest of its lifecycle
 remain separate gates. Tests stream exact histories through full/lite JSON
 without depending on the optional compact action log.
 The sim-build dependency now includes the vendored Permit2 build.

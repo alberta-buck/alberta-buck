@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { profile, issuance, terms, refinance, refinanceQuoted, bestQuotedRefinance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
   externalPremiumDue, ROLES } from "../src/agents/household-policy.js";
 import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
+import { observeRefinanceForecasts } from "../src/agents/net-household.js";
 
 const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-policy.json", import.meta.url)));
 const insurance = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-insurance.json", import.meta.url)));
@@ -49,6 +50,22 @@ test("net refinance requires valid explicit forecasts", () => {
     ["expected_wallet_growth", Infinity, /wallet/]]) {
     assert.throws(() => terms({ ...f.state, ...f.net_refinance[0].state, [field]: value }, p), error);
   }
+});
+test("default forecasts keep absent age distinct and never hide a missing mark", async () => {
+  for (const rate of [null, 0n, 20_000_000_000_000_000n]) {
+    const observation = { blockNumber: 7n, totalSeconds: rate === null ? 0n : 100n * 31_557_600n,
+      cashScaled: rate === null ? 0n : rate * 100n * 10n ** 36n / 10n ** 18n,
+      positionMark: 0n, availableReliefScaled: 0n, annualRateWad: rate };
+    const forecast = await observeRefinanceForecasts({ netCreditOps: { quoteGlobalReliefRate: async () => observation } });
+    assert.equal(forecast.observation.annualRateWad, rate);
+    assert.equal(forecast.source.annual_rate_wad, rate);
+    assert.equal(forecast.values.expected_relief_rate, rate === null ? 0 : Number(rate) / 1e18);
+    assert.equal(forecast.values.expected_wallet_growth, forecast.values.expected_refund_growth);
+    assert.ok(forecast.values.expected_wallet_growth > -.02 && forecast.values.expected_wallet_growth < 0);
+    assert.equal(forecast.basis, rate === null ? "no-claim-age/zero-relief/idle-cash" : "marked-fund/idle-cash");
+  }
+  await assert.rejects(observeRefinanceForecasts({ netCreditOps: {
+    quoteGlobalReliefRate: async () => { throw new Error("guarded fund mark unavailable"); } } }), /guarded fund mark/);
 });
 test("the shared issuance limit includes premium principal", () => {
   const p = profile(f.seed, "0", { ...f.settings, apr: .03, theta: 3 });

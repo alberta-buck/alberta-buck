@@ -330,7 +330,8 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
 
 
 @pytest.mark.parametrize("cash_k,will_issue", [(40, True), (10, False)])
-def test_refinance_assessment_chooses_actual_affordable_issuance_without_transactions(household_world, cash_k, will_issue):
+@pytest.mark.parametrize("forecast_mode", ["explicit", "observed"])
+def test_refinance_assessment_chooses_actual_affordable_issuance_without_transactions(household_world, cash_k, will_issue, forecast_mode):
     d, _, make = household_world
     a = make(33, CreditHouseholdAgent, settings=dict(apr=.06, ltv=.4, theta=3, risk=0,
                                                    switch_k=0, max_impact_bp=100, divest_rate=0))
@@ -340,10 +341,20 @@ def test_refinance_assessment_chooses_actual_affordable_issuance_without_transac
     a._proxy_exec(d, d.permit2.address, d.permit2.encode_abi(
         "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
     before = (d.w3.eth.block_number, a.mortgage, a.hypo_mortgage, a.hypo_cash, d.buck.functions.totalIssued().call())
-    assessed = a.assess_net_refinance(d, 1, expected_relief_rate=.02, expected_refund_growth=-.02, expected_wallet_growth=-.02)
+    forecasts = (dict(expected_relief_rate=.02, expected_refund_growth=-.02, expected_wallet_growth=-.02)
+                 if forecast_mode == "explicit" else {})
+    assessed = a.assess_net_refinance(d, 1, **forecasts)
     assert (d.w3.eth.block_number, a.mortgage, a.hypo_mortgage, a.hypo_cash, d.buck.functions.totalIssued().call()) == before
     assert a.refinance_machine.events == [] and not a.funding_pending
     plan, verdict, context = (assessed[k] for k in ("plan", "verdict", "context"))
+    if forecast_mode == "observed":
+        from buck_core import buck_math
+        observed = d.net_credit_ops.quote_global_relief_rate()
+        assert context["forecasts"]["source"]["block_number"] == before[0]
+        assert context["forecasts"]["relief_rate"] == observed.annual_rate_wad / 10**18
+        assert context["forecasts"]["basis"] == "marked-fund/idle-cash"
+        assert abs(context["forecasts"]["wallet_growth"] - (buck_math.net_decay(Q, YEAR) / Q - 1)) < 1e-10
+        assert context["forecasts"]["refund_growth"] == context["forecasts"]["wallet_growth"]
     assert (plan is not None) == will_issue and verdict.go == will_issue
     if not will_issue:
         assert context["rejections"]["cash-buffer"] > 0 and context["reason"] == "no-worthwhile-refinance"

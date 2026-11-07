@@ -7,7 +7,7 @@ from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
-from alberta_buck.sim.net_household import HouseholdRefinance, assess_refinance
+from alberta_buck.sim.net_household import HouseholdRefinance, assess_refinance, observe_refinance_forecasts
 from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted
 from buck_core.session import _txhex, custom_error_name
 
@@ -337,7 +337,17 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         return False
 
     def assess_net_refinance(self, d, day, **forecasts):
-        return assess_refinance(self, d, day, **forecasts)
+        keys = ("expected_relief_rate", "expected_refund_growth", "expected_wallet_growth")
+        explicit = any(key in forecasts for key in keys)
+        if explicit and not all(key in forecasts for key in keys):
+            raise ValueError("explicit household forecasts must include all three annual rates")
+        observed = None if explicit else observe_refinance_forecasts(d)
+        result = assess_refinance(self, d, day, **((observed["values"] if observed else {}) | forecasts))
+        if observed:
+            if result["context"]["block"] != observed["observation"]["block_number"]:
+                raise ValueError("household forecast block changed")
+            result["context"]["forecasts"].update(source=observed["observation"], basis=observed["basis"])
+        return result
 
     def start_net_refinance(self, d, plan, day, ctr, *, context=None):
         """Execute an assessed plan, including its optional bounded reserve buy."""

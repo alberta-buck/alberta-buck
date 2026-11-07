@@ -22,7 +22,7 @@ markets are implemented. An assessed refinancing plan can now acquire a
 bounded net BUCK reserve when needed, then execute
 through =start_net_refinance= / =startNetRefinance= with a checkpoint after
 each authenticated receipt. Normal household decisions remain gated while
-automatic decision scheduling/forecasts, complete calendar cash flows,
+automatic decision scheduling, complete calendar cash flows,
 saving/paydown and exits are ported. An isolated funded-plan test is not a
 completed household economy or five-year stability result.
 
@@ -96,10 +96,20 @@ forecast, while the block allowance remains the actual liquidity constraint.
 * Refinancing state machine
 
 The read-only =assess_net_refinance= / =assessNetRefinance= entry point now
-chooses a plan from actual per-NFT quotes. It requires explicit annual
-=expected_relief_rate=, =expected_refund_growth= and
-=expected_wallet_growth= forecasts. These are assumptions for the cost
-comparison, not guaranteed fund payments or investment returns. It returns
+chooses a plan from actual per-NFT quotes. Its default relief forecast uses
+the current observed global fund/age ratio. Wallet and insurer-pool carry
+use the modeled idle-cash annual decline, =expm1(-0.02)=; this is a forecast
+approximation checked against the native decay kernel, not a token-balance
+calculation. An actively managed insurer needs an explicit return forecast.
+No aggregate claim age uses a labeled conservative zero relief forecast;
+an observed zero rate remains distinguishable from missing age. Unsafe marks
+and maturity failures propagate.
+
+Supply all three annual =expected_relief_rate=, =expected_refund_growth= and
+=expected_wallet_growth= values to use an explicit comparison instead.
+Partial overrides are rejected. Default context records the source block,
+actual marked assets/age/allowance and forecast basis. All forecasts are
+assumptions for cost comparison, not guaranteed fund payments or ROI. It returns
 =plan= (or null/None), =verdict= and =context=; assessment changes neither
 accounts nor the household's ledger. Normal external keeper/controller work
 must precede a decision, especially after a time jump. Otherwise Buck's
@@ -130,14 +140,11 @@ The context supplies rejection counts, quote/option counts, explicit
 forecasts and the selected cost breakdown for a decision table. The pinned
 books/market are reused; a changed observation block aborts assessment.
 This finite menu is not an exhaustive optimizer. The normal household loop
-still needs its default observed forecasts and calendar/surplus/exit wiring.
+still needs its calendar/surplus/exit wiring.
 An assessed plan can be reviewed or passed to the same execution machine:
 
 #+begin_src python
-result = agent.assess_net_refinance(d, day,
-    expected_relief_rate=relief_forecast,
-    expected_refund_growth=insurer_forecast,
-    expected_wallet_growth=wallet_forecast)
+result = agent.assess_net_refinance(d, day)  # observed fund + modeled idle-cash forecasts
 if result["plan"] is not None:
     agent.start_net_refinance(d, result["plan"], day, counters,
                              context=result["context"])

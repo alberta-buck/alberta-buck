@@ -115,7 +115,11 @@ the original selected issuance terms after funding. `NetPurchase.receipt`
 retains that evidence without changing equality of its monetary fields.
 `agent.assess_net_refinance(d, day, **forecasts)` now builds a read-only,
 bounded menu from actual NFT/pool books and returns `plan`, `verdict` and
-`context`. Supply explicit annual relief/refund/wallet forecasts; the
+`context`. By default it observes the current fund/age ratio and uses the
+modeled idle-cash annual decline for wallet/insurer carry, with the source
+recorded. No age means a labeled conservative zero relief forecast; unsafe
+marks fail. Supply all three explicit annual relief/refund/wallet forecasts
+for a comparison; partial overrides fail. The
 assessment includes wallet/new/mixed funding, premium refund values,
 incremental insurance savings and reserve acquisition/carry costs. The
 normal calendar/surplus/exit lifecycle remains open; see the checkout's

@@ -285,7 +285,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(a.extPremium, expected + restored); assert.equal(a.hypoPremium, 2n * full);
   });
   await t.test("refinance assessment reads exact affordable options before any transaction", async () => {
-    for (const [i, cashK] of [40n, 10n].entries()) {
+    for (const [i, [cashK, explicit]] of [[40n, true], [10n, false], [40n, false]].entries()) {
       const account = { address: `0x${(0xabe10n + BigInt(i)).toString(16).padStart(40, "0")}` };
       const a = new CreditHouseholdAgent({ account, member: `assessment-${i}`, settings: { home_k: 1000, premium_bp: 100,
         apr: .06, ltv: .4, theta: 3, risk: 0, switch_k: 0, max_impact_bp: 100, divest_rate: 0 } });
@@ -294,12 +294,20 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
       await s.send(world.usdc, "mint", [owner, cashK * 1000n * RAW]);
       const before = { block: (await s.client.getBlock()).number, mortgage: a.mortgage, hypo: a.hypoMortgage,
         hypoCash: a.hypoCash, supply: await s.call(buck, "totalIssued") };
-      const { plan, verdict, context } = await a.assessNetRefinance(world, 1, {
-        expected_relief_rate: .02, expected_refund_growth: -.02, expected_wallet_growth: -.02 });
+      const forecasts = explicit ? { expected_relief_rate: .02, expected_refund_growth: -.02, expected_wallet_growth: -.02 } : {};
+      const { plan, verdict, context } = await a.assessNetRefinance(world, 1, forecasts);
       assert.equal((await s.client.getBlock()).number, before.block);
       assert.equal(a.mortgage, before.mortgage); assert.equal(a.hypoMortgage, before.hypo); assert.equal(a.hypoCash, before.hypoCash);
       assert.equal(await s.call(buck, "totalIssued"), before.supply);
       assert.equal(a.refinanceMachine.events.length, 0); assert.equal(a.fundingPending, false);
+      if (!explicit) {
+        const observed = await world.netCreditOps.quoteGlobalReliefRate();
+        assert.equal(context.forecasts.source.block_number, before.block);
+        assert.equal(context.forecasts.relief_rate, Number(observed.annualRateWad) / 1e18);
+        assert.equal(context.forecasts.basis, "marked-fund/idle-cash");
+        assert.ok(Math.abs(context.forecasts.wallet_growth - (Number(math.decay(math.scale, 31_557_600n)) / Number(math.scale) - 1)) < 1e-10);
+        assert.equal(context.forecasts.refund_growth, context.forecasts.wallet_growth);
+      }
       assert.equal(plan !== null, cashK === 40n); assert.equal(verdict.go, cashK === 40n);
       if (plan === null) {
         assert.ok(context.rejections["cash-buffer"] > 0); assert.equal(context.reason, "no-worthwhile-refinance");

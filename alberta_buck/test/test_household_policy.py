@@ -4,10 +4,13 @@ import json
 import math
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 from alberta_buck.sim import carry, household_policy as hp
+from alberta_buck.sim.net_household import observe_refinance_forecasts
+from buck_core import GlobalReliefRateQuote
 
 ROOT                            = Path(__file__).resolve().parents[2]
 FIXTURE                         = json.loads((ROOT / "test/fixtures/household-policy.json").read_text())
@@ -71,6 +74,27 @@ def test_external_premium_rejects_impossible_inputs():
         carry.refinance_quoted(quoted_terms(), 4900, 5000, 0, 0, 0, external_premium_saving=1)
     with pytest.raises(ValueError, match="incremental external"):
         carry.refinance_quoted(quoted_terms(), 4900, 0, 5000, 0, 0, external_premium_saving=1)
+
+
+@pytest.mark.parametrize("rate", [None, 0, 20_000_000_000_000_000])
+def test_default_forecasts_distinguish_no_age_from_an_observed_rate(rate):
+    observed = GlobalReliefRateQuote(7, 0 if rate is None else 100 * 31_557_600,
+        0 if rate is None else rate * 100 * 10**36 // 10**18, 0, 0, rate)
+    d = SimpleNamespace(net_credit_ops=SimpleNamespace(quote_global_relief_rate=lambda: observed))
+    forecast = observe_refinance_forecasts(d)
+    assert forecast["observation"]["annual_rate_wad"] == rate
+    assert forecast["values"]["expected_relief_rate"] == (0 if rate is None else rate / 10**18)
+    assert forecast["values"]["expected_wallet_growth"] == forecast["values"]["expected_refund_growth"]
+    assert -.02 < forecast["values"]["expected_wallet_growth"] < 0
+    assert forecast["basis"] == ("no-claim-age/zero-relief/idle-cash" if rate is None else "marked-fund/idle-cash")
+
+
+def test_default_forecast_refuses_a_missing_mark_instead_of_assuming_a_rate():
+    def unavailable():
+        raise ValueError("guarded fund mark unavailable")
+    d = SimpleNamespace(net_credit_ops=SimpleNamespace(quote_global_relief_rate=unavailable))
+    with pytest.raises(ValueError, match="guarded fund mark"):
+        observe_refinance_forecasts(d)
 
 
 def test_net_refinance_requires_available_explicit_forecasts():
