@@ -22,6 +22,7 @@ RAW = 10**6
 Q = 10**36
 YEAR = 365 * 86400 + 6 * 3600
 REFINANCE = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-refinance.json").read_text())
+CALENDAR = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-calendar.json").read_text())["flow"]
 
 
 @pytest.fixture
@@ -607,3 +608,199 @@ def test_readable_books_do_not_allow_unimplemented_interactive_economy_to_finish
         driver.step_tick()
     assert driver.snap.meta["run"]["completed"] is False and not driver.done and driver.tick == 0
     assert not agent._started and agent.income_total == agent.external_paid == 0
+
+
+@pytest.mark.parametrize("case", CALENDAR["cases"], ids=lambda c: c["name"])
+def test_calendar_cash_flows_recover_once_without_stopping_the_shadow(household_world, monkeypatch, case):
+    from alberta_buck.sim.household_calendar import MortgageBook
+    from buck_core.session import _txhex
+    d, scenario, make = household_world
+    a = make(71, CreditHouseholdAgent, settings=CALENDAR["settings"])
+    m, ctr = a.calendar_machine, {}
+    opening, income, living, premium = (int(CALENDAR[k]) for k in ("opening", "income", "living", "full_premium"))
+    initial_debt = a.mortgage
+    assert a.advance_net_calendar(d, 0, ctr) is False
+    assert a._started and a.hypo_cash == opening == d.usdc.functions.balanceOf(a.address).call()
+    assert a.income_total == a.external_paid == 0
+    assert not m.active and m.income_due == 0
+    calls, failed, receipts = {}, [], {}
+    mint, execute, record = m._mint, d.net_settlement_ops.execute, m.record_mortgage
+
+    def submit(phase, dispatch, *args):
+        calls[phase] = calls.get(phase, 0) + 1
+        if case["phase"] == phase and case["fault"] == "unknown":
+            raise RuntimeError("submission outcome unknown")
+        if phase == "income" and case["fault"] == "bad-mint-evidence":
+            args = (args[0], args[1] + 1)
+        if phase == "income" and case["fault"] == "revert" and not failed:
+            from buck_core.session import Expect
+            failed.append(True)
+            return d.chain.send(d.usdc.functions.transfer(a.SINK, 2**256 - 1), expect=Expect.EITHER)
+        receipt = dispatch(*args)
+        receipts[phase] = receipt
+        if case["phase"] == phase and case["fault"] == "lost" and not failed:
+            failed.append(True)
+            raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
+        return receipt
+
+    monkeypatch.setattr(m, "_mint", lambda d, amount: submit("income", mint, d, amount))
+    monkeypatch.setattr(d.net_settlement_ops, "execute", lambda *args: submit(m.flow["phase"], execute, *args))
+    def dated(*args):
+        if case["fault"] == "date-unavailable" and not failed:
+            failed.append(True)
+            raise RuntimeError("receipt block temporarily unavailable")
+        return record(*args)
+    monkeypatch.setattr(m, "record_mortgage", dated)
+
+    d.anvil.warp_to(m.epoch + 30 * 86400)
+    pending = a.advance_net_calendar(d, 30, ctr)
+    assert pending == (case["fault"] != "none")
+    assert a.hypo_paid == a.payment and a.hypo_living == living and a.hypo_premium == premium
+    assert a.hypo_cash == opening + income - living - premium - a.payment
+    sent = calls.copy()
+    if pending:
+        assert m.status()["status"] == ("refused" if case["fault"] == "revert" else "pending")
+        assert m.flow["phase"] == case["phase"]
+        with pytest.raises(ValueError, match="calendar must finish"):
+            a.start_net_refinance(d, None, 30, ctr)
+        if case["fault"] in ("unknown", "bad-mint-evidence"):
+            assert m.income_due == income and a.income_total == 0
+            d.anvil.warp_to(m.epoch + 60 * 86400)
+            a.act(d, scenario, 60, 0, ctr)
+            assert calls == sent and a.income_total == a.external_paid == 0
+            assert d.usdc.functions.balanceOf(a.address).call() == opening + (income + 1 if case["fault"] == "bad-mint-evidence" else 0)
+            assert m.income_due == 2 * income and len(m.queue) == 2
+            assert a.hypo_paid == 2 * a.payment and a.hypo_interest > 0
+            assert a.living_arrears == 2 * living and a.premium_arrears == 2 * premium
+            assert ("hash unavailable" if case["fault"] == "unknown" else "does not match terms") in a.last_error
+            return
+        assert m.flow["hash"]
+        if case["phase"] == "mortgage":
+            assert a.external_paid == 0 and m.status()["mortgage_provisional"]
+        get_receipt = d.w3.eth.get_transaction_receipt
+        if case["fault"] != "revert":
+            with monkeypatch.context() as patch:
+                patch.setattr(d.w3.eth, "get_transaction_receipt", lambda h: {**get_receipt(h), "transactionHash": bytes(32)})
+                assert a.advance_net_calendar(d, 30, ctr)
+        assert calls == sent
+        d.anvil.warp_to(m.epoch + 35 * 86400)
+        a.act(d, scenario, 35, 0, ctr)
+    expected_calls = {phase: 1 for phase in ("income", "living", "insurance", "mortgage")}
+    expected_calls["income"] += case["fault"] == "revert"
+    assert calls == expected_calls
+    assert a.external_paid == a.hypo_paid == a.payment
+    assert a.income_total == income and a.living_paid == living and a.ext_premium == premium
+    assert a.living_arrears == a.premium_arrears == m.income_due == 0
+    assert d.usdc.functions.balanceOf(a.SINK).call() == living + premium + a.payment
+    assert d.usdc.functions.balanceOf(a.address).call() == opening + income - living - premium - a.payment
+    bank_day = 35 if pending and case["phase"] != "mortgage" else 30
+    actual = MortgageBook(initial_debt, 60_000_000)
+    actual.advance(bank_day)
+    actual.record_payment("bank", bank_day, a.payment)
+    actual.advance(m.day)
+    assert m.actual.state == actual.state
+    shadow = MortgageBook(initial_debt, 60_000_000)
+    shadow.advance(30)
+    shadow.record_payment("shadow", 30, a.payment)
+    shadow.advance(m.day)
+    assert m.shadow.state == shadow.state
+    assert m.status()["mortgage_provisional"] is False
+    events, count = json.loads(json.dumps(a.refinance_machine.events)), len(a.refinance_machine.events)
+    assert all(e["kind"] == "calendar" for e in events)
+    assert all("counterfactual_mortgage" in e["accounts"] for e in events)
+    assert int(next(e for e in events if e.get("operation") == "mortgage" and e["status"] == "confirmed")["effective_day"]) == bank_day
+    assert a.advance_net_calendar(d, m.day, ctr) is False
+    assert calls == expected_calls
+    assert len(a.refinance_machine.events) == count
+    d.anvil.warp_to(m.epoch + 60 * 86400)
+    assert a.advance_net_calendar(d, 60, ctr) is False
+    assert a.external_paid == a.hypo_paid == 2 * a.payment
+    assert a.income_total == 2 * income
+    assert calls == {phase: count + 1 for phase, count in expected_calls.items()}
+    assert not d.chain.mismatches
+
+
+def test_calendar_charges_only_unactivated_external_insurance(household_world):
+    d, _, make = household_world
+    a = make(72, CreditHouseholdAgent, settings=CALENDAR["settings"])
+    a.advance_net_calendar(d, 0, {})
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, 20 * RAW])))
+    d.net_credit_ops.issue(a.address, a._token_ids[0], 100 * RAW, 40 * RAW, 10 * RAW, d.pool_acct)
+    full = int(CALENDAR["full_premium"])
+    expected = (full * (a._face0 - 100 * RAW) + a._face0 - 1) // a._face0
+    d.anvil.warp_to(a.calendar_machine.epoch + 30 * 86400)
+    assert a.advance_net_calendar(d, 30, {}) is False
+    assert a.ext_premium == expected < a.hypo_premium == full
+    assert a.mortgage == a.hypo_mortgage
+
+
+def test_calendar_rejects_skipped_paydays_and_a_label_without_elapsed_chain_time(household_world):
+    d, _, make = household_world
+    a = make(74, CreditHouseholdAgent, settings=CALENDAR["settings"])
+    a.advance_net_calendar(d, 0, {})
+    m = a.calendar_machine
+    before = (a.mortgage, a.hypo_cash, a.hypo_paid, a.living_arrears, len(a.refinance_machine.events))
+    with pytest.raises(ValueError, match="chain clock"):
+        a.advance_net_calendar(d, 30, {})
+    assert before == (a.mortgage, a.hypo_cash, a.hypo_paid, a.living_arrears, len(a.refinance_machine.events))
+    d.anvil.warp_to(m.epoch + 31 * 86400)
+    with pytest.raises(ValueError, match="each payday"):
+        a.advance_net_calendar(d, 31, {})
+    assert before == (a.mortgage, a.hypo_cash, a.hypo_paid, a.living_arrears, len(a.refinance_machine.events))
+
+
+@pytest.mark.parametrize("fault", ["lost", "date-unavailable"])
+def test_calendar_dates_refinance_receipts_and_keeps_its_paydays(household_world, monkeypatch, fault):
+    from alberta_buck.sim.household_calendar import MortgageBook
+    from buck_core.session import _txhex
+    d, scenario, make = household_world
+    a = make(73, CreditHouseholdAgent, settings=CALENDAR["settings"])
+    m, ctr = a.calendar_machine, {}
+    a.advance_net_calendar(d, 0, ctr)
+    b = {k: int(v) for k, v in REFINANCE["base"].items()}
+    initial = a.mortgage
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, b["seed_buck"]])))
+    a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("approve", args=[d.swap_guard.address, 2**256 - 1]))
+    a._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1]))
+    a._proxy_exec(d, d.permit2.address, d.permit2.encode_abi("approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
+    c = d.net_credit_ops.assess_issue_candidate(a.address, a._token_ids[0], b["coverage"], b["new_spendable"], b["premium"])
+    plan = RefinancePlan(c, *(b[k] for k in ("export_buck", "minimum_usdc", "mortgage_limit", "cash_buffer",
+                                           "reserve_floor", "switch_cost", "penalty_numerator", "penalty_denominator")))
+    execute, record, sends, dates = d.net_settlement_ops.execute, m.record_mortgage, [], []
+    def bank(*args):
+        receipt = execute(*args)
+        sends.append(receipt)
+        if fault == "lost" and len(sends) == 1:
+            raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
+        return receipt
+    def dated(*args):
+        dates.append(True)
+        if fault == "date-unavailable" and len(dates) == 1:
+            raise RuntimeError("receipt block temporarily unavailable")
+        return record(*args)
+    monkeypatch.setattr(d.net_settlement_ops, "execute", bank)
+    monkeypatch.setattr(m, "record_mortgage", dated)
+    a.start_net_refinance(d, plan, 0, ctr)
+    assert a.refinance_machine.status()["status"] == "pending"
+    assert a.refinance_machine.flow["hash"] and m.status()["mortgage_provisional"]
+    assert a.external_paid == 0
+    payment_receipt = sends[0]
+    payment_block = d.w3.eth.get_block(payment_receipt["blockNumber"])
+    d.anvil.warp_to(m.epoch + 30 * 86400)
+    # Recover the bank first, while calendar preparation independently pays
+    # the shadow and schedules real salary/bills. No owner salary is sent yet.
+    a.act(d, scenario, 30, 0, ctr)
+    assert d.w3.eth.get_block(payment_receipt["blockNumber"])["timestamp"] == m.epoch
+    assert d.w3.eth.get_block(payment_block["hash"])["timestamp"] == m.epoch
+    assert a.external_paid == b["mortgage_limit"] and len(sends) == 1
+    assert a.refinance_machine.status()["status"] == "complete"
+    assert a.income_total == 0 and m.income_due == int(CALENDAR["income"])
+    assert a.hypo_paid == a.payment
+    expected = MortgageBook(initial, 60_000_000)
+    expected.record_payment("refinance", 0, b["mortgage_limit"])
+    expected.advance(30)
+    assert m.actual.state == expected.state
+    a.act(d, scenario, 30, 0, ctr)
+    assert a.external_paid == b["mortgage_limit"] + a.payment and len(sends) == 4
+    assert a.switch_paid == b["switch_cost"] and a.refis == 1
+    assert not m.active and m.income_due == 0

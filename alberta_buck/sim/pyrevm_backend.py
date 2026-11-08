@@ -18,6 +18,8 @@ Fidelity notes (vs anvil):
     via warp_to, so this is deterministic rather than lossy);
   * `eth_call` executes non-static inside a snapshot/revert bracket (matches
     anvil semantics: writes allowed, never persisted);
+  * mined block numbers/hashes retain their original timestamps, including
+    after a warp; this does not provide historical contract-state snapshots;
   * gas is executed but unmetered economically (gasPrice 0 profile, like the
     sim's anvil flags); balances only matter where contracts check them.
 """
@@ -114,10 +116,14 @@ class _RevmProvider(BaseProvider):
         return _hex(self.b.nonces.get(to_checksum_address(p[0]), 0))
 
     def rpc_getBlockByNumber(self, p):
-        return self.b.block_dict()
+        tag = p[0]
+        number = (self.b.block if tag in ("latest", "pending", "safe", "finalized") else
+                  0 if tag == "earliest" else int(tag, 16))
+        return self.b.block_dict(number)
 
     def rpc_getBlockByHash(self, p):
-        return self.b.block_dict()
+        number = self.b.block_hashes.get(p[0])
+        return self.b.block_dict(number) if number is not None else None
 
     # -- execution --------------------------------------------------------- #
 
@@ -239,6 +245,8 @@ class PyrevmAnvil:
                               gas_limit=gas_limit or 3_000_000_000)
         self.block = 0
         self.ts = timestamp or GENESIS_TS
+        self.block_times: dict[int, int] = {}
+        self.block_hashes: dict[str, int] = {}
         self.nonces: dict[str, int] = {}
         self.receipts: dict[str, dict] = {}
         self.w3: Optional[Web3] = None
@@ -314,6 +322,8 @@ class PyrevmAnvil:
     # -- execution core ------------------------------------------------------ #
 
     def _push_block_env(self) -> None:
+        self.block_times[self.block] = self.ts
+        self.block_hashes[_h32(b"blk" + self.block.to_bytes(8, "big"))] = self.block
         self.evm.set_block_env(pyrevm.BlockEnv(
             number=self.block, timestamp=self.ts))
 
@@ -372,16 +382,19 @@ class PyrevmAnvil:
 
     # -- block view ------------------------------------------------------------ #
 
-    def block_dict(self) -> dict:
+    def block_dict(self, number=None) -> Optional[dict]:
+        number = self.block if number is None else number
+        if number not in self.block_times:
+            return None
         return {
-            "number": _hex(self.block), "hash": _h32(b"blk" + self.block.to_bytes(8, "big")),
-            "parentHash": _h32(b"blk" + max(0, self.block - 1).to_bytes(8, "big")),
+            "number": _hex(number), "hash": _h32(b"blk" + number.to_bytes(8, "big")),
+            "parentHash": _h32(b"blk" + max(0, number - 1).to_bytes(8, "big")),
             "nonce": "0x0000000000000000", "sha3Uncles": ZERO32,
             "logsBloom": BLOOM, "transactionsRoot": ZERO32,
             "stateRoot": ZERO32, "receiptsRoot": ZERO32,
             "miner": DEV_ACCOUNTS[0], "difficulty": "0x0",
             "totalDifficulty": "0x0", "extraData": "0x",
             "size": "0x0", "gasLimit": _hex(3_000_000_000), "gasUsed": "0x0",
-            "timestamp": _hex(self.ts), "transactions": [], "uncles": [],
+            "timestamp": _hex(self.block_times[number]), "transactions": [], "uncles": [],
             "baseFeePerGas": "0x0", "mixHash": ZERO32,
         }

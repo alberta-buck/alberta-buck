@@ -74,7 +74,8 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
     switching costs/penalty are funded from old USDC, so never counted twice
     as execution loss. Quote estimates are advisory, and execution rechecks.
     """
-    if getattr(d, "buck_accounting", "") != "net" or agent.refinance_machine.active:
+    if (getattr(d, "buck_accounting", "") != "net" or agent.refinance_machine.active or
+            agent.calendar_machine.active):
         raise ValueError("household refinance assessment needs idle canonical accounting")
     previous = agent.refinance_machine.flow
     if reserve_floor is None:
@@ -276,6 +277,12 @@ class HouseholdRefinance:
                           "issued": issued, "credit_limit": limit, "custody": custody, "facilities": facilities,
                           "premium_nominal": premium, "mortgage": a.mortgage,
                           "external_paid": a.external_paid, "premium_paid": a.premium_paid,
+                          "external_interest": a.external_interest, "income_total": a.income_total,
+                          "living_paid": a.living_paid, "external_premium_paid": a.ext_premium,
+                          "living_arrears": a.living_arrears, "premium_arrears": a.premium_arrears,
+                          "counterfactual_cash": a.hypo_cash, "counterfactual_mortgage": a.hypo_mortgage,
+                          "counterfactual_interest": a.hypo_interest, "counterfactual_paid": a.hypo_paid,
+                          "calendar": a.calendar_machine.status(),
                           "switch_paid": a.switch_paid, "penalty_paid": a.penalty_paid,
                           "external_premium_monthly": external_premium,
                           "counterfactual_premium_monthly": monthly_premium,
@@ -321,7 +328,7 @@ class HouseholdRefinance:
             block = None
         self.events.append({"schema": 1, "seq": len(self.events) + 1, "member": self.agent.member,
                             "decision": self.decisions, "day": day, "block": block,
-                            "phase": f["phase"], "status": status, "accounts": self._accounts(d),
+                            "phase": f["phase"] if f else "idle", "status": status, "accounts": self._accounts(d),
                             **_wire(detail)})
 
     def start(self, d, plan, day, ctr, *, context=None):
@@ -407,8 +414,11 @@ class HouseholdRefinance:
             terms = f["terms"]
             if result.amount != terms["amount"] or a.mortgage < terms["principal"]:
                 raise ValueError("household bank allocation changed")
-            a.mortgage -= terms["principal"]
-            a.external_paid += terms["principal"]
+            if a.calendar_machine.bound:
+                a.calendar_machine.record_mortgage(d, receipt, terms["principal"])
+            else:
+                a.mortgage -= terms["principal"]
+                a.external_paid += terms["principal"]
             a.switch_paid += terms["switch"]
             a.penalty_paid += terms["penalty"]
             a.refis += 1
@@ -423,6 +433,22 @@ class HouseholdRefinance:
         f["phase"] = PHASES[PHASES.index(phase) + 1] if phase != "mortgage" else "complete"
         self._event(d, day, "confirmed", operation=phase, amounts=moved,
                     transaction_hash=_txhex(receipt["transactionHash"]), receipt_block=receipt.get("blockNumber"))
+
+    def _apply_known(self, d, day, result, ctr):
+        """Retain evidence if the required receipt-date lookup is unavailable."""
+        f, phase = self.flow, self.flow["phase"]
+        f["hash"] = _txhex(result.receipt["transactionHash"])
+        try:
+            self._apply(d, day, result, ctr)
+            return True
+        except Exception as exc:
+            if f["phase"] != phase:
+                raise
+            f["status"] = "pending"
+            self.agent.last_action = "refinance-pending"
+            self.agent.last_error = f"refinance accounting unavailable: {exc}"[:200]
+            self._event(d, day, "pending", reason=self.agent.last_error, transaction_hash=f["hash"])
+            return False
 
     def _recover(self, d):
         f, a = self.flow, self.agent
@@ -465,7 +491,8 @@ class HouseholdRefinance:
             except Exception as exc:
                 a.last_error = f"refinance receipt unavailable: {exc}"[:200]
                 return True
-            self._apply(d, day, result, ctr)
+            if not self._apply_known(d, day, result, ctr):
+                return True
         while f["phase"] != "complete":
             p, phase = f["plan"], f["phase"]
             if phase == "issue":
@@ -529,7 +556,8 @@ class HouseholdRefinance:
                 a.last_action, a.last_error = "refinance-pending", str(exc)[:200]
                 self._event(d, day, "pending", reason=a.last_error, transaction_hash=None)
                 return True
-            self._apply(d, day, result, ctr)
+            if not self._apply_known(d, day, result, ctr):
+                return True
         f["status"] = "complete"
         a.funding_pending, a.last_action, a.last_error = False, "refinance", ""
         self._event(d, day, "complete")

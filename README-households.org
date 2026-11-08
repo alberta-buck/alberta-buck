@@ -21,9 +21,10 @@ Setup, personal portfolio books, selected-facility operations and guarded
 markets are implemented. An assessed refinancing plan can now acquire a
 bounded net BUCK reserve when needed, then execute
 through =start_net_refinance= / =startNetRefinance= with a checkpoint after
-each authenticated receipt. Normal household decisions remain gated while
-automatic decision scheduling, complete calendar cash flows,
-saving/paydown and exits are ported. An isolated funded-plan test is not a
+each authenticated receipt. The explicit calendar component now schedules
+arrival capital, wages, bills and mortgage payments with receipt recovery.
+Normal household decisions remain gated while automatic policy scheduling,
+saving/paydown, exits and full restoration are ported. An isolated funded-plan test is not a
 completed household economy or five-year stability result.
 
 Use the existing acceptance target; it builds the contracts/kernels and runs
@@ -40,8 +41,53 @@ make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setu
 make nix-core-equilibrium-bootstrap-test
 #+end_src
 
-The shared interruption cases are in =test/fixtures/household-refinance.json=.
+The shared interruption cases are in =test/fixtures/household-refinance.json=
+and =test/fixtures/household-calendar.json=.
 They exercise actual contracts, not a substitute monetary model.
+
+* Calendar, income and mortgage counterexample
+
+Call =advance_net_calendar(d, day, counters)= or
+=await advanceNetCalendar(world, day)= on arrival, then at least on each
+30-day payday. Daily observation is supported and required by the eventual
+normal runner. The integer day must match elapsed EVM time; changing an
+actor's day label cannot substitute for advancing the world. Missing a payday
+is an explicit error because today's activated insurance coverage cannot
+reconstruct an unobserved historical premium.
+
+The calendar keeps independent actual and counterfactual mortgage books.
+External USD interest is =floor(balance * APR_ppb / (365 * 1e9))= once per
+bank day, with payments after that day's interest. This fixes observation-
+dependent rounding in the former floating-point advance. It does not
+calculate BUCK cash, demurrage or Jubilee relief. Shared five-year debt
+vectors use an independent rational-arithmetic oracle.
+
+Arrival capital is an endowment, not income. Each later payday queues one
+wage mint, living costs, the uncovered external insurance premium and the
+fixed mortgage payment. Wages require one exact USDC mint event; expenses
+use the existing exact settlement-token evidence. Insufficient cash leaves
+living/insurance arrears and outstanding debt; it never creates spendable
+cash. Counterfactual wages/bills/loan payments follow their original schedule
+even while a real operation is unresolved.
+
+Only the authenticated bank allocation changes the actual mortgage.
+Its block timestamp determines the effective payment day, including for
+refinancing. Recovering old evidence replays interest from that payment day,
+not from the discovery day. Known hashes recover once; missing or mismatched
+evidence stays pending, and a hashless outcome cannot authorize another
+send. A proved revert permits a later retry. Recurring and discretionary
+operations share one owner dispatcher: earlier refinance/buyback recovery
+finishes before queued recurring sends, and refinancing cannot start while
+the calendar has queued work.
+
+Personal rows expose =calendar= status: queued periods, phase/hash,
+=income_due= and =mortgage_provisional=. Income due is pending accounting,
+not extra liquid wealth: its mint might already have executed. A provisional
+mortgage awaits bank evidence and/or its block date. The existing public
+decision stream records calendar transitions, due/effective dates, actual
+accounts, arrears and counterfactual balances. These supply future household
+charts and decision tables without a new reporting runner. Full-state import
+and the automatic policy loop remain completion gates.
 
 * Market estimates for reserve funding
 

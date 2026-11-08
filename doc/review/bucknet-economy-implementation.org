@@ -58,8 +58,11 @@ assessment now chooses actual bounded candidates with explicit forecasts,
 including wallet/new/mixed funding, proportional insurance and reserve
 costs. Default forecasts now observe the actual global fund/age ratio with a
 labeled idle-cash carry baseline; full overrides remain explicit comparisons.
-Complete calendar/surplus/exit scheduling
-and full restoration still gate the normal household loop.
+The explicit calendar component now schedules arrival capital and recurring
+wages/bills/mortgage transfers with receipt recovery and independent shadow
+books. Dated bank evidence corrects interest from its effective payment day.
+Automatic policy/surplus/exit scheduling and full restoration still gate the
+normal household loop.
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -903,7 +906,8 @@ implementation sequence, before changing the primary economy builder.
   retains its full premium. Raw full-width/dust vectors and actual
   activation/retirement/calendar-component checks cover both languages.
   The economic selector now supplies the exact incremental saving;
-  complete receipt-safe calendar scheduling is still part of the open lifecycle.
+  Receipt-safe calendar scheduling is now an explicit component; automatic
+  policy/surplus/exit scheduling remains part of the open lifecycle.
 - [X] Add read-only actual economic plan selection to the existing household
   in both languages. Pin the wallet/facility/activated-capacity/market books
   and reject a changed block. Compare the existing five requested sizes,
@@ -942,7 +946,22 @@ implementation sequence, before changing the primary economy builder.
   forecast with a distinct label; observed zero and unavailable marks are
   not conflated. All three explicit forecasts remain available for comparison;
   partial overrides fail and a changed source/assessment block aborts.
-  Automatic calendar, surplus and exits remain the normal-loop gate.
+  Automatic policy, surplus and exits remain the normal-loop gate.
+- [X] Add explicit recurring calendar components to the same Python/JS
+  household. Bind arrival endowment once, observe every payday against the
+  actual EVM clock, retain original shadow cash/debt terms and queue actual
+  wages/bills independently from pending owner sends. Authenticate USDC wage
+  mints and reuse exact settlement helpers for expenses. Retain unknown
+  outcomes and known hashes without resending; expose pending income and
+  provisional mortgage observations in personal rows and the existing
+  public event stream. Full automatic policy/import remains separate work.
+- [X] Keep dated actual and counterfactual mortgage books with daily integer
+  APR/365 rounding. Shared rational-oracle cases cover a full five-year debt
+  history, delayed evidence, full-width amounts, dust, cadence, conflicts
+  and atomic overflow refusal. Actual receipt block dates drive both ordinary
+  and refinance debt payments. Fix Pyrevm's previously current-only block
+  lookup to preserve mined timestamps by number/hash; do not claim historical
+  contract-state snapshots from that backend.
 - [ ] Persist pending outcomes, buyback targets/reserves, mortgage cash-flow
   timing, NFT/receipt state, random streams and actual fund/insurer wiring.
   Reconcile receipts before retries; never count authorization as repayment,
@@ -975,7 +994,7 @@ implementation sequence, before changing the primary economy builder.
 
 * Next economic integration boundary
 
-** Calendar implementation acceptance (next)
+** Calendar implementation acceptance
 
 Keep the existing household and its actual/counterfactual books. Separate
 calendar accrual from outgoing monetary operations: an uncertain transaction
@@ -983,20 +1002,20 @@ must not silently stop mortgage interest, wages, expenses or the mortgage
 counterexample's clock. Money becomes spendable only from actual balances;
 never credit an unconfirmed mint or payment as liquid funds.
 
-- [ ] Define one simulation-day/receipt-time mapping, using the existing
+- [X] Define one simulation-day/receipt-time mapping, using the explicit
   bank compounding and pay-period convention consistently in both languages.
   Keep the model's clock and the receipt's effective payment date explicit.
-- [ ] Maintain a dated external-debt payment history or equivalent
+- [X] Maintain a dated external-debt payment history or equivalent
   recoverable checkpoints. A bank receipt discovered late reduced the loan
   at its confirmed effective date, not at the later recovery date. Reconcile
   interest from that point; do not overcharge interest on already retired
   principal. Preserve original shadow-mortgage terms and schedule separately.
-- [ ] Queue each payday/expense period once. Checkpoint the simulated USDC
+- [X] Queue each payday/expense period once. Checkpoint the simulated USDC
   wage mint and authenticate its actual zero-address transfer, then exact
   living/insurance/mortgage payments with their saved allocations. Reuse
   the existing settlement evidence helpers where possible. Known hashes
   reconcile once; unknown hashes cannot authorize another mint/payment.
-- [ ] Decide explicitly how unconfirmed income and delayed bills appear in
+- [X] Decide explicitly how unconfirmed income and delayed bills appear in
   personal reports. Preserve scheduled accrual and expose incomplete or
   provisional comparisons; do not fabricate spendable cash or quietly move
   the counterfactual's payment dates to match an RPC outage.
@@ -1005,10 +1024,15 @@ never credit an unconfirmed mint or payment as liquid funds.
   across actual elapsed EVM days, in both languages, against an independent
   debt/cash-flow oracle. Recovery must neither mint another salary nor pay
   the same mortgage allocation twice.
+  Implemented in both dispatchers; Python actual-contract checks pass.
+  Complete JS primary acceptance including the added calendar/refinance
+  cases is running at this checkpoint.
 - [ ] Keep external premiums proportional to actual activated coverage and
   protect the issuance reserve in subsequent saving/paydown decisions.
   Apply closing costs once to a coherent staged mortgage refinance;
   distinguish actual insurer activation from a closing cost already paid.
+  Proportional recurring premiums are implemented and tested; reserve-safe
+  surplus integration and coherent staged closing-cost decisions remain next.
 
 ** Remaining economy sequence
 
@@ -1244,9 +1268,49 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-07 | Select actual household refinance options and observe the global Jubilee rate | Added matching read-only household assessment APIs using same-block actual wallet/facility/capacity/market observations. Reuse the existing bounded coverage and cost policy to compare new/wallet/mixed alternatives, observed insurer refund fractions, incremental insurance savings and reserve friction/carry without discarding owned reserve wealth. Requested sizes include exact unused activated room; zero-premium issuance needs no optional premium buffer or redundant top-up of an aged reserve. All raw cash/utilization/impact/debt budgets remain bounded; the selected assessed plan runs through the existing receipt machine. Explicit annual forecasts and selected costs/rejections are returned for UI/history. Reject Python Boolean/string/overflow forecasts consistently with JS. Both SDKs now observe the global marked fund/eligible-age rate with historical reads and separate block liquidity; zero age has no rate and stale maturity/unsafe wheel marks fail. No new valuation engine, contract or runner. Final combined Python: 169 passed, including fresh short JSON/PDFs. JS quote/policy: 58 passed; focused planner, corrected activated-room and marked global-rate fixtures pass. Browser equilibrium page rebuilt. One unfiltered JS primary run passed 22 checks but exposed the year-jump/controller-cache fixture: quoting exact room before control maintenance correctly reverted on issuance. Both fixtures now compute the controller before the read-only decision; the focused corrected cases pass. A new complete JS acceptance and complete SDK fixture are running at this checkpoint; no full-green result is yet claimed. Normal automatic calendar/surplus/exits and five-year/Notes gates remain open. | =83ce5eaf= |
 
-| 2026-11-07 | Use observed household forecast defaults and finish primary acceptance | The existing household assessment now defaults to the actual global fund/age ratio and a labeled idle-cash annual carry baseline; all three explicit rates remain comparison inputs, with partial overrides rejected. No-age conservative zero and actual observed zero remain distinct; missing guarded marks propagate. Default context preserves normalized source fields and requires the same source/assessment block. The idle annual estimate is checked against the native kernel within forecast precision and never calculates token balances. Actual Python/JS tests execute selected plans with observed defaults and retain cash-short refusal. The corrected unfiltered primary JavaScript acceptance now passes all 24 checks without skips; the separate observed-default fixture passes, as do four SDK cases and 59 policy/quote checks. Browser equilibrium bundle rebuild passes. Normal income/calendar, savings/paydown, exits and full snapshots still gate the household economy; no five-year campaign or Notes acceptance is claimed. | This commit |
+| 2026-11-07 | Use observed household forecast defaults and finish primary acceptance | The existing household assessment now defaults to the actual global fund/age ratio and a labeled idle-cash annual carry baseline; all three explicit rates remain comparison inputs, with partial overrides rejected. No-age conservative zero and actual observed zero remain distinct; missing guarded marks propagate. Default context preserves normalized source fields and requires the same source/assessment block. The idle annual estimate is checked against the native kernel within forecast precision and never calculates token balances. Actual Python/JS tests execute selected plans with observed defaults and retain cash-short refusal. The corrected unfiltered primary JavaScript acceptance now passes all 24 checks without skips; the separate observed-default fixture passes, as do four SDK cases and 59 policy/quote checks. Browser equilibrium bundle rebuild passes. Normal income/calendar, savings/paydown, exits and full snapshots still gate the household economy; no five-year campaign or Notes acceptance is claimed. | =eb0be458= |
 
-** Current handoff: observed defaults and calendar boundary
+| 2026-11-07 | Add dated household calendar books and receipt-backed recurring flows | Both existing households now expose an explicit calendar component for arrival capital and each payday's wages, living costs, proportional premiums and mortgage payment. Independent actual/shadow daily-integer debt books and dated bank evidence prevent receipt recovery from overcharging interest or moving counterfactual payment dates. Shared rational-oracle five-year debt/full-width/cadence/conflict vectors and real interruption cases cover known/unknown/mismatched evidence, proved mint refusal, wrong wage amount, late bank date and refinance recovery across a payday. Pending income is not extra spendable wealth; personal status/public histories expose provisional books. Fix Pyrevm historical block timestamps by number/hash; no historical contract-state promise. Final supported Python accounting/reporting set: 199 passed, no skips, with fresh short JSON/PDFs. Pure JS policy/quote/calendar: 70 passed; browser equilibrium build passes. Initial focused JS acceptance exposed a duplicate test-account address, now isolated; the new complete primary suite is running and its final result is not yet claimed. No Solidity changed. Normal automatic surplus/exits/import and five-year/Notes gates remain. | This commit |
+
+** Current handoff: calendar implemented; final JS acceptance running
+
+- Same worktree/branch as below. Calendar implementation files are
+  =sim/household_calendar.py= and =core/js/src/agents/household-calendar.js=.
+  Public explicit APIs and report fields are in README-households.org.
+  The existing owner recovery dispatcher advances pure calendar books first,
+  reconciles earlier refinance/buyback work, then sends queued recurring
+  flows. It must not prioritize queued income over an earlier pending buyback.
+- Python final supported acceptance passed *199* checks, no skips:
+  =/private/tmp/buck-household-calendar-acceptance-final-py.log=.
+  Focused final calendar set passed 24; its log is
+  =/private/tmp/buck-household-calendar-final-py.log=.
+  Fresh short canonical JSON/PDFs remain in build/test/economy-accounting.
+- JS pure policy/market/calendar set passed *70*. The *unfiltered*
+  =make nix-core-equilibrium-bootstrap-test= is running in session 85995,
+  log =/private/tmp/buck-household-calendar-primary-final-js.log=.
+  Read that result before claiming full primary acceptance or checking
+  the cross-language calendar acceptance item. The earlier filtered log
+  =/private/tmp/buck-household-calendar-flow-js.log= failed because its first
+  household reused the existing insurance test's account. All new calendar
+  accounts now have a distinct namespace. The full run also includes later
+  added bad-mint/refused-mint, dated-refinance and clock-guard cases.
+- Browser =make nix-core-demo-eqworld= passed:
+  =/private/tmp/buck-household-calendar-eqworld-build.log=.
+- *Next*: finish final JS qualification, then connect reserve-safe savings /
+  discounted paydown and coherent staged mortgage closing-cost decisions.
+  Activated insurance (=joined=) does not prove that the bank closing cost
+  was paid. Avoid making a large fixed setup cost rule out every small
+  impact-capped tranche when a feasible staged programme is worthwhile.
+  Keep actual receipts/USDC buffers/K/positive trade bounds intact.
+- After canonical normal scheduling replaces the old monthly/advance path,
+  make that older path explicitly legacy-only and move its insurance tests
+  onto the calendar; remove overlap as its distinct coverage is retained.
+  Then no-money zero-principal facility closure, exits, persistence, short
+  household worlds, actual five-year campaigns/adjacent PDFs, arb and Notes.
+- The automatic act gate stays intentional. This calendar milestone is
+  neither a complete savings sandbox nor five-year stability evidence.
+
+** Previous handoff: observed defaults and calendar boundary
 
 - Worktree =.claude/worktrees/buck-compound=; branch
   =feature/buck-compound-demurrage=. Earlier commits: =4446c477= funded

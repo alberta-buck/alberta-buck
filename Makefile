@@ -1701,11 +1701,12 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 # household lifecycle or a completed economy. Includes actual portfolio and
 # guarded proxy market operations, optional reserve acquisition and
 # receipt-backed refinancing. Shared policy cases include proportional
-# external insurance; normal income/surplus/exit decisions remain gated.
+# external insurance and dated calendar/receipt recovery. Normal automatic
+# policy/surplus/exit decisions remain gated.
 CORE_EQUILIBRIUM_TEST_ARGS ?=
 core-equilibrium-bootstrap-test: sim-build core-build-wasm
 	node core/js/bin/bundle-artifacts.mjs
-	cd core/js && node --test test/net-market-quote.test.js test/household-policy.test.js
+	cd core/js && node --test test/net-market-quote.test.js test/household-policy.test.js test/household-calendar.test.js
 	cd core/js && node --test $(CORE_EQUILIBRIUM_TEST_ARGS) test/net-equilibrium-bootstrap.tevm.test.js
 
 # Both EXISTING builders, not the household loop or a five-year campaign.
@@ -1723,14 +1724,15 @@ economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 # Primary proxy markets use real Permit2, net-output guards, positive sale
 # bounds and authenticated separate USDC payments, not implicit debt burns.
 # Funded household refinancing uses shared interruption vectors and exact
-# transition histories (README-households.org). Normal economic scheduling,
-# reserve acquisition, savings/paydown and exits remain migration gates.
+# transition histories and dated recurring cash flows (README-households.org).
+# Automatic economic scheduling, savings/paydown, exits and restoration
+# remain migration gates; reserve acquisition already has actual coverage.
 # Pytest owns build/test/economy-accounting: each run replaces that scratch
 # directory and leaves the latest canonical.json/PDF there for inspection.
 #   make nix-venv-economy-accounting-test
 economy-accounting-test: economy-bootstrap-test
 	mkdir -p build/test
-	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py --basetemp=build/test/economy-accounting -q
+	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_household_calendar.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py --basetemp=build/test/economy-accounting -q
 	cd core/js && node --test test/net-basket-mark.tevm.test.js
 
 # Each published crate carries its OWN copy of the vectors it replays:

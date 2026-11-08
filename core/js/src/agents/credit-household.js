@@ -3,6 +3,7 @@ import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, 
   arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, externalPremiumDue, ROLES } from "./household-policy.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 import { HouseholdRefinance, assessRefinance, observeRefinanceForecasts } from "./net-household.js";
+import { HouseholdCalendar } from "./household-calendar.js";
 
 const E6 = 1_000_000n;
 const units = (n) => BigInt(Math.trunc(n * 1e6));
@@ -74,6 +75,7 @@ export class CreditHouseholdAgent {
     this.netTradeUncertain = false;
     this.netPendingBuyHash = null;
     this.refinanceMachine = new HouseholdRefinance(this);
+    this.calendarMachine = new HouseholdCalendar(this);
   }
 
   get mortgageOwing() { return this.mortgage; }
@@ -224,6 +226,10 @@ export class CreditHouseholdAgent {
   }
 
   async startNetRefinance(world, plan, day, ctr = {}, options = {}) {
+    if (this.calendarMachine.bound) {
+      await this.calendarMachine.prepare(world, day);
+      if (this.calendarMachine.active) throw new Error("household calendar must finish before refinancing");
+    }
     if (world.accounting !== "net") throw new Error("canonical refinancing requires net accounting");
     if (await this.pendingRepayment(world) || this.netRepaymentReserve !== null || this.netRepaymentTarget !== null) {
       throw new Error("household buyback must finish before refinancing");
@@ -231,8 +237,13 @@ export class CreditHouseholdAgent {
     return this.refinanceMachine.start(world, plan, day, ctr, options);
   }
 
+  async advanceNetCalendar(world, day) {
+    return this.calendarMachine.advance(world, day);
+  }
+
   async recoverPendingOperations(world, day = this.lastDay) {
     if (world.accounting !== "net") return false;
+    if (this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
     try {
       if (this.refinanceMachine.active) return this.refinanceMachine.advance(world, day);
       if (this.netTradeUncertain) {
@@ -259,7 +270,9 @@ export class CreditHouseholdAgent {
         return true;
       }
       if (await this.pendingRepayment(world)) return true;
-      return await this.resumeNetRepayment(world);
+      if (await this.resumeNetRepayment(world)) return true;
+      if (this.calendarMachine.active) { await this.calendarMachine.advance(world, day); return true; }
+      return false;
     } catch (err) {
       this.lastAction = this.netTradeUncertain ? "buy-pending" : this.netCancelUncertain ? "cancel-pending" : "repay-pending";
       this.lastError = `transaction reconciliation: ${err}`.slice(0, 200);
@@ -695,7 +708,7 @@ export class CreditHouseholdAgent {
       ...(net ? { markBlock: s.blockNumber, auxCash: s.auxCash, held: s.held, savingsHeld: s.savedBucks,
         premiumNet: s.premiumNet, reliefScaled: s.reliefScaled, availableReliefScaled: s.availableReliefScaled,
         reliefLiquidityLimited: s.reliefLiquidityLimited, basketShares: s.basketShares,
-        machine: this.refinanceMachine.status() } : {}),
+        machine: this.refinanceMachine.status(), calendar: this.calendarMachine.status() } : {}),
       pending: s.pending, premiumPaid: this.premiumPaid, extPremium: this.extPremium, hypoPremium: this.hypoPremium,
       switchPaid: this.switchPaid, penaltyPaid: this.penaltyPaid, tradeLoss: this.tradeLoss, unwound: this.unwound,
       externalInterest: this.externalInterest, hypoInterest: this.hypoInterest, investedUsd: this.investedUsd,

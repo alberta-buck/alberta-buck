@@ -44,8 +44,9 @@ cash, insurer pools and remaining receipt basis. Normal household decisions,
 five-year campaigns and corrected-token Notes proofs remain in the
 [[file:doc/review/bucknet-economy-implementation.org][unified accounting plan]]. Hosted examples below are separate deployments;
 local build commands use this checkout. The savings economy still needs its accounting migration.
-The [[file:README-households.org][household guide]] explains the checkpointed refinancing states,
-receipt-backed accounting and exact public data for decision histories and charts.
+The [[file:README-households.org][household guide]] explains checkpointed refinancing and
+calendar flows, dated mortgage accounting and exact public data for decision
+histories and charts.
 
 * Try it
 

@@ -1,0 +1,452 @@
+{
+  "schema": 1,
+  "money": "raw decimal strings",
+  "apr": "parts per billion",
+  "interest": "floor daily, APR / 365; payment after daily interest",
+  "flow": {
+    "settings": {"home_k": 1000, "ltv": 0.4, "cash_k": 20, "income_frac": 0.24, "living_frac": 0.5, "apr": 0.06, "premium_bp": 100},
+    "opening": "20000000000", "income": "20000000000", "living": "10000000000", "full_premium": "833333333",
+    "cases": [
+      {"name": "confirmed", "phase": "income", "fault": "none"},
+      {"name": "lost wage reply", "phase": "income", "fault": "lost"},
+      {"name": "unknown wage submission", "phase": "income", "fault": "unknown"},
+      {"name": "unproven wage amount", "phase": "income", "fault": "bad-mint-evidence"},
+      {"name": "reverted wage mint", "phase": "income", "fault": "revert"},
+      {"name": "lost living payment reply", "phase": "living", "fault": "lost"},
+      {"name": "lost insurance payment reply", "phase": "insurance", "fault": "lost"},
+      {"name": "lost mortgage payment reply", "phase": "mortgage", "fault": "lost"},
+      {"name": "unavailable bank date", "phase": "mortgage", "fault": "date-unavailable"}
+    ]
+  },
+  "cases": [
+    {
+      "name": "five-year mortgage counterexample",
+      "principal": "400000000000",
+      "apr_ppb": "60000000",
+      "start_day": 0,
+      "steps": [
+        {
+          "advance": 0,
+          "expected": {
+            "day": 0,
+            "balance": "400000000000",
+            "interest": "0",
+            "paid": "0"
+          }
+        },
+        {
+          "advance": 1,
+          "expected": {
+            "day": 1,
+            "balance": "400065753424",
+            "interest": "65753424",
+            "paid": "0"
+          }
+        },
+        {
+          "advance": 30,
+          "expected": {
+            "day": 30,
+            "balance": "401977311767",
+            "interest": "1977311767",
+            "paid": "0"
+          }
+        },
+        {
+          "advance": 365,
+          "expected": {
+            "day": 365,
+            "balance": "424732524083",
+            "interest": "24732524083",
+            "paid": "0"
+          }
+        },
+        {
+          "advance": 1826,
+          "expected": {
+            "day": 1826,
+            "balance": "540018965560",
+            "interest": "140018965560",
+            "paid": "0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "refinance discovered late",
+      "principal": "400000000000",
+      "apr_ppb": "60000000",
+      "start_day": 0,
+      "steps": [
+        {
+          "advance": 30,
+          "expected": {
+            "day": 30,
+            "balance": "401977311767",
+            "interest": "1977311767",
+            "paid": "0"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:refi",
+            "day": 10,
+            "amount": "100000000000"
+          },
+          "expected": {
+            "day": 30,
+            "balance": "301648030719",
+            "interest": "1648030719",
+            "paid": "100000000000"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:refi",
+            "day": 10,
+            "amount": "100000000000"
+          },
+          "changed": false,
+          "expected": {
+            "day": 30,
+            "balance": "301648030719",
+            "interest": "1648030719",
+            "paid": "100000000000"
+          }
+        },
+        {
+          "at": 9,
+          "expected": {
+            "day": 9,
+            "balance": "400592170083",
+            "interest": "592170083",
+            "paid": "0"
+          }
+        },
+        {
+          "at": 10,
+          "expected": {
+            "day": 10,
+            "balance": "300658020850",
+            "interest": "658020850",
+            "paid": "100000000000"
+          }
+        },
+        {
+          "at": 20,
+          "expected": {
+            "day": 20,
+            "balance": "301152618964",
+            "interest": "1152618964",
+            "paid": "100000000000"
+          }
+        },
+        {
+          "advance": 60,
+          "expected": {
+            "day": 60,
+            "balance": "303139161216",
+            "interest": "3139161216",
+            "paid": "100000000000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "monthly payments",
+      "principal": "400000000000",
+      "apr_ppb": "60000000",
+      "start_day": 0,
+      "steps": [
+        {
+          "advance": 30,
+          "expected": {
+            "day": 30,
+            "balance": "401977311767",
+            "interest": "1977311767",
+            "paid": "0"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:30",
+            "day": 30,
+            "amount": "2500000000"
+          },
+          "expected": {
+            "day": 30,
+            "balance": "399477311767",
+            "interest": "1977311767",
+            "paid": "2500000000"
+          }
+        },
+        {
+          "advance": 60,
+          "expected": {
+            "day": 60,
+            "balance": "401452039739",
+            "interest": "3952039739",
+            "paid": "2500000000"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:60",
+            "day": 60,
+            "amount": "2500000000"
+          },
+          "expected": {
+            "day": 60,
+            "balance": "398952039739",
+            "interest": "3952039739",
+            "paid": "5000000000"
+          }
+        },
+        {
+          "advance": 90,
+          "expected": {
+            "day": 90,
+            "balance": "400924171145",
+            "interest": "5924171145",
+            "paid": "5000000000"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:90",
+            "day": 90,
+            "amount": "2500000000"
+          },
+          "expected": {
+            "day": 90,
+            "balance": "398424171145",
+            "interest": "5924171145",
+            "paid": "7500000000"
+          }
+        },
+        {
+          "advance": 120,
+          "expected": {
+            "day": 120,
+            "balance": "400393693148",
+            "interest": "7893693148",
+            "paid": "7500000000"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:120",
+            "day": 120,
+            "amount": "2500000000"
+          },
+          "expected": {
+            "day": 120,
+            "balance": "397893693148",
+            "interest": "7893693148",
+            "paid": "10000000000"
+          }
+        },
+        {
+          "advance": 365,
+          "expected": {
+            "day": 365,
+            "balance": "414244147991",
+            "interest": "24244147991",
+            "paid": "10000000000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "nonzero arrival day",
+      "principal": "123000000",
+      "apr_ppb": "45000000",
+      "start_day": 100,
+      "steps": [
+        {
+          "advance": 110,
+          "expected": {
+            "day": 110,
+            "balance": "123151723",
+            "interest": "151723",
+            "paid": "0"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:arrived",
+            "day": 105,
+            "amount": "23000000"
+          },
+          "expected": {
+            "day": 110,
+            "balance": "100137542",
+            "interest": "137542",
+            "paid": "23000000"
+          }
+        },
+        {
+          "at": 105,
+          "expected": {
+            "day": 105,
+            "balance": "100075838",
+            "interest": "75838",
+            "paid": "23000000"
+          }
+        },
+        {
+          "advance": 130,
+          "expected": {
+            "day": 130,
+            "balance": "100384736",
+            "interest": "384736",
+            "paid": "23000000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "zero-interest full-width repayment",
+      "principal": "1606938044258990275541962092341162602522202993782792835301413",
+      "apr_ppb": "0",
+      "start_day": 0,
+      "steps": [
+        {
+          "advance": 50,
+          "expected": {
+            "day": 50,
+            "balance": "1606938044258990275541962092341162602522202993782792835301413",
+            "interest": "0",
+            "paid": "0"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:wide",
+            "day": 10,
+            "amount": "803469022129495137770981046170581301261101496891396417650688"
+          },
+          "expected": {
+            "day": 50,
+            "balance": "803469022129495137770981046170581301261101496891396417650725",
+            "interest": "0",
+            "paid": "803469022129495137770981046170581301261101496891396417650688"
+          }
+        },
+        {
+          "advance": 1826,
+          "expected": {
+            "day": 1826,
+            "balance": "803469022129495137770981046170581301261101496891396417650725",
+            "interest": "0",
+            "paid": "803469022129495137770981046170581301261101496891396417650688"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dust interest rounds per day",
+      "principal": "1000",
+      "apr_ppb": "60000000",
+      "start_day": 0,
+      "steps": [
+        {
+          "advance": 365,
+          "expected": {
+            "day": 365,
+            "balance": "1000",
+            "interest": "0",
+            "paid": "0"
+          }
+        },
+        {
+          "advance": 1826,
+          "expected": {
+            "day": 1826,
+            "balance": "1000",
+            "interest": "0",
+            "paid": "0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "fully retired balance stays empty",
+      "principal": "200000000",
+      "apr_ppb": "0",
+      "start_day": 0,
+      "steps": [
+        {
+          "advance": 30,
+          "expected": {
+            "day": 30,
+            "balance": "200000000",
+            "interest": "0",
+            "paid": "0"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:close",
+            "day": 30,
+            "amount": "200000000"
+          },
+          "expected": {
+            "day": 30,
+            "balance": "0",
+            "interest": "0",
+            "paid": "200000000"
+          }
+        },
+        {
+          "advance": 1826,
+          "expected": {
+            "day": 1826,
+            "balance": "0",
+            "interest": "0",
+            "paid": "200000000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "large interest-bearing debt",
+      "principal": "1267650600228229401496703205407",
+      "apr_ppb": "75000000",
+      "start_day": 0,
+      "steps": [
+        {
+          "advance": 30,
+          "expected": {
+            "day": 30,
+            "balance": "1275488211749216022910824194407",
+            "interest": "7837611520986621414120989000",
+            "paid": "0"
+          }
+        },
+        {
+          "pay": {
+            "key": "bank:large",
+            "day": 15,
+            "amount": "316912650057057350374175801344"
+          },
+          "expected": {
+            "day": 30,
+            "balance": "957597369909607043653042192315",
+            "interest": "6859419738434992530514788252",
+            "paid": "316912650057057350374175801344"
+          }
+        },
+        {
+          "advance": 365,
+          "expected": {
+            "day": 365,
+            "balance": "1025828597646499309284068337707",
+            "interest": "75090647475327258161540933644",
+            "paid": "316912650057057350374175801344"
+          }
+        }
+      ]
+    }
+  ]
+}

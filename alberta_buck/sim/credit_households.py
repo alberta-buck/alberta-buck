@@ -8,6 +8,7 @@ from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _imp
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
 from alberta_buck.sim.net_household import HouseholdRefinance, assess_refinance, observe_refinance_forecasts
+from alberta_buck.sim.household_calendar import HouseholdCalendar
 from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted
 from buck_core.session import _txhex, custom_error_name
 
@@ -70,6 +71,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._net_trade_uncertain = False               # uncertain guarded buy must be reconciled
         self._net_pending_buy_hash = None
         self.refinance_machine  = HouseholdRefinance(self)
+        self.calendar_machine   = HouseholdCalendar(self)
         self.wallet_bought      = 0
         self._sold              = False                 # the insured asset has been sold
         self._released          = False                 # its coverage has been released
@@ -353,10 +355,18 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         """Execute an assessed plan, including its optional bounded reserve buy."""
         if getattr(d, "buck_accounting", "") != "net":
             raise ValueError("canonical refinancing requires net accounting")
+        if self.calendar_machine.bound:
+            self.calendar_machine.prepare(d, day)
+            if self.calendar_machine.active:
+                raise ValueError("household calendar must finish before refinancing")
         if (self._pending_repayment(d) or self._net_repayment_reserve is not None or
                 self._net_repayment_target is not None):
             raise ValueError("household buyback must finish before refinancing")
         return self.refinance_machine.start(d, plan, day, ctr, context=context)
+
+    def advance_net_calendar(self, d, day, ctr):
+        """Explicit recurring-flow component; normal economic decisions remain gated."""
+        return self.calendar_machine.advance(d, day, ctr)
 
     def _recover_pending_operations(self, d, ctr, day=None):
         """Reconcile one known receipt before this household submits more work.
@@ -368,6 +378,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         """
         if getattr(d, "buck_accounting", "") != "net":
             return False
+        if self.calendar_machine.bound:
+            self.calendar_machine.prepare(d, self._last_day if day is None else day)
         try:
             machine = getattr(self, "refinance_machine", None)
             if machine is not None and machine.active:
@@ -403,7 +415,12 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 return True
             if self._pending_repayment(d):
                 return True
-            return self._resume_net_repayment(d, ctr)
+            if self._resume_net_repayment(d, ctr):
+                return True
+            if self.calendar_machine.active:
+                self.calendar_machine.advance(d, self._last_day if day is None else day, ctr)
+                return True  # reconciled recurring work consumes this turn
+            return False
         except Exception as exc:
             self.last_action    = ("buy-pending" if getattr(self, "_net_trade_uncertain", False) else
                                    "cancel-pending" if getattr(self, "_net_cancel_uncertain", False) else "repay-pending")
@@ -1272,6 +1289,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         st.update(self.exit_state())
         if getattr(d, "buck_accounting", "") == "net":
             st["machine"] = self.refinance_machine.status()
+            st["calendar"] = self.calendar_machine.status()
         return st
 
     def exit_state(self):

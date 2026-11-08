@@ -18,8 +18,10 @@ import { TransactionReceiptPending, TransactionReverted } from "../src/session.j
 import { settlementOps } from "../src/settlement.js";
 import { observeNetMarket, netSaleExpected, netPurchaseExpected, netPurchaseCost } from "../src/net-market-quote.js";
 import { buyBuckExact } from "../src/market.js";
+import { MortgageBook } from "../src/agents/household-calendar.js";
 
 const REFINANCE = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-refinance.json", import.meta.url)));
+const CALENDAR = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-calendar.json", import.meta.url))).flow;
 const RAW = 1_000_000n;
 
 test("canonical equilibrium bootstrap reuses one fund/basket and issues actual pool money", async (t) => {
@@ -489,6 +491,170 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
         assert.equal(machine.status().status, "pending");
       }
     });
+  });
+  await t.test("household calendar recovers actual flows without stopping the shadow", async (t) => {
+    const phases = ["income", "living", "insurance", "mortgage"], BANK = "0x000000000000000000000000000000000000dEaD";
+    for (const [index, c] of CALENDAR.cases.entries()) await t.test(c.name, async () => {
+      const account = { address: `0x${(0xbca00n + BigInt(index)).toString(16).padStart(40, "0")}` };
+      const a = new CreditHouseholdAgent({ account, member: `calendar-${index}`, settings: CALENDAR.settings });
+      await a.setup(world);
+      const m = a.calendarMachine, owner = world.holderAddress(account), initialDebt = a.mortgage;
+      const [opening, income, living, premium] = ["opening", "income", "living", "full_premium"].map((k) => BigInt(CALENDAR[k]));
+      const bankBefore = await s.call(world.usdc, "balanceOf", [BANK]);
+      assert.equal(await a.advanceNetCalendar(world, 0), false);
+      assert.equal(a.started, true); assert.equal(a.hypoCash, opening);
+      assert.equal(await s.call(world.usdc, "balanceOf", [owner]), opening);
+      assert.equal(a.incomeTotal + a.externalPaid + m.incomeDue, 0n);
+      const calls = {}, mint = m.mint.bind(m), pay = world.netSettlementOps.payExact, record = m.recordMortgage.bind(m);
+      let failed = false;
+      const submit = async (phase, dispatch, receiptOf, ...args) => {
+        calls[phase] = (calls[phase] ?? 0) + 1;
+        if (c.phase === phase && c.fault === "unknown") throw new Error("submission outcome unknown");
+        if (phase === "income" && c.fault === "bad-mint-evidence") args = [args[0], args[1] + 1n];
+        if (phase === "income" && c.fault === "revert" && !failed) {
+          failed = true;
+          return s.send(world.usdc, "transfer", [BANK, (1n << 256n) - 1n], { expect: "either" });
+        }
+        const result = await dispatch(...args), receipt = receiptOf(result);
+        if (c.phase === phase && c.fault === "lost" && !failed) {
+          failed = true; throw new TransactionReceiptPending(receipt.transactionHash);
+        }
+        return result;
+      };
+      m.mint = (...args) => submit("income", mint, (r) => r, ...args);
+      world.netSettlementOps.payExact = (...args) => submit(m.flow.phase, pay, (r) => r.receipt, ...args);
+      m.recordMortgage = async (...args) => {
+        if (c.fault === "date-unavailable" && !failed) { failed = true; throw new Error("receipt block temporarily unavailable"); }
+        return record(...args);
+      };
+      const moveTo = async (day) => advanceTime(world, m.epoch + BigInt(day * DAY) - (await s.client.getBlock()).timestamp);
+      try {
+        await moveTo(30);
+        const pending = await a.advanceNetCalendar(world, 30);
+        assert.equal(pending, c.fault !== "none", a.lastError);
+        assert.equal(a.hypoPaid, a.payment); assert.equal(a.hypoLiving, living); assert.equal(a.hypoPremium, premium);
+        assert.equal(a.hypoCash, opening + income - living - premium - a.payment);
+        const sent = { ...calls };
+        if (pending) {
+          assert.equal(m.status().status, c.fault === "revert" ? "refused" : "pending"); assert.equal(m.flow.phase, c.phase);
+          await assert.rejects(a.startNetRefinance(world, null, 30), /calendar must finish/);
+          if (["unknown", "bad-mint-evidence"].includes(c.fault)) {
+            assert.equal(m.incomeDue, income); assert.equal(a.incomeTotal, 0n);
+            await moveTo(60); await a.act(world, 60, 0);
+            assert.deepEqual(calls, sent); assert.equal(a.incomeTotal + a.externalPaid, 0n);
+            assert.equal(await s.call(world.usdc, "balanceOf", [owner]), opening + (c.fault === "bad-mint-evidence" ? income + 1n : 0n));
+            assert.equal(m.incomeDue, 2n * income); assert.equal(m.queue.length, 2);
+            assert.equal(a.hypoPaid, 2n * a.payment); assert.ok(a.hypoInterest > 0n);
+            assert.equal(a.livingArrears, 2n * living); assert.equal(a.premiumArrears, 2n * premium);
+            assert.match(a.lastError, c.fault === "unknown" ? /hash unavailable/ : /does not match terms/); return;
+          }
+          assert.ok(m.flow.hash);
+          if (c.phase === "mortgage") { assert.equal(a.externalPaid, 0n); assert.equal(m.status().mortgage_provisional, true); }
+          const getReceipt = s.client.getTransactionReceipt;
+          if (c.fault !== "revert") {
+            s.client.getTransactionReceipt = async (args) => ({ ...await getReceipt(args), transactionHash: `0x${"00".repeat(32)}` });
+            try { assert.equal(await a.advanceNetCalendar(world, 30), true); }
+            finally { s.client.getTransactionReceipt = getReceipt; }
+          }
+          assert.deepEqual(calls, sent);
+          await moveTo(35); await a.act(world, 35, 0);
+        }
+        const expectedCalls = Object.fromEntries(phases.map((k) => [k, 1]));
+        expectedCalls.income += c.fault === "revert" ? 1 : 0;
+        assert.deepEqual(calls, expectedCalls);
+        assert.equal(a.externalPaid, a.payment); assert.equal(a.hypoPaid, a.payment);
+        assert.equal(a.incomeTotal, income); assert.equal(a.livingPaid, living); assert.equal(a.extPremium, premium);
+        assert.equal(a.livingArrears + a.premiumArrears + m.incomeDue, 0n);
+        assert.equal(await s.call(world.usdc, "balanceOf", [BANK]) - bankBefore, living + premium + a.payment);
+        assert.equal(await s.call(world.usdc, "balanceOf", [owner]), opening + income - living - premium - a.payment);
+        const bankDay = pending && c.phase !== "mortgage" ? 35 : 30;
+        const actual = new MortgageBook(initialDebt, 60_000_000n);
+        actual.advance(bankDay); actual.recordPayment("bank", bankDay, a.payment); actual.advance(m.day);
+        assert.deepEqual(m.actual.state, actual.state);
+        const shadow = new MortgageBook(initialDebt, 60_000_000n);
+        shadow.advance(30); shadow.recordPayment("shadow", 30, a.payment); shadow.advance(m.day);
+        assert.deepEqual(m.shadow.state, shadow.state); assert.equal(m.status().mortgage_provisional, false);
+        const events = a.householdEventsSince(), count = events.length;
+        assert.ok(events.every((e) => e.kind === "calendar" && Object.hasOwn(e.accounts, "counterfactual_mortgage")));
+        assert.equal(Number(events.find((e) => e.operation === "mortgage" && e.status === "confirmed").effective_day), bankDay);
+        assert.equal(await a.advanceNetCalendar(world, m.day), false);
+        assert.equal(a.householdEventsSince().length, count);
+        await moveTo(60);
+        assert.equal(await a.advanceNetCalendar(world, 60), false);
+        assert.equal(a.externalPaid, 2n * a.payment); assert.equal(a.hypoPaid, 2n * a.payment);
+        assert.equal(a.incomeTotal, 2n * income);
+        assert.deepEqual(calls, Object.fromEntries(Object.entries(expectedCalls).map(([k, v]) => [k, v + 1])));
+      } finally { world.netSettlementOps.payExact = pay; }
+    });
+  });
+  await t.test("calendar charges only unactivated external insurance", async () => {
+    const account = { address: "0x00000000000000000000000000000000000bcaf0" };
+    const a = new CreditHouseholdAgent({ account, member: "calendar-insurance", settings: CALENDAR.settings });
+    await a.setup(world); await a.advanceNetCalendar(world, 0);
+    const owner = world.holderAddress(account), [id] = world._credits.get(account.address);
+    await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi, functionName: "transfer", args: [owner, 20n * RAW] })]);
+    await world.netCreditOps.issue(owner, id, 100n * RAW, 40n * RAW, 10n * RAW, world.poolAcct);
+    const full = BigInt(CALENDAR.full_premium), expected = (full * (a.face - 100n * RAW) + a.face - 1n) / a.face;
+    await advanceTime(world, a.calendarMachine.epoch + BigInt(30 * DAY) - (await s.client.getBlock()).timestamp);
+    assert.equal(await a.advanceNetCalendar(world, 30), false, a.lastError);
+    assert.equal(a.extPremium, expected); assert.ok(expected < full); assert.equal(a.hypoPremium, full);
+    assert.equal(a.mortgage, a.hypoMortgage);
+  });
+  await t.test("calendar dates refinance receipts and keeps its paydays", async (t) => {
+    for (const [index, fault] of ["lost", "date-unavailable"].entries()) await t.test(fault, async () => {
+      const account = { address: `0x${(0xbcb00n + BigInt(index)).toString(16).padStart(40, "0")}` };
+      const a = new CreditHouseholdAgent({ account, member: `calendar-refinance-${index}`, settings: CALENDAR.settings });
+      await a.setup(world); await a.advanceNetCalendar(world, 0); await world.households.openTrading(account);
+      const m = a.calendarMachine, initial = a.mortgage, owner = world.holderAddress(account), [id] = world._credits.get(account.address);
+      const b = Object.fromEntries(Object.entries(REFINANCE.base).map(([k, v]) => [k, BigInt(v)]));
+      await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi, functionName: "transfer", args: [owner, b.seed_buck] })]);
+      await s.send(world.kctrl, "compute");
+      const candidate = await world.netCreditOps.assessIssueCandidate(owner, id, b.coverage, b.new_spendable, b.premium);
+      assert.deepEqual(candidate.reasons, []);
+      const plan = { candidate, ...Object.fromEntries(["export_buck", "minimum_usdc", "mortgage_limit", "cash_buffer",
+        "reserve_floor", "switch_cost", "penalty_numerator", "penalty_denominator"].map((k) => [k, b[k]])) };
+      const pay = world.netSettlementOps.payExact, record = m.recordMortgage.bind(m), sends = [];
+      let dates = 0;
+      world.netSettlementOps.payExact = async (...args) => {
+        const result = await pay(...args); sends.push(result.receipt);
+        if (fault === "lost" && sends.length === 1) throw new TransactionReceiptPending(result.receipt.transactionHash);
+        return result;
+      };
+      m.recordMortgage = async (...args) => {
+        if (fault === "date-unavailable" && dates++ === 0) throw new Error("receipt block temporarily unavailable");
+        return record(...args);
+      };
+      try {
+        await a.startNetRefinance(world, plan, 0);
+        assert.equal(a.refinanceMachine.status().status, "pending", a.lastError);
+        assert.ok(a.refinanceMachine.flow.hash); assert.equal(m.status().mortgage_provisional, true);
+        assert.equal(a.externalPaid, 0n);
+        const receipt = sends[0], block = await s.client.getBlock({ blockNumber: receipt.blockNumber });
+        await advanceTime(world, m.epoch + BigInt(30 * DAY) - (await s.client.getBlock()).timestamp);
+        await a.act(world, 30, 0);
+        assert.equal((await s.client.getBlock({ blockNumber: receipt.blockNumber })).timestamp, block.timestamp);
+        assert.equal(a.externalPaid, b.mortgage_limit); assert.equal(sends.length, 1);
+        assert.equal(a.refinanceMachine.status().status, "complete");
+        assert.equal(a.incomeTotal, 0n); assert.equal(m.incomeDue, BigInt(CALENDAR.income)); assert.equal(a.hypoPaid, a.payment);
+        const expected = new MortgageBook(initial, 60_000_000n);
+        expected.recordPayment("refinance", 0, b.mortgage_limit); expected.advance(30);
+        assert.deepEqual(m.actual.state, expected.state);
+        await a.act(world, 30, 0);
+        assert.equal(a.externalPaid, b.mortgage_limit + a.payment); assert.equal(sends.length, 4);
+        assert.equal(a.switchPaid, b.switch_cost); assert.equal(a.refis, 1); assert.equal(m.active, false); assert.equal(m.incomeDue, 0n);
+      } finally { world.netSettlementOps.payExact = pay; }
+    });
+  });
+  await t.test("calendar refuses skipped paydays and labels without chain time", async () => {
+    const a = new CreditHouseholdAgent({ account: { address: "0x00000000000000000000000000000000000bcb10" },
+      member: "calendar-clock", settings: CALENDAR.settings });
+    await a.setup(world); await a.advanceNetCalendar(world, 0);
+    const before = [a.mortgage, a.hypoCash, a.hypoPaid, a.livingArrears, a.householdEventsSince().length];
+    await assert.rejects(a.advanceNetCalendar(world, 30), /chain clock/);
+    assert.deepEqual([a.mortgage, a.hypoCash, a.hypoPaid, a.livingArrears, a.householdEventsSince().length], before);
+    await advanceTime(world, a.calendarMachine.epoch + BigInt(31 * DAY) - (await s.client.getBlock()).timestamp);
+    await assert.rejects(a.advanceNetCalendar(world, 31), /each payday/);
+    assert.deepEqual([a.mortgage, a.hypoCash, a.hypoPaid, a.livingArrears, a.householdEventsSince().length], before);
   });
   await t.test("personal records use actual portfolios and exact integer money", async () => {
     const Q = 10n ** 36n, RAW = 1_000_000n;

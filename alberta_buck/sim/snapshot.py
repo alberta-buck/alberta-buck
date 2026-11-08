@@ -1107,7 +1107,7 @@ class Snapshotter:
             cursors[ident] = len(machine.events)
         if events:
             self.frames[-1]["household_events"] = events
-            self.meta["household_events"] = {"schema": 1, "scope": "refinance", "money": "raw decimal strings",
+            self.meta["household_events"] = {"schema": 1, "scope": "refinance/calendar", "money": "raw decimal strings",
                                              "identity": "agent/member", "ordering": "per-household seq"}
 
     def write(self, path=None) -> Path:
