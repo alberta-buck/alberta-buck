@@ -5,8 +5,9 @@ import {BuckBasketEquityStorage} from "./BuckBasketEquityStorage.sol";
 import {IBasketArb} from "./IBasketArb.sol";
 import {BasketMarketOps} from "./BasketMarketOps.sol";
 
-/// @notice Shared by the two existing upkeep facets. Arb uses actual surplus
-/// cash, never new issuance, LP principal withdrawal or the caller reserve.
+/// @notice Shared by the two existing upkeep facets. Arb uses actual cash,
+/// preserves the net reserve on completion (or improves an existing deficit),
+/// and never uses new issuance, LP principal withdrawal or the caller reserve.
 abstract contract BasketArb is BuckBasketEquityStorage, IBasketArb {
     error CanonicalArbRequired();
     error BasketArbReentrant();

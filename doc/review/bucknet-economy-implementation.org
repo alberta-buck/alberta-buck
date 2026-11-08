@@ -28,9 +28,14 @@ facets and the separate desk now use explicit cash/principal transitions;
 real V3 and actual Jubilee settlement checks cover their contract paths.
 Fund/maturity work and optional actual basket retirement are now scheduled in
 both existing wheels. Public basket onboarding now validates the canonical
-model, public ordinary identity and matching BuckCredit hook, with shared
+model, verified public identity and matching BuckCredit hook, with shared
 setup in the existing upkeep facets and no deployed initializer. Production
 registry authorization and both public V3 lifecycles pass. The canonical
+machine basket is now an approved Carrying issuer. Its nominal ERC-20 flow
+uses one shared helper for net valuation/budgets/payouts and funded net-ROI
+arb, covering both directions of triangles and four-pool TOKEN routes. Both
+primary runtimes enable arb by default and use bounded transactions on the
+same wheel; detailed invariants and final acceptance are recorded below. The canonical
 machine wheel now has production identity authorization/revocation and real
 private-keeper reward tests. Canonical uint256 cash/baseline math now agrees
 across Solidity, Rust, Python and Node/browser WASM. Both existing machine
@@ -509,9 +514,9 @@ The prototype's sampled maximum 1,275,392 burn gas is not a worst-case bound.
   measured runtime was 24,516 bytes against the 24,576-byte runtime limit.
   Canonical wheel identity binding and funded reward acceptance are now
   implemented below. Cash-only platform acceptance still does not configure
-  that role in the primary world. Before enabling canonical arbitrage, add
-  actual inventory/fee acceptance for those routes. The older comparison
-  wheel has only 75 runtime bytes spare: prefer the canonical machine wheel
+  that role in the primary world. Canonical Carrying-basket inventory/fee
+  acceptance and primary arb activation are recorded below. The older
+  comparison wheel has very little runtime space: prefer the canonical machine wheel
   in primary builders and retire legacy variants only after mapping their
   distinct detection coverage. This binding milestone does not complete the
   ecosystem-wide service allowlist or production insurer strategies.
@@ -624,7 +629,7 @@ implementation sequence, before changing the primary economy builder.
   cash alone must not be reported as restored K backing. Preserve bounded
   scans and prevent tiny/no-op repayments from earning repeated rewards.
   Optional fourth JubileeKind job: actual NFT principal, matching canonical
-  ordinary basket, governed raw cap/minimum, current and final cash target,
+  basket (including approved Carrying), governed raw cap/minimum, current and final cash target,
   guarded full-facility relief quote and exact batch recheck. Full-facility
   sizing avoids a demonstrated partial-quote BUCK-second rounding trap;
   no unbounded search or relaxed relief is needed. Complete dust tails may
@@ -633,10 +638,12 @@ implementation sequence, before changing the primary economy builder.
   liquidity, maturity-owner control and the mixed-age counterexample.
 - [X] Enable normal net-mode openCredit only after real-contract lifecycle,
   low-K and fund liquidity regressions pass. Validate the intended public,
-  ordinary basket identity and zero-premium self-issued facility at that gate.
+  basket identity and zero-premium self-issued facility at that gate. The
+  current default is an approved Carrying issuer; Ordinary fixtures retain
+  comparison coverage.
   BasketCreditSetup is a shared abstract implementation in both existing
   upkeep facets, adding no storage or deployed initializer. Governance
-  authorizes/revokes an exact public ordinary contract binding at the basket
+  authorizes/revokes an exact public Carrying contract binding at the basket
   address through IBasketUpkeep; the production registry still certifies the
   operator, key, ciphertext, target and flags. Only the token's registry is
   accepted, and binding setup closes after deposits or credit opening.
@@ -1089,19 +1096,21 @@ the Jubilee cash cap or the rule excluding unpaid claims from new credit.
   with ordinary sequential routing through the Carrying basket. Its outgoing
   BUCK carries its pooled average fee basis; do not pretend a particular
   incoming BUCK lot can be selected or its age reset.
-- [ ] Qualify both actual facets/wheel and Python/JS fresh deployment, net
+- [X] Qualify both actual facets/wheel and Python/JS fresh deployment, net
   deposits/redemptions, Jubilee single receipt and household quotes. Existing
   live/frozen Ordinary identities cannot simply change flavor; use fresh sim
   worlds and a separately reviewed real deployment migration.
 
-Contract checkpoint: canonical accounting passed 402 tests; the subsequent
-focused Carrying/arb set passes 52 including aged net-payout fuzzing and a
-mixed-age fractional nominal debit. Both existing wheels and facets fit the
-runtime limit. Python bootstrap/marks/short JSON/PDF integration passes six
-checks. The first full JS run passed 39 checks but exposed one old test using
-an Ordinary-household reader on the Carrying basket; that fixture now reads
-actual NFT/fund state instead. Its corrected full acceptance is still pending.
-Runtime activation, household automation and five-year evidence remain open.
+The contract implementation is committed at =9e0364d3=. The subsequent
+focused Carrying/arb set passes 53, including aged net-payout fuzzing,
+mixed-age fractional nominal debit and reserve-deficit repair. Both existing
+wheels and facets fit the runtime limit. Python bootstrap/marks/short JSON/PDF
+integration passes six checks, now including active shock repair. The
+corrected complete JS household acceptance passes 41 checks; the fresh
+active-arb world separately passes its actual withdrawal/repair test.
+Canonical Python/JS machine worlds enable arb by default, with explicit
+disable switches for component comparisons. See the current handoff for
+final logs and the remaining household/five-year boundary.
 
 - [X] First canonical arb qualification: real V3, actual NFT-backed public
   basket LP placement, BUCK/USDC shocks in both directions, no caller reward,
@@ -1109,12 +1118,21 @@ Runtime activation, household automation and five-year evidence remain open.
   Repair callback scope after reproducing a pool retaining authority after
   the outermost swap. Characterize nominally unchanged wheel BUCK inventory
   losing net backing during an otherwise TOKEN-profitable cycle.
-- [ ] Complete net-portfolio/funding qualification and enable the existing
+- [X] Complete net-portfolio/funding qualification and enable the existing
   wheel's arb against canonical Buck and real V3. Cover TOKEN moves,
   existing inventory and both directions. Extend the same bounded
   engine to all simple triangles/four-pool cycles. Read current liquidity,
   fees and net/gross balances during normal ticks; never trade inside the
   read-only valuation path used by Buck.
+- [X] Keep runtime work bounded without adding another scheduler: at most
+  four examined slots/one completed job per transaction, real cursor progress
+  through one rotation or the caller's work budget, and publication between
+  batches. Run arb before Ops/response capital deployment. Preserve actual
+  confirmed receipt prefixes rather than synthesize a combined receipt.
+- [X] Permit atomic use of the basket's own cash while preserving its
+  pre-trade net reserve floor, or never worsening an existing reserve deficit.
+  Prohibiting initial spends from reserve would starve useful repair work.
+  Do not finance arb by issuance, principal sales or caller reward reserves.
 - [X] Include actual basket LP fee ownership, protocol fees and carried-fee
   exchange in the cost/return model. An exchange can replace higher-fee
   BUCK with lower-fee BUCK or TOKEN exposure that a nominal-price-only
@@ -1406,6 +1424,10 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-07 | Pin both runners and household arrivals to one calendar epoch | Corrected Python batch/interactive ticks to absolute targets, including non-divisor tick counts. JS DayClock now absorbs keeper/transaction time, is idempotent within a day and rejects a whole-day work overrun. Both households share the runner's epoch, including later arrivals and interleaved actor work; personal status exposes the anchor. No inferred driver epoch on restoration. Shared five-year clock properties and actual two-arrival wage/bank fixtures pass. Final Python supported accounting/reporting: 206 passed, no skips, regenerating short JSON/PDFs. Complete unfiltered JS calendar primary acceptance: 40 passed, no skips; later clock addition separately passes 71 pure checks and one focused actual fixture (two checks including its parent). Changed-insurer fixture: five passed. Existing browser equilibrium bundle rebuild passes. No Solidity changed; normal household policy/surplus/exits/import, real five-year economy campaigns and Notes remain gated. | This commit |
 
+| 2026-11-08 | Convert the canonical basket to Carrying and execute funded net-portfolio arb | Reused the existing shell, facets, Buck issuer approval and wheel. One linked BasketMarketOps helper converts nominal cash at existing market/payout boundaries and checks actual wallet plus owned LP return at frozen net marks. Ordinary sequential cycles replace the special direct-pool workaround. Cover both directions of triangles and four-pool routes, actual fee ownership/protocol exclusion, aged fee transport, positive LP-supported cash losses, net gain despite nominal decline, reserve/K/authority refusals and exact payout fuzzing. Both SDKs link the helper; canonical builders bind/approve Carrying before mode freeze. Frames expose exact fee ratios/return attribution without adding gains twice to MTM ROI. Initial checkpoint: 402 canonical, 52 focused and six Python integration checks passed; corrected JS acceptance and runtime activation continued next. | =9e0364d3= |
+
+| 2026-11-08 | Activate the same funded arb in both primary runtimes | Enable canonical machine arb by default with explicit component disable switches; retain one wheel and one shared Python tick driver. Bound each transaction to four examined slots/one job and continue by actual cursor, publishing the guarded fund mark between batches. Arb precedes capital deployment; an atomic cycle may use actual cash while preserving the pre-trade net reserve or not worsening an existing deficit. Real Python/JS investment and USDC-withdrawal fixtures verify positive net return, actual fee-flow events, price repair and bounded gas. Final canonical suite: 404 passed; focused suite: 53 passed. Primary Python: six passed with fresh short JSON/PDFs; primary JS: 41 controlled household checks plus one fresh active-arb check; pure JS: 71. Shared SDK: 35 Python and 20 JS; wallet/browser: 15. Contract compiler/link/runtime checks and equilibrium browser build passed. Old recovery-only fixtures now initialize their unbound calendar explicitly. Updated Make/detail guides and current checklist; automatic household decisions/surplus/exits, real five-year campaigns and Notes remain open. | This commit |
+
 ** Calendar-qualified checkpoint (6bf53283)
 
 - Worktree =.claude/worktrees/buck-compound=; branch
@@ -1474,11 +1496,12 @@ the canonical Buck evidence recorded below.
 The earlier observed-defaults handoff is preserved at =eb0be458=; its
 implementation and validation milestones remain in the journal above.
 
-** Current handoff: Carrying basket and funded ROI contract checkpoint
+** Current handoff: Carrying basket and active funded ROI wheel
 
 - Branch =feature/household-minimal-ecosystem= in
   =.claude/worktrees/buck-compound=, based on =6bf53283=. Earlier design and
-  callback checkpoints: =1201866d= and =70b27881=.
+  callback checkpoints: =1201866d= and =70b27881=. Contract conversion:
+  =9e0364d3=; this checkpoint completes primary runtime activation.
 - The owner requires the Carrying conversion in this arb work. The checklist
   above is current. The canonical basket now binds Carrying, is explicitly
   approved to issue, and preserves nominal ERC-20 flow while marking policy,
@@ -1487,10 +1510,17 @@ implementation and validation milestones remain in the journal above.
   swap/LP boundaries, read-only credit validation and funded ROI. Both existing
   upkeep facets reuse it. No new basket, token, wheel, monetary mode or Notes
   implementation was deployed. Ordinary fixtures remain comparison coverage.
+  The Carrying basket replaces the special direct pool-to-pool workaround;
+  one conversion boundary replaces separate cash implementations. Standard
+  sequential swaps and pooled average fee transport remain sufficient.
 - The existing canonical machine overrides the comparison wheel's strategy:
   N triangles and N*(N-1)/2 cross-TOKEN cycles, both directions, funded only
-  from actual surplus cash. No new issuance, LP-principal sale or reward
+  from actual basket cash. No new issuance, LP-principal sale or reward
   reserve finances arb. Caller bounty is not a trading prerequisite.
+  An atomic cycle can use the basket's own liquid reserve temporarily; on
+  completion it must preserve the pre-trade net reserve floor, or leave an
+  existing deficit no worse. Otherwise profitable repair could be starved.
+  Arb slots precede Ops/response capital deployment in the same wheel.
 - Quotes use bounded search and the current pool/fee/cash state. Execution
   rechecks, collects old fees before its baseline, freezes the existing net
   TWAP TOKEN marks, and verifies actual wallet + LP principal/new-fee return.
@@ -1501,33 +1531,58 @@ implementation and validation milestones remain in the journal above.
   frames now include =net.carrying= and exact =wh_arb_*= counters. Portfolio
   NAV uses net wealth; deliverable liquidity is a separate budget. See
   [[file:../BASKET-WHEEL.org::*Implemented Carrying-basket path (2026-11-08)][BASKET-WHEEL.org]] for invariants, API units and log access.
-- *Contracts*: =make nix-buck-accounting-test= passed *402* without skips in
-  =/private/tmp/buck-carrying-basket-accounting.log=. The subsequent
-  =make nix-basket-arb-test= passed *52* without skips in
-  =/private/tmp/buck-carrying-basket-focused.log=, including the additional
-  256-case aged payout fuzz test and mixed-age fractional cash retirement.
+- Both primary builders enable funded arb by default. Explicit component
+  controls are =SIM_WHEEL_ARB=0= and JS =wheelArb: false=. Older non-machine
+  Python comparisons remain off. The built-in keeper and BasketWheelAgent
+  share =basket_machine.tick_receipts=; JS =turnWheel= follows the same
+  bounded cursor logic. Scan at most four slots/finish at most one job per
+  transaction, continue through a rotation or work budget, and publish the
+  guarded valuation between batches. Preserve actual confirmed receipts;
+  a zero-work intermediate batch is not a whole-wheel idle result.
+- *Contracts*: final =make nix-buck-accounting-test= passed *404* without
+  skips in =/private/tmp/buck-carrying-basket-accounting-final.log=.
+  The retained =make nix-test= suite also passes *1,536*, with no failures,
+  the existing controller-fork setup skip and unchanged four proof-suite
+  exclusions. Log: =/private/tmp/buck-carrying-basket-all-contracts.log=.
+  Notes/proof restoration is not covered by that acceptance.
+  =make nix-basket-arb-test= passed *53* without skips in
+  =/private/tmp/buck-carrying-basket-runtime-contracts.log=, including the
+  256-case aged payout fuzz test, mixed-age fractional cash retirement and
+  successful atomic repair below the reserve target.
   The independent nominal-only arb finds no trade in the demonstrated
   positive-net/negative-nominal fee-basis exchange.
 - Runtime bytes: basket *24,170*; machine upkeep *24,168*; components
-  *17,254*; venue *21,692*; market helper *17,889*; canonical machine wheel
-  *18,824*; retained older wheel *24,532*. All remain under 24,576.
+  *17,254*; venue *21,692*; market helper *18,209*; canonical machine wheel
+  *18,746*; retained older wheel *24,532*. All remain under 24,576.
   Moving validation into the existing shared helper and explicit strategy
   overrides removed the size overflow without another contract hierarchy.
 - *Python*: the existing bootstrap, marks and short JSON/PDF tests passed
   *6* through the Nix/venv wrapper:
-  =/private/tmp/buck-carrying-basket-primary-py.log=; reports are under
-  =build/test/carrying-basket/=. Their first run identified the old use of
+  =/private/tmp/buck-carrying-basket-active-py.log=; reports are under
+  =build/test/carrying-basket/=. The bootstrap test invests actual capital,
+  sells BUCK into USDC, runs the bounded keeper and checks positive net
+  return, price repair and actual per-transaction work/gas. Their first run identified the old use of
   a household-only reader on the basket and old caller-share configuration.
   Both are corrected; household wallets still require Ordinary mode.
-- *JavaScript*: 71 pure checks pass. First full primary run passed *39*
-  but failed the same outdated basket-as-household assertion (one child and
-  its parent, 41 checks total). Its corrected test reads actual NFT principal
-  and marked fund relief; the corrected complete acceptance is not yet
-  claimed. Log: =/private/tmp/buck-carrying-basket-primary-js.log=.
-- *Next*: finish corrected JS primary/wallet/build/package acceptance;
-  qualify and activate funded arb in the primary Python/JS world with
-  practical bounded scans and actual pool shocks. Keep the old env gate
-  until that is demonstrated. Then finish household autonomous refinancing,
+- *JavaScript*: 71 pure checks pass. The corrected complete primary
+  household/fault suite passes *41* checks without skips; it explicitly
+  disables arb to retain control of its fault scenarios. Log:
+  =/private/tmp/buck-carrying-basket-primary-js-qualified.log=.
+  The separate fresh active-arb test passes through the same builder with
+  default settings, actual investment, USDC withdrawal and bounded keeper
+  repair: =/private/tmp/buck-carrying-basket-active-js.log=. It verifies
+  signed cash/LP gain attribution, actual fee-flow events, improved pool
+  price and per-transaction work/gas. These are 42 distinct actual checks.
+  The existing target includes both; =CORE_EQUILIBRIUM_TEST_FILES= selects
+  a file for focused work without another runner or acceptance target.
+- *Shared SDK and wallet*: 35 Python and 20 JavaScript cash/market/receipt
+  checks pass without skips in =/private/tmp/buck-carrying-basket-sdk-final.log= after
+  initializing the new unbound calendar in old recovery-only fixtures.
+  Wallet acceptance passes *15* including Chromium
+  in =/private/tmp/buck-carrying-basket-wallet.log=. Contract compiler/link/
+  size checks and the equilibrium browser build pass in
+  =/private/tmp/buck-carrying-basket-builds.log=.
+- *Next*: finish household autonomous refinancing,
   reserve-safe surplus saving/paydown and guarded exits; run short complete
   worlds before actual five-year campaigns and adjacent PDFs. Save/resume
   stays later work; Notes/proofs and release checks remain separate gates.

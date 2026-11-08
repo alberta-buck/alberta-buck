@@ -103,6 +103,51 @@ def targets_bp(d) -> list | None:
             for w, x in zip(declared, leaned)]
 
 
+def tick_receipts(d, *, rounds=1, max_work=12, max_scan=0, dispatch=None,
+                  proxy=None, receipts=None, publications=None):
+    """One bounded rotation per round; preserve each actual receipt.
+
+    Active funded arb scans at most four slots and completes at most one
+    job per transaction. Cursor progress, rather than a zero-work batch,
+    determines whether the whole rotation is idle. Publication after each
+    batch keeps the fund's changed single-position key usable by later jobs.
+    Supplied lists retain confirmed effects if a later send is uncertain.
+    """
+    from web3.logs import DISCARD
+    receipts = [] if receipts is None else receipts
+    publications = [] if publications is None else publications
+    d.last_wheel_receipts = receipts
+    send = dispatch or (lambda name, args: d.chain.send(getattr(d.wheel.functions, name)(*args)))
+    bounded = (getattr(d, "equity_machine", False)
+               and int(d.wheel.functions.arbRouteCount().call()) > 0)
+    for _ in range(rounds):
+        send("rearm", [])
+        slots = int(d.wheel.functions.slotCount().call())
+        remaining = max(1, slots)
+        cursor = int(d.wheel.functions.cursor().call())
+        round_work = 0
+        while remaining > 0 and round_work < max_work:
+            scan = min(remaining, max_scan or 4, 4) if bounded else max_scan
+            rc = send("tick", [1 if bounded else max_work - round_work, scan])
+            receipts.append(rc)
+            w = sum(int(ev["args"]["work"]) for ev in d.wheel.events.Ticked().process_receipt(rc, errors=DISCARD))
+            round_work += w
+            publication = publish_jubilee_valuation(d, proxy=proxy)
+            if publication is not None:
+                publications.append(publication)
+            if not bounded:
+                break
+            next_cursor = int(d.wheel.functions.cursor().call())
+            examined = (next_cursor - cursor) % slots or (slots if scan >= slots else 0)
+            if examined == 0:
+                break
+            remaining -= min(remaining, examined)
+            cursor = next_cursor
+        if round_work == 0:
+            break
+    return receipts, publications
+
+
 def book_receipt(d, receipt, ctr) -> None:
     """Wheel-driven desk actions use the same counters as keeper actions."""
     if not getattr(d, "equity_machine", False):

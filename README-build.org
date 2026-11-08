@@ -133,8 +133,8 @@ kernel, regenerates the demo bundle and uses that exact bundle to bootstrap
 the existing machine world. It checks the single fund/basket graph, weighted
 opening pools, governed wheel binding, zero-allowance keeper introduction,
 real insurer acceptance, premium funding and independent principal. It does
-not run the household decision loop; that lifecycle and full economy
-save/restore remain explicit migration gates. Synthetic SimLP/router binding
+not run the household decision loop; that lifecycle remains gated. Full
+economy save/restore is deferred. Synthetic SimLP/router binding
 still uses the labelled registry harness; production service authorization
 is separately tested by the Solidity suites.
 
@@ -145,9 +145,20 @@ keeps the two older component configurations covered. The canonical machine
 omits the disabled advisers and replaced component facet. Opening TOKEN
 endowments model existing holdings, preserve declared weights and leave the
 reference pools unchanged; ongoing investor purchases still trade normally.
-Canonical wheel arbitrage is disabled pending its inventory/fee qualification;
-an explicit =SIM_WHEEL_ARB=1= request fails. The Python wheel comparison is
-also gated under corrected accounting; the existing Solidity wheel is used.
+Canonical machine worlds enable funded Carrying-basket arb by default;
+=SIM_WHEEL_ARB=0= or JS =wheelArb: false= disables it for component comparisons.
+The primary JS target includes both the controlled household fault fixture
+and a fresh active-arb fixture with a real USDC withdrawal. To run only the
+latter:
+
+#+begin_src sh
+make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-equilibrium-arb.tevm.test.js
+#+end_src
+
+The existing Solidity machine wheel owns execution in both languages;
+bounded batches preserve actual receipts and publish the fund mark between
+transactions. The old Python wheel and non-machine arb comparisons remain
+gated under corrected accounting. See [[file:doc/BASKET-WHEEL.org][the wheel invariants and net return observations]].
 
 =economy-accounting-test= includes those bootstrap checks, exact receipt-mark
 tests in Anvil/Tevm and the existing Python loop with a small bootstrap-only

@@ -1,5 +1,9 @@
-"""BasketWheelAgent: the Alberta Buck agent that turns the basket's work wheel
-(doc/BASKET-WHEEL.org), and -- in this prototype -- the basket's hands.
+"""BasketWheelAgent: caller of the existing basket wheel (doc/BASKET-WHEEL.org).
+
+Canonical worlds reuse their one deployed machine wheel. The Carrying basket
+executes funded net-ROI cycles; this agent sends bounded ticks and records
+actual receipts/gas. Caller-profit estimates and legacy start/share settings
+do not gate that work. The following mechanisms are retained comparisons:
 
 Two roles the contracts will separate, kept apart in the books here:
 
@@ -300,7 +304,9 @@ class BasketWheelAgent(_ProxyAgent):
         # An equity basket's components must run whatever the arbitrage pays:
         # they are the basket's placing, and the reserve pays for the upkeep.
         upkeep = False
-        if getattr(self, "equity", False):
+        if self.canonical:
+            upkeep = True  # ROI work is independent of a caller-profit simulation.
+        elif getattr(self, "equity", False):
             # pending() checks due slots directly; a simulated rearm would
             # not persist and does not affect this view.
             upkeep = int(self.sol.functions.pending().call()) > 0
@@ -311,18 +317,34 @@ class BasketWheelAgent(_ProxyAgent):
                 ctr.update({k: (round(v, 2) if isinstance(v, float) else v)
                             for k, v in c.items()})
                 return
+        receipts, publications = [], []
         try:
-            rcpt = self._proxy_exec(d, self.sol.address, self.sol.encode_abi(
-                "tick", args=[self.max_work, self.max_scan]))
+            if self.canonical:
+                from alberta_buck.sim.basket_machine import tick_receipts
+                tick_receipts(d, max_work=self.max_work, max_scan=self.max_scan, proxy=self.proxy,
+                    dispatch=lambda name, args: self._proxy_exec(d, self.sol.address, self.sol.encode_abi(name, args=args)),
+                    receipts=receipts, publications=publications)
+            else:
+                receipts.append(self._proxy_exec(d, self.sol.address, self.sol.encode_abi(
+                    "tick", args=[self.max_work, self.max_scan])))
         except Exception as e:
             ctr["wh_sol_err"] = repr(e)[:200]
-            return
+        for rcpt in receipts:
+            self._record_solidity_receipt(d, rcpt, ctr, refresh=not self.canonical)
+        for publication in publications:
+            gas = int(publication.get("gasUsed", 0) or 0)
+            c["wh_sol_gas"] += gas
+            c["wh_sol_gas_usd"] += self.profile.usd(gas)
+        ctr.update({k: (round(v, 2) if isinstance(v, float) else v) for k, v in c.items()})
+
+    def _record_solidity_receipt(self, d, rcpt, ctr, *, refresh=True):
+        c = self.sol_ctr
         c["wh_sol_ticks"] += 1
         from alberta_buck.sim.basket_machine import book_receipt
         book_receipt(d, rcpt, ctr)
         gas = int(rcpt.get("gasUsed", 0) or 0)
         from alberta_buck.sim.basket_machine import publish_jubilee_valuation
-        valuation = publish_jubilee_valuation(d, proxy=self.proxy)
+        valuation = publish_jubilee_valuation(d, proxy=self.proxy) if refresh else None
         if valuation is not None:
             gas += int(valuation.get("gasUsed", 0) or 0)
         c["wh_sol_gas"] += gas

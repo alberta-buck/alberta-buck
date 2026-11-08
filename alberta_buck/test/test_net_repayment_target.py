@@ -4,11 +4,13 @@ from types import SimpleNamespace
 import pytest
 
 from alberta_buck.sim.credit_households import CreditHouseholdAgent
+from alberta_buck.sim.household_calendar import HouseholdCalendar
 from buck_core import TransactionReceiptPending, TransactionReverted
 
 
 def test_unknown_buyback_target_stops_the_household_before_a_new_action():
     agent = CreditHouseholdAgent(0)
+    agent.calendar_machine = HouseholdCalendar(agent)  # Isolated recovery, no bound recurring calendar.
     agent.arrive_day, agent.exited = 0, False
     agent._token_ids = []
     agent._net_repayment_reserve = 1
@@ -31,6 +33,7 @@ def test_unknown_buyback_target_stops_the_household_before_a_new_action():
 
 def test_daily_turn_finishes_only_the_saved_buyback_target():
     agent = CreditHouseholdAgent(1)
+    agent.calendar_machine = HouseholdCalendar(agent)
     agent.arrive_day, agent.exited, agent._token_ids = 0, False, []
     agent.proxy = SimpleNamespace(address="payer")
     agent.p = {"surplus_policy": "adaptive"}

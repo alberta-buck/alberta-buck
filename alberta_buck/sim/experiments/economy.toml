@@ -68,8 +68,8 @@ carry_utilization = 0.3     # savers keep 30% of their K-scaled limit drawn
 
 [agents.BasketWheelAgent]
 impl = "solidity"
-start = "token"
+# The canonical Carrying basket funds BUCK-start cycles and retains all ROI.
+# Caller profitability and legacy start/share settings do not gate its work.
 cap_bp = 200
 max_work = 12
 chain = "l2"
-call = "profitable"

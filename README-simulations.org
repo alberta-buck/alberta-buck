@@ -39,7 +39,7 @@ not identify which accounting produced a result. The
 | Demurrage reference | How do net holdings, linear relief and Jubilee funding evolve? | =demurrage-reference=, =demurrage-test= | Event-driven accounting table, optional JSON and tests |
 | Canonical accounting smoke | Can Python and JS link corrected Buck and exercise its basic cash accounting? | =net-demurrage-smoke= | Local Anvil and Tevm tests; Python compared with the independent reference |
 | Canonical money kernel | Do Solidity, native Python and Node/browser WASM agree on compounded cash and baseline facility relief? | =core-net-math-test= | Shared uint256 vectors, overflow checks and exact integer comparisons |
-| Canonical wheel arbitrage | Does the Carrying basket improve combined net ROI across three/four-pool routes, LP fees and fee-basis exchange? | =make nix-basket-arb-test= | Actual V3, net payouts/credit, funded cash-loss cases and nominal-only comparisons; runtime integration is tracked separately |
+| Canonical wheel arbitrage | Does the Carrying basket improve combined net ROI across three/four-pool routes, LP fees and fee-basis exchange? | =make nix-basket-arb-test= | Actual V3, net payouts/credit, funded cash-loss cases and nominal-only comparisons; primary bootstraps additionally test actual runtime shocks |
 | JS equilibrium bootstrap | Can the existing primary builder deploy its corrected monetary graph, pair the weighted opening and issue against a premium-bearing facility? | =core-equilibrium-bootstrap-test= | Real Tevm bootstrap through the demo artifact bundle; household decisions and restore remain pending |
 | Both economy bootstraps | Do the existing Python and JS builders construct the canonical graph, issue actual pool money and handle the insurer premium? | =economy-bootstrap-test= | JS check plus Python machine/desk and two retained component setups; no five-year loop |
 | Economy accounting/report integration | Does the existing loop record actual cash, principal and open investor marks and finish its report? | =economy-accounting-test= | Both bootstraps, exact Python/JS marks and a three-day bootstrap-only JSON/PDF check; no household/five-year policy claim |
@@ -54,8 +54,9 @@ The retained flash fixture shows why TOKEN profit alone is insufficient:
 unchanged nominal wheel BUCK can lose net backing. The canonical machine
 now executes in its Carrying basket, with net portfolio/LP guards and no
 mandatory caller bounty. See [[file:doc/BASKET-WHEEL.org::*Implemented Carrying-basket path (2026-11-08)][the current wheel implementation]] for units, fee recovery, per-trade
-events and the exact =net.carrying= frame fields. Primary-world activation
-and household lifecycle acceptance remain separate from contract evidence.
+events and the exact =net.carrying= frame fields. Primary bootstraps now test
+active shock repair in both languages. Automatic household lifecycle
+acceptance remains separate from this arb evidence.
 
 ** Reading canonical economy observations
 
@@ -226,9 +227,12 @@ boundaries; the unmodified shell's public lifecycle is tested separately.
 These contract checks do not complete the five-year household migration.
 
 Public =openCredit(credit, face)= now supports canonical mode. It requires
-governance, =enableNetAccounting=, a verified public ordinary basket identity,
+governance, =enableNetAccounting=, a verified public basket identity,
 the canonical token model and the token's own BuckCredit with its Buck hook
-already wired. It creates a self-issued, zero-premium MARKED NFT with zero
+already wired. The canonical basket binds Carrying and requires BUCK governance's
+=setApprovedCarryingIssuer(basket, true)= grant before opening/issuance.
+Ordinary identities remain supported comparison fixtures. Opening creates a
+self-issued, zero-premium MARKED NFT with zero
 activated coverage and principal. Opening alone changes no cash, supply or
 issuance age; later upkeep marks and activates backing before explicit draws.
 
@@ -236,8 +240,8 @@ For a fresh basket, configure its venue and one existing upkeep facet
 (=BuckBasketEquityWheel= or =BasketUpkeepFacet=). Governance calls
 =authorizeIdentityBinding(registry, binder, pk, E)= at the *basket address*,
 using =IBasketUpkeep= or the selected facet's ABI. The certified operator
-then calls =registry.bindContract(basket, pk, E, true, false)=. Authorization
-pins the exact binder, key, ciphertext and public/non-Carrying flags; only the
+then calls =registry.bindContract(basket, pk, E, true, true)=. Authorization
+pins the exact binder, key, ciphertext and public/Carrying flags; only the
 token's registry is accepted. Governance can revoke pending authorization
 before deposits or credit opening. The deployed facet address is not the
 target of this binding.
@@ -396,10 +400,12 @@ exercise this wheel role.
 
 World builders must configure and persist the actual facet, wheel, fund,
 identity and introduction state. Use the canonical machine wheel for new
-worlds. The older comparison wheel has only 75 runtime bytes spare and does
+worlds. The older comparison wheel has very little runtime space and does
 not gain this binding API; retire legacy variants only as their distinct
-checks are covered. Actual canonical arbitrage inventory/fee behavior still
-needs acceptance before enabling those triangles. Public opening and wheel
+checks are covered. Canonical machine worlds enable funded basket arb by
+default, using bounded keeper transactions and actual net portfolio return;
+=SIM_WHEEL_ARB=0= / JS =wheelArb: false= disables it for controlled comparisons.
+Public opening and wheel
 jobs do not migrate an existing simulation or saved world by themselves.
 
 BVIB retains its nominal V3 reference: newly issued ordinary BUCK enter a pool

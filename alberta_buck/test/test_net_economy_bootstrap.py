@@ -25,7 +25,7 @@ RAW = 10**6
 
 
 def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(monkeypatch, tmp_path):
-    monkeypatch.delenv("SIM_WHEEL_ARB", raising=False)
+    monkeypatch.setenv("SIM_WHEEL_ARB", "0")
     BootstrapDMAgent._counter = 0
     scenario = replace(ROUTING, tokens=[(*ROUTING.tokens[0][:3], 7500), (*ROUTING.tokens[1][:3], 2500)],
                        csv_files=ROUTING.csv_files[:2], days=1, agents={"BootstrapDMAgent": 2})
@@ -54,13 +54,11 @@ def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(mo
         equity_arb_on(d)
         assert wheel.functions.triangleCount().call() == 0
         monkeypatch.setenv("SIM_WHEEL_ARB", "1")
-        try:
-            equity_arb_on(d)
-        except NotImplementedError as exc:
-            assert "inventory/fee qualification" in str(exc)
-        else:
-            raise AssertionError("unqualified canonical arbitrage was enabled")
-        monkeypatch.delenv("SIM_WHEEL_ARB")
+        equity_arb_on(d)
+        assert wheel.functions.triangleCount().call() == 2
+        assert wheel.functions.arbRouteCount().call() == 3
+        assert d.reg.functions.isCarrying(basket.address).call()
+        assert buck.functions.approvedCarryingIssuer(basket.address).call()
 
         seeders = [BootstrapDMAgent(i) for i in range(2)]
         counters = {}
@@ -112,6 +110,33 @@ def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(mo
         assert after.premium_nominal == 10 * RAW
         assert buck.functions.totalIssued().call() == supply + 50 * RAW
         assert buck.functions.facilityPool(token_id).call() == d.pool_acct
+
+        # Use real invested capital, then the same BUCK sale/USDC withdrawal
+        # as a refinancing household. The registered machine must execute
+        # actual funded arb through bounded transactions, not an event stub.
+        capital = 20_000 * RAW
+        chain.send(d.simlp.functions.exec(buck.address, buck.encode_abi(
+            "approve(address,uint256)", args=[basket.address, capital])))
+        chain.send(d.simlp.functions.exec(basket.address, basket.encode_abi(
+            "deposit", args=[buck.address, capital, 1])))
+        ub = chain.at("UniswapV3Pool", d.pool_ub)
+        b0 = ub.functions.token0().call() == buck.address
+        chain.send(d.simlp.functions.swap(d.pool_ub, d.simlp.address, b0, 10_000 * RAW,
+            4295128740 if b0 else 1461446703485210103287273052203988822378723970341,
+            ub.functions.token0().call(), ub.functions.token1().call()))
+        before_price = ub.functions.slot0().call()[0]
+        counters = {}
+        turn_wheel(d, rounds=2, ctr=counters)
+        assert int(counters.get("wh_arb_cycles", 0)) > 0
+        assert int(counters["wh_arb_gain_net_raw"]) > 0
+        after_price = ub.functions.slot0().call()[0]
+        assert after_price > before_price if b0 else after_price < before_price
+        assert len(d.last_wheel_receipts) > 1
+        from web3.logs import DISCARD
+        for receipt in d.last_wheel_receipts:
+            assert int(receipt["gasUsed"]) < 12_000_000
+            tick = wheel.events.Ticked().process_receipt(receipt, errors=DISCARD)[0]
+            assert tick["args"]["work"] <= 1
 
 
 @pytest.mark.parametrize("basket_impl", ["equity", "equity-ops"])

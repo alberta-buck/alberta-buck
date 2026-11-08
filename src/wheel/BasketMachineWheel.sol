@@ -90,10 +90,10 @@ abstract contract SampleKind is WorkWheel {
     }
 }
 
-/// @notice The machine's wheel: Sample, Jubilee, Compute, Ops, N+2 basket
-///         components, Arb. Unconfigured kinds add no slots. The initial
+/// @notice The machine's wheel: Sample, Jubilee, Compute, Arb, Ops, N+2 basket
+///         components. Arb precedes capital deployment. Unconfigured kinds add no slots. The initial
 ///         observation precedes all portfolio work; Ops also refreshes it.
-contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, OpsKind, ResponseKind, ArbKind {
+contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, ArbKind, OpsKind, ResponseKind {
     constructor(address buck, address stable, address gov, uint16 kappa, uint256 reserveCap)
         WorkWheel(buck, gov, kappa, reserveCap) ArbKind(buck, stable) {}
 
@@ -130,7 +130,11 @@ contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, 
 
     /// @notice N triangles plus each unordered cross-TOKEN four-pool cycle.
     function arbRouteCount() external view returns (uint256) {
-        uint256 n = poolUb == address(0) ? 0 : triangles.length;
+        return poolUb == address(0) ? 0 : _arbSlots();
+    }
+
+    function _arbSlots() internal view override returns (uint256) {
+        uint256 n = triangles.length;
         return n + (n > 1 ? n * (n - 1) / 2 : 0);
     }
 
@@ -160,10 +164,7 @@ contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, 
 
     function _slotCount() internal view
         override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (uint256)
-    {
-        uint256 n = poolUb == address(0) ? 0 : triangles.length;
-        return super._slotCount() + (n > 1 ? n * (n - 1) / 2 : 0);
-    }
+    { return super._slotCount(); }
 
     function _due(uint256 s) internal view
         override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (bool)

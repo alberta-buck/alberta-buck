@@ -1716,12 +1716,16 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 # guarded proxy market operations, optional reserve acquisition and
 # receipt-backed refinancing. Shared policy cases include proportional
 # external insurance, absolute calendar clocks and dated receipt recovery. Normal automatic
-# policy/surplus/exit decisions remain gated.
+# policy/surplus/exit decisions remain gated. The active-arb fixture uses
+# the same builder and keeper with a real USDC withdrawal shock. To run it
+# alone (the household fault suite is slower):
+#   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-equilibrium-arb.tevm.test.js
 CORE_EQUILIBRIUM_TEST_ARGS ?=
+CORE_EQUILIBRIUM_TEST_FILES ?= test/net-equilibrium-bootstrap.tevm.test.js test/net-equilibrium-arb.tevm.test.js
 core-equilibrium-bootstrap-test: sim-build core-build-wasm
 	node core/js/bin/bundle-artifacts.mjs
 	cd core/js && node --test test/net-market-quote.test.js test/household-policy.test.js test/household-calendar.test.js
-	cd core/js && node --test $(CORE_EQUILIBRIUM_TEST_ARGS) test/net-equilibrium-bootstrap.tevm.test.js
+	cd core/js && node --test $(CORE_EQUILIBRIUM_TEST_ARGS) $(CORE_EQUILIBRIUM_TEST_FILES)
 
 # Both EXISTING builders, not the household loop or a five-year campaign.
 # The Python path also configures the separate canonical desk.

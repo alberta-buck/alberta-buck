@@ -161,15 +161,20 @@ upkeep facets. The existing canonical machine wheel overrides the older
 wheel's direct-profit strategy; no second basket or wheel is deployed.
 Its slots cover N triangles and N*(N-1)/2 cross-TOKEN routes. Each plan
 considers both directions with a bounded numerical search.
+The canonical slot order is Sample, Jubilee, Compute, Arb, Ops, then basket
+response components. Arb runs before portfolio deployment can consume its
+trading cash; every action still rechecks the current state.
 
 Preconditions and maintained invariants:
 
 1. Only the configured wheel executes, outside any position/credit operation.
    Venue callbacks authenticate the active pool. Partial inputs revert; no
    intermediate inventory is left unbooked.
-2. Nominal trade inputs fit cash above the *net* liquidity reserve and the
-   pool-depth cap. No credit is minted, LP principal withdrawn or caller
-   reserve used to finance the trade.
+2. Nominal trade inputs fit actual basket cash and the pool-depth cap. The
+   complete atomic cycle preserves the pre-trade *net* liquidity target; if cash was
+   already below target, it must not worsen that deficit. Temporarily using
+   the basket's own reserve avoids starving profitable repair work. No credit
+   is minted, LP principal withdrawn or caller reserve used to finance it.
 3. Collect/book earlier LP fees before the baseline. Freeze the existing
    TWAP/net TOKEN marks, without spot fallback. Measure actual wallet cash
    and LP principal at those same marks before and after the cycle.
@@ -189,6 +194,21 @@ triangles first, then unordered TOKEN pairs in lexicographic index order.
 The machine's =arbRouteCount= reports their total. The older comparison
 wheel retains its historical flash/caller-share API.
 
+Fresh canonical Python/JS machine worlds enable these routes by default.
+=SIM_WHEEL_ARB=0= or JS =wheelArb: false= provides an explicit component
+comparison. Older non-machine Python comparisons keep arb disabled under
+corrected accounting. Canonical callers do not require a profitable bounty
+quote before performing basket work.
+
+Both runtime drivers scan at most four slots and complete at most one job
+per transaction when arb is active. They continue from the real wheel cursor
+through a rotation (or the caller's work budget), even when an intermediate
+batch finds no work. Each batch refreshes the guarded read-only fund mark.
+There is one wheel, not a separately simulated arb scheduler. Python
+=last_wheel_receipts= and JS =lastWheelReceipts= retain actual confirmed
+receipts, including a prefix if later work fails. JS =turnWheel= still
+returns the final actual receipt, rather than inventing a combined receipt.
+
 =BasketArbitrage= reports realized attribution. =ArbBuckFlow= reports each
 BUCK leg's nominal amount, delivered net scaled by 1e36, and the basket/pool
 before/after net-to-nominal ratios. Python/Web3 and JavaScript/viem can read
@@ -202,8 +222,17 @@ already marked portfolio ROI again.
 Actual V3 checks cover both directions, four-pool cycles, a direct cash loss
 supported by LP return, a net-cash gain despite nominal cash falling, and
 fee transport from aged TOKEN/BUCK holdings into a fresher BUCK/USDC pool.
-The nominal-only comparison finds no trade in the fee-basis case. These
-are contract results; complete household economies remain a separate gate.
+The nominal-only comparison finds no trade in the fee-basis case. The
+existing Python builder also executes a real USDC-withdrawal shock and
+bounded repair. Matching JS runtime acceptance uses the existing world:
+
+#+begin_src sh
+make nix-basket-arb-test
+make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-equilibrium-arb.tevm.test.js
+make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_economy_bootstrap.py
+#+end_src
+
+Complete household economies remain a separate gate.
 
 ** Historical fresh-BUCK fee-band illustration
 

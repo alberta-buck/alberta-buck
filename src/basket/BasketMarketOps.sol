@@ -79,6 +79,7 @@ library BasketMarketOps {
         uint256 budget;
         uint256 walletGross;
         uint256 walletNet;
+        uint256 reserveFloor;
     }
     struct Route {
         Pool[4] pools;
@@ -218,6 +219,7 @@ library BasketMarketOps {
         (, uint256 afterCash) = IMarketCash(buck).accountBalancesScaled(address(this));
         result.cashReturn = _netDifference(afterCash, cash);
         result.lpFees = _sync(c, idle);
+        if (spendableNet(buck) < c.reserveFloor) revert ArbBudget();
         result.totalReturn = _difference(_value(c), beforeValue);
         result.lpReturn = result.totalReturn - result.cashReturn;
         if (result.totalReturn < int256(required)) revert NoPortfolioGain();
@@ -286,10 +288,11 @@ library BasketMarketOps {
         (c.walletGross, c.walletNet) = IMarketCash(buck).accountBalancesScaled(address(this));
         uint256 cash = spendableNet(buck);
         uint256 target = IArbBasket(address(this)).liquidityTarget();
-        // Size nominal swaps from the full-value reserve budget. A Carrying
-        // balance cannot be used as full-value cash or new-credit backing.
-        c.budget = cash > target && c.walletNet != 0
-            ? Math.mulDiv(cash - target, c.walletGross, c.walletNet) : 0;
+        // An atomic cycle may temporarily use the basket's own liquid cash.
+        // Preserve the net reserve at completion, or never worsen a reserve
+        // deficit that already exists. No outside financing is introduced.
+        c.reserveFloor = Math.min(cash, target);
+        c.budget = c.walletNet == 0 ? 0 : IERC20(buck).balanceOf(address(this));
     }
 
     function _market(Context memory c, IArbMarkets w, uint256 index) private view returns (Market memory m) {
@@ -365,6 +368,7 @@ library BasketMarketOps {
         q.amount = amount; q.direction = direction;
         uint256 flowing = amount;
         uint256 finalNet;
+        uint256 cashFees;
         for (uint256 k; k < r.length; k++) {
             Pool memory p = r.pools[k];
             (Pool memory afterPool, uint256 out, uint256 fee, uint256 receivedNet) = _step(c, p, r.input[k], flowing);
@@ -376,6 +380,7 @@ library BasketMarketOps {
                 uint256 feeValue = r.input[k] == c.buck ? Math.mulDiv(ownedFee, afterPool.net, afterPool.gross)
                     : Math.mulDiv(ownedFee, m.mark, m.one);
                 q.lpFees += feeValue;
+                if (r.input[k] == c.buck) cashFees += feeValue;
                 q.lpReturn += _difference(_lpValue(c.buck, m, afterPool), _lpValue(c.buck, m, p)) + int256(feeValue);
             }
             flowing = out;
@@ -383,6 +388,9 @@ library BasketMarketOps {
         }
         q.cashReturn = _netDifference(finalNet, Math.mulDiv(amount * Q, c.walletNet, c.walletGross));
         q.totalReturn = q.cashReturn + q.lpReturn;
+        if (int256(c.walletNet / Q) + q.cashReturn + int256(cashFees) < int256(c.reserveFloor)) {
+            q.totalReturn = -1;
+        }
     }
 
     function _step(Context memory c, Pool memory p, address input, uint256 amount)

@@ -41,21 +41,16 @@ def turn_wheel(d, rounds: int = 1, max_work: int = 12, ctr=None) -> int:
     """Tick the equity basket's work wheel as the deployer, up to `rounds`
     times or until a tick finds nothing to do; return the work done."""
     from web3.logs import DISCARD
-    work = 0
-    for _ in range(rounds):
-        d.chain.send(d.wheel.functions.rearm())
-        rc = d.chain.send(d.wheel.functions.tick(max_work, 0))
+    from alberta_buck.sim.basket_machine import book_receipt, tick_receipts
+    receipts = []
+    try:
+        tick_receipts(d, rounds=rounds, max_work=max_work, receipts=receipts)
+    finally:
         if ctr is not None:
-            from alberta_buck.sim.basket_machine import book_receipt
-            book_receipt(d, rc, ctr)
-        w = sum(int(ev["args"]["work"])
-                for ev in d.wheel.events.Ticked().process_receipt(rc, errors=DISCARD))
-        work += w
-        if w == 0:
-            break
-    from alberta_buck.sim.basket_machine import publish_jubilee_valuation
-    publish_jubilee_valuation(d)
-    return work
+            for rc in receipts:
+                book_receipt(d, rc, ctr)
+    return sum(int(ev["args"]["work"]) for rc in receipts
+               for ev in d.wheel.events.Ticked().process_receipt(rc, errors=DISCARD))
 
 
 def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machine",

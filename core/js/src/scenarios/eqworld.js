@@ -36,7 +36,7 @@
 // helpers dispatch on holderAddress().  Fiat legs (income, endowments)
 // enter as MockERC20 mints via fiatIn -- the sim's fiat bridge.
 
-import { encodeFunctionData, keccak256, toBytes } from "viem";
+import { encodeFunctionData, keccak256, toBytes, parseEventLogs } from "viem";
 import { installHouseholdOps } from "../agents/household-ops.js";
 import { linkArtifact } from "../artifacts.js";
 import { netCreditOps } from "../net-world.js";
@@ -388,15 +388,34 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     world.net.venue = machineVenue;
     parts = { observer, policy, parity, upkeep, wheel };
     world.turnWheel = async ({ tag } = {}) => {
-      await session.send(wheel, "rearm", [], { tag: `${tag ?? "eq:wheel"}:rearm` });
-      const receipt = await session.send(wheel, "tick", [12n, 0n],
-                          { tag: tag ?? "eq:wheel", gas: 12_000_000n });
-      // Fund maintenance can change the one receipt's key. Publish the
-      // existing guarded read-only source after that work, outside Buck.
-      // A refused price leaves quotes unavailable; it earns no work/reward.
-      await session.send(wheel, "refreshValuation", [],
-                         { tag: `${tag ?? "eq:wheel"}:valuation`, expect: "either" });
-      return receipt;
+      const base = tag ?? "eq:wheel";
+      const receipts = [];
+      world.lastWheelReceipts = receipts; // Keep confirmed prefixes on a later refusal.
+      await session.send(wheel, "rearm", [], { tag: `${base}:rearm` });
+      const bounded = await session.call(wheel, "arbRouteCount") > 0n;
+      const slots = await session.call(wheel, "slotCount");
+      let remaining = slots, budget = 12n, cursor = await session.call(wheel, "cursor");
+      do {
+        const scan = bounded ? (remaining < 4n ? remaining : 4n) : 0n;
+        const receipt = await session.send(wheel, "tick", [bounded ? 1n : budget, scan],
+          { tag: `${base}:tick:${receipts.length}`, gas: 12_000_000n });
+        receipts.push(receipt);
+        const work = parseEventLogs({ abi: wheel.abi, logs: receipt.logs, eventName: "Ticked" })
+          .reduce((sum, e) => sum + e.args.work, 0n);
+        budget = work < budget ? budget - work : 0n;
+        // Publish between batches: later jobs must see the current single
+        // receipt key. This source remains read-only inside Buck operations.
+        await session.send(wheel, "refreshValuation", [],
+          { tag: `${base}:valuation:${receipts.length}`, expect: "either" });
+        if (!bounded) break;
+        const next = await session.call(wheel, "cursor");
+        const delta = (next + slots - cursor) % slots;
+        const examined = delta || (scan >= slots ? slots : 0n);
+        if (!examined) break;
+        remaining = examined < remaining ? remaining - examined : 0n;
+        cursor = next;
+      } while (remaining > 0n && budget > 0n);
+      return receipts.at(-1);
     };
 
     // Bootstrap the basket's pools to real depth: a targetBuck-sized
@@ -413,6 +432,13 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
         session.call(basket, "liquidityOf", [BigInt(i)])));
       if (placed.every((l) => l > 0n)) break;
       if (turn === 7) throw new Error("the wheel did not pair the bootstrap deposits");
+    }
+    if (opts.wheelArb !== false) {
+      await session.send(wheel, "setArb", [poolUB.address, basket.address, 0,
+        opts.arbCapBp ?? 100, opts.arbMinEdgeBp ?? 0], { tag: "eq:arb.configure" });
+      for (const [i, t] of tokens.entries()) await session.send(wheel, "setTriangle",
+        [BigInt(i), [t.erc20.address, t.poolBuck.address, t.poolUsdc.address, BigInt(i)]],
+        { tag: `eq:arb.register:${t.sym}` });
     }
   }
 

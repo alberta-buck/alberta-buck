@@ -7,7 +7,7 @@ it decides and what bounds it. It replaces the proposal that carried this name a
 notes written while the machine was built. What the machine earns, and on what evidence, is in
 [[file:BASKET-MACHINE-RESULTS.org][the results]]. What is left to do is in [[file:BASKET-MACHINE-TASKS.org][the task list]].
 
-Accounting update, 2026-11-05: the [[file:review/bucknet-economy-implementation.org][unified Buck accounting plan]] owns the current
+Accounting update, 2026-11-08: the [[file:review/bucknet-economy-implementation.org][unified Buck accounting plan]] owns the current
 migration state and execution order. Canonical Buck separates actual cash and
 NFT principal. LP prices include a marked Jubilee claim; new-credit collateral
 excludes unpaid claims, and pool values account for carried fees. Both upkeep
@@ -16,7 +16,15 @@ cash shortfall, then enforce actual activated collateral after execution.
 The separate bounded
 =BuckBasketEquity.retireCredit= settles principal through the fund, with actual
 cash/relief limits and protected valuation callbacks. Public leveraged opening
-awaits scheduled wheel integration. Price-unit vectors distinguish the nominal
+and scheduled fund/wheel integration are tested. The canonical basket is an
+approved Carrying issuer: nominal ERC-20 flows retain fees, while shares,
+policy budgets, collateral and payouts use net value. One linked market
+helper serves both existing upkeep facets. The same machine wheel executes
+funded triangles and cross-TOKEN four-pool cycles before capital deployment,
+measuring combined net wallet/LP return rather than requiring caller profit.
+Both primary Python/JS worlds enable these routes with bounded keeper
+transactions. See [[file:BASKET-WHEEL.org::*Implemented Carrying-basket path (2026-11-08)][the current wheel invariants and observations]].
+Price-unit vectors distinguish the nominal
 issuance reference from net liquidation and buyback costs. The desk
 has explicit canonical cash/principal, bare collateral and real Jubilee
 retirement paths. Cash/in-kind exits now require
@@ -65,7 +73,8 @@ its own file (see [[#names][names]]); they depend on those, not on each other's 
 
 * The books and the mark
 
-The basket is an ordinary BUCK credit holder. It holds one self-issued credit that it marks
+In the earlier signed-account model described below, the basket was an ordinary
+BUCK credit holder. It holds one self-issued credit that it marks
 itself, so Buck enforces its limit: it can draw at most K times that mark.
 
 - /Gross/ is every TOKEN/BUCK position at fair value (twice its BUCK side, full range) plus the

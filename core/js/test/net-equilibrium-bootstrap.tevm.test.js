@@ -27,6 +27,7 @@ const RAW = 1_000_000n;
 test("canonical equilibrium bootstrap reuses one fund/basket and issues actual pool money", async (t) => {
   const s = await tevmSession();
   const world = await buildEquilibriumWorld(s, artifact, { identity,
+    wheelArb: false, // Component fault/receipt tests keep their market under explicit control.
     targetBuck: 100_000n * 1_000_000n,
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
     tokens: [{ sym: "CNST", name: "Construction", dec: 18, p0: 2_500_000n, weightBp: 7500 },
@@ -41,7 +42,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   assert.equal((await s.call(buck, "jubilee")).toLowerCase(), net.fund.address.toLowerCase());
   assert.equal((await s.call(net.fund, "valuationWheel")).toLowerCase(), wheel.address.toLowerCase());
   assert.equal((await s.call(net.fund, "investmentKeeper")).toLowerCase(), wheel.address.toLowerCase());
-  assert.equal(await s.call(wheel, "triangleCount"), 0n, "canonical arb still needs fee/inventory qualification");
+  assert.equal(await s.call(wheel, "triangleCount"), 0n, "this fault suite explicitly disables arb");
   assert.equal(await s.call(world.reg, "isCarrying", [wheel.address]), true);
   assert.equal(await s.call(world.reg, "carryingFrozen", [wheel.address]), true);
   assert.notEqual(await s.call(buck, "receiptFragment", [s.account.address, wheel.address]), `0x${"00".repeat(32)}`);

@@ -76,9 +76,10 @@ def wheel_arb_enabled(d=None) -> bool:
     equity basket, whose wheel must run to place deposits, it is the
     "wheel off" of the experiments."""
     if getattr(d, "buck_accounting", "") == "net":
-        if os.environ.get("SIM_WHEEL_ARB") not in (None, "0"):
-            raise NotImplementedError("canonical wheel arbitrage requires net inventory/fee qualification")
-        return False
+        if not getattr(d, "equity_machine", False):
+            if os.environ.get("SIM_WHEEL_ARB") not in (None, "0"):
+                raise NotImplementedError("canonical funded arbitrage uses the machine wheel; legacy comparisons use SIM_WHEEL_ARB=0")
+            return False
     return os.environ.get("SIM_WHEEL_ARB", "1") != "0"
 
 
@@ -88,6 +89,13 @@ def equity_arb_on(d) -> None:
     if d.wheel is None or not wheel_arb_enabled(d) \
             or int(d.wheel.functions.triangleCount().call()) > 0:
         return
+    if getattr(d, "buck_accounting", "") == "net":
+        if not d.reg.functions.isCarrying(d.basket.address).call() \
+                or not d.buck.functions.approvedCarryingIssuer(d.basket.address).call():
+            raise ValueError("funded wheel arb requires the approved Carrying basket")
+        d.chain.send(d.wheel.functions.setArb(d.pool_ub, d.basket.address, 0,
+            int(os.environ.get("SIM_WHEEL_ARB_CAP_BP", "100")),
+            int(os.environ.get("SIM_WHEEL_ARB_MIN_EDGE_BP", "0"))), sender=d.gov)
     for k, t in enumerate(d.tokens):
         d.chain.send(d.wheel.functions.setTriangle(
             k, (t.address, d.pool_buck[k], d.pool_usdc[k], k)), sender=d.gov)

@@ -10,6 +10,7 @@ from web3 import Web3
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.credit_households import CreditHouseholdAgent
+from alberta_buck.sim.household_calendar import HouseholdCalendar
 from alberta_buck.sim.gauge import active_reserves
 from alberta_buck.sim.router import full_range_ticks, sqrt_price_x96
 from buck_core import (Expect, NetCreditOps, NetMarketOps, ReductionPlan, SettlementOps, TransactionReceiptPending,
@@ -28,6 +29,13 @@ REQUIRED = ("Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOp
 def _exec(chain, actor, contract, method, args):
     encoded = contract.encode_abi(method, args=args)
     return chain.send(actor.functions.exec(contract.address, bytes.fromhex(encoded[2:])))
+
+
+def _household(idx):
+    agent = CreditHouseholdAgent(idx)
+    # This isolated market/recovery fixture has no recurring household income.
+    agent.calendar_machine = HouseholdCalendar(agent)
+    return agent
 
 
 @pytest.mark.skipif(
@@ -189,7 +197,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         # Exercise the existing adaptive household's discount path using the
         # real guard and selected-NFT settlement. This isolated action is not
         # a full net household deployment, basket or five-year economy.
-        agent = CreditHouseholdAgent(7)
+        agent = _household(7)
         agent.proxy, agent._token_ids = buyer, [buyer_id]
         agent._basket_receipts, agent._receipt_book, agent._savings_proxy = [], {}, None
         agent.p = {"surplus_policy": "adaptive", "paydown_share": .1, "paydown_double": .005,
@@ -337,7 +345,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
             def retire_household(self, owner, ids, requested, deadline, **kw):
                 return super().retire_household(owner, ids, min(requested, RAW), deadline, **kw)
 
-        agent2 = CreditHouseholdAgent(8)
+        agent2 = _household(8)
         agent2.proxy, agent2._token_ids = buyer, [second_id]
         agent2._basket_receipts, agent2._receipt_book, agent2._savings_proxy = [], {}, None
         agent2.p = agent.p.copy()
@@ -390,7 +398,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
             buy_receipts.append(receipt)
             raise TransactionReceiptPending(receipt["transactionHash"])
 
-        agent3 = CreditHouseholdAgent(9)
+        agent3 = _household(9)
         agent3.proxy, agent3._token_ids = buyer, [third_id]
         agent3._basket_receipts, agent3._receipt_book, agent3._savings_proxy = [], {}, None
         agent3.p = agent.p.copy()
@@ -592,7 +600,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
 
         # No cancellation hash means the household cannot safely tell a
         # pending transaction from a completed cancellation after a restart.
-        agent7 = CreditHouseholdAgent(13)
+        agent7 = _household(13)
         agent7.proxy, agent7._token_ids, agent7._net_repayment_reserve = buyer, [third_id], 1
         agent7._net_repayment_target = RAW
         agent7.arrive_day, agent7.exited = 0, False
@@ -653,7 +661,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
         # An unavailable post-batch balance must not erase the earlier
         # settlement or the pending authorization's exact transaction data.
         bad_balance = SimpleNamespace(buck=object(), w3=d.w3, buck_accounting="net", net_credit_ops=Capture(batch_ops))
-        agent4 = CreditHouseholdAgent(10)
+        agent4 = _household(10)
         agent4.proxy, agent4._token_ids, agent4._net_repayment_reserve = buyer, batch_ids, 1
         agent4._net_repayment_target = 2 * RAW
         agent4.last_error = ""
@@ -684,7 +692,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
                 return super().plan_reduction(owner, token_id, requested, **kwargs)
 
         bad_balance.net_credit_ops = Capture(PlanUnavailable(chain, stack, credit_ops.execute))
-        agent5 = CreditHouseholdAgent(11)
+        agent5 = _household(11)
         agent5.proxy, agent5._token_ids, agent5._net_repayment_reserve = buyer, [first, second], 1
         agent5._net_repayment_target = 2 * RAW
         agent5.last_error = ""
@@ -719,7 +727,7 @@ def test_python_guard_uses_actual_net_value_from_aged_v3_pool():
 
         first = new_small_facility()
         bad_balance.net_credit_ops = Capture(credit_ops)
-        agent6 = CreditHouseholdAgent(12)
+        agent6 = _household(12)
         agent6.proxy, agent6._token_ids, agent6._net_repayment_reserve = buyer, [first], 1
         agent6._net_repayment_target = 2 * RAW
         agent6.last_error = ""

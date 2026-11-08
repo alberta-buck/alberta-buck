@@ -20,6 +20,8 @@ while portfolio marks, reserves, collateral and redemption minimums are net.
 The shared market helper grosses up cash payouts and records actual values.
 Funded wheel ROI and carried-fee exchange are described in the
 [[file:doc/BASKET-WHEEL.org::*Implemented Carrying-basket path (2026-11-08)][wheel implementation note]].
+Canonical machine worlds enable arb by default, with bounded keeper batches
+and actual receipt logs; =SIM_WHEEL_ARB=0= or JS =wheelArb: false= disables it.
 =make nix-core-equilibrium-bootstrap-test= tests that stage through the demo
 artifact bundle. =make nix-venv-economy-bootstrap-test= adds the existing
 Python builder, bootstrap agents, desk and component comparisons.

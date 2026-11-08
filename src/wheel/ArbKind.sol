@@ -161,10 +161,14 @@ abstract contract ArbKind is WorkWheel {
 
     function triangleCount() external view returns (uint256) { return triangles.length; }
 
+    /// @dev The canonical machine includes cross-TOKEN cycles in this kind's
+    /// range, so it may be placed before portfolio response in the C3 order.
+    function _arbSlots() internal view virtual returns (uint256) { return triangles.length; }
+
     // --- the seam --------------------------------------------------------------- //
 
     function _slotCount() internal view virtual override returns (uint256) {
-        return super._slotCount() + (poolUb == address(0) ? 0 : triangles.length);
+        return super._slotCount() + (poolUb == address(0) ? 0 : _arbSlots());
     }
 
     function _due(uint256 s) internal view virtual override returns (bool) {

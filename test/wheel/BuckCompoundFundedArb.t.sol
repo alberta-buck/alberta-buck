@@ -55,7 +55,7 @@ contract BuckCompoundFundedArbTest is BuckCompoundArbFixture {
         assertEq(basket.lien(), principal);
         assertEq(basket.totalShares(), shares);
         assertEq(buck.netBalanceOf(address(wheel)), reserve);
-        assertGe(buck.balanceOf(address(basket)), basket.liquidityTarget());
+        assertGe(buck.netBalanceOf(address(basket)), basket.liquidityTarget());
         assertApproxEqAbs(actual.totalReturn, p.totalReturn, 12);
     }
 
@@ -65,6 +65,19 @@ contract BuckCompoundFundedArbTest is BuckCompoundArbFixture {
     function test_agedPoolsUseNetOutputAndNewFeesOnly() public {
         vm.warp(t0 + YEAR);
         _shock(true);
+    }
+
+    function test_atomicProfitCanImproveCashAlreadyBelowItsReserveTarget() public {
+        uint256 nominal = buck.balanceOf(address(basket));
+        vm.prank(address(basket)); buck.transfer(ALICE, nominal - 5e6);
+        uint256 beforeNet = buck.netBalanceOf(address(basket));
+        assertLt(beforeNet, basket.liquidityTarget());
+        _trade(ub, address(buck), int256(100_000e6));
+        IBasketArb.ArbPlan memory p = _plan();
+        assertGt(p.amount, 0); assertLe(p.amount, 5e6);
+        IBasketArb.ArbPlan memory actual = _execute(p, 2);
+        assertGt(actual.totalReturn, 0);
+        assertGe(buck.netBalanceOf(address(basket)), beforeNet);
     }
 
     function test_carryingBasketTransportsFeesBetweenAgedAndFreshPools() public {
@@ -231,7 +244,7 @@ contract BuckCompoundFundedArbTest is BuckCompoundArbFixture {
         assertEq(basket.liquidityOf(0), liquidity);
     }
 
-    function test_zeroAndOverBudgetInputsCannotBorrowOrSpendTheReserve() public {
+    function test_zeroAndOverBudgetInputsCannotBorrowOrExceedActualCash() public {
         vm.expectRevert(BasketMarketOps.InvalidArbRoute.selector);
         vm.prank(address(wheel));
         IBasketArb(address(basket)).executeBasketArb(0, 0, 0, 0);
