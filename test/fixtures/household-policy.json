@@ -5,6 +5,11 @@
   "state": {"mortgage": 400000, "face": 1000000, "joined": false, "k": 0.75,
             "drawn": 0, "spendable": 0, "unactivated": 1000000, "ru": 10000000,
             "rb": 10000000, "fee": 0.0005, "basket_usd": 1, "at_renewal": true},
+  "closing": [
+    {"name": "not activated or closed", "joined": false, "closing_paid": false, "fixed": 2000},
+    {"name": "activated but bank closing unpaid", "joined": true, "closing_paid": false, "fixed": 2000},
+    {"name": "confirmed closing is not charged again", "joined": true, "closing_paid": true, "fixed": 0}
+  ],
   "issuance": [
     {"name": "refinance", "state": {}, "settings": {}, "kind": "refinance", "go": true},
     {"name": "interest justifies poor execution", "state": {"ru": 9500000}, "settings": {}, "kind": "refinance", "go": true},

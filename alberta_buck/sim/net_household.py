@@ -75,6 +75,7 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
     as execution loss. Quote estimates are advisory, and execution rechecks.
     """
     if (getattr(d, "buck_accounting", "") != "net" or agent.refinance_machine.active or
+            agent.refinance_machine.payment_due or
             agent.calendar_machine.active):
         raise ValueError("household refinance assessment needs idle canonical accounting")
     previous = agent.refinance_machine.flow
@@ -97,7 +98,7 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
     # Reuse the pinned books/market rather than re-reading the entire legacy
     # household state. Financial feasibility remains integer arithmetic.
     state = dict(accounting="net", mortgage=agent.mortgage / RAW, face=agent._face0 / RAW,
-        joined=agent.joined, k=k / 10**18, spendable=book.spendable / RAW,
+        joined=agent.joined, closing_paid=agent.refinance_closed, k=k / 10**18, spendable=book.spendable / RAW,
         unactivated=0 if available.maturities_pending else available.unactivated_present / RAW,
         activated_capacity=available.capacity / RAW,
         issuance_limit=0 if available.maturities_pending else available.shared_limit / RAW,
@@ -242,11 +243,16 @@ class HouseholdRefinance:
     def active(self):
         return self.flow is not None and self.flow["status"] in ("running", "pending")
 
+    @property
+    def payment_due(self):
+        """A failed bank leg still owns the confirmed issue/export proceeds."""
+        return self.flow is not None and self.flow["status"] == "refused" and self.flow["phase"] == "mortgage"
+
     def status(self):
         f = self.flow
         return {"schema": 1, "decision": self.decisions, "status": f["status"] if f else "idle",
                 "phase": f["phase"] if f else None, "hash": f.get("hash") if f else None,
-                "events": len(self.events)}
+                "payment_due": self.payment_due, "events": len(self.events)}
 
     def _accounts(self, d):
         a = self.agent
@@ -284,6 +290,7 @@ class HouseholdRefinance:
                           "counterfactual_interest": a.hypo_interest, "counterfactual_paid": a.hypo_paid,
                           "calendar": a.calendar_machine.status(),
                           "switch_paid": a.switch_paid, "penalty_paid": a.penalty_paid,
+                          "refinance_closed": a.refinance_closed,
                           "external_premium_monthly": external_premium,
                           "counterfactual_premium_monthly": monthly_premium,
                           "cash_buffer": buffer, "reserve_floor": reserve,
@@ -334,6 +341,8 @@ class HouseholdRefinance:
     def start(self, d, plan, day, ctr, *, context=None):
         if self.active:
             raise ValueError("household refinancing already active")
+        if self.payment_due:
+            raise ValueError("household bank payment due; retry before a new refinance")
         if not isinstance(plan, RefinancePlan):
             raise ValueError("invalid household refinance plan")
         values = (plan.export_buck, plan.minimum_usdc, plan.mortgage_limit, plan.cash_buffer,
@@ -358,6 +367,8 @@ class HouseholdRefinance:
             raise ValueError("refinance must retain the quoted BUCK reserve")
         if c is None and plan.switch_cost:
             raise ValueError("wallet prepayment cannot switch insurance")
+        if self.agent.refinance_closed and plan.switch_cost:
+            raise ValueError("household refinance closing was already paid")
         book = d.net_credit_ops.household(self.agent.address, self.agent._token_ids)
         if any(d.buck.functions.reductionAuthorization(t).call()[0] for t in self.agent._token_ids):
             raise ValueError("household reduction authorization pending")
@@ -377,12 +388,26 @@ class HouseholdRefinance:
         self.decisions += 1
         self.flow = {"plan": plan, "phase": "fund" if funding else "issue" if c else "export",
                      "status": "running", "hash": None, "issue_candidate": None,
-                     "initial_joined": self.agent.joined, "terms": None}
+                     "initial_closed": self.agent.refinance_closed, "terms": None}
         self.agent.funding_pending = True
         limits = {key: self.agent.p[key] for key in
                   ("surplus_policy", "theta", "issue_premium", "retire_disc", "utilization", "max_impact_bp")}
         self._event(d, day, "planned", plan=asdict(plan), context=context, limits=limits,
                     market=self._market(d), basket=self._basket(d))
+        return self.advance(d, day, ctr)
+
+    def retry_payment(self, d, day, ctr):
+        """PRE: a proved-refused bank leg, idle owner and calendar. POST:
+        only that leg is retried, under its original amount/buffer bounds;
+        no issue/export is replayed. Unknown outcomes are never retryable.
+        """
+        if not self.payment_due:
+            raise ValueError("household has no refused bank payment to retry")
+        if self.agent.mortgage < self.flow["plan"].mortgage_limit:
+            raise ValueError("household mortgage changed; bank allocation needs reassessment")
+        self.flow.update(status="running", hash=None, terms=None)
+        self.agent.funding_pending = True
+        self._event(d, day, "retry", operation="mortgage")
         return self.advance(d, day, ctr)
 
     def _refuse(self, d, day, reason):
@@ -421,9 +446,11 @@ class HouseholdRefinance:
                 a.external_paid += terms["principal"]
             a.switch_paid += terms["switch"]
             a.penalty_paid += terms["penalty"]
+            if f["plan"].candidate is not None:
+                a.refinance_closed = True
             a.refis += 1
             a.deploys += 1
-            key = "rtrTopUps" if f["initial_joined"] else "rtrRefis"
+            key = "rtrTopUps" if f["initial_closed"] else "rtrRefis"
             ctr[key] = ctr.get(key, 0) + 1
             ctr["rtrUsdRetired"] = ctr.get("rtrUsdRetired", 0) + terms["principal"] // RAW
             moved = {"usdc": result.amount, "principal_usdc": terms["principal"],

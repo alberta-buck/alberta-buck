@@ -1049,6 +1049,21 @@ never credit an unconfirmed mint or payment as liquid funds.
   distinguish actual insurer activation from a closing cost already paid.
   Proportional recurring premiums are implemented and tested; reserve-safe
   surplus integration and coherent staged closing-cost decisions remain next.
+- [X] Separate actual insurance activation from confirmed mortgage closing.
+  Only an authenticated issuance-backed bank allocation sets refinance_closed;
+  economic quotes retain the fixed fee before that point. Wallet-only
+  prepayment does not switch insurance; later tranches cannot pay a second
+  closing fee. Public histories/personal records expose the distinction.
+- [X] Retain a refused bank leg as payment_due and expose bank-only retry.
+  Reuse its saved allocation and original cash buffer; never repeat its
+  confirmed issue/export. Block a new refinance while that obligation waits.
+  Unknown outcomes stay pending, and dated/calendar/buyback serialization
+  still applies. A smaller remaining mortgage requires reassessment.
+- [ ] Assess an affordable staged programme at the current K/credit and a
+  conservative per-tranche conversion price. A liquidity-limited first leg
+  need not repay the entire startup fee by itself; pay the actual first fee
+  in full and require both programme admission and worthwhile marginal legs.
+  Do not count future wages, higher K or unquoted insurance capacity as funds.
 
 ** Remaining economy sequence
 
@@ -1496,7 +1511,7 @@ the canonical Buck evidence recorded below.
 The earlier observed-defaults handoff is preserved at =eb0be458=; its
 implementation and validation milestones remain in the journal above.
 
-** Current handoff: Carrying basket and active funded ROI wheel
+** Carrying basket and active funded ROI checkpoint (10907b02)
 
 - Branch =feature/household-minimal-ecosystem= in
   =.claude/worktrees/buck-compound=, based on =6bf53283=. Earlier design and
@@ -1590,3 +1605,29 @@ implementation and validation milestones remain in the journal above.
   claimed. The normal household act gate remains until its actual scheduler
   replaces the old behavior; read-only calendar/financial vectors are not
   a completed household economy.
+
+** Current handoff: household closing and staged refinance admission
+
+- Continue =feature/household-minimal-ecosystem= in
+  =.claude/worktrees/buck-compound=. The Carrying/arb checkpoint is complete
+  at =10907b02=; its contract, SDK, browser and live-shock evidence remains
+  above. This household work changes no Solidity contract.
+- The same Python/JS household now distinguishes joined insurance from a
+  confirmed refinance closing. It retains closing costs until an actual
+  issuance-backed mortgage receipt, prevents a second closing charge, and
+  leaves wallet-only prepayment separate. A refused bank leg keeps its
+  allocation and actual issue/export; an explicit retry sends only that
+  payment, with normal hash/receipt recovery. An unresolved payment prevents
+  a new refinance, and a reduced mortgage cannot silently change the bounds.
+- Validation so far: *163 Python* policy/calendar/actual-household checks
+  pass in =/private/tmp/buck-household-closing-py.log=. *74 pure JS* policy/
+  quote/calendar checks pass. The complete existing actual JS primary suite
+  is running in =/private/tmp/buck-household-closing-primary-js.log=; no final
+  result is claimed yet. Shared cases check both initial bank refusal and
+  a successful retry whose response is lost, without replaying issuance,
+  export or the closing fee.
+- Next in this turn: bounded staged-programme admission, still paying the
+  first closing cost in full. Then automatic decision scheduling, reserve-
+  safe surplus and working money, saver credit investment, guarded exits,
+  short complete economies and actual five-year JSON/PDF campaigns.
+  Normal act remains gated until those monetary paths are implemented.

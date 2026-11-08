@@ -404,7 +404,7 @@ export function terms(s, p, investment = false) {
   return { debt: s.mortgage, rate: investment ? 0 : p.apr, face: s.face,
     premium_bp: p.premium_bp, joined: s.joined, payback_y: p.theta, k: s.k,
     headroom: s.spendable, unactivated: s.unactivated,
-    fixed_cost: s.joined ? 0 : p.switch_k * 1000,
+    fixed_cost: (s.closing_paid ?? s.joined) ? 0 : p.switch_k * 1000,
     penalty_months: investment || s.at_renewal ? 0 : p.penalty_months,
     risk: p.risk, opp_rate: p.apr, buck_value: s.basket_usd,
     expected_relief_rate: s.expected_relief_rate, premium_refund_fraction: s.premium_refund_fraction ?? 1,

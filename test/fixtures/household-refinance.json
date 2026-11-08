@@ -16,7 +16,7 @@
     {"name": "lost bank reply", "fault": "lost", "phase": "mortgage", "final": "complete"},
     {"name": "unknown issuance hash", "fault": "unknown", "phase": "issue", "final": "pending"},
     {"name": "reverted export", "fault": "revert", "phase": "export", "final": "refused"},
-    {"name": "reverted bank payment", "fault": "revert", "phase": "mortgage", "final": "refused"},
+    {"name": "reverted bank payment", "fault": "revert", "phase": "mortgage", "final": "refused", "retry_payment": true},
     {"name": "acquire reserve before issuance", "fault": null, "phase": null, "final": "complete", "seed_buck": "0", "reserve_buy_net": "4000000", "reserve_buy_max_usdc": "5000000", "confirmed": ["fund", "issue", "export", "mortgage"]},
     {"name": "lost reserve purchase reply", "fault": "lost", "phase": "fund", "final": "complete", "seed_buck": "0", "reserve_buy_net": "4000000", "reserve_buy_max_usdc": "5000000", "confirmed": ["fund", "issue", "export", "mortgage"]},
     {"name": "unknown reserve purchase hash", "fault": "unknown", "phase": "fund", "final": "pending", "seed_buck": "0", "reserve_buy_net": "4000000", "reserve_buy_max_usdc": "5000000", "confirmed": []},

@@ -44,6 +44,7 @@ export class CreditHouseholdAgent {
     this.nextDecision = arrive_day + p.phase;
     this.started = false;
     this.joined = false;
+    this.refinanceClosed = false; // Confirmed bank closing, separate from insurance activation.
     this.refis = 0;
     this.deploys = 0;
     this.throttled = 0;
@@ -226,6 +227,16 @@ export class CreditHouseholdAgent {
   }
 
   async startNetRefinance(world, plan, day, ctr = {}, options = {}) {
+    await this.prepareNetRefinance(world, day);
+    return this.refinanceMachine.start(world, plan, day, ctr, options);
+  }
+
+  async retryNetRefinancePayment(world, day, ctr = this.refinanceMachine.counters ?? {}) {
+    await this.prepareNetRefinance(world, day);
+    return this.refinanceMachine.retryPayment(world, day, ctr);
+  }
+
+  async prepareNetRefinance(world, day) {
     if (this.calendarMachine.bound) {
       await this.calendarMachine.prepare(world, day);
       if (this.calendarMachine.active) throw new Error("household calendar must finish before refinancing");
@@ -234,7 +245,6 @@ export class CreditHouseholdAgent {
     if (await this.pendingRepayment(world) || this.netRepaymentReserve !== null || this.netRepaymentTarget !== null) {
       throw new Error("household buyback must finish before refinancing");
     }
-    return this.refinanceMachine.start(world, plan, day, ctr, options);
   }
 
   async advanceNetCalendar(world, day) {
@@ -709,7 +719,8 @@ export class CreditHouseholdAgent {
         reliefLiquidityLimited: s.reliefLiquidityLimited, basketShares: s.basketShares,
         machine: this.refinanceMachine.status(), calendar: this.calendarMachine.status() } : {}),
       pending: s.pending, premiumPaid: this.premiumPaid, extPremium: this.extPremium, hypoPremium: this.hypoPremium,
-      switchPaid: this.switchPaid, penaltyPaid: this.penaltyPaid, tradeLoss: this.tradeLoss, unwound: this.unwound,
+      switchPaid: this.switchPaid, penaltyPaid: this.penaltyPaid, refinanceClosed: this.refinanceClosed,
+      tradeLoss: this.tradeLoss, unwound: this.unwound,
       externalInterest: this.externalInterest, hypoInterest: this.hypoInterest, investedUsd: this.investedUsd,
       incomeTotal: this.incomeTotal, livingPaid: this.livingPaid, hypoLiving: this.hypoLiving,
       receipts: this.receipts.length, policy: this.p.surplus_policy, role: this.p.role,

@@ -33,6 +33,21 @@ saving/paydown and exits are ported. Save/resume is deferred; it is not a
 prerequisite for uninterrupted household or five-year runs. An isolated funded-plan test is not a
 completed household economy or five-year stability result.
 
+Insurance activation (=joined=) and a completed mortgage closing are separate.
+=refinance_closed= / =refinanceClosed= becomes true only when a confirmed bank
+receipt applies the first issuance-backed mortgage allocation. Before that,
+new-credit assessments still include the closing cost. Later tranches do not
+pay it again. A completed wallet-only prepayment does not switch insurance.
+
+After a proved bank refusal, the machine exposes =payment_due= and retains
+its confirmed issue/export and bank allocation. New refinancing is refused
+until =retry_net_refinance_payment= / =retryNetRefinancePayment= completes
+that bank leg. The retry keeps its amount and cash-buffer bounds and shares
+normal receipt recovery: an unknown hash never permits another send. If the
+mortgage has fallen below the saved principal, that allocation needs explicit
+reassessment. Calendar flows and buyback reconciliation remain serialized.
+These fields also appear in personal observations and decision events.
+
 Use the existing acceptance target; it builds the contracts/kernels and runs
 the primary-world, household, receipt and reporting tests:
 

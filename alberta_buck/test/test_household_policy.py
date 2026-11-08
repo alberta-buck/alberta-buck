@@ -17,6 +17,13 @@ FIXTURE                         = json.loads((ROOT / "test/fixtures/household-po
 INSURANCE                       = json.loads((ROOT / "test/fixtures/household-insurance.json").read_text())
 
 
+@pytest.mark.parametrize("case", FIXTURE["closing"], ids=lambda c: c["name"])
+def test_closing_cost_tracks_confirmed_payment_separately_from_activation(case):
+    p = hp.profile(FIXTURE["seed"], "closing", FIXTURE["settings"] | {"switch_k": 2})
+    state = FIXTURE["state"] | {key: case[key] for key in ("joined", "closing_paid")}
+    assert hp.terms(state, p).fixed_cost == case["fixed"]
+
+
 @pytest.mark.parametrize("case", FIXTURE["issuance"], ids=lambda c: c["name"])
 def test_issuance_cases(case):
     p                           = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | case["settings"])

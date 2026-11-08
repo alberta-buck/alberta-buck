@@ -41,7 +41,7 @@ export async function observeRefinanceForecasts(world) {
  * Execution still rechecks the selected issuance and actual trade bounds. */
 export async function assessRefinance(a, world, day, { expected_relief_rate, expected_refund_growth,
   expected_wallet_growth, reserve_floor = null, slippage_bp = 50 } = {}) {
-  if (world.accounting !== "net" || a.refinanceMachine.active || a.calendarMachine.active) throw new Error("household refinance assessment needs idle canonical accounting");
+  if (world.accounting !== "net" || a.refinanceMachine.active || a.refinanceMachine.paymentDue || a.calendarMachine.active) throw new Error("household refinance assessment needs idle canonical accounting");
   reserve_floor ??= a.refinanceMachine.flow?.plan.reserve_floor ?? 0n;
   if (typeof reserve_floor !== "bigint" || reserve_floor < 0n || reserve_floor > MAX
       || !Number.isInteger(slippage_bp) || slippage_bp < 0 || slippage_bp > 1000) throw new Error("invalid household assessment reserve or slippage");
@@ -56,7 +56,7 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
   const cash = await at(world.usdc, "balanceOf", [owner]), k = await at(world.kctrl, "currentBuckK");
   const bvib = await at(world.basket, "basketValueInBuck"), month = Math.floor((day - a.arrive_day) / 30);
   const state = { accounting: "net", mortgage: Number(a.mortgage) / 1e6, face: Number(a.face) / 1e6,
-    joined: a.joined, k: Number(k) / 1e18, spendable: Number(book.spendable) / 1e6,
+    joined: a.joined, closing_paid: a.refinanceClosed, k: Number(k) / 1e18, spendable: Number(book.spendable) / 1e6,
     unactivated: available.maturitiesPending ? 0 : Number(available.unactivatedPresent) / 1e6,
     activated_capacity: Number(available.capacity) / 1e6,
     issuance_limit: available.maturitiesPending ? 0 : Number(available.sharedLimit) / 1e6,
@@ -145,10 +145,11 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
 export class HouseholdRefinance {
   constructor(agent) { this.agent = agent; this.flow = null; this.events = []; this.decisions = 0; }
   get active() { return this.flow !== null && ["running", "pending"].includes(this.flow.status); }
+  get paymentDue() { return this.flow !== null && this.flow.status === "refused" && this.flow.phase === "mortgage"; }
   status() {
     const f = this.flow;
     return { schema: 1, decision: this.decisions, status: f?.status ?? "idle", phase: f?.phase ?? null,
-      hash: f?.hash ?? null, events: this.events.length };
+      hash: f?.hash ?? null, payment_due: this.paymentDue, events: this.events.length };
   }
   async accounts(world) {
     const a = this.agent, owner = world.holderAddress(a.account);
@@ -179,7 +180,7 @@ export class HouseholdRefinance {
         external_premium_paid: a.extPremium, living_arrears: a.livingArrears, premium_arrears: a.premiumArrears,
         counterfactual_cash: a.hypoCash, counterfactual_mortgage: a.hypoMortgage,
         counterfactual_interest: a.hypoInterest, counterfactual_paid: a.hypoPaid, calendar: a.calendarMachine.status(),
-        premium_paid: a.premiumPaid, switch_paid: a.switchPaid, penalty_paid: a.penaltyPaid,
+        premium_paid: a.premiumPaid, switch_paid: a.switchPaid, penalty_paid: a.penaltyPaid, refinance_closed: a.refinanceClosed,
         external_premium_monthly: externalPremium, counterfactual_premium_monthly: monthlyPremium,
         cash_buffer: buffer, reserve_floor: reserve, ratios: { utilization: limit ? Number(issued) / Number(limit) : null,
           cash_buffer_cover: buffer ? Number(cash) / Number(buffer) : null, reserve_cover: reserve ? Number(bucks) / Number(reserve) : null } });
@@ -215,6 +216,7 @@ export class HouseholdRefinance {
   }
   async start(world, given, day, ctr = {}, { context = {} } = {}) {
     if (this.active) throw new Error("household refinancing already active");
+    if (this.paymentDue) throw new Error("household bank payment due; retry before a new refinance");
     const p = { switch_cost: 0n, penalty_numerator: 0n, penalty_denominator: 1n,
       reserve_buy_net: 0n, reserve_buy_max_usdc: 0n, ...given };
     const values = [p.export_buck, p.minimum_usdc, p.mortgage_limit, p.cash_buffer, p.reserve_floor,
@@ -235,6 +237,7 @@ export class HouseholdRefinance {
     if (c && p.reserve_buy_net < c.reserveShortfall) throw new Error("refinance reserve purchase is insufficient");
     if (c && p.reserve_floor < reserveFor(c)) throw new Error("refinance must retain the quoted BUCK reserve");
     if (!c && p.switch_cost) throw new Error("wallet prepayment cannot switch insurance");
+    if (a.refinanceClosed && p.switch_cost) throw new Error("household refinance closing was already paid");
     const book = await world.netCreditOps.household(owner, ids);
     for (const id of ids) if ((await world.session.call(world.buck, "reductionAuthorization", [id]))[0]) {
       throw new Error("household reduction authorization pending");
@@ -254,12 +257,22 @@ export class HouseholdRefinance {
     this.counters = ctr;
     this.flow = { plan: { ...p, candidate: c ? { ...c, reasons: [...c.reasons] } : null },
       phase: funding ? "fund" : c ? "issue" : "export", status: "running", hash: null, issue_candidate: null,
-      initial_joined: a.joined, terms: null };
+      initial_closed: a.refinanceClosed, terms: null };
     a.fundingPending = true;
     const limits = Object.fromEntries(["surplus_policy", "theta", "issue_premium", "retire_disc", "utilization", "max_impact_bp"]
       .map((k) => [k, a.p[k]]));
     const plan = { ...this.flow.plan, candidate: c ? Object.fromEntries(Object.entries(c).map(([k, v]) => [snake(k), v])) : null };
     await this.event(world, day, "planned", { plan, context, limits, market: await this.market(world), basket: await this.basket(world) });
+    return this.advance(world, day, ctr);
+  }
+  /** Only a proved-refused bank leg can retry; original amount/buffer bounds
+   * remain, and confirmed issue/export phases cannot be replayed. */
+  async retryPayment(world, day, ctr = this.counters ?? {}) {
+    if (!this.paymentDue) throw new Error("household has no refused bank payment to retry");
+    if (this.agent.mortgage < this.flow.plan.mortgage_limit) throw new Error("household mortgage changed; bank allocation needs reassessment");
+    Object.assign(this.flow, { status: "running", hash: null, terms: null });
+    this.agent.fundingPending = true;
+    await this.event(world, day, "retry", { operation: "mortgage" });
     return this.advance(world, day, ctr);
   }
   async refuse(world, day, reason) {
@@ -292,8 +305,9 @@ export class HouseholdRefinance {
       if (a.calendarMachine.bound) await a.calendarMachine.recordMortgage(world, receipt, t.principal);
       else { a.mortgage -= t.principal; a.externalPaid += t.principal; }
       a.switchPaid += t.switch; a.penaltyPaid += t.penalty;
+      if (f.plan.candidate) a.refinanceClosed = true;
       a.refis++; a.deploys++;
-      const key = f.initial_joined ? "rtrTopUps" : "rtrRefis";
+      const key = f.initial_closed ? "rtrTopUps" : "rtrRefis";
       ctr[key] = (ctr[key] ?? 0) + 1;
       ctr.rtrUsdRetired = (ctr.rtrUsdRetired ?? 0n) + t.principal / RAW;
       amounts = { usdc: result.amount, principal_usdc: t.principal, switch_usdc: t.switch, penalty_usdc: t.penalty };

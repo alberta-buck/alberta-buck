@@ -8,6 +8,10 @@ import { observeRefinanceForecasts } from "../src/agents/net-household.js";
 
 const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-policy.json", import.meta.url)));
 const insurance = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-insurance.json", import.meta.url)));
+for (const c of f.closing) test(`household closing: ${c.name}`, () => {
+  const p = profile(f.seed, "closing", { ...f.settings, switch_k: 2 });
+  assert.equal(terms({ ...f.state, joined: c.joined, closing_paid: c.closing_paid }, p).fixed_cost, c.fixed);
+});
 for (const c of f.issuance) test(`household policy: ${c.name}`, () => {
   const [kind, v] = issuance({ ...f.state, ...c.state }, profile(f.seed, "0", { ...f.settings, ...c.settings }));
   assert.equal(kind, c.kind); assert.equal(v.go, c.go);

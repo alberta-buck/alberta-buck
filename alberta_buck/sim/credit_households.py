@@ -88,6 +88,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self.pattern            = "salary"
         self.surplus_policy     = p["surplus_policy"]
         self.joined             = False
+        self.refinance_closed   = False                 # confirmed bank closing, separate from insurance activation
         self.refis              = 0
         self.deploys            = 0
         self.throttled          = 0
@@ -352,7 +353,16 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         return result
 
     def start_net_refinance(self, d, plan, day, ctr, *, context=None):
-        """Execute an assessed plan, including its optional bounded reserve buy."""
+        self._prepare_net_refinance(d, day)
+        return self.refinance_machine.start(d, plan, day, ctr, context=context)
+
+    def retry_net_refinance_payment(self, d, day, ctr):
+        """Retry only a proved-refused bank leg; keep its confirmed issue/export."""
+        self._prepare_net_refinance(d, day)
+        return self.refinance_machine.retry_payment(d, day, ctr)
+
+    def _prepare_net_refinance(self, d, day):
+        """Serialize refinancing with calendar flows and the saved buyback intent."""
         if getattr(d, "buck_accounting", "") != "net":
             raise ValueError("canonical refinancing requires net accounting")
         if self.calendar_machine.bound:
@@ -362,7 +372,6 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         if (self._pending_repayment(d) or self._net_repayment_reserve is not None or
                 self._net_repayment_target is not None):
             raise ValueError("household buyback must finish before refinancing")
-        return self.refinance_machine.start(d, plan, day, ctr, context=context)
 
     def advance_net_calendar(self, d, day, ctr):
         """Explicit recurring-flow component; normal economic decisions remain gated."""
@@ -1280,6 +1289,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                   active=self._started, role=self.p["role"], member=self.member, action=self.last_action,
                   issue_action=self.last_issue, surplus_action=self.last_surplus,
                   funding_pending=self.funding_pending,
+                  refinance_closed=self.refinance_closed,
                   pending_usd=pending, invested_usd=self.invested_usd, issued_invest=self.issued_invest,
                   external_interest=self.external_interest, hypo_interest=self.hypo_interest,
                   income_total=self.income_total, living_paid=self.living_paid, hypo_living=self.hypo_living,

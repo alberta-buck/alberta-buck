@@ -467,6 +467,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
         assert.equal(machine.status().status, vector.final);
         assert.ok(Object.values(calls).every((n) => n === 1));
         const complete = vector.final === "complete", principal = complete ? b.mortgage_limit : 0n;
+        assert.equal(a.refinanceClosed, complete);
         const expected = vector.confirmed ?? (complete ? ["issue", "export", "mortgage"]
           : vector.fault === "unknown" ? [] : vector.phase === "export" ? ["issue"] : ["issue", "export"]);
         const issued = expected.includes("issue") ? b.new_spendable + b.premium : 0n;
@@ -500,6 +501,27 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
         }
         assert.throws(() => a.householdEventsSince(-1), /cursor/);
         if (!machine.active) assert.equal(await machine.advance(world, 3), false);
+        if (vector.retry_payment) {
+          assert.ok(a.joined && !a.refinanceClosed && machine.paymentDue);
+          const supply = await s.call(buck, "totalIssued"), sent = { ...calls };
+          await assert.rejects(a.startNetRefinance(world, plan, 3, ctr), /bank payment due/);
+          let attempts = 0;
+          world.netSettlementOps.payExact = async (...args) => {
+            const result = await originalPay(...args);
+            attempts++;
+            throw new TransactionReceiptPending(result.receipt.transactionHash);
+          };
+          await a.retryNetRefinancePayment(world, 3, ctr);
+          assert.ok(machine.active && !machine.paymentDue && !a.refinanceClosed);
+          await a.act(world, 4, 0);
+          assert.equal(machine.status().status, "complete"); assert.equal(a.refinanceClosed, true);
+          assert.deepEqual(calls, sent); assert.equal(attempts, 1);
+          assert.equal(await s.call(buck, "totalIssued"), supply);
+          assert.equal(a.switchPaid, b.switch_cost); assert.equal(a.refis, 1); assert.equal(a.externalPaid, b.mortgage_limit);
+          assert.equal(ctr.rtrRefis, 1); assert.equal(ctr.rtrTopUps, undefined);
+          await assert.rejects(a.startNetRefinance(world, plan, 4, ctr), /already paid/);
+          await assert.rejects(a.retryNetRefinancePayment(world, 4, ctr), /no refused bank payment/);
+        }
       } finally {
         world.netCreditOps.issue = originalIssue; world.netMarket.execute = originalExecute; world.netSettlementOps.payExact = originalPay;
         world.netCreditOps.assessIssueCandidate = originalAssess;

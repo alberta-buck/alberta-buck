@@ -235,6 +235,7 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
                 raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
             return receipt
         return execute
+    original_bank_execute = d.net_settlement_ops.execute
     for ops in (d.net_credit_ops, d.net_market_ops, d.net_settlement_ops):
         monkeypatch.setattr(ops, "execute", wrap(ops.execute))
     assess, read_failures = d.net_credit_ops.assess_issue_candidate, []
@@ -270,6 +271,7 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
     assert machine.status()["status"] == case["final"]
     assert all(n == 1 for n in calls.values()), "a recovered receipt must not send again"
     completed = case["final"] == "complete"
+    assert a.refinance_closed is completed
     principal = b["mortgage_limit"] if completed else 0
     expected_operations = case.get("confirmed", ["issue", "export", "mortgage"] if completed else
         [] if case["fault"] == "unknown" else ["issue"] if case["phase"] == "export" else ["issue", "export"])
@@ -306,6 +308,31 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
     if not machine.active:
         count = len(events)
         assert machine.advance(d, 3, ctr) is False and len(machine.events) == count
+    if case.get("retry_payment"):
+        assert a.joined and not a.refinance_closed and machine.payment_due
+        before_supply = d.buck.functions.totalIssued().call()
+        before_calls = dict(calls)
+        with pytest.raises(ValueError, match="bank payment due"):
+            a.start_net_refinance(d, plan, 3, ctr)
+        attempts = []
+        def lose_retry(*args):
+            receipt = original_bank_execute(*args)
+            attempts.append(receipt)
+            raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
+        monkeypatch.setattr(d.net_settlement_ops, "execute", lose_retry)
+        a.retry_net_refinance_payment(d, 3, ctr)
+        assert machine.active and not machine.payment_due and not a.refinance_closed
+        a.act(d, scenario, 4, 0, ctr)
+        assert machine.status()["status"] == "complete" and a.refinance_closed
+        assert calls == before_calls and len(attempts) == 1
+        assert d.buck.functions.totalIssued().call() == before_supply
+        assert a.switch_paid == b["switch_cost"] and a.refis == 1
+        assert a.external_paid == b["mortgage_limit"]
+        assert ctr["rtrRefis"] == 1 and "rtrTopUps" not in ctr
+        with pytest.raises(ValueError, match="already paid"):
+            a.start_net_refinance(d, plan, 4, ctr)
+        with pytest.raises(ValueError, match="no refused bank payment"):
+            a.retry_net_refinance_payment(d, 4, ctr)
     if case["name"] == "confirmed":
         # Mandatory public transitions survive failed capture and SIM_ACTS=none,
         # then stream once through the existing JSON/full/lite frame paths.
