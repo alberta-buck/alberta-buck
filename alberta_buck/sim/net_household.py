@@ -5,7 +5,7 @@ rechecks the selected facility, guards the sale and authenticates each receipt.
 Only a confirmed bank payment changes the external mortgage. A lost reply
 stops at that exact phase until its saved receipt can be reconciled. This
 assessor chooses among bounded actual candidates using explicit forecasts;
-calendar cash-flow scheduling is still separate work.
+cash-flow scheduling lives in the existing household calendar component.
 
 The append-only public events use decimal strings for money, with stable
 decision/sequence identifiers. They are suitable for saved JSON and live UI
@@ -75,7 +75,7 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
     as execution loss. Quote estimates are advisory, and execution rechecks.
     """
     if (getattr(d, "buck_accounting", "") != "net" or agent.refinance_machine.active or
-            agent.refinance_machine.payment_due or
+            agent.refinance_machine.settlement_due or
             agent.calendar_machine.active):
         raise ValueError("household refinance assessment needs idle canonical accounting")
     previous = agent.refinance_machine.flow
@@ -119,14 +119,14 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
     context = dict(block=block, considered=0, issuance_quotes=0, rejections={}, feasible=0,
                    forecasts=dict(relief_rate=expected_relief_rate, refund_growth=expected_refund_growth,
                                   wallet_growth=expected_wallet_growth), protected_buck=reserve_floor)
-    plans, values, refunds = [], [], {}
+    plans, values, refunds, programmes = [], [], {}, []
     active = sum(f.activated for f in book.facilities)
     annual = agent._face0 * agent.premium_rate // 10_000
 
     def reject(reason):
         context["rejections"][reason] = context["rejections"].get(reason, 0) + 1
 
-    def option(candidate, wallet):
+    def option(candidate, wallet, *, programme=False):
         context["considered"] += 1
         new, premium = (candidate.requested_spendable, candidate.premium) if candidate else (0, 0)
         floor = max(retained, _reserve_for(candidate)) if candidate else retained
@@ -137,11 +137,17 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
             return
         maximum = (cost * (10_000 + slippage_bp) + 9999) // 10_000
         export = new + wallet
-        if (export < RAW or export > buck_cap or maximum > cash_cap or
+        if (export < RAW or (not programme and export > buck_cap) or maximum > cash_cap or
                 buy * market.gross_scaled > buck_cap * market.net_scaled):
             reject("trade-size")
             return
-        minimum = market.sell_expected(export) * (10_000 - slippage_bp) // 10_000
+        # A programme is a forecast of bounded tranches after route repair,
+        # not a single large swap or authorization to issue its full amount.
+        leg = min(export, buck_cap)
+        if leg == 0:
+            reject("trade-size")
+            return
+        minimum = (market.sell_expected(leg) * (10_000 - slippage_bp) // 10_000) * export // leg
         if not 0 < minimum <= agent.mortgage:
             reject("mortgage-size")
             return
@@ -166,44 +172,78 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
         if candidate and candidate.coverage:
             saving = (external_premium_due(annual, agent._face0, active) -
                       external_premium_due(annual, agent._face0, active + candidate.coverage))
-        plans.append(RefinancePlan(candidate, export, minimum, minimum, agent.cash_buffer, floor,
-                                   fixed, pn, 10**12, buy, maximum))
-        values.append(dict(usd=minimum / RAW, wallet_used=wallet / RAW, new_spendable=new / RAW,
+        economics = dict(usd=minimum / RAW, wallet_used=wallet / RAW, new_spendable=new / RAW,
             present_coverage=coverage / RAW, premium=premium / RAW, premium_refund_fraction=fraction,
             external_premium_saving=saving / RAW, reserve_cost=(maximum - buy * t.buck_value) / RAW,
-            reserve_carry=buy / RAW * t.buck_value * (agent.apr - expected_wallet_growth)))
+            reserve_carry=buy / RAW * t.buck_value * (agent.apr - expected_wallet_growth))
+        if programme:
+            programmes.append((candidate, economics, export))
+        else:
+            plans.append(RefinancePlan(candidate, export, minimum, minimum, agent.cash_buffer, floor,
+                                       fixed, pn, 10**12, buy, maximum))
+            values.append(economics)
 
     wallet_limit = min(max(0, book.spendable - retained), buck_cap)
     for wallet in sorted({wallet_limit * f // 20 for f in fractions}, reverse=True):
         option(None, wallet)
-    maximum_new = min(max(0, utilization - book.issued), available.shared_limit, buck_cap)
+    credit_cap = min(max(0, utilization - book.issued), available.shared_limit)
+    maximum_new = min(credit_cap, buck_cap)
     activated = dict(available.facilities)
-    for facility in book.facilities:
-        sizes = {maximum_new * f // 20 for f in fractions} | {min(maximum_new, activated.get(facility.token_id, 0))}
-        for amount in sorted((v for v in sizes if v >= RAW), reverse=True):
-            menu = d.net_credit_ops.issue_coverage_menu(agent.address, facility.token_id, amount,
-                facility.face * facility.premium_rate * 10 // 10_000, reserve_buffer=RAW)
-            context["issuance_quotes"] += len(menu)
-            for candidate in menu:
-                if candidate.block_number != block:
-                    raise ValueError("household assessment block changed")
-                if any(r != "reserve-shortfall" for r in candidate.reasons):
-                    for reason in candidate.reasons:
-                        reject(reason)
+
+    def issuance_options(cap, *, programme=False):
+        for facility in book.facilities:
+            sizes = {cap * f // 20 for f in fractions} | {min(cap, activated.get(facility.token_id, 0))}
+            for amount in sorted((v for v in sizes if v >= RAW), reverse=True):
+                menu = d.net_credit_ops.issue_coverage_menu(agent.address, facility.token_id, amount,
+                    facility.face * facility.premium_rate * 10 // 10_000, reserve_buffer=RAW)
+                context["issuance_quotes"] += len(menu)
+                for candidate in menu:
+                    if candidate.block_number != block:
+                        raise ValueError("household assessment block changed")
+                    if any(r != "reserve-shortfall" for r in candidate.reasons):
+                        for reason in candidate.reasons:
+                            reject(reason)
+                        continue
+                    if book.issued + amount + candidate.premium > utilization:
+                        reject("utilization")
+                        continue
+                    floor = max(retained, _reserve_for(candidate))
+                    wallet = min(max(0, book.spendable - floor), max(0, buck_cap - amount))
+                    for spent in (0,) if programme else sorted({0, wallet}):
+                        option(candidate, spent, programme=programme)
+
+    issuance_options(maximum_new)
+    index, verdict = carry.best_quoted_refinance(t, values)
+    # A first small trade should not have to repay the entire closing fee
+    # alone. Require a same-asset programme affordable from current capital
+    # and actual credit, scored at today's conservative per-tranche price.
+    if index is None and plans and t.fixed_cost > 0 and buck_cap:
+        minimum_leg = market.sell_expected(buck_cap) * (10_000 - slippage_bp) // 10_000
+        programme_cap = min(credit_cap, agent.mortgage * buck_cap // minimum_leg) if minimum_leg else 0
+        if programme_cap > maximum_new:
+            issuance_options(programme_cap, programme=True)
+        context["programme_feasible"] = len(programmes)
+        selected_key = None
+        for i, (plan, economics) in enumerate(zip(plans, values)):
+            if plan.candidate is None:
+                continue
+            for candidate, whole_economics, exported in programmes:
+                if candidate.token_id != plan.candidate.token_id:
                     continue
-                if book.issued + amount + candidate.premium > utilization:
-                    reject("utilization")
-                    continue
-                floor = max(retained, _reserve_for(candidate))
-                wallet = min(max(0, book.spendable - floor), max(0, buck_cap - amount))
-                for spent in sorted({0, wallet}):
-                    option(candidate, spent)
+                marginal, whole = carry.staged_refinance(t, economics, whole_economics)
+                key = (plan.mortgage_limit, marginal.value, -plan.candidate.premium)
+                if marginal.go and (selected_key is None or key > selected_key):
+                    index, verdict, selected_key = i, marginal, key
+                    context["programme"] = dict(token_id=candidate.token_id, economics=whole_economics,
+                        score=asdict(whole), tranches=(exported + buck_cap - 1) // buck_cap,
+                        basis="current-credit/capital/per-tranche-price", fixed_cost_paid_now=plan.switch_cost,
+                        fixed_cost_allocated=-marginal.parts["fixed"])
     if d.w3.eth.block_number != block:
         raise ValueError("household assessment block changed")
-    index, verdict = carry.best_quoted_refinance(t, values)
     context["feasible"] = len(plans)
     context["selected"] = None if index is None else dict(economics=values[index], score=asdict(verdict))
-    context["reason"] = "worthwhile-refinance" if index is not None else "no-worthwhile-refinance"
+    context["reason"] = ("worthwhile-staged-refinance" if "programme" in context else
+                         "worthwhile-refinance" if index is not None else "no-worthwhile-refinance")
     return dict(plan=plans[index] if index is not None else None, verdict=verdict, context=context)
 
 
@@ -244,15 +284,19 @@ class HouseholdRefinance:
         return self.flow is not None and self.flow["status"] in ("running", "pending")
 
     @property
+    def settlement_due(self):
+        return self.flow is not None and self.flow["status"] == "refused" and self.flow["phase"] in ("export", "mortgage")
+
+    @property
     def payment_due(self):
         """A failed bank leg still owns the confirmed issue/export proceeds."""
-        return self.flow is not None and self.flow["status"] == "refused" and self.flow["phase"] == "mortgage"
+        return self.settlement_due and self.flow["phase"] == "mortgage"
 
     def status(self):
         f = self.flow
         return {"schema": 1, "decision": self.decisions, "status": f["status"] if f else "idle",
                 "phase": f["phase"] if f else None, "hash": f.get("hash") if f else None,
-                "payment_due": self.payment_due, "events": len(self.events)}
+                "payment_due": self.payment_due, "settlement_due": self.settlement_due, "events": len(self.events)}
 
     def _accounts(self, d):
         a = self.agent
@@ -343,6 +387,8 @@ class HouseholdRefinance:
             raise ValueError("household refinancing already active")
         if self.payment_due:
             raise ValueError("household bank payment due; retry before a new refinance")
+        if self.settlement_due:
+            raise ValueError("household has an unsettled export; resolve before a new refinance")
         if not isinstance(plan, RefinancePlan):
             raise ValueError("invalid household refinance plan")
         values = (plan.export_buck, plan.minimum_usdc, plan.mortgage_limit, plan.cash_buffer,

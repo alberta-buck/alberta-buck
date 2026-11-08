@@ -359,6 +359,62 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
         assert "household_events" not in snap.frames[1]
 
 
+def test_staged_refinance_pays_one_full_closing_and_only_issues_each_bounded_leg(household_world):
+    d, _, make = household_world
+    spec = REFINANCE["programme"]
+    a = make(50, CreditHouseholdAgent, settings=spec["settings"])
+    d.chain.send(d.usdc.functions.mint(a.address, int(spec["seed_usdc"])))
+    a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("approve", args=[d.swap_guard.address, 2**256 - 1]))
+    a._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1]))
+    a._proxy_exec(d, d.permit2.address, d.permit2.encode_abi(
+        "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
+    block, mortgage, supply = d.w3.eth.block_number, a.mortgage, d.buck.functions.totalIssued().call()
+    a.p["utilization"] = spec["insufficient_utilization"]
+    declined = a.assess_net_refinance(d, 1, **spec["forecasts"])
+    assert declined["plan"] is None, "future K/capacity must not finance the programme"
+    a.p["utilization"] = spec["settings"]["utilization"]
+    result = a.assess_net_refinance(d, 1, **spec["forecasts"])
+    plan, v, ctx = result["plan"], result["verdict"], result["context"]
+    assert d.w3.eth.block_number == block and a.mortgage == mortgage
+    assert plan is not None, ctx
+    assert ctx["reason"] == "worthwhile-staged-refinance"
+    assert v.go and ctx["programme"]["score"]["go"]
+    assert ctx["programme"]["tranches"] > 1
+    fixed = spec["settings"]["switch_k"] * 1000
+    assert plan.switch_cost == fixed * RAW
+    allocated = ctx["programme"]["fixed_cost_allocated"]
+    assert 0 < allocated < fixed
+    assert v.value - fixed + allocated < 0, "a standalone first tranche would decline the full startup fee"
+    assert -ctx["programme"]["score"]["parts"]["fixed"] == fixed
+    assert ctx["programme"]["economics"]["new_spendable"] > ctx["selected"]["economics"]["new_spendable"]
+    a.start_net_refinance(d, plan, 1, {}, context=ctx)
+    assert a.refinance_machine.status()["status"] == "complete", a.last_error
+    assert a.refinance_closed and a.switch_paid == fixed * RAW
+    assert a.mortgage == mortgage - plan.mortgage_limit
+    assert a.hypo_mortgage == mortgage
+    assert d.buck.functions.totalIssued().call() == supply + plan.candidate.requested_spendable + plan.candidate.premium
+    second = a.assess_net_refinance(d, 1, **spec["forecasts"])
+    assert second["plan"] is not None, second["context"]
+    assert second["plan"].switch_cost == second["verdict"].parts["fixed"] == 0
+    a.start_net_refinance(d, second["plan"], 1, {}, context=second["context"])
+    assert a.refinance_machine.status()["status"] == "complete", a.last_error
+    assert a.refis == 2 and a.switch_paid == fixed * RAW
+    assert a.external_paid == plan.mortgage_limit + second["plan"].mortgage_limit
+    assert d.usdc.functions.balanceOf(a.SINK).call() == a.external_paid + a.switch_paid + a.penalty_paid
+    third = a.assess_net_refinance(d, 1, **spec["forecasts"])
+    bad = replace(third["plan"], minimum_usdc=third["plan"].export_buck * 2)
+    a.start_net_refinance(d, bad, 1, {}, context=third["context"])
+    assert a.refinance_machine.status()["phase"] == "export"
+    assert a.refinance_machine.settlement_due and not a.refinance_machine.payment_due
+    retained = d.buck.functions.totalIssued().call()
+    with pytest.raises(ValueError, match="idle canonical"):
+        a.assess_net_refinance(d, 1, **spec["forecasts"])
+    with pytest.raises(ValueError, match="unsettled export"):
+        a.start_net_refinance(d, third["plan"], 1, {})
+    assert d.buck.functions.totalIssued().call() == retained
+    assert a.refis == 2 and a.switch_paid == fixed * RAW
+
+
 @pytest.mark.parametrize("cash_k,will_issue", [(40, True), (10, False)])
 @pytest.mark.parametrize("forecast_mode", ["explicit", "observed"])
 def test_refinance_assessment_chooses_actual_affordable_issuance_without_transactions(household_world, cash_k, will_issue, forecast_mode):

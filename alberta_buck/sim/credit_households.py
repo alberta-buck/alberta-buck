@@ -249,6 +249,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                                        at_renewal=(month - self.p["renew_in"]) % self.p["term_months"] == 0)
         if getattr(d, "buck_accounting", "") == "net":
             state["accounting"] = "net"  # policy refuses absent explicit forecasts
+            state["closing_paid"] = self.refinance_closed
             state["activated_capacity"] = available.capacity / PARITY
             state["issuance_limit"] = (0 if available.maturities_pending else available.shared_limit / PARITY)
             state["maturities_pending"] = available.maturities_pending

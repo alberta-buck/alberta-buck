@@ -7,7 +7,7 @@ import { buyBuckExact, netPurchaseFromReceipt, sellBuck, netSaleFromReceipt } fr
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 import { markNetBasketPositions } from "../basket.js";
 import { observeNetMarket, netPurchaseCost, netSaleExpected } from "../net-market-quote.js";
-import { externalPremiumDue, terms, bestQuotedRefinance } from "./household-policy.js";
+import { externalPremiumDue, terms, bestQuotedRefinance, stagedRefinance } from "./household-policy.js";
 
 const RAW = 1_000_000n, MAX = (1n << 256n) - 1n;
 const PHASES = ["fund", "issue", "export", "mortgage"];
@@ -41,7 +41,7 @@ export async function observeRefinanceForecasts(world) {
  * Execution still rechecks the selected issuance and actual trade bounds. */
 export async function assessRefinance(a, world, day, { expected_relief_rate, expected_refund_growth,
   expected_wallet_growth, reserve_floor = null, slippage_bp = 50 } = {}) {
-  if (world.accounting !== "net" || a.refinanceMachine.active || a.refinanceMachine.paymentDue || a.calendarMachine.active) throw new Error("household refinance assessment needs idle canonical accounting");
+  if (world.accounting !== "net" || a.refinanceMachine.active || a.refinanceMachine.settlementDue || a.calendarMachine.active) throw new Error("household refinance assessment needs idle canonical accounting");
   reserve_floor ??= a.refinanceMachine.flow?.plan.reserve_floor ?? 0n;
   if (typeof reserve_floor !== "bigint" || reserve_floor < 0n || reserve_floor > MAX
       || !Number.isInteger(slippage_bp) || slippage_bp < 0 || slippage_bp > 1000) throw new Error("invalid household assessment reserve or slippage");
@@ -75,20 +75,23 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
     .sort((x, y) => x > y ? -1 : x < y ? 1 : 0);
   const context = { block: blockNumber, considered: 0, issuance_quotes: 0, rejections: {}, feasible: 0,
     forecasts: { relief_rate: expected_relief_rate, refund_growth: expected_refund_growth, wallet_growth: expected_wallet_growth }, protected_buck: reserve_floor };
-  const plans = [], values = [], refunds = new Map(), active = book.facilities.reduce((n, f) => n + f.activated, 0n);
+  const plans = [], values = [], programmes = [], refunds = new Map(), active = book.facilities.reduce((n, f) => n + f.activated, 0n);
   const annual = a.face * BigInt(a.p.premium_bp) / 10000n;
   const reject = (reason) => { context.rejections[reason] = (context.rejections[reason] ?? 0) + 1; };
-  const option = async (candidate, wallet) => {
+  const option = async (candidate, wallet, programme = false) => {
     context.considered++;
     const newly = candidate?.requestedSpendable ?? 0n, premium = candidate?.premium ?? 0n;
     const floor = candidate ? max(retained, reserveFor(candidate)) : retained;
     const buy = candidate ? max(0n, floor - book.spendable) : 0n, cost = netPurchaseCost(market, buy);
     if (cost === null) { reject("reserve-liquidity"); return; }
     const maximum = (cost * BigInt(10000 + slippage_bp) + 9999n) / 10000n, exported = newly + wallet;
-    if (exported < RAW || exported > buckCap || maximum > cashCap || buy * market.gross_scaled > buckCap * market.net_scaled) {
+    if (exported < RAW || (!programme && exported > buckCap) || maximum > cashCap || buy * market.gross_scaled > buckCap * market.net_scaled) {
       reject("trade-size"); return;
     }
-    const minimum = netSaleExpected(market, exported) * BigInt(10000 - slippage_bp) / 10000n;
+    // A bounded-tranche forecast after route repair, not one oversized swap.
+    const leg = min(exported, buckCap);
+    if (!leg) { reject("trade-size"); return; }
+    const minimum = (netSaleExpected(market, leg) * BigInt(10000 - slippage_bp) / 10000n) * exported / leg;
     if (minimum <= 0n || minimum > a.mortgage) { reject("mortgage-size"); return; }
     const fixed = candidate ? BigInt(Math.trunc(t.fixed_cost * 1e6)) : 0n;
     const pn = state.at_renewal ? 0n : BigInt(Math.ceil(a.p.apr * a.p.penalty_months / 12 * 1e12));
@@ -104,37 +107,70 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
       fraction = Number(q.refundFractionWad) / 1e18;
     }
     if (candidate?.coverage) saved = externalPremiumDue(annual, a.face, active) - externalPremiumDue(annual, a.face, active + candidate.coverage);
-    plans.push({ candidate, export_buck: exported, minimum_usdc: minimum, mortgage_limit: minimum,
-      cash_buffer: a.buffer, reserve_floor: floor, switch_cost: fixed, penalty_numerator: pn, penalty_denominator: 10n ** 12n,
-      reserve_buy_net: buy, reserve_buy_max_usdc: maximum });
-    values.push({ usd: Number(minimum) / 1e6, wallet_used: Number(wallet) / 1e6, new_spendable: Number(newly) / 1e6,
+    const economics = { usd: Number(minimum) / 1e6, wallet_used: Number(wallet) / 1e6, new_spendable: Number(newly) / 1e6,
       present_coverage: Number(coverage) / 1e6, premium: Number(premium) / 1e6, premium_refund_fraction: fraction,
       external_premium_saving: Number(saved) / 1e6, reserve_cost: (Number(maximum) - Number(buy) * t.buck_value) / 1e6,
-      reserve_carry: Number(buy) / 1e6 * t.buck_value * (a.p.apr - expected_wallet_growth) });
+      reserve_carry: Number(buy) / 1e6 * t.buck_value * (a.p.apr - expected_wallet_growth) };
+    if (programme) programmes.push({ candidate, economics, exported });
+    else {
+      plans.push({ candidate, export_buck: exported, minimum_usdc: minimum, mortgage_limit: minimum,
+        cash_buffer: a.buffer, reserve_floor: floor, switch_cost: fixed, penalty_numerator: pn, penalty_denominator: 10n ** 12n,
+        reserve_buy_net: buy, reserve_buy_max_usdc: maximum });
+      values.push(economics);
+    }
   };
   const walletLimit = min(max(0n, book.spendable - retained), buckCap);
   for (const wallet of sizes(walletLimit)) await option(null, wallet);
-  const maximumNew = min(max(0n, utilization - book.issued), available.sharedLimit, buckCap);
+  const creditCap = min(max(0n, utilization - book.issued), available.sharedLimit), maximumNew = min(creditCap, buckCap);
   const activated = new Map(available.facilities.map(({ tokenId, maxSpendable }) => [String(tokenId), maxSpendable]));
-  for (const facility of book.facilities) for (const amount of [...new Set([...sizes(maximumNew), min(maximumNew, activated.get(String(facility.tokenId)) ?? 0n)])]
-    .filter((v) => v >= RAW).sort((x, y) => x > y ? -1 : x < y ? 1 : 0)) {
-    const menu = await world.netCreditOps.issueCoverageMenu(owner, facility.tokenId, amount,
-      facility.face * BigInt(facility.premiumRate) * 10n / 10000n, { reserveBuffer: RAW });
-    context.issuance_quotes += menu.length;
-    for (const candidate of menu) {
-      if (candidate.blockNumber !== blockNumber) throw new Error("household assessment block changed");
-      if (candidate.reasons.some((r) => r !== "reserve-shortfall")) { candidate.reasons.forEach(reject); continue; }
-      if (book.issued + amount + candidate.premium > utilization) { reject("utilization"); continue; }
-      const floor = max(retained, reserveFor(candidate));
-      const wallet = min(max(0n, book.spendable - floor), max(0n, buckCap - amount));
-      for (const spent of [...new Set([0n, wallet])].sort((x, y) => x < y ? -1 : x > y ? 1 : 0)) await option(candidate, spent);
+  const issuanceOptions = async (cap, programme = false) => {
+    for (const facility of book.facilities) for (const amount of [...new Set([...sizes(cap), min(cap, activated.get(String(facility.tokenId)) ?? 0n)])]
+      .filter((v) => v >= RAW).sort((x, y) => x > y ? -1 : x < y ? 1 : 0)) {
+      const menu = await world.netCreditOps.issueCoverageMenu(owner, facility.tokenId, amount,
+        facility.face * BigInt(facility.premiumRate) * 10n / 10000n, { reserveBuffer: RAW });
+      context.issuance_quotes += menu.length;
+      for (const candidate of menu) {
+        if (candidate.blockNumber !== blockNumber) throw new Error("household assessment block changed");
+        if (candidate.reasons.some((r) => r !== "reserve-shortfall")) { candidate.reasons.forEach(reject); continue; }
+        if (book.issued + amount + candidate.premium > utilization) { reject("utilization"); continue; }
+        const floor = max(retained, reserveFor(candidate));
+        const wallet = min(max(0n, book.spendable - floor), max(0n, buckCap - amount));
+        for (const spent of programme ? [0n] : [...new Set([0n, wallet])].sort((x, y) => x < y ? -1 : x > y ? 1 : 0)) {
+          await option(candidate, spent, programme);
+        }
+      }
+    }
+  };
+  await issuanceOptions(maximumNew);
+  let { index, verdict } = bestQuotedRefinance(t, values);
+  if (index === null && plans.length && t.fixed_cost > 0 && buckCap) {
+    const minimumLeg = netSaleExpected(market, buckCap) * BigInt(10000 - slippage_bp) / 10000n;
+    const programmeCap = minimumLeg ? min(creditCap, a.mortgage * buckCap / minimumLeg) : 0n;
+    if (programmeCap > maximumNew) await issuanceOptions(programmeCap, true);
+    context.programme_feasible = programmes.length;
+    let selected = null;
+    for (const [i, plan] of plans.entries()) {
+      if (!plan.candidate) continue;
+      for (const p of programmes) {
+        if (p.candidate.tokenId !== plan.candidate.tokenId) continue;
+        const marginal = stagedRefinance(t, values[i], p.economics);
+        const better = selected === null || plan.mortgage_limit > selected.usd
+          || plan.mortgage_limit === selected.usd && (marginal.verdict.value > selected.value
+            || marginal.verdict.value === selected.value && plan.candidate.premium < selected.premium);
+        if (marginal.verdict.go && better) {
+          index = i; verdict = marginal.verdict;
+          selected = { usd: plan.mortgage_limit, value: verdict.value, premium: plan.candidate.premium };
+          context.programme = { token_id: p.candidate.tokenId, economics: p.economics, score: marginal.programme,
+            tranches: (p.exported + buckCap - 1n) / buckCap, basis: "current-credit/capital/per-tranche-price",
+            fixed_cost_paid_now: plan.switch_cost, fixed_cost_allocated: -verdict.parts.fixed };
+        }
+      }
     }
   }
   if ((await s.client.getBlock()).number !== blockNumber) throw new Error("household assessment block changed");
-  const { index, verdict } = bestQuotedRefinance(t, values);
   context.feasible = plans.length;
   context.selected = index === null ? null : { economics: values[index], score: verdict };
-  context.reason = index === null ? "no-worthwhile-refinance" : "worthwhile-refinance";
+  context.reason = context.programme ? "worthwhile-staged-refinance" : index === null ? "no-worthwhile-refinance" : "worthwhile-refinance";
   return { plan: index === null ? null : plans[index], verdict, context };
 }
 
@@ -145,11 +181,12 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
 export class HouseholdRefinance {
   constructor(agent) { this.agent = agent; this.flow = null; this.events = []; this.decisions = 0; }
   get active() { return this.flow !== null && ["running", "pending"].includes(this.flow.status); }
-  get paymentDue() { return this.flow !== null && this.flow.status === "refused" && this.flow.phase === "mortgage"; }
+  get settlementDue() { return this.flow !== null && this.flow.status === "refused" && ["export", "mortgage"].includes(this.flow.phase); }
+  get paymentDue() { return this.settlementDue && this.flow.phase === "mortgage"; }
   status() {
     const f = this.flow;
     return { schema: 1, decision: this.decisions, status: f?.status ?? "idle", phase: f?.phase ?? null,
-      hash: f?.hash ?? null, payment_due: this.paymentDue, events: this.events.length };
+      hash: f?.hash ?? null, payment_due: this.paymentDue, settlement_due: this.settlementDue, events: this.events.length };
   }
   async accounts(world) {
     const a = this.agent, owner = world.holderAddress(a.account);
@@ -217,6 +254,7 @@ export class HouseholdRefinance {
   async start(world, given, day, ctr = {}, { context = {} } = {}) {
     if (this.active) throw new Error("household refinancing already active");
     if (this.paymentDue) throw new Error("household bank payment due; retry before a new refinance");
+    if (this.settlementDue) throw new Error("household has an unsettled export; resolve before a new refinance");
     const p = { switch_cost: 0n, penalty_numerator: 0n, penalty_denominator: 1n,
       reserve_buy_net: 0n, reserve_buy_max_usdc: 0n, ...given };
     const values = [p.export_buck, p.minimum_usdc, p.mortgage_limit, p.cash_buffer, p.reserve_floor,

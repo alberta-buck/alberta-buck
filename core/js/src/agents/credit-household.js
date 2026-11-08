@@ -172,6 +172,7 @@ export class CreditHouseholdAgent {
       if (typeof world.households.activatedCapacity !== "function") throw new Error("BuckNet activated capacity unavailable");
       const available = await world.households.activatedCapacity(this.account);
       state.accounting = "net"; // policy still requires explicit forecasts
+      state.closing_paid = this.refinanceClosed;
       state.activated_capacity = whole(available.capacity);
       state.issuance_limit = available.maturitiesPending ? 0 : whole(available.sharedLimit);
       state.unactivated = whole(available.unactivatedPresent);

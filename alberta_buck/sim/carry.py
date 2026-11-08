@@ -355,6 +355,27 @@ def best_quoted_refinance(t: RefiTerms, candidates):
     return best_index, best
 
 
+def staged_refinance(t: RefiTerms, tranche, programme):
+    """Admit a small first leg against a separately quoted current programme.
+
+    Both mappings use refinance_quoted inputs. The programme must cover this
+    leg and pass with the full startup cost. Allocate that cost by principal
+    only for the leg's economic score; its actual bank payment remains the
+    full fixed cost. No future credit, income or price improvement is added.
+    The caller must establish matching asset/quotes and exact cash feasibility.
+    Returns the marginal leg verdict and the whole-programme verdict.
+    """
+    whole = refinance_quoted(t, **programme)
+    first = refinance_quoted(t, **tranche)  # Validate all quoted inputs before allocation.
+    dimensions = ("usd", "wallet_used", "new_spendable", "present_coverage", "premium")
+    if (not whole.go or t.fixed_cost <= 0 or tranche["new_spendable"] <= 0 or
+            any(tranche[key] > programme[key] for key in dimensions) or
+            tranche.get("external_premium_saving", 0) > programme.get("external_premium_saving", 0)):
+        return NO, whole
+    allocated = t.fixed_cost * first.usd / whole.usd
+    return refinance_quoted(replace(t, fixed_cost=allocated), **tranche), whole
+
+
 # Sizes tried, as fractions of the most the household can retire.  The
 # value is concave in size (carry is linear, slippage convex, fixed costs
 # fixed), so a coarse grid finds the best size without a solver.

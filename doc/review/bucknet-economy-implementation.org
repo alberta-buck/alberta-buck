@@ -1059,11 +1059,29 @@ never credit an unconfirmed mint or payment as liquid funds.
   confirmed issue/export. Block a new refinance while that obligation waits.
   Unknown outcomes stay pending, and dated/calendar/buyback serialization
   still applies. A smaller remaining mortgage requires reassessment.
-- [ ] Assess an affordable staged programme at the current K/credit and a
+- [X] Assess an affordable staged programme at the current K/credit and a
   conservative per-tranche conversion price. A liquidity-limited first leg
   need not repay the entire startup fee by itself; pay the actual first fee
   in full and require both programme admission and worthwhile marginal legs.
   Do not count future wages, higher K or unquoted insurance capacity as funds.
+  Reuse the same five size fractions and actual coverage/refund menus. Only
+  after standalone first-tranche choices fail, score a larger same-asset
+  programme at today's conservative bounded-trade conversion price. It must
+  pass with the full startup cost and fit current cash/reserve/penalty bounds.
+  Allocate startup cost by principal for the marginal leg's economic score;
+  its actual first bank payment still includes the entire fee. Prefer the
+  largest worthwhile current principal; never issue the forecast amount at
+  once. Context labels the assumption of route repair between tranches;
+  every later operation needs fresh prices/credit and can decline.
+- [X] Keep refused post-issuance settlement explicit. settlement_due covers
+  export and mortgage refusal; payment_due identifies the bank-only retry.
+  A new assessment/loan cannot erase the old export and manufacture a free
+  wallet-only closing or duplicate existing issuance.
+- [ ] Complete explicit export resumption/reassessment after a proved refusal,
+  including reduced remaining mortgage allocations. Preserve actual funded
+  cash and issuance and their original closing obligation; no replayed mint
+  or artificial disposal of the remaining BUCKs. Unknown outcomes remain
+  pending. This must precede the automatic dispatcher, not be bypassed by it.
 
 ** Remaining economy sequence
 
@@ -1190,7 +1208,7 @@ explicit so simplification does not remove an economic source of demand:
 | Floating monthly/advance and direct payments | Dated calendar, authenticated income/bills and independent shadow books | After the calendar is qualified, move the old insurance-cost fixture onto it and make the old path legacy-only. Its separate working-wallet action still needs migration. |
 | Working-wallet payday action | Guarded net purchases/sales from surplus after actual bills and buffers; preserve distinct custody | Retain its ordinary money-demand behavior before removing the old monthly caller or an overlapping spending agent. Reading the wallet mark is already supported; the new calendar intentionally does not submit this discretionary trade. |
 | Debtor refinancing versus saver credit investment | Reuse selected issuance, reserve funding, bounded market operations and one owner receipt dispatcher; distinguish bank payment from investment/cash retention | Extend common execution where it is the same operation. A saver has no mortgage, so it must not manufacture a positive bank allocation to pass the refinance plan's debt bounds or duplicate the whole refinance machine. |
-| First closing versus later tranches | Confirm one actual closing-cost payment; assess a conservative, capital-limited staged programme under existing theta/risk bounds | Activated insurance is not proof that a closing was paid. Retain exact cash costs and per-trade bounds; do not waive the fee or assume that every future tranche will execute unchanged. |
+| First closing versus later tranches | Confirmed one-time closing plus current-credit/capital staged admission now implemented | Activation alone does not pay a fee. Allocate it only for economics, pay it fully on the first bank receipt, and recheck every later tranche. Resolve refused export prefixes before automatic scheduling. |
 | Surplus saving and discounted retirement | Protect required issuance cash/reserve, quote full net acquired BUCK including pool-carried fees, then authenticate actual deposit or selected settlement | A nominal pool discount alone is insufficient. Preserve targets through actual uncertainty, but let known waiting intentions coexist with normal income and bills. |
 | Asset exits | Explicit unused-facility close, guarded principal retirement and receipt redemption | Keep burn(0) invalid and K/fund limits intact. Preserve distinct exit checks as household integration proceeds. |
 | Saved-world state (later) | Dated books/queues/hashes/cursors and exact fund/insurer graph | Keep imports gated until restart coverage demonstrates the replacement; save/resume does not gate uninterrupted economy runs. |
@@ -1220,8 +1238,9 @@ Continue in this order:
    canonical graph and real opening pools. Python now does likewise, including
    its separate desk, without disabled comparison advisers. Canonical Python
    observations and a short bootstrap-only JSON/PDF run now pass; personal
-   Python/JS reports also pass. Complete household actions remain open. Qualify actual
-   canonical arbitrage inventory/fees before enabling those routes. Receiving
+   Python/JS reports also pass. Complete household actions remain open.
+   Canonical funded arbitrage is now enabled and primary-shock-qualified,
+   including actual LP ownership and carried-fee inventory. Receiving
    cash alone must not reduce principal or make an insolvent
    low-K exit pass. Keep fund liquidity preparation outside the position lock.
 2. Finish the existing Python/JS household lifecycle and primary world builders;
@@ -1443,6 +1462,10 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-08 | Activate the same funded arb in both primary runtimes | Enable canonical machine arb by default with explicit component disable switches; retain one wheel and one shared Python tick driver. Bound each transaction to four examined slots/one job and continue by actual cursor, publishing the guarded fund mark between batches. Arb precedes capital deployment; an atomic cycle may use actual cash while preserving the pre-trade net reserve or not worsening an existing deficit. Real Python/JS investment and USDC-withdrawal fixtures verify positive net return, actual fee-flow events, price repair and bounded gas. Final canonical suite: 404 passed; focused suite: 53 passed. Primary Python: six passed with fresh short JSON/PDFs; primary JS: 41 controlled household checks plus one fresh active-arb check; pure JS: 71. Shared SDK: 35 Python and 20 JS; wallet/browser: 15. Contract compiler/link/runtime checks and equilibrium browser build passed. Old recovery-only fixtures now initialize their unbound calendar explicitly. Updated Make/detail guides and current checklist; automatic household decisions/surplus/exits, real five-year campaigns and Notes remain open. | This commit |
 
+| 2026-11-08 | Separate insurance activation from confirmed household closing | Both agents now retain the closing fee until an authenticated issuance-backed bank payment, expose confirmed closing in histories/personal state and reject a second charge. A proved-refused bank leg retains its original issue/export and allocation; bank-only retry keeps the original buffers and normal receipt recovery. Shared vectors lose the retry response and recover without another send, issuance, export or fee. Initial Python policy/calendar/actual-household set: 163 passed; pure JS: 74. Complete actual JS primary acceptance was started and its result is recorded in the current handoff. No Solidity changed; normal automatic decisions remain gated. | =278bc3f1= |
+
+| 2026-11-08 | Admit affordable staged refinancing while paying startup costs in full | Both existing assessors reuse the bounded SDK coverage menu to forecast a same-asset programme from current credit, capital and a conservative per-tranche price. The programme must pass with all startup costs; the current leg must pass its proportional economic allocation while its actual first bank payment still pays the whole fee. Prefer the largest eligible current principal and authorize only that leg; later quotes use confirmed closing state. Current-capacity shortfalls and incompatible programme dimensions cannot be funded by future wages/K. Known refused export/mortgage prefixes now block fresh assessments/issuance rather than turning existing debt into an apparently free wallet prepayment. Final Python policy/calendar/actual-household checks: 167 passed; strengthened pure-policy boundary rerun: 108 passed (subset). Final JS pure quote/policy/calendar: 77 passed; fresh actual programme/three-leg refusal case: one passed; complete existing actual JS closing/calendar acceptance: 41 passed, no skips. Existing equilibrium browser build passed. Added a fast policy Make target and focused file selection to the normal acceptance; no new runner or Solidity. Export resumption/reduced bank allocation, automatic decisions/surplus/saver/exits and real five-year runs remain open. | This commit |
+
 ** Calendar-qualified checkpoint (6bf53283)
 
 - Worktree =.claude/worktrees/buck-compound=; branch
@@ -1619,15 +1642,47 @@ implementation and validation milestones remain in the journal above.
   allocation and actual issue/export; an explicit retry sends only that
   payment, with normal hash/receipt recovery. An unresolved payment prevents
   a new refinance, and a reduced mortgage cannot silently change the bounds.
-- Validation so far: *163 Python* policy/calendar/actual-household checks
-  pass in =/private/tmp/buck-household-closing-py.log=. *74 pure JS* policy/
-  quote/calendar checks pass. The complete existing actual JS primary suite
-  is running in =/private/tmp/buck-household-closing-primary-js.log=; no final
-  result is claimed yet. Shared cases check both initial bank refusal and
+- Closing responsibility/retry is checkpointed at =278bc3f1=. Its complete
+  actual JS primary suite passes *41* without skips in
+  =/private/tmp/buck-household-closing-primary-js.log=. Shared cases check both initial bank refusal and
   a successful retry whose response is lost, without replaying issuance,
-  export or the closing fee.
-- Next in this turn: bounded staged-programme admission, still paying the
-  first closing cost in full. Then automatic decision scheduling, reserve-
-  safe surplus and working money, saver credit investment, guarded exits,
-  short complete economies and actual five-year JSON/PDF campaigns.
-  Normal act remains gated until those monetary paths are implemented.
+  export or the closing fee; all calendar/portfolio cases also pass.
+- Staged admission is now implemented in the same assessors/policy modules.
+  It reuses the existing bounded quote menu for the same asset, at today's
+  conservative per-tranche price and actual current credit/capital. The full
+  programme and marginal leg must both pass existing theta/risk economics;
+  the first actual bank payment still pays the full fee. Context labels the
+  forecast/allocation, while the executable plan authorizes only its bounded
+  first leg. Later quotes use confirmed closing state and no second fee.
+- Final Python policy/calendar/actual-household acceptance: *167 passed*
+  without skips in =/private/tmp/buck-household-programme-final-py.log=.
+  The stronger final boundary vectors also pass the *108-case Python policy
+  subset* in =/private/tmp/buck-household-programme-policy-final-py.log=.
+  *77 pure JS* checks pass in
+  =/private/tmp/buck-household-programme-policy-final-js.log=.
+  The final fresh actual JS programme test passes in
+  =/private/tmp/buck-household-programme-final-js.log=: two confirmed bank
+  allocations pay one closing fee and issue only each bounded current leg.
+  A refused third export retains its existing issuance and blocks a new
+  assessment/loan. A profitable but oversized pure leg is also rejected
+  when its supposedly covering programme cannot cover it.
+  The browser equilibrium rebuild passes in
+  =/private/tmp/buck-household-programme-browser-build.log=.
+- The normal Make acceptance includes the focused programme file. Use
+  =CORE_EQUILIBRIUM_TEST_FILES=test/net-household-programme.tevm.test.js=
+  to run it alone; README-households.org documents its assumptions and APIs.
+  =make nix-core-equilibrium-policy-test= runs the same 77 pure checks
+  without contract compilation or a Tevm world; bootstrap acceptance reuses
+  that target. The full actual JS regression
+  is CPU-intensive (about 36 minutes here); the focused programme case is
+  about eight minutes.
+  No new simulation, contract, duplicated calendar or repayment engine.
+- Next: resolve/reassess known refused exports and shrunken bank allocations
+  using the existing receipt machine. Then connect the automatic dispatcher:
+  arrival/calendar, heterogeneous adoption, and prompt fresh refinancing after
+  commitment, rather than a new adoption delay after every affordable leg.
+  Preserve wage/bill progress through known waiting intentions and stop new
+  spending on actual uncertain receipts. Add reserve-safe surplus/working
+  money, saver credit investment and guarded exits before opening normal act.
+  Reuse that same path in both primary runtimes, then short complete worlds
+  and actual five-year JSON/PDF campaigns. Save/resume and Notes remain later.

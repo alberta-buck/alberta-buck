@@ -1673,7 +1673,7 @@ sim-plot-eq-%:
 .PHONY: core-test core-test-py core-test-js core-test-rust core-js-deps core-js-check-worktree
 .PHONY: core-build core-build-py core-build-wasm core-identity-vectors
 .PHONY: core-net-math-test core-net-math-vectors core-net-math-vectors-check
-.PHONY: core-equilibrium-bootstrap-test
+.PHONY: core-equilibrium-bootstrap-test core-equilibrium-policy-test
 .PHONY: economy-bootstrap-test economy-accounting-test
 .PHONY: core-wallet-vectors core-registry-vectors
 .PHONY: core-vectors-sync core-vectors-check
@@ -1720,11 +1720,17 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 # the same builder and keeper with a real USDC withdrawal shock. To run it
 # alone (the household fault suite is slower):
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-equilibrium-arb.tevm.test.js
+# Staged mortgage admission/actual first-closing and later-tranche payments:
+#   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-programme.tevm.test.js
 CORE_EQUILIBRIUM_TEST_ARGS ?=
-CORE_EQUILIBRIUM_TEST_FILES ?= test/net-equilibrium-bootstrap.tevm.test.js test/net-equilibrium-arb.tevm.test.js
-core-equilibrium-bootstrap-test: sim-build core-build-wasm
-	node core/js/bin/bundle-artifacts.mjs
+CORE_EQUILIBRIUM_TEST_FILES ?= test/net-equilibrium-bootstrap.tevm.test.js test/net-equilibrium-arb.tevm.test.js test/net-household-programme.tevm.test.js
+# Fast policy/quote/calendar boundary checks; no EVM or contract compilation.
+#   make nix-core-equilibrium-policy-test
+core-equilibrium-policy-test: core-build-wasm
 	cd core/js && node --test test/net-market-quote.test.js test/household-policy.test.js test/household-calendar.test.js
+
+core-equilibrium-bootstrap-test: sim-build core-equilibrium-policy-test
+	node core/js/bin/bundle-artifacts.mjs
 	cd core/js && node --test $(CORE_EQUILIBRIUM_TEST_ARGS) $(CORE_EQUILIBRIUM_TEST_FILES)
 
 # Both EXISTING builders, not the household loop or a five-year campaign.

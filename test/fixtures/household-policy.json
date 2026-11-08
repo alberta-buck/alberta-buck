@@ -41,6 +41,11 @@
     {"name": "reserve carrying costs change the decision", "usd": 99000, "wallet": 0, "new_spendable": 100000, "coverage": 20000, "premium": 1000, "reserve_carry": 5000, "go": false},
     {"name": "reserve acquisition can provide a benefit", "usd": 99000, "wallet": 0, "new_spendable": 100000, "coverage": 20000, "premium": 1000, "reserve_cost": -1000, "go": true}
   ],
+  "staged_refinance": [
+    {"name": "startup is repaid by a quoted programme", "fixed": 3000, "go": true, "allocated": 30},
+    {"name": "programme cannot repay startup", "fixed": 30000, "go": false},
+    {"name": "first leg exceeds programme credit", "fixed": 3000, "scale": 1.00001, "standalone": true, "go": false}
+  ],
   "surplus": [
     ["adaptive", 1.1, 1.2, 0.003, 0.02, 0.02, "retire"],
     ["adaptive", 1.1, 1.0, 0.003, 0.02, 0.02, "invest"],

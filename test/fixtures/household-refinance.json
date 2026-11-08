@@ -8,6 +8,12 @@
     "cash_buffer": "10000000000", "reserve_floor": "3000000",
     "switch_cost": "100000", "penalty_numerator": "1", "penalty_denominator": "100"
   },
+  "programme": {
+    "settings": {"home_k": 1000, "premium_bp": 50, "apr": 0.06, "ltv": 0.4, "theta": 3,
+      "risk": 0, "switch_k": 2, "max_impact_bp": 100, "utilization": 0.8, "renew_frac": 0, "divest_rate": 0},
+    "seed_usdc": "40000000000", "insufficient_utilization": 0.0001,
+    "forecasts": {"expected_relief_rate": 0.02, "expected_refund_growth": -0.02, "expected_wallet_growth": -0.02}
+  },
   "cases": [
     {"name": "confirmed", "fault": null, "phase": null, "final": "complete"},
     {"name": "wide cash book", "fault": null, "phase": null, "final": "complete", "seed_usdc": "1237940039285380274899124231"},

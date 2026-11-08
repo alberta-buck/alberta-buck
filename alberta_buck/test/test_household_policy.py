@@ -185,6 +185,22 @@ def test_quoted_refinance_prices_selected_wallet_issue_and_reserve(case):
     assert v.parts["deposit_age"] == pytest.approx(case["premium"] * fraction * growth)
 
 
+@pytest.mark.parametrize("case", FIXTURE["staged_refinance"], ids=lambda c: c["name"])
+def test_staged_refinance_retains_all_startup_costs_and_current_credit_bounds(case):
+    t = replace(quoted_terms(), fixed_cost=case["fixed"], rate=.06)
+    programme = dict(usd=99_000, wallet_used=0, new_spendable=100_000, present_coverage=150_000, premium=10_000)
+    tranche = {key: value * case.get("scale", .01) for key, value in programme.items()}
+    marginal, whole = carry.staged_refinance(t, tranche, programme)
+    assert marginal.go is case["go"]
+    assert carry.refinance_quoted(t, **tranche).go is case.get("standalone", False)
+    if marginal.go:
+        assert -marginal.parts["fixed"] == case["allocated"]
+        assert marginal.value * 100 == pytest.approx(whole.value)
+        assert -whole.parts["fixed"] == case["fixed"]
+    with pytest.raises(ValueError, match="shared issuance limit"):
+        carry.staged_refinance(replace(t, issuance_limit=5000), tranche, programme)
+
+
 def test_quoted_refinance_can_retain_a_valuable_wallet():
     t = quoted_terms()
     old = carry.refinance(t, 99_000, 100_000)

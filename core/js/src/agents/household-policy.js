@@ -329,12 +329,7 @@ export function bestQuotedRefinance(t, candidates) {
   if (!Array.isArray(candidates)) throw new Error("invalid quoted refinance candidates");
   let index = null, verdict = NO, selected = null;
   candidates.forEach((candidate, i) => {
-    const v = refinanceQuoted(t, candidate.usd, candidate.wallet_used, candidate.new_spendable,
-      candidate.present_coverage, candidate.premium,
-      { reserveCost: candidate.reserve_cost ?? 0, reserveCarry: candidate.reserve_carry ?? 0,
-        premiumRefundFraction: candidate.premium_refund_fraction ?? null,
-        expectedRefundGrowth: candidate.expected_refund_growth ?? null,
-        externalPremiumSaving: candidate.external_premium_saving ?? 0 });
+    const v = quotedVerdict(t, candidate);
     if (!v.go) return;
     if (selected === null || v.value > verdict.value || (v.value === verdict.value
         && (candidate.present_coverage < selected.present_coverage ||
@@ -343,6 +338,26 @@ export function bestQuotedRefinance(t, candidates) {
     }
   });
   return { index, verdict };
+}
+
+const quotedVerdict = (t, c) => refinanceQuoted(t, c.usd, c.wallet_used, c.new_spendable,
+  c.present_coverage, c.premium,
+  { reserveCost: c.reserve_cost ?? 0, reserveCarry: c.reserve_carry ?? 0,
+    premiumRefundFraction: c.premium_refund_fraction ?? null, expectedRefundGrowth: c.expected_refund_growth ?? null,
+    externalPremiumSaving: c.external_premium_saving ?? 0 });
+
+/** The separately quoted programme pays the full startup cost in its score.
+ * Allocate by principal only for the first leg's economics; its real bank
+ * payment still includes the entire fixed cost. No future K/income/price is
+ * assumed. The caller checks matching asset, exact quotes and cash bounds. */
+export function stagedRefinance(t, tranche, programme) {
+  const whole = quotedVerdict(t, programme), first = quotedVerdict(t, tranche);
+  if (!whole.go || t.fixed_cost <= 0 || tranche.new_spendable <= 0
+      || ["usd", "wallet_used", "new_spendable", "present_coverage", "premium"].some((key) => tranche[key] > programme[key])
+      || (tranche.external_premium_saving ?? 0) > (programme.external_premium_saving ?? 0)) {
+    return { verdict: NO, programme: whole };
+  }
+  return { verdict: quotedVerdict({ ...t, fixed_cost: t.fixed_cost * first.usd / whole.usd }, tranche), programme: whole };
 }
 
 const capacity = (t) => {

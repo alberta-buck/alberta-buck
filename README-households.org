@@ -47,6 +47,10 @@ normal receipt recovery: an unknown hash never permits another send. If the
 mortgage has fallen below the saved principal, that allocation needs explicit
 reassessment. Calendar flows and buyback reconciliation remain serialized.
 These fields also appear in personal observations and decision events.
+The broader =settlement_due= flag also retains a refused export after credit
+was issued. It blocks a new assessment/loan while those BUCKs await resolution.
+Explicit export resumption/reassessment is the next migration step before
+normal automatic decisions are enabled.
 
 Use the existing acceptance target; it builds the contracts/kernels and runs
 the primary-world, household, receipt and reporting tests:
@@ -58,6 +62,7 @@ make nix-venv-economy-accounting-test
 For focused work on the existing primary fixtures:
 
 #+begin_src sh
+make nix-core-equilibrium-policy-test  # pure quote/policy/calendar checks, no EVM
 make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py
 make nix-core-equilibrium-bootstrap-test
 #+end_src
@@ -206,6 +211,30 @@ coverage increment saves only its corresponding external insurance cost.
 The policy can refinance at a modest trading loss when the interest and
 insurance saving justify it; a mortgage refinance does not require BUCK to
 be trading at a premium.
+
+When only the startup fee makes every bounded first trade unattractive, the
+same assessor tries a staged programme against *current* quoted credit and
+capital, for the same asset. It reuses the five size fractions and coverage
+menu. The larger programme must pass with the full closing fee and fit the
+current cash buffer, reserve funding and penalty. Future wages, increased K
+or unquoted asset capacity cannot fund admission.
+
+Programme proceeds use today's conservative bounded-trade conversion price,
+including fees, impact and slippage. This forecasts route repair between
+tranches; it is not a promise that later liquidity/prices will be available.
+Every later tranche needs a fresh assessment. Allocate startup cost by the
+tranche's share of programme mortgage principal *for its economic score*;
+the first actual bank payment still pays the full fee. Require both the
+whole programme and the marginal tranche to be worthwhile, then prefer the
+largest eligible current mortgage payment. Never issue the programme's
+forecast amount at once. The decision context labels this admission and
+exposes its forecast, tranche count and allocated versus actual upfront fee.
+
+The actual two-tranche fixture runs through the same JS builder:
+
+#+begin_src sh
+make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-programme.tevm.test.js
+#+end_src
 
 A reserve purchase counts its acquisition friction and annual opportunity /
 demurrage cost, while retaining the reserve's owned mark value. A previously

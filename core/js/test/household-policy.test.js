@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { profile, issuance, terms, refinance, refinanceQuoted, bestQuotedRefinance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
-  externalPremiumDue, ROLES } from "../src/agents/household-policy.js";
+  externalPremiumDue, stagedRefinance, ROLES } from "../src/agents/household-policy.js";
 import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 import { observeRefinanceForecasts } from "../src/agents/net-household.js";
 
@@ -145,6 +145,21 @@ for (const c of f.quoted_refinance) test(`quoted refinance: ${c.name}`, () => {
   const growth = c.expected_refund_growth ?? t.expected_refund_growth;
   assert.ok(Math.abs(v.parts.deposit_write_down + c.premium * (1 - fraction)) < 1e-8);
   assert.ok(Math.abs(v.parts.deposit_age - c.premium * fraction * growth) < 1e-8);
+});
+for (const c of f.staged_refinance) test(`staged refinance: ${c.name}`, () => {
+  const t = { ...quotedTerms(), fixed_cost: c.fixed, rate: .06 };
+  const programme = { usd: 99000, wallet_used: 0, new_spendable: 100000, present_coverage: 150000, premium: 10000 };
+  const tranche = Object.fromEntries(Object.entries(programme).map(([k, v]) => [k, v * (c.scale ?? .01)]));
+  const { verdict, programme: whole } = stagedRefinance(t, tranche, programme);
+  assert.equal(verdict.go, c.go);
+  const standalone = bestQuotedRefinance(t, [tranche]);
+  assert.equal(standalone.index !== null, c.standalone ?? false);
+  if (verdict.go) {
+    assert.equal(-verdict.parts.fixed, c.allocated);
+    assert.ok(Math.abs(verdict.value * 100 - whole.value) < 1e-8);
+    assert.equal(-whole.parts.fixed, c.fixed);
+  }
+  assert.throws(() => stagedRefinance({ ...t, issuance_limit: 5000 }, tranche, programme), /shared issuance limit/);
 });
 test("quoted refinance can retain a valuable wallet", () => {
   const t = quotedTerms(), old = refinance(t, 99000, 100000), retain = refinanceQuoted(t, 99000, 0, 100000, 0, 0);
