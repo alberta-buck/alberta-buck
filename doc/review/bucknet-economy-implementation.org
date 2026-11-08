@@ -1270,7 +1270,9 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-07 | Use observed household forecast defaults and finish primary acceptance | The existing household assessment now defaults to the actual global fund/age ratio and a labeled idle-cash annual carry baseline; all three explicit rates remain comparison inputs, with partial overrides rejected. No-age conservative zero and actual observed zero remain distinct; missing guarded marks propagate. Default context preserves normalized source fields and requires the same source/assessment block. The idle annual estimate is checked against the native kernel within forecast precision and never calculates token balances. Actual Python/JS tests execute selected plans with observed defaults and retain cash-short refusal. The corrected unfiltered primary JavaScript acceptance now passes all 24 checks without skips; the separate observed-default fixture passes, as do four SDK cases and 59 policy/quote checks. Browser equilibrium bundle rebuild passes. Normal income/calendar, savings/paydown, exits and full snapshots still gate the household economy; no five-year campaign or Notes acceptance is claimed. | =eb0be458= |
 
-| 2026-11-07 | Add dated household calendar books and receipt-backed recurring flows | Both existing households now expose an explicit calendar component for arrival capital and each payday's wages, living costs, proportional premiums and mortgage payment. Independent actual/shadow daily-integer debt books and dated bank evidence prevent receipt recovery from overcharging interest or moving counterfactual payment dates. Shared rational-oracle five-year debt/full-width/cadence/conflict vectors and real interruption cases cover known/unknown/mismatched evidence, proved mint refusal, wrong wage amount, late bank date and refinance recovery across a payday. Pending income is not extra spendable wealth; personal status/public histories expose provisional books. Fix Pyrevm historical block timestamps by number/hash; no historical contract-state promise. Final supported Python accounting/reporting set: 199 passed, no skips, with fresh short JSON/PDFs. Pure JS policy/quote/calendar: 70 passed; browser equilibrium build passes. Initial focused JS acceptance exposed a duplicate test-account address, now isolated; the new complete primary suite is running and its final result is not yet claimed. No Solidity changed. Normal automatic surplus/exits/import and five-year/Notes gates remain. | This commit |
+| 2026-11-07 | Add dated household calendar books and receipt-backed recurring flows | Both existing households now expose an explicit calendar component for arrival capital and each payday's wages, living costs, proportional premiums and mortgage payment. Independent actual/shadow daily-integer debt books and dated bank evidence prevent receipt recovery from overcharging interest or moving counterfactual payment dates. Shared rational-oracle five-year debt/full-width/cadence/conflict vectors and real interruption cases cover known/unknown/mismatched evidence, proved mint refusal, wrong wage amount, late bank date and refinance recovery across a payday. Pending income is not extra spendable wealth; personal status/public histories expose provisional books. Fix Pyrevm historical block timestamps by number/hash; no historical contract-state promise. Final supported Python accounting/reporting set: 199 passed, no skips, with fresh short JSON/PDFs. Pure JS policy/quote/calendar: 70 passed; browser equilibrium build passes. Initial focused JS acceptance exposed a duplicate test-account address, now isolated; the new complete primary suite is running and its final result is not yet claimed. No Solidity changed. Normal automatic surplus/exits/import and five-year/Notes gates remain. | =e5df6124= |
+
+| 2026-11-07 | Prevent a confirmed buyback intention from freezing household income | Keep reconciliation of actual uncertain buys/authorizations/settlements first. Once that evidence is resolved, due recurring USD flows now precede further attempts against a known remaining BUCK retirement target. Preserve that target and its BUCK reserve, never loosen K/fund guards or purchase twice. Actual Python and JS fixtures lose a guarded-buy reply, recover it across a payday, then authenticate wages/bills while the target stays open. Python full primary/calendar set: 52 passed. Focused canonical JS: two checks passed; pure policy/quote/calendar: 70 passed. The earlier complete calendar primary run remains in progress and is not yet a full-green claim. | This commit |
 
 ** Current handoff: calendar implemented; final JS acceptance running
 
@@ -1278,8 +1280,9 @@ the canonical Buck evidence recorded below.
   =sim/household_calendar.py= and =core/js/src/agents/household-calendar.js=.
   Public explicit APIs and report fields are in README-households.org.
   The existing owner recovery dispatcher advances pure calendar books first,
-  reconciles earlier refinance/buyback work, then sends queued recurring
-  flows. It must not prioritize queued income over an earlier pending buyback.
+  reconciles earlier uncertain refinance/buyback transactions, then sends
+  queued recurring flows before further known buyback attempts. An open
+  target alone is not an unresolved transaction and cannot freeze wages.
 - Python final supported acceptance passed *199* checks, no skips:
   =/private/tmp/buck-household-calendar-acceptance-final-py.log=.
   Focused final calendar set passed 24; its log is
@@ -1294,6 +1297,13 @@ the canonical Buck evidence recorded below.
   household reused the existing insurance test's account. All new calendar
   accounts now have a distinct namespace. The full run also includes later
   added bad-mint/refused-mint, dated-refinance and clock-guard cases.
+- The subsequent known-buyback-intent scheduling correction has separate
+  actual acceptance: Python full primary/calendar *52* passed, log
+  =/private/tmp/buck-household-calendar-buyback-py.log=; focused JS *two*
+  checks passed, log =/private/tmp/buck-household-calendar-buyback-js.log=.
+  That target also passes the 70 pure policy/market/calendar cases. The full
+  run above was started at e5df6124; these focused tests qualify the small
+  subsequent owner-priority change and its new regression separately.
 - Browser =make nix-core-demo-eqworld= passed:
   =/private/tmp/buck-household-calendar-eqworld-build.log=.
 - *Next*: finish final JS qualification, then connect reserve-safe savings /

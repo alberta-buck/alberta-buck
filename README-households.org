@@ -77,11 +77,15 @@ not from the discovery day. Known hashes recover once; missing or mismatched
 evidence stays pending, and a hashless outcome cannot authorize another
 send. A proved revert permits a later retry. Recurring and discretionary
 operations share one owner dispatcher: earlier refinance/buyback recovery
-finishes before queued recurring sends, and refinancing cannot start while
-the calendar has queued work.
+finishes before queued recurring sends. A confirmed but unfinished buyback
+target is an intention, not an unresolved transaction: due wages/bills run
+before another retirement attempt, without spending its protected BUCKs or
+discarding the target. Refinancing cannot start while the calendar has
+queued work.
 
 Personal rows expose =calendar= status: queued periods, phase/hash,
-=income_due= and =mortgage_provisional=. Income due is pending accounting,
+=income_due= and =mortgage_provisional=. Income due includes a pending arrival
+endowment while opening; it is pending accounting,
 not extra liquid wealth: its mint might already have executed. A provisional
 mortgage awaits bank evidence and/or its block date. The existing public
 decision stream records calendar transitions, due/effective dates, actual

@@ -304,7 +304,7 @@ class HouseholdCalendar:
     def advance(self, d, day, ctr):
         self.prepare(d, day)
         a = self.agent
-        if a.refinance_machine.active or a._pending_repayment(d) or a._net_repayment_target is not None:
+        if a.refinance_machine.active or a._pending_repayment(d):
             return self.active
         while self.queue:
             if self.flow is None:

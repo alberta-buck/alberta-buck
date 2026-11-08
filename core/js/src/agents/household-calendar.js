@@ -222,7 +222,7 @@ export class HouseholdCalendar {
   async advance(world, day) {
     await this.prepare(world, day);
     const a = this.agent, s = world.session;
-    if (a.refinanceMachine.active || await a.pendingRepayment(world) || a.netRepaymentTarget !== null) return this.active;
+    if (a.refinanceMachine.active || await a.pendingRepayment(world)) return this.active;
     while (this.queue.length) {
       if (!this.flow) {
         a.refinanceMachine.decisions++;

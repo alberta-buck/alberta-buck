@@ -270,9 +270,8 @@ export class CreditHouseholdAgent {
         return true;
       }
       if (await this.pendingRepayment(world)) return true;
-      if (await this.resumeNetRepayment(world)) return true;
       if (this.calendarMachine.active) { await this.calendarMachine.advance(world, day); return true; }
-      return false;
+      return await this.resumeNetRepayment(world);
     } catch (err) {
       this.lastAction = this.netTradeUncertain ? "buy-pending" : this.netCancelUncertain ? "cancel-pending" : "repay-pending";
       this.lastError = `transaction reconciliation: ${err}`.slice(0, 200);

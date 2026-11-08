@@ -749,6 +749,38 @@ def test_calendar_rejects_skipped_paydays_and_a_label_without_elapsed_chain_time
     assert before == (a.mortgage, a.hypo_cash, a.hypo_paid, a.living_arrears, len(a.refinance_machine.events))
 
 
+def test_calendar_services_bills_after_buyback_receipt_recovery_with_a_remaining_target(household_world, monkeypatch):
+    from buck_core.session import _txhex
+    d, scenario, make = household_world
+    a = make(75, CreditHouseholdAgent, settings=CALENDAR["settings"])
+    a.advance_net_calendar(d, 0, {})
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, 20 * RAW])))
+    d.net_credit_ops.issue(a.address, a._token_ids[0], 100 * RAW, 40 * RAW, 10 * RAW, d.pool_acct)
+    a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("approve", args=[d.swap_guard.address, 2**256 - 1]))
+    before_buck = d.buck.functions.balanceOf(a.address).call()
+    sends, execute = [], d.net_market_ops.execute
+    def lost(*args):
+        receipt = execute(*args)
+        sends.append(receipt)
+        raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
+    with monkeypatch.context() as patch:
+        patch.setattr(d.net_market_ops, "execute", lost)
+        with pytest.raises(TransactionReceiptPending):
+            a._buy_cash(d, 2 * RAW, RAW, for_repayment=True, repayment_target=25 * RAW)
+    assert a._net_trade_uncertain and a._net_pending_buy_hash
+    supply, reserve = d.buck.functions.totalIssued().call(), a._net_repayment_reserve
+    d.anvil.warp_to(a.calendar_machine.epoch + 30 * 86400)
+    a.act(d, scenario, 30, 0, {})  # reconcile earlier buy; do not send new salary yet
+    assert not a._net_trade_uncertain and a._net_repayment_target == 25 * RAW
+    assert a.income_total == 0 and a.calendar_machine.active
+    a.act(d, scenario, 30, 0, {})  # due bills precede retrying a known remaining target
+    assert a.income_total == int(CALENDAR["income"]) and a.external_paid == a.payment
+    assert not a.calendar_machine.active and a._net_repayment_target == 25 * RAW
+    assert a._net_repayment_reserve == reserve and len(sends) == 1
+    assert d.buck.functions.totalIssued().call() == supply
+    assert d.buck.functions.balanceOf(a.address).call() > before_buck - RAW
+
+
 @pytest.mark.parametrize("fault", ["lost", "date-unavailable"])
 def test_calendar_dates_refinance_receipts_and_keeps_its_paydays(household_world, monkeypatch, fault):
     from alberta_buck.sim.household_calendar import MortgageBook

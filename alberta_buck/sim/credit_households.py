@@ -415,12 +415,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 return True
             if self._pending_repayment(d):
                 return True
-            if self._resume_net_repayment(d, ctr):
-                return True
             if self.calendar_machine.active:
                 self.calendar_machine.advance(d, self._last_day if day is None else day, ctr)
                 return True  # reconciled recurring work consumes this turn
-            return False
+            return self._resume_net_repayment(d, ctr)
         except Exception as exc:
             self.last_action    = ("buy-pending" if getattr(self, "_net_trade_uncertain", False) else
                                    "cancel-pending" if getattr(self, "_net_cancel_uncertain", False) else "repay-pending")

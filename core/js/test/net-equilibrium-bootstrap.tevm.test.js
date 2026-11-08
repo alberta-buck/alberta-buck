@@ -656,6 +656,36 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     await assert.rejects(a.advanceNetCalendar(world, 31), /each payday/);
     assert.deepEqual([a.mortgage, a.hypoCash, a.hypoPaid, a.livingArrears, a.householdEventsSince().length], before);
   });
+  await t.test("recurring cash flows run after buyback reconciliation with an open target", async () => {
+    const account = { address: "0x00000000000000000000000000000000000bcb20" };
+    const a = new CreditHouseholdAgent({ account, member: "calendar-buyback", settings: CALENDAR.settings });
+    await a.setup(world); await a.advanceNetCalendar(world, 0); await world.households.openTrading(account);
+    const owner = world.holderAddress(account), [id] = world._credits.get(account.address);
+    await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
+      functionName: "transfer", args: [owner, 20n * RAW] })]);
+    await s.send(world.kctrl, "compute");
+    await world.netCreditOps.issue(owner, id, 100n * RAW, 40n * RAW, 10n * RAW, world.poolAcct);
+    const beforeBuck = await s.call(buck, "balanceOf", [owner]), execute = world.netMarket.execute;
+    let sends = 0;
+    world.netMarket.execute = async (...args) => {
+      const receipt = await execute(...args); sends++;
+      throw new TransactionReceiptPending(receipt.transactionHash);
+    };
+    try { await assert.rejects(a.buyForRepayment(world, 2n * RAW, RAW, 25n * RAW), TransactionReceiptPending); }
+    finally { world.netMarket.execute = execute; }
+    assert.equal(a.netTradeUncertain, true); assert.ok(a.netPendingBuyHash);
+    const supply = await s.call(buck, "totalIssued"), reserve = a.netRepaymentReserve;
+    await advanceTime(world, a.calendarMachine.epoch + BigInt(30 * DAY) - (await s.client.getBlock()).timestamp);
+    await a.act(world, 30, 0);
+    assert.equal(a.netTradeUncertain, false); assert.equal(a.netRepaymentTarget, 25n * RAW);
+    assert.equal(a.incomeTotal, 0n); assert.equal(a.calendarMachine.active, true);
+    await a.act(world, 30, 0);
+    assert.equal(a.incomeTotal, BigInt(CALENDAR.income)); assert.equal(a.externalPaid, a.payment);
+    assert.equal(a.calendarMachine.active, false); assert.equal(a.netRepaymentTarget, 25n * RAW);
+    assert.equal(a.netRepaymentReserve, reserve); assert.equal(sends, 1);
+    assert.equal(await s.call(buck, "totalIssued"), supply);
+    assert.ok(await s.call(buck, "balanceOf", [owner]) > beforeBuck - RAW);
+  });
   await t.test("personal records use actual portfolios and exact integer money", async () => {
     const Q = 10n ** 36n, RAW = 1_000_000n;
     const [debtor, saver, investor] = family;
