@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { encodeFunctionData, keccak256, toBytes } from "viem";
 import { tevmSession } from "../src/backends.js";
-import { buildEquilibriumWorld } from "../src/scenarios/eqworld.js";
+import { buildEquilibriumWorld, DayClock } from "../src/scenarios/eqworld.js";
 import { artifact } from "../artifacts/bundle.mjs";
 import { createInsurerPool, worldRecord } from "../src/buckworld.js";
 import { createNetMath } from "../src/net-math.js";
@@ -702,6 +702,28 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.ok(await s.call(buck, "balanceOf", [owner]) > beforeBuck - RAW);
     const bank = a.householdEventsSince().find((e) => e.operation === "mortgage" && e.status === "confirmed");
     assert.equal(bank.amounts.usdc, String(a.payment)); assert.equal(Number(bank.effective_day), 30);
+  });
+  await t.test("absolute clock dates different household arrivals consistently", async () => {
+    const make = async (member, arrive_day) => {
+      const a = new CreditHouseholdAgent({ account: { address: `0x${(0xbd000n + BigInt(arrive_day)).toString(16).padStart(40, "0")}` },
+        member, arrive_day, settings: CALENDAR.settings });
+      await a.setup(world); return a;
+    };
+    const a = await make("clock-first", 0), b = await make("clock-later", 1), clock = new DayClock();
+    for (const day of [0, 1, 29, 30, 31]) {
+      await advanceTime(world, 601); // the existing wheel's inter-tick settlement work
+      await clock.act(world, day, 0);
+      assert.equal((await s.client.getBlock()).timestamp - world.householdEpoch, BigInt(day * DAY));
+      await a.advanceNetCalendar(world, day);
+      await advanceTime(world, 7); // another actor can work before the later household binds
+      if (day >= b.arrive_day) await b.advanceNetCalendar(world, day);
+    }
+    assert.equal(a.calendarMachine.epoch, world.householdEpoch); assert.equal(b.calendarMachine.epoch, world.householdEpoch);
+    for (const [agent, paidDay] of [[a, 30], [b, 31]]) {
+      assert.equal(agent.incomeTotal, BigInt(CALENDAR.income)); assert.equal(agent.externalPaid, agent.payment); assert.equal(agent.hypoPaid, agent.payment);
+      assert.deepEqual([...agent.calendarMachine.actual.payments.values()].map((p) => p.day), [paidDay]);
+    }
+    assert.ok(a.externalInterest > b.externalInterest);
   });
   await t.test("personal records use actual portfolios and exact integer money", async () => {
     const Q = 10n ** 36n, RAW = 1_000_000n;

@@ -843,11 +843,21 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   return installHouseholdOps(world);
 }
 
-/** The clock: FIRST in the agent order, it advances simulated time one
- *  day per tick -- demurrage accrues, the PID integrates real dT. */
+/** FIRST in agent order. Pin each day to one epoch so keeper settlement
+ *  and mined transaction seconds do not accumulate into extra bank days.
+ *  Repeating a day's clock is idempotent; overrunning a whole day fails. */
 export class DayClock {
   async act(world, day, tick) {
-    if (tick === 0) await advanceTime(world, DAY);
+    if (!Number.isSafeInteger(day) || day < 0 || !Number.isSafeInteger(tick) || tick < 0) throw new Error("invalid simulation clock day/tick");
+    if (tick !== 0) return;
+    const now = (await world.session.client.getBlock()).timestamp;
+    // Preserve the existing first-day advance; all households then share
+    // that day's start, including households that arrive on later days.
+    world.householdEpoch ??= now + BigInt(DAY) - BigInt(day) * BigInt(DAY);
+    if (typeof world.householdEpoch !== "bigint" || world.householdEpoch < 0n) throw new Error("invalid simulation clock epoch");
+    const target = world.householdEpoch + BigInt(day) * BigInt(DAY);
+    if (now >= target + BigInt(DAY)) throw new Error("simulation work exceeded its calendar day");
+    if (target > now) await advanceTime(world, target - now);
   }
 }
 

@@ -92,6 +92,7 @@ export class HouseholdCalendar {
   status() {
     const f = this.flow, refi = this.agent.refinanceMachine.flow;
     return { schema: 1, bound: this.bound, day: this.bound ? this.day : null,
+      epoch: this.bound ? String(this.epoch) : null,
       queued: this.queue.length, income_due: String(this.incomeDue),
       mortgage_provisional: Boolean(f?.phase === "mortgage" && f.status === "pending"
         || refi?.phase === "mortgage" && refi.status === "pending"),
@@ -110,11 +111,16 @@ export class HouseholdCalendar {
     if (this.bound || day !== a.arrive_day || a.started || a.refinanceMachine.active || world.accounting !== "net") {
       throw new Error("calendar must bind an idle canonical household on arrival");
     }
+    const stamp = (await world.session.client.getBlock()).timestamp;
+    const epoch = world.householdEpoch ?? stamp - BigInt(day) * DAY;
+    if (typeof epoch !== "bigint" || epoch < 0n || stamp < epoch || (stamp - epoch) / DAY !== BigInt(day)) {
+      throw new Error("household calendar day does not match chain clock");
+    }
     const rate = BigInt(Math.trunc(a.p.apr * 1e9));
     this.actual = new MortgageBook(a.mortgage, rate, day); this.shadow = new MortgageBook(a.hypoMortgage, rate, day);
     this.interestOffset = a.externalInterest; this.paidOffset = a.externalPaid;
     this.hypoInterestOffset = a.hypoInterest; this.hypoPaidOffset = a.hypoPaid;
-    this.epoch = (await world.session.client.getBlock()).timestamp - BigInt(day) * DAY;
+    this.epoch = epoch;
     this.day = day; this.nextPay = day + 30;
     const opening = BigInt(Math.trunc(a.p[a.investor ? "invest_cash_k" : "cash_k"] * 1000 * 1e6));
     money(opening);

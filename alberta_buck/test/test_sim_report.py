@@ -115,6 +115,7 @@ def test_interactive_completion_preserves_json_and_retries_a_failed_pdf(snapshot
     driver.day, driver.tick     = report.FIVE_YEARS - 1, 0
     driver.done                 = False
     driver.ts, driver.tick_secs = 0, 1
+    driver.timeline_epoch = driver.ts + driver.tick_secs
     driver.anvil                = SimpleNamespace(warp_to=lambda ts: None)
     chain                       = SimpleNamespace(clear_balance_cache=lambda: None, send=lambda operation: None)
     kctrl                       = SimpleNamespace(functions=SimpleNamespace(compute=lambda: None))

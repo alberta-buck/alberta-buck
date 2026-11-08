@@ -83,3 +83,20 @@ def test_invalid_domains_and_overflow_preserve_the_clock():
         book.advance(9)
     with pytest.raises(ValueError, match="unavailable"):
         book.at(4)
+
+
+@pytest.mark.parametrize("ticks,step", [(1, 1), (7, 1), (37, 1), (1440, 1), (7, 5)])
+def test_absolute_ticks_do_not_round_a_five_year_calendar_into_different_days(ticks, step):
+    from alberta_buck.sim.timeline import tick_timestamp
+    epoch = 1_000_000
+    for day in range(0, 1827, step):
+        first = tick_timestamp(epoch, day, 0, ticks, step)
+        last = tick_timestamp(epoch, day, ticks - 1, ticks, step)
+        assert first - epoch == day * 86400
+        assert first <= last < first + step * 86400
+    times = [tick_timestamp(epoch, day, tick, ticks, step) for day in (0, step) for tick in range(ticks)]
+    assert all(a < b for a, b in zip(times, times[1:]))
+    for args in ((epoch, -1, 0, ticks), (epoch, 0, ticks, ticks), (epoch, 0, 0, 1441),
+                 (epoch, True, 0, ticks), (epoch, 0, 0, ticks, 0)):
+        with pytest.raises(ValueError, match="simulation clock"):
+            tick_timestamp(*args)

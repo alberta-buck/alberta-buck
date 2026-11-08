@@ -55,6 +55,16 @@ actor's day label cannot substitute for advancing the world. Missing a payday
 is an explicit error because today's activated insurance coverage cannot
 reconstruct an unobserved historical premium.
 
+Both Python runners publish one shared household epoch. Their ticks use
+absolute day/fractional-tick targets, including tick counts that do not divide
+86,400 evenly. The JS =DayClock= pins each day to one shared epoch; the
+wheel's settlement waits and transaction seconds consume that day's time,
+instead of being added to every later day. A whole-day work overrun fails
+explicitly. Households arriving later bind the same epoch. Standalone
+component fixtures without a runner bind a local epoch on arrival.
+Use =day_step=1= for household economies: coarse diagnostic strides cannot
+skip an arrival or payday and then invent the missing historical coverage.
+
 The calendar keeps independent actual and counterfactual mortgage books.
 External USD interest is =floor(balance * APR_ppb / (365 * 1e9))= once per
 bank day, with payments after that day's interest. This fixes observation-
@@ -83,7 +93,7 @@ before another retirement attempt, without spending its protected BUCKs or
 discarding the target. Refinancing cannot start while the calendar has
 queued work.
 
-Personal rows expose =calendar= status: queued periods, phase/hash,
+Personal rows expose =calendar= status: epoch, current day, queued periods, phase/hash,
 =income_due= and =mortgage_provisional=. Income due includes a pending arrival
 endowment while opening; it is pending accounting,
 not extra liquid wealth: its mint might already have executed. A provisional

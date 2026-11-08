@@ -139,6 +139,7 @@ class HouseholdCalendar:
         f = self.flow
         refi = self.agent.refinance_machine.flow
         return dict(schema=1, bound=self.bound, day=self.day if self.bound else None,
+                    epoch=str(self.epoch) if self.bound else None,
                     queued=len(self.queue), income_due=str(self.income_due),
                     mortgage_provisional=bool(f and f["phase"] == "mortgage" and f["status"] == "pending" or
                                               refi and refi["phase"] == "mortgage" and refi["status"] == "pending"),
@@ -158,11 +159,15 @@ class HouseholdCalendar:
         if (self.bound or day != a.arrive_day or a._started or a.refinance_machine.active or
                 getattr(d, "buck_accounting", "") != "net"):
             raise ValueError("calendar must bind an idle canonical household on arrival")
+        stamp = d.w3.eth.get_block("latest")["timestamp"]
+        epoch = getattr(d, "household_epoch", stamp - day * DAY_SECONDS)
+        if type(epoch) is not int or epoch < 0 or (stamp - epoch) // DAY_SECONDS != day:
+            raise ValueError("household calendar day does not match chain clock")
         rate = int(a.apr * 10**9)
         self.actual, self.shadow = MortgageBook(a.mortgage, rate, day), MortgageBook(a.hypo_mortgage, rate, day)
         self.interest_offset, self.paid_offset = a.external_interest, a.external_paid
         self.hypo_interest_offset, self.hypo_paid_offset = a.hypo_interest, a.hypo_paid
-        self.epoch = d.w3.eth.get_block("latest")["timestamp"] - day * DAY_SECONDS
+        self.epoch = epoch
         self.day, self.next_pay = day, day + 30
         opening = int(a.p["invest_cash_k" if a.investor else "cash_k"] * 1000 * 10**6)
         _money(opening)

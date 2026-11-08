@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { MortgageBook } from "../src/agents/household-calendar.js";
+import { DayClock } from "../src/scenarios/eqworld.js";
 
 const vectors = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-calendar.json", import.meta.url)));
 for (const c of vectors.cases) test(`dated mortgage: ${c.name}`, () => {
@@ -52,4 +53,32 @@ test("invalid mortgage domains and overflow do not advance the clock", () => {
   arrived.advance(10);
   assert.throws(() => arrived.advance(9), /backwards/);
   assert.throws(() => arrived.at(4), /unavailable/);
+});
+
+test("absolute day clock absorbs five years of keeper work without calendar drift", async () => {
+  let now = 1_000_000n, next = now, mines = 0;
+  const world = { session: { client: {
+    getBlock: async () => ({ timestamp: now }),
+    request: async ({ method, params }) => {
+      if (method === "evm_setNextBlockTimestamp") next = BigInt(params[0]);
+      else if (method === "evm_mine") { now = next; mines++; }
+      else throw new Error(`unexpected clock RPC ${method}`);
+    },
+  } } };
+  const clock = new DayClock();
+  for (let day = 0; day <= 1826; day++) {
+    await clock.act(world, day, 0);
+    assert.equal(now - world.householdEpoch, BigInt(day) * 86400n);
+    // The existing keeper waits 601 seconds, as well as mining operations.
+    now += 1200n;
+    const before = now, count = mines;
+    await clock.act(world, day, 0); await clock.act(world, day, 1);
+    assert.equal(now, before); assert.equal(mines, count);
+  }
+  const saved = world.householdEpoch;
+  await new DayClock().act(world, 1827, 0);
+  assert.equal(world.householdEpoch, saved);
+  now += 2n * 86400n;
+  await assert.rejects(clock.act(world, 1828, 0), /exceeded its calendar day/);
+  for (const day of [-1, .5, NaN, 2 ** 53]) await assert.rejects(clock.act(world, day, 0), /invalid/);
 });

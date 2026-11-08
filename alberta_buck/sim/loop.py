@@ -21,6 +21,7 @@ from alberta_buck.sim.direct_mint import (
     BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
 )
 from alberta_buck.sim.snapshot import Snapshotter
+from alberta_buck.sim.timeline import tick_timestamp
 from alberta_buck.sim.markout import MarkoutLedger, PoolProbe, actor_tag  # WP-1
 import alberta_buck.sim.undertaking_agents  # noqa: F401  WP-2
 import alberta_buck.sim.facility_agent  # noqa: F401  triggers @_register  WP-6
@@ -194,6 +195,9 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     # `day_step` days of wall-clock time across its inner ticks.
     step = max(1, getattr(scenario, "day_step", 1))
     tick_secs = max(60, (86_400 * step) // scenario.ticks_per_day)
+    timeline_epoch = ts + tick_secs
+    tick_timestamp(timeline_epoch, 0, 0, scenario.ticks_per_day, step)
+    d.household_epoch = timeline_epoch
 
     n_tok = len(d.tokens)
     # WP-1: the markout ledger (alberta_buck/sim/markout.py).  Every act
@@ -251,7 +255,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
             whale_order = list(range(n_tok))
             prng.shuffle(whale_order)
         for tick in range(scenario.ticks_per_day):
-            ts += tick_secs
+            ts = tick_timestamp(timeline_epoch, day, tick, scenario.ticks_per_day, step)
             anvil.warp_to(ts)
             d.chain.clear_balance_cache()
             d.chain.sim_day = day

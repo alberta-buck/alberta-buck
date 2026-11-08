@@ -1701,7 +1701,7 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 # household lifecycle or a completed economy. Includes actual portfolio and
 # guarded proxy market operations, optional reserve acquisition and
 # receipt-backed refinancing. Shared policy cases include proportional
-# external insurance and dated calendar/receipt recovery. Normal automatic
+# external insurance, absolute calendar clocks and dated receipt recovery. Normal automatic
 # policy/surplus/exit decisions remain gated.
 CORE_EQUILIBRIUM_TEST_ARGS ?=
 core-equilibrium-bootstrap-test: sim-build core-build-wasm

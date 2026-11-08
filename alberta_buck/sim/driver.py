@@ -37,6 +37,7 @@ from alberta_buck.sim.direct_mint import (
 )
 from alberta_buck.sim.proxy import ChainProxy
 from alberta_buck.sim.snapshot import Snapshotter
+from alberta_buck.sim.timeline import tick_timestamp
 
 
 class SimDriver:
@@ -128,6 +129,9 @@ class SimDriver:
         # --- timeline cursor ---------------------------------------- #
         self.ts = w3.eth.get_block("latest")["timestamp"] + 10
         self.tick_secs = max(60, 86_400 // scenario.ticks_per_day)
+        self.timeline_epoch = self.ts + self.tick_secs
+        tick_timestamp(self.timeline_epoch, 0, 0, scenario.ticks_per_day)  # validate the schedule
+        self.d.household_epoch = self.timeline_epoch
         self.day = 0
         self.tick = 0
         self.done = False
@@ -166,7 +170,7 @@ class SimDriver:
         if self.tick == 0:
             self._begin_day()
 
-        self.ts += self.tick_secs
+        self.ts = tick_timestamp(self.timeline_epoch, self.day, self.tick, s.ticks_per_day)
         self.anvil.warp_to(self.ts)
         d.chain.clear_balance_cache()
 

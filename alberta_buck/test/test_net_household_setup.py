@@ -35,8 +35,10 @@ def household_world(monkeypatch):
     with PyrevmAnvil(port=0) as evm:
         chain = Chain(evm.w3, evm.w3.eth.accounts[0])
         d = deploy(chain, evm, scenario, rng, verbose=False, basket_impl="equity-ops", equity_machine=True)
-        def make(i, cls, *, assets=1, settings=None):
+        def make(i, cls, *, assets=1, settings=None, arrive_day=None):
             agent = cls(i)
+            if arrive_day is not None:
+                agent.arrive_day = arrive_day
             agent.settings = dict(home_k=1000, premium_bp=100, asset_count=assets) | (settings or {})
             agent.setup(d, scenario, rng)
             return agent
@@ -609,6 +611,7 @@ def test_readable_books_do_not_allow_unimplemented_interactive_economy_to_finish
     driver.d, driver.scenario, driver.anvil = d, scenario, d.anvil
     driver.day, driver.tick, driver.done = 0, 0, False
     driver.ts, driver.tick_secs = d.w3.eth.get_block("latest")["timestamp"], 1
+    driver.timeline_epoch = driver.ts + driver.tick_secs
     driver.ctr = {"directTrades": 0, "cycleTrades": 0}
     driver._begin_day = lambda: None
     driver._whale_tick, driver.whales, driver.arbs = -1, [], [agent]
@@ -791,6 +794,28 @@ def test_calendar_services_bills_after_buyback_receipt_recovery_with_a_remaining
     assert d.buck.functions.balanceOf(a.address).call() > before_buck - RAW
     bank = next(e for e in a.refinance_machine.events if e.get("operation") == "mortgage" and e["status"] == "confirmed")
     assert bank["amounts"]["usdc"] == str(a.payment) and int(bank["effective_day"]) == 30
+
+
+def test_runner_epoch_dates_different_household_arrivals_consistently(household_world):
+    d, _, make = household_world
+    a = make(76, CreditHouseholdAgent, settings=CALENDAR["settings"])
+    b = make(77, CreditHouseholdAgent, settings=CALENDAR["settings"], arrive_day=1)
+    d.household_epoch = d.w3.eth.get_block("latest")["timestamp"] + 1234
+    with pytest.raises(ValueError, match="chain clock"):
+        a.advance_net_calendar(d, 0, {})
+    assert not a.calendar_machine.bound and not a.calendar_machine.queue and a.hypo_cash == 0
+    for day in (0, 1, 29, 30, 31):
+        d.anvil.warp_to(d.household_epoch + day * 86400)
+        a.advance_net_calendar(d, day, {})
+        d.anvil.warp_to(d.household_epoch + day * 86400 + 7)  # work before the other household's turn
+        if day >= b.arrive_day:
+            b.advance_net_calendar(d, day, {})
+    assert a.calendar_machine.epoch == b.calendar_machine.epoch == d.household_epoch
+    for agent, paid_day in ((a, 30), (b, 31)):
+        assert agent.income_total == int(CALENDAR["income"])
+        assert agent.external_paid == agent.hypo_paid == agent.payment
+        assert [at for at, amount in agent.calendar_machine.actual.payments.values()] == [paid_day]
+    assert a.external_interest > b.external_interest
 
 
 @pytest.mark.parametrize("fault", ["lost", "date-unavailable"])
