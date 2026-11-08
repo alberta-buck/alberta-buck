@@ -201,7 +201,7 @@ export class HouseholdCalendar {
     } else if (phase === "living") { a.livingArrears -= amount; a.livingPaid += amount; }
     else { a.premiumArrears -= amount; a.extPremium += amount; }
     f.phase = this.nextPhase(f, phase); f.hash = null; f.status = "running";
-    await this.emit(world, day, "confirmed", { operation: phase, usdc: amount, effective_day: effective,
+    await this.emit(world, day, "confirmed", { operation: phase, amounts: { usdc: amount }, effective_day: effective,
       transaction_hash: receipt.transactionHash, receipt_block: receipt.blockNumber ?? null });
   }
   async applyKnown(world, day, receipt) {

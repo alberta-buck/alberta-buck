@@ -251,15 +251,17 @@ counterfactual and cash-flow totals. They retain their observation block.
 The insured asset is common to both financial comparisons and is excluded
 from financial net worth; basket returns precede exit costs.
 
-The refinancing machine adds an exact append-only event stream:
+The household keeps one exact append-only event stream for refinancing
+and calendar transitions:
 
 | Field | Meaning |
 |-------+---------|
 | schema, member, decision, seq | Format version and stable per-household decision/event identifiers |
 | day, block, phase, status | Calendar time, observation block and current transition posture |
+| kind, due_day, effective_day | Calendar events use kind=calendar, retain their scheduled day and record the bank payment's effective day when applicable |
 | plan, context, limits | Exact selected terms, caller's economic explanation and resolved randomized thresholds |
 | market | Pinned K/BVIB, exact nominal USDC/BUCK price fraction, fee tier and pool nominal/net balances; unavailable is explicit |
-| accounts | Wallet cash, issued principal, credit limit, premiums, reserve/buffer levels, custody cash, per-NFT face/activation/principal/age, actual/counterfactual monthly external insurance and comparison ratios |
+| accounts | Wallet cash, issued principal, credit limit, premiums, reserve/buffer levels, custody cash, per-NFT face/activation/principal/age, actual/counterfactual cash/debt/interest, accrued bills, calendar status and comparison ratios |
 | basket | At decision start, actual receipt basis, mark, shares and ROI; no receipts is distinct from an unavailable mark |
 | operation, amounts, transaction_hash, receipt_block | A confirmed monetary transition and its evidence; bank principal/cost allocations remain separate |
 | reason | Why an attempt is pending or refused |

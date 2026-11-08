@@ -278,7 +278,7 @@ class HouseholdCalendar:
         f["phase"] = ("complete" if f["period"]["kind"] == "opening" or phase == "mortgage"
                       else self.PHASES[self.PHASES.index(phase) + 1])
         f["hash"], f["status"] = None, "running"
-        self._emit(d, day, "confirmed", operation=phase, usdc=amount, effective_day=effective,
+        self._emit(d, day, "confirmed", operation=phase, amounts={"usdc": amount}, effective_day=effective,
                    transaction_hash=_txhex(receipt["transactionHash"]), receipt_block=receipt.get("blockNumber"))
 
     def _apply_known(self, d, day, receipt):

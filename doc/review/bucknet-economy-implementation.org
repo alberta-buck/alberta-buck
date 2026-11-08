@@ -1019,14 +1019,14 @@ never credit an unconfirmed mint or payment as liquid funds.
   personal reports. Preserve scheduled accrual and expose incomplete or
   provisional comparisons; do not fabricate spendable cash or quietly move
   the counterfactual's payment dates to match an RPC outage.
-- [ ] Serialize discretionary owner operations with the existing pending
+- [X] Serialize discretionary owner operations with the existing pending
   machine. Test an interrupted monthly phase and an interrupted refinance
   across actual elapsed EVM days, in both languages, against an independent
   debt/cash-flow oracle. Recovery must neither mint another salary nor pay
   the same mortgage allocation twice.
-  Implemented in both dispatchers; Python actual-contract checks pass.
-  Complete JS primary acceptance including the added calendar/refinance
-  cases is running at this checkpoint.
+  Actual Python/JS interruptions across real elapsed days and a payday pass,
+  including dated refinance recovery and a known waiting buyback target.
+  Overall primary acceptance remains separately tracked in the handoff.
 - [ ] Keep external premiums proportional to actual activated coverage and
   protect the issuance reserve in subsequent saving/paydown decisions.
   Apply closing costs once to a coherent staged mortgage refinance;
@@ -1035,6 +1035,23 @@ never credit an unconfirmed mint or payment as liquid funds.
   surplus integration and coherent staged closing-cost decisions remain next.
 
 ** Remaining economy sequence
+
+*** Next household integration after calendar qualification
+
+Use the existing household, dispatcher and runner. Calendar completion alone
+does not restore the normal decision loop. Keep these remaining behaviors
+explicit so simplification does not remove an economic source of demand:
+
+| Existing path | Required canonical successor | Simplification boundary |
+|---------------+------------------------------+-------------------------|
+| Floating monthly/advance and direct payments | Dated calendar, authenticated income/bills and independent shadow books | After the calendar is qualified, move the old insurance-cost fixture onto it and make the old path legacy-only. Its separate working-wallet action still needs migration. |
+| Working-wallet payday action | Guarded net purchases/sales from surplus after actual bills and buffers; preserve distinct custody | Retain its ordinary money-demand behavior before removing the old monthly caller or an overlapping spending agent. Reading the wallet mark is already supported; the new calendar intentionally does not submit this discretionary trade. |
+| Debtor refinancing versus saver credit investment | Reuse selected issuance, reserve funding, bounded market operations and one owner receipt dispatcher; distinguish bank payment from investment/cash retention | Extend common execution where it is the same operation. A saver has no mortgage, so it must not manufacture a positive bank allocation to pass the refinance plan's debt bounds or duplicate the whole refinance machine. |
+| First closing versus later tranches | Confirm one actual closing-cost payment; assess a conservative, capital-limited staged programme under existing theta/risk bounds | Activated insurance is not proof that a closing was paid. Retain exact cash costs and per-trade bounds; do not waive the fee or assume that every future tranche will execute unchanged. |
+| Surplus saving and discounted retirement | Protect required issuance cash/reserve, quote full net acquired BUCK including pool-carried fees, then authenticate actual deposit or selected settlement | A nominal pool discount alone is insufficient. Preserve targets through actual uncertainty, but let known waiting intentions coexist with normal income and bills. |
+| Exit and saved-world state | Explicit unused-facility close, guarded principal retirement, receipt redemption, dated books/queues/hashes/cursors and exact fund/insurer graph | Keep burn(0) invalid, K/fund limits intact and imports gated until interruption/restart coverage demonstrates the replacement. |
+
+*** Economy acceptance sequence
 
 The user approved the pricing/collateral policy on November 5: include marked
 Jubilee claims in LP receipt pricing through the capped mutual-holding
@@ -1272,11 +1289,14 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-07 | Add dated household calendar books and receipt-backed recurring flows | Both existing households now expose an explicit calendar component for arrival capital and each payday's wages, living costs, proportional premiums and mortgage payment. Independent actual/shadow daily-integer debt books and dated bank evidence prevent receipt recovery from overcharging interest or moving counterfactual payment dates. Shared rational-oracle five-year debt/full-width/cadence/conflict vectors and real interruption cases cover known/unknown/mismatched evidence, proved mint refusal, wrong wage amount, late bank date and refinance recovery across a payday. Pending income is not extra spendable wealth; personal status/public histories expose provisional books. Fix Pyrevm historical block timestamps by number/hash; no historical contract-state promise. Final supported Python accounting/reporting set: 199 passed, no skips, with fresh short JSON/PDFs. Pure JS policy/quote/calendar: 70 passed; browser equilibrium build passes. Initial focused JS acceptance exposed a duplicate test-account address, now isolated; the new complete primary suite is running and its final result is not yet claimed. No Solidity changed. Normal automatic surplus/exits/import and five-year/Notes gates remain. | =e5df6124= |
 
-| 2026-11-07 | Prevent a confirmed buyback intention from freezing household income | Keep reconciliation of actual uncertain buys/authorizations/settlements first. Once that evidence is resolved, due recurring USD flows now precede further attempts against a known remaining BUCK retirement target. Preserve that target and its BUCK reserve, never loosen K/fund guards or purchase twice. Actual Python and JS fixtures lose a guarded-buy reply, recover it across a payday, then authenticate wages/bills while the target stays open. Python full primary/calendar set: 52 passed. Focused canonical JS: two checks passed; pure policy/quote/calendar: 70 passed. The earlier complete calendar primary run remains in progress and is not yet a full-green claim. | This commit |
+| 2026-11-07 | Prevent a confirmed buyback intention from freezing household income | Keep reconciliation of actual uncertain buys/authorizations/settlements first. Once that evidence is resolved, due recurring USD flows now precede further attempts against a known remaining BUCK retirement target. Preserve that target and its BUCK reserve, never loosen K/fund guards or purchase twice. Actual Python and JS fixtures lose a guarded-buy reply, recover it across a payday, then authenticate wages/bills while the target stays open. Python full primary/calendar set: 52 passed. Focused canonical JS: two checks passed; pure policy/quote/calendar: 70 passed. The earlier complete calendar primary run remains in progress and is not yet a full-green claim. | =f3b93586= |
 
-** Current handoff: calendar implemented; final JS acceptance running
+| 2026-11-07 | Unify public money histories and qualify reserve conservation | Calendar and refinance transitions now use the same exact amounts.usdc field, with calendar due/effective dates and actual/shadow accounts. Consolidated the current handoff and documented the remaining working-wallet, saver issuance, staged closing, surplus, exit and import sequence before legacy retirement. Python complete primary/calendar: 52 passed; focused actual JS history/buyback: two passed; pure checks: 70 passed. The first complete JS run passed all calendar/recovery/clock and personal-mark cases but failed a frozen-reserve expectation and a direct test issue using a replaced insurer pool (36 passed, three failed including parent). Both are fixture fixes: native compounded conservation with the actual required issuance front replaces the frozen reserve; direct issue reads the facility insurer's current pool. Corrected economic assessment passes in focused actual JS; no monetary guard changed. Final unfiltered primary rerun and changed-insurer regression are running at this checkpoint; final green is not yet claimed. Browser rebuild passes. | This commit |
 
-- Same worktree/branch as below. Calendar implementation files are
+** Current handoff: calendar qualified; complete JS rerun in progress
+
+- Worktree =.claude/worktrees/buck-compound=; branch
+  =feature/buck-compound-demurrage=. Calendar implementation files are
   =sim/household_calendar.py= and =core/js/src/agents/household-calendar.js=.
   Public explicit APIs and report fields are in README-households.org.
   The existing owner recovery dispatcher advances pure calendar books first,
@@ -1288,15 +1308,24 @@ the canonical Buck evidence recorded below.
   Focused final calendar set passed 24; its log is
   =/private/tmp/buck-household-calendar-final-py.log=.
   Fresh short canonical JSON/PDFs remain in build/test/economy-accounting.
-- JS pure policy/market/calendar set passed *70*. The *unfiltered*
-  =make nix-core-equilibrium-bootstrap-test= is running in session 85995,
-  log =/private/tmp/buck-household-calendar-primary-final-js.log=.
-  Read that result before claiming full primary acceptance or checking
-  the cross-language calendar acceptance item. The earlier filtered log
-  =/private/tmp/buck-household-calendar-flow-js.log= failed because its first
-  household reused the existing insurance test's account. All new calendar
-  accounts now have a distinct namespace. The full run also includes later
-  added bad-mint/refused-mint, dated-refinance and clock-guard cases.
+- JS pure policy/market/calendar set passes *70*. The first unfiltered run,
+  =/private/tmp/buck-household-calendar-primary-final-js.log=, finished with
+  36 passes and three failures (including the parent): frozen reserve
+  expectation and a direct test issue into the superseded insurer pool.
+  All nine shared calendar interruptions, both dated refinance recoveries,
+  clock checks and personal records passed. Separate fixture fixes preserve
+  exact compounded reserve conservation and the insurer's actual pool.
+  Corrected economic assessment passes: two checks in
+  =/private/tmp/buck-household-calendar-reserve-carry-js.log=.
+  Earlier duplicate test-account failure in the first filtered run is also
+  superseded; new calendar accounts have a distinct namespace.
+- *Current unfiltered rerun*: =make nix-core-equilibrium-bootstrap-test=,
+  session 87839; log
+  =/private/tmp/buck-household-calendar-qualified-primary-js.log=.
+  *Changed-insurer regression*: session 74354; log
+  =/private/tmp/buck-household-calendar-current-insurer-js.log=.
+  Read both results before claiming full primary acceptance. No K, fund,
+  reserve eligibility or positive market bound was loosened.
 - The subsequent known-buyback-intent scheduling correction has separate
   actual acceptance: Python full primary/calendar *52* passed, log
   =/private/tmp/buck-household-calendar-buyback-py.log=; focused JS *two*
@@ -1304,8 +1333,14 @@ the canonical Buck evidence recorded below.
   That target also passes the 70 pure policy/market/calendar cases. The full
   run above was started at e5df6124; these focused tests qualify the small
   subsequent owner-priority change and its new regression separately.
+- Unified public money fields pass *52* Python primary/calendar checks and
+  the focused actual JS history/buyback case (*two* checks):
+  =/private/tmp/buck-household-calendar-public-history-py.log= and
+  =/private/tmp/buck-household-calendar-public-history-js.log=.
+  The final Python reserve-conservation regression also passes all *52*:
+  =/private/tmp/buck-household-calendar-reserve-carry-py.log=.
 - Browser =make nix-core-demo-eqworld= passed:
-  =/private/tmp/buck-household-calendar-eqworld-build.log=.
+  =/private/tmp/buck-household-calendar-final-eqworld-build.log=.
 - *Next*: finish final JS qualification, then connect reserve-safe savings /
   discounted paydown and coherent staged mortgage closing-cost decisions.
   Activated insurance (=joined=) does not prove that the bank closing cost
@@ -1320,56 +1355,5 @@ the canonical Buck evidence recorded below.
 - The automatic act gate stays intentional. This calendar milestone is
   neither a complete savings sandbox nor five-year stability evidence.
 
-** Previous handoff: observed defaults and calendar boundary
-
-- Worktree =.claude/worktrees/buck-compound=; branch
-  =feature/buck-compound-demurrage=. Earlier commits: =4446c477= funded
-  flow/history; =d46a6bfc= one asset + quotes; =87663858= reserve funding /
-  proportional insurance; =83ce5eaf= exact economic selection + global rate.
-- Unfiltered =make nix-core-equilibrium-bootstrap-test= passed all *24*
-  actual checks, no skips/failures:
-  =/private/tmp/buck-household-planner-primary-final-js.log=.
-  That run retains explicit forecast cases; the added default cases are
-  separately qualified by the same target with a diagnostic filter in
-  =/private/tmp/buck-household-default-forecasts-js.log= (passed).
-  The earlier failing cached-controller run is superseded; do not treat
-  its old failure log as current. Controller work before assessment is a
-  real precondition, with no K guard relaxed.
-- The complete SDK =node --test test/net-demurrage.tevm.test.js= passed
-  *four* cases; log =/private/tmp/buck-household-global-relief-final-js.log=.
-  Final default policy/quote set passes *59* JS checks; log
-  =/private/tmp/buck-household-default-forecasts-final-unit-js.log=.
-  Final Python policy-only run passes 102; the default household assessment
-  cases pass six. The final combined supported Python run passes *175*
-  without skips, including regenerated short JSON/PDF reports; its log is
-  =/private/tmp/buck-household-observed-defaults-final-py.log=.
-- Existing browser page rebuilt after default integration:
-  =/private/tmp/buck-household-observed-defaults-eqworld-build.log=.
-  No Solidity source changed. Every finished short report remains JSON +
-  adjacent PDF under build/test/economy-accounting (owned scratch directory).
-- New defaults are applied by the household assessment wrapper only when
-  none of the three annual forecast keys is supplied. Providing any requires
-  all three. The underlying assessor still consumes explicit numerical
-  forecasts. Global source fields are normalized between Python and JS;
-  observed zero differs from no age, which is labeled conservative zero.
-  Idle main cash and the currently modeled uninvested insurer pool use
-  expm1(-.02) for annual forecasting, checked against native math within
-  1e-10. Real balances and relief always come from canonical contract views.
-- *Next*: implement the calendar acceptance checklist immediately above the
-  remaining economy sequence. Keep actual/counterfactual timing independent
-  from uncertain outgoing operations, authenticate wages and expenses once,
-  and preserve bank receipts' effective payment dates. Dated debt history or
-  equivalent checkpoints must prevent charging interest through the recovery
-  day on debt already paid earlier. Existing events retain transaction hash /
-  receipt block, enabling authoritative receipt-time lookup. Do not invent
-  liquid income or shift shadow payment dates to fit an RPC outage.
-- Then retain the acquired issuance reserve during savings/paydown, account
-  for first-closing costs over sensible staged refinancing, and add explicit
-  zero-principal facility closure (BuckCredit already has Buck-only
-  deactivateFromBuck/closeFromBuck; Buck lacks the owner-facing no-money
-  operation). Keep numeric burn(0) invalid and all K/fund limits intact.
-  Finish snapshots and short actual household worlds before frozen five-year
-  campaigns/adjacent PDFs, arb qualification and Notes/proof restoration.
-- The normal act gate remains intentional: neither these passing components
-  nor the browser bundle is a completed household/savings economy. No
-  corrected-accounting five-year campaign has run.
+The earlier observed-defaults handoff is preserved at =eb0be458=; its
+implementation and validation milestones remain in the journal above.

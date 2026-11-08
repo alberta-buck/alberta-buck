@@ -372,7 +372,17 @@ def test_refinance_assessment_chooses_actual_affordable_issuance_without_transac
     assert [e["operation"] for e in a.refinance_machine.events if e["status"] == "confirmed"] == ["fund", "issue", "export", "mortgage"]
     assert a.mortgage == before[1] - plan.mortgage_limit and a.hypo_mortgage == before[2] and a.hypo_cash == before[3]
     assert d.usdc.functions.balanceOf(a.address).call() >= a.cash_buffer
-    assert d.buck.functions.balanceOf(a.address).call() >= plan.reserve_floor
+    from buck_core import buck_math
+    issue, sale = (next(e for e in a.refinance_machine.events if e.get("operation") == op and e["status"] == "confirmed")
+                   for op in ("issue", "export"))
+    issue_time, sale_time = (d.w3.eth.get_block(e["block"])["timestamp"] for e in (issue, sale))
+    before_sale = int(issue["accounts"]["buck_scaled"])
+    assert before_sale >= (plan.export_buck + plan.reserve_floor) * Q
+    after_sale = buck_math.net_decay(before_sale, sale_time - issue_time) - plan.export_buck * Q
+    assert int(sale["accounts"]["buck_scaled"]) == after_sale
+    now = d.w3.eth.get_block("latest")["timestamp"]
+    assert d.buck.functions.netBalanceScaled(a.address).call() == buck_math.net_decay(after_sale, now - sale_time)
+    assert d.buck.functions.balanceOf(a.address).call() >= plan.candidate.reserve_required
 
 
 @pytest.mark.parametrize("keep_reserve", [True, False])
@@ -779,6 +789,8 @@ def test_calendar_services_bills_after_buyback_receipt_recovery_with_a_remaining
     assert a._net_repayment_reserve == reserve and len(sends) == 1
     assert d.buck.functions.totalIssued().call() == supply
     assert d.buck.functions.balanceOf(a.address).call() > before_buck - RAW
+    bank = next(e for e in a.refinance_machine.events if e.get("operation") == "mortgage" and e["status"] == "confirmed")
+    assert bank["amounts"]["usdc"] == str(a.payment) and int(bank["effective_day"]) == 30
 
 
 @pytest.mark.parametrize("fault", ["lost", "date-unavailable"])

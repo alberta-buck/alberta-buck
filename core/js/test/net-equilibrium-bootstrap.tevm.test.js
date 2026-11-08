@@ -328,7 +328,20 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
       assert.deepEqual(a.householdEventsSince(0).filter((e) => e.status === "confirmed").map((e) => e.operation), ["fund", "issue", "export", "mortgage"]);
       assert.equal(a.mortgage, before.mortgage - plan.mortgage_limit); assert.equal(a.hypoMortgage, before.hypo); assert.equal(a.hypoCash, before.hypoCash);
       assert.ok(await s.call(world.usdc, "balanceOf", [owner]) >= a.buffer);
-      assert.ok(await s.call(buck, "balanceOf", [owner]) >= plan.reserve_floor);
+      // The reserve is ordinary cash. A fixed full-value export also pays
+      // demurrage on the cash waiting to be exported; subsequent bank blocks
+      // let the remainder decay. Prove cash conservation, not a frozen floor.
+      const [issueEvent, saleEvent] = ["issue", "export"].map((op) =>
+        a.householdEventsSince().find((e) => e.operation === op && e.status === "confirmed"));
+      const [issueTime, saleTime] = await Promise.all([issueEvent, saleEvent].map(async (e) =>
+        (await s.client.getBlock({ blockNumber: BigInt(e.block) })).timestamp));
+      const beforeSale = BigInt(issueEvent.accounts.buck_scaled);
+      assert.ok(beforeSale >= (plan.export_buck + plan.reserve_floor) * math.scale);
+      const afterSale = math.decay(beforeSale, saleTime - issueTime) - plan.export_buck * math.scale;
+      assert.equal(BigInt(saleEvent.accounts.buck_scaled), afterSale);
+      const currentTime = (await s.client.getBlock()).timestamp;
+      assert.equal(await s.call(buck, "netBalanceScaled", [owner]), math.decay(afterSale, currentTime - saleTime));
+      assert.ok(await s.call(buck, "balanceOf", [owner]) >= plan.candidate.reserveRequired);
     }
   });
   await t.test("available activated credit issues without redundant reserve purchases", async () => {
@@ -593,7 +606,8 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     await a.setup(world); await a.advanceNetCalendar(world, 0);
     const owner = world.holderAddress(account), [id] = world._credits.get(account.address);
     await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi, functionName: "transfer", args: [owner, 20n * RAW] })]);
-    await world.netCreditOps.issue(owner, id, 100n * RAW, 40n * RAW, 10n * RAW, world.poolAcct);
+    const insurer = await s.call(credit, "insurerOf", [id]);
+    await world.netCreditOps.issue(owner, id, 100n * RAW, 40n * RAW, 10n * RAW, await s.call(buck, "insurerPool", [insurer]));
     const full = BigInt(CALENDAR.full_premium), expected = (full * (a.face - 100n * RAW) + a.face - 1n) / a.face;
     await advanceTime(world, a.calendarMachine.epoch + BigInt(30 * DAY) - (await s.client.getBlock()).timestamp);
     assert.equal(await a.advanceNetCalendar(world, 30), false, a.lastError);
@@ -664,7 +678,8 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
       functionName: "transfer", args: [owner, 20n * RAW] })]);
     await s.send(world.kctrl, "compute");
-    await world.netCreditOps.issue(owner, id, 100n * RAW, 40n * RAW, 10n * RAW, world.poolAcct);
+    const insurer = await s.call(credit, "insurerOf", [id]);
+    await world.netCreditOps.issue(owner, id, 100n * RAW, 40n * RAW, 10n * RAW, await s.call(buck, "insurerPool", [insurer]));
     const beforeBuck = await s.call(buck, "balanceOf", [owner]), execute = world.netMarket.execute;
     let sends = 0;
     world.netMarket.execute = async (...args) => {
@@ -685,6 +700,8 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     assert.equal(a.netRepaymentReserve, reserve); assert.equal(sends, 1);
     assert.equal(await s.call(buck, "totalIssued"), supply);
     assert.ok(await s.call(buck, "balanceOf", [owner]) > beforeBuck - RAW);
+    const bank = a.householdEventsSince().find((e) => e.operation === "mortgage" && e.status === "confirmed");
+    assert.equal(bank.amounts.usdc, String(a.payment)); assert.equal(Number(bank.effective_day), 30);
   });
   await t.test("personal records use actual portfolios and exact integer money", async () => {
     const Q = 10n ** 36n, RAW = 1_000_000n;
