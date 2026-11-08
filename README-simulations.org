@@ -50,6 +50,12 @@ not identify which accounting produced a result. The
 Keep these distinct checks. A five-year parity average cannot detect a broken wallet workflow;
 a short diagnostic trace cannot establish an economic equilibrium.
 
+The canonical wheel fixture also records a remaining qualification gate:
+TOKEN trading profit can coexist with a reduction in the net value of
+unchanged nominal BUCK inventory. The normal canonical worlds keep arb
+disabled until the basket's combined ROI, funded execution and routes are
+qualified. See [[file:doc/BASKET-WHEEL.org::*Current accounting and implementation direction (2026-11-08)][the current wheel design]] for LP fee recovery and carried-fee exchange.
+
 ** Reading canonical economy observations
 
 =make nix-venv-economy-accounting-test= exercises the existing runner and report

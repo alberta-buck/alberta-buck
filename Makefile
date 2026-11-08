@@ -178,6 +178,10 @@ match-%:
 # for actual issuance, real V3 LP placement, repayment and investor exit.
 # nix-match-BasketMachineIdentityTest checks production Carrying binding,
 # real private-keeper CP introductions and net delivery of nominal rewards.
+# nix-match-BuckCompoundWheelArbTest qualifies the existing arb on canonical
+# Buck/real V3: BUCK/USDC shocks, zero caller reward, actual LP fee ownership,
+# net fee collection, inventory fee mixing and scoped callbacks. It is not
+# yet the funded basket-ROI planner; canonical world arb remains gated.
 # See README-simulations.org for units, accounting gates and interpretation.
 .PHONY: buck-accounting-test
 buck-accounting-test: build-uniswap-artifacts

@@ -262,10 +262,15 @@ abstract contract ArbKind is WorkWheel {
         internal returns (uint256 out)
     {
         bool zeroForOne = IUniswapV3Pool(leg.pool).token0() == leg.tokenIn;
+        // Pre: only the current swap may call back. Nested legs temporarily
+        // replace that authority; post: restore the enclosing swap, or zero
+        // after the outermost leg. No pool keeps payment authority at rest.
+        address previous = _cbPool;
         _cbPool = leg.pool;
         (int256 a0, int256 a1) = IUniswapV3Pool(leg.pool).swap(
             address(this), zeroForOne, int256(amountIn),
             zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1, data);
+        _cbPool = previous;
         out = uint256(-(zeroForOne ? a1 : a0));
     }
 

@@ -1053,9 +1053,15 @@ Keep one canonical Python runtime for the savings server and batch runner,
 and the matching existing JavaScript world. Reuse their households, calendar,
 markets, work wheel and reporting; do not port a second legacy economy engine.
 
-- [ ] Qualify and enable the existing wheel's arb against canonical Buck and
-  real V3. Cover BUCK/USDC withdrawal shocks, TOKEN moves, aged Carrying
-  pools, existing inventory and both directions. Extend the same bounded
+- [X] First canonical arb qualification: real V3, actual NFT-backed public
+  basket LP placement, BUCK/USDC shocks in both directions, no caller reward,
+  actual LP fee ownership, protocol fee exclusion and aged net collection.
+  Repair callback scope after reproducing a pool retaining authority after
+  the outermost swap. Characterize nominally unchanged wheel BUCK inventory
+  losing net backing during an otherwise TOKEN-profitable cycle.
+- [ ] Complete net-portfolio/funding qualification and enable the existing
+  wheel's arb against canonical Buck and real V3. Cover TOKEN moves,
+  existing inventory and both directions. Extend the same bounded
   engine to all simple triangles/four-pool cycles. Read current liquidity,
   fees and net/gross balances during normal ticks; never trade inside the
   read-only valuation path used by Buck.
@@ -1431,7 +1437,38 @@ implementation and validation milestones remain in the journal above.
   and direct cash surplus are secondary. The old direct-profit-only executor
   is not the finished funded planner, even when its component tests pass.
 - Canonical arb remains disabled in primary worlds until net inventory,
-  funding and route qualification is complete. The new real-V3 fixture is
-  being run through =make nix-match-BuckCompoundWheelArbTest=; final results
-  will be recorded in the next checkpoint, not inferred from older MockBuck
-  tests. No five-year household campaign is claimed.
+  funding and route qualification is complete. First canonical qualification
+  now passes eight real-V3 tests in =BuckCompoundWheelArbTest=. The combined
+  canonical/retained arb, identity, Jubilee and retirement regression run
+  passes *47*, with no skips:
+  =/private/tmp/buck-compound-wheel-arb-regression.log=.
+  Run =make nix-match-'BuckCompoundWheelArbTest|BasketWheelArbTest|BasketMachineIdentityTest|JubileeWheelTest|BasketRetirementWheelTest'=.
+  The eight MockBuck comparison checks within that total are retained
+  regression coverage, not independent canonical accounting evidence.
+- The callback guard now restores the enclosing pool after a nested swap
+  and zero after the outermost swap. The new fixture first reproduced the
+  stale callback authorization, then passed after this repair. No pool
+  retains payment authority at rest. Supply and basket principal remain
+  unchanged by the tested arb/fee collections.
+- Fee tests use the basket's actual full-range active liquidity share and
+  newly accrued fee growth, excluding earlier uncollected fees and protocol
+  fees. Collected BUCK is checked against the pool's current net/gross ratio.
+  Equal exact-output nominal BUCK purchases deliver different actual net
+  values after fresh liquidity changes the pool's carried-fee basis.
+- *Important remaining gate*: a TOKEN-profitable cycle can leave the
+  wheel's nominal BUCK unchanged while reducing its net BUCK inventory.
+  This is a documented characterization, not a successful portfolio-ROI
+  guard. Do not enable the current direct-profit-only executor on that
+  evidence or assume its TOKEN profit is the combined basket return.
+- Runtime after the callback repair: canonical machine wheel *24,217*
+  bytes, older wheel *24,532*, against 24,576. Both deployed sizes pass a
+  regression. The older wheel has only 44 bytes spare. Further route/ROI
+  calculations need code moved into the existing venue/facet structure
+  or a shared linked helper, not another large inline kind/new wheel.
+  Consider funded sequential execution in the existing basket venue so
+  basket cash/TOKEN capital, net return and earned fees are in one custody
+  context; this would avoid mixing the caller reserve into arb inventory.
+  Keep the legacy route checks until their distinct coverage is replaced.
+- Plan/design checkpoint: =1201866d=. This checkpoint records the callback
+  repair, actual component tests and remaining funded ROI work. No corrected
+  five-year household campaign, push, merge or publication is claimed.
