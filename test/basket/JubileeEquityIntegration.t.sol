@@ -55,7 +55,10 @@ abstract contract JubileeEquityFixture is Test {
         _bind(BOB, false, address(this));
         _bind(INSURER, false, address(this));
         _bind(address(fund), true, address(this));
-        _bind(address(basket), false, address(this));
+        _bind(address(basket), _carryingBasket(), address(this));
+        if (_carryingBasket()) {
+            vm.prank(GOV); buck.setApprovedCarryingIssuer(address(basket), true);
+        }
         vm.prank(ALICE);
         credit.setCreditIssuer(INSURER, true);
         vm.prank(BOB);
@@ -73,6 +76,8 @@ abstract contract JubileeEquityFixture is Test {
     function _makeBasket(address factory) internal virtual returns (BuckBasketEquity) {
         return new BuckBasketEquity(address(buck), address(k), factory, GOV, 3000, 600, 64, 500, 1e3);
     }
+
+    function _carryingBasket() internal pure virtual returns (bool) { return false; }
 
     function _bind(address target, bool carrying, address binder) internal {
         if (target.code.length == 0) vm.etch(target, address(new EqHolder()).code);

@@ -12,6 +12,7 @@ import {BuckBasketEquityStorage, IMarkedCredit, IBuckNetAccount, IBasketCreditFu
 import {PortfolioMath} from "./PortfolioMath.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {IBuckBasketPosition} from "./IBuckBasketPosition.sol";
+import {IBasketArb} from "./IBasketArb.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 
@@ -23,12 +24,15 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 ///         Canonical snapshots distinguish net cash, actual NFT principal
 ///         and a fee-aware marked Jubilee claim. LP prices include the claim;
 ///         new-credit collateral excludes it. Canonical credit opening checks
-///         the public ordinary identity, token model and matching credit NFT.
+///         the public service identity, Carrying issuer approval where needed,
+///         token model and matching credit NFT.
 ///         Canonical spending/repayment is explicit, and exits must preserve
 ///         actual activated backing. The implicit leveraged flow described
 ///         below is the legacy fixture path alone.
 ///
-///         The basket is an ordinary credit holder: one self-issued MARKED
+///         The canonical basket is an approved Carrying service. Nominal
+///         ERC-20 flow is separate from net cash/ROI/collateral and payouts.
+///         It owns one self-issued MARKED
 ///         BuckCredit (`openCredit`), marked at its equity before it spends,
 ///         so its limit is K x equity and Buck enforces it.  Its debt is its
 ///         lien, which earns Jubilee relief like any other.
@@ -64,8 +68,6 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     using SafeERC20 for IERC20;
 
-    bool private transient _positionEntered;
-    bool private transient _creditEntered;
     error PositionReentrant();
     error PositionAssetMismatch();
     error PositionOverflow();
@@ -201,7 +203,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     /// @notice Select the experimental net-token integration before any
     ///         deposits or credit are opened. This mode can invest existing
     ///         BUCK. Credit opening additionally validates the canonical model,
-    ///         public ordinary identity and credit binding. Draws are explicit.
+    ///         public service identity and credit binding. Draws are explicit.
     function enableNetAccounting() external onlyGov {
         if (netAccounting || totalShares != 0 || address(credit) != address(0)) revert AlreadyPresent();
         (bool ok, bytes memory data) = address(buck).staticcall(
@@ -485,9 +487,9 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         // mark. Canonical Buck spends cash only; its final actual collateral
         // and unchanged principal are checked after receipt retirement.
         if (!netAccounting) _markAt(_creditValueS(sn, eLow - pay));
-        if (pay <= _bk().balanceOf(address(this))) {
+        if (pay <= _cashAvailable()) {
             totalShares = S - out;
-            IERC20(address(buck)).transfer(to, pay);
+            _payCash(to, pay);
             dayFlow -= int256(pay);
             return (pay, 0);
         }
@@ -543,7 +545,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
                 toks[i] -= keep;
             }
         } else if (residue > 0) {
-            uint256 spend = _bk().balanceOf(address(this));
+            uint256 spend = _cashAvailable();
             pay = uint256(residue) < spend ? uint256(residue) : spend;
             uint256 unpaid = uint256(residue) - pay;
             if (unpaid > 0) {
@@ -553,7 +555,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
                 uint256 stay = S - out;
                 left = eAfter > unpaid ? unpaid * stay / (eAfter - unpaid) : 0;
             }
-            if (pay > 0) IERC20(address(buck)).transfer(to, pay);
+            if (pay > 0) _payCash(to, pay);
             flow = pay;
         }
         for (uint256 i = 0; i < n; i++) {
@@ -671,7 +673,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     }
     /// @notice Actual canonical wallet cash; legacy fixtures include unused
     ///         headroom. Upkeep's potential issuance budget is separate.
-    function liquidity() external view returns (uint256) { return _bk().balanceOf(address(this)); }
+    function liquidity() external view returns (uint256) { return _cashAvailable(); }
     function liquidityTarget() external view returns (uint256) { return _target(); }
 
     function sharePrice() public view returns (uint256) {
@@ -707,12 +709,14 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     // --- Dispatch: the components facet, else the venue ------------------------- //
 
     fallback() external {
+        bool arb = msg.sig == IBasketArb.executeBasketArb.selector
+                || msg.sig == IBasketArb.basketArbPlan.selector;
         bool setup = msg.sig == IBasketUpkeep.initializeEquityCredit.selector
                   || msg.sig == IBasketUpkeep.authorizeIdentityBinding.selector
                   || msg.sig == IBasketUpkeep.revokeIdentityBinding.selector;
         if ((_positionEntered || _creditEntered) && (setup || msg.sig == IBasketUpkeep.wheelStep.selector
             || msg.sig == bytes4(keccak256("setWheel(address)")))) revert PositionReentrant();
-        address v = (setup || msg.sig == IBasketUpkeep.wheelStep.selector
+        address v = (setup || arb || msg.sig == IBasketUpkeep.wheelStep.selector
                      || msg.sig == IBasketUpkeep.wheelDue.selector)
             ? equityWheel : address(venue);
         if (v == address(0)) revert VenueUnset();

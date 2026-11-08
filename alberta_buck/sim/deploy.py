@@ -349,7 +349,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         raise ValueError(f"unknown basket: {basket_impl!r} (prorata, ops, equity, equity-ops)")
     chain.send(kctrl.functions.setBasket(basket.address), sender=gov)
     if credit_holder:
-        # A credit holder: bound public and NON-Carrying (it holds a lien), and
+        # A Carrying service: net-valued equity and separate NFT principal;
         # it issues itself its MARKED credit.  The face caps what it may ever
         # issue at K x face; 1e23 raw (1e17 BUCK) is no practical cap.
         chain.send(basket.functions.enableNetAccounting(), sender=gov)
@@ -357,7 +357,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         if not machine:
             chain.send(basket.functions.authorizeIdentityBinding(
                 reg.address, deployer, operator_args[0], operator_args[1]), sender=gov)
-            idmod.bind_as_operator(chain, reg, basket.address, True, False, sender=deployer)
+            idmod.bind_as_operator(chain, reg, basket.address, True, True, sender=deployer)
+            chain.send(buck.functions.setApprovedCarryingIssuer(basket.address, True), sender=gov)
             chain.send(basket.functions.openCredit(credit.address, 10**23), sender=gov)
     desk = None
     if basket_impl == "equity-ops":

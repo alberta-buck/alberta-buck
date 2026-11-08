@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BuckBasketEquityStorage, IMarkedCredit} from "./BuckBasketEquityStorage.sol";
+import {BuckBasketEquityStorage, IMarkedCredit, IBuckNetAccount} from "./BuckBasketEquityStorage.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {IBuckJubilee} from "../IBuckJubilee.sol";
 import {IdentityRegistry} from "../IdentityRegistry.sol";
 import {BN254} from "../BN254.sol";
+import {BasketArb} from "./BasketArb.sol";
+import {BasketMarketOps} from "./BasketMarketOps.sol";
 
 /// @notice Shared setup code in the two existing equity-upkeep facets. No
 ///         new state or deployed initializer; their storage remains identical
 ///         to the shell's equity prefix. Setup cannot move BUCK or activate debt.
-abstract contract BasketCreditSetup is BuckBasketEquityStorage, IBasketUpkeep {
+abstract contract BasketCreditSetup is BasketArb, IBasketUpkeep {
     /// @dev PRE: the governed shell calls itself, no facility is open, and
     ///      the canonical token/model/identity/credit bindings agree. Legacy
     ///      fixtures retain their own token path. POST: one self-insured,
@@ -20,19 +22,7 @@ abstract contract BasketCreditSetup is BuckBasketEquityStorage, IBasketUpkeep {
     function initializeEquityCredit(address credit_, uint256 face) external override {
         if (msg.sender != address(this)) revert NotSelf();
         if (address(credit) != address(0)) revert AlreadyPresent();
-        bool canonical = _hasCanonicalModel();
-        if (netAccounting) {
-            if (!canonical) revert InvalidCreditModel();
-            IBuckJubilee token = IBuckJubilee(address(buck));
-            IdentityRegistry registry = token.identity();
-            if (!registry.isVerified(address(this)) || !registry.isPublicIdentity(address(this))
-                || registry.isCarrying(address(this))) revert InvalidCreditIdentity();
-            if (credit_ != address(token.buckCredit()) || token.buckCredit().buck() != address(buck)) {
-                revert WrongCreditContract();
-            }
-        } else if (canonical) {
-            revert InvalidCreditModel();
-        }
+        BasketMarketOps.validateCredit(address(buck), credit_, netAccounting);
         IMarkedCredit c = IMarkedCredit(credit_);
         c.setCreditIssuer(address(this), true);
         creditId = c.createCredit(address(this), 0, face, 0, DEP_MARKED, 0, 0, 0);
@@ -48,7 +38,7 @@ abstract contract BasketCreditSetup is BuckBasketEquityStorage, IBasketUpkeep {
         BN254.G1Point calldata pk, IdentityRegistry.ElGamalCT calldata E) external override onlyGov
     {
         _bindingSetup(registry);
-        registry.authorizeContractBinding(binder, pk, E, true, false);
+        registry.authorizeContractBinding(binder, pk, E, true, true);
     }
 
     /// @notice Cancel a pending binding, under the same setup preconditions.
@@ -62,9 +52,4 @@ abstract contract BasketCreditSetup is BuckBasketEquityStorage, IBasketUpkeep {
             || address(registry) != address(IBuckJubilee(address(buck)).identity())) revert BindingSetupClosed();
     }
 
-    function _hasCanonicalModel() private view returns (bool) {
-        (bool ok, bytes memory data) = address(buck).staticcall(abi.encodeWithSignature("ACCOUNTING_MODEL()"));
-        return ok && data.length == 32
-            && abi.decode(data, (bytes32)) == keccak256("Buck/compounded-cash/per-facility-jubilee/v1");
-    }
 }

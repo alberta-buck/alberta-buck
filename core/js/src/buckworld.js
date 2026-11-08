@@ -203,6 +203,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
     const basketStack = await deployNetBasket(session, artifacts, net, { factory: net.factory, governance: gov, gas });
     net.basket = basketStack.basket;
     net.basketValuationLibrary = basketStack.valuationLibrary;
+    net.basketMarketLibrary = basketStack.marketLibrary;
     await session.send(net.basket, "enableNetAccounting", [], { tag: "world:basket.net" });
     await session.send(net.fund, "configure", [buck.address, net.basket.address], { tag: "world:fund.configure" });
     // The empty basket is not bound to K or populated with liquidity. This is
@@ -215,6 +216,7 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
     for (const [name, contract] of Object.entries({ registry: reg, credit, controller: kctrl, token: buck, pool,
       fund: net.fund, basket: net.basket, factory: net.factory, quoter: net.quoter,
       basketValuationLibrary: net.basketValuationLibrary,
+      basketMarketLibrary: net.basketMarketLibrary,
       ...Object.fromEntries(BUCK_CASH_LIBRARIES.map(([key]) => [key, net[key]])) })) {
       const code = await session.client.getCode({ address: contract.address });
       if (!code || code === "0x") throw new Error(`net world ${name} has no code`);
@@ -260,6 +262,7 @@ export function worldRecord(world) {
       accountingModel: world.net.accountingModel,
       fund: world.net.fund.address, basket: world.net.basket.address,
       basketValuationLibrary: world.net.basketValuationLibrary.address,
+      basketMarketLibrary: world.net.basketMarketLibrary.address,
       factory: world.net.factory.address, quoter: world.net.quoter.address,
       libraries: Object.fromEntries(BUCK_CASH_LIBRARIES.map(([key]) => [key, world.net[key].address])),
       codeHashes: { ...world.net.codeHashes } };
@@ -315,6 +318,7 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   w.net = { registry: w.reg, credit: w.credit, controller: w.kctrl, token: w.buck,
     fund: at("JubileeFund", n.fund), basket: at("BuckBasketEquity", n.basket),
     basketValuationLibrary: at("BasketJubileeMath", n.basketValuationLibrary),
+    basketMarketLibrary: at("BasketMarketOps", n.basketMarketLibrary),
     factory: at("UniswapV3Factory", n.factory), quoter: at("BuckNetQuoter", n.quoter),
     ...Object.fromEntries(BUCK_CASH_LIBRARIES.map(([key, name]) => [key, at(name, n.libraries?.[key])])),
     chainId: n.chainId, issueAbiVersion: n.issueAbiVersion, accountingModel: n.accountingModel, codeHashes: { ...n.codeHashes } };
@@ -343,6 +347,7 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   for (const [name, c] of Object.entries({ registry: w.reg, credit: w.credit, controller: w.kctrl, token: w.buck,
     pool: w.pool, fund: w.net.fund, basket: w.net.basket, factory: w.net.factory, quoter: w.net.quoter,
     basketValuationLibrary: w.net.basketValuationLibrary,
+    basketMarketLibrary: w.net.basketMarketLibrary,
     ...Object.fromEntries(BUCK_CASH_LIBRARIES.map(([key]) => [key, w.net[key]])) })) {
     const deployed = await session.client.getCode({ address: c.address });
     if (!deployed || deployed === "0x") throw new Error("net world contract has no code");
@@ -360,6 +365,8 @@ export async function attachNetBuckWorld(session, artifacts, record, opts = {}) 
   const basketCode = await session.client.getCode({ address: w.net.basket.address });
   if (!basketCode?.toLowerCase().includes(w.net.basketValuationLibrary.address.slice(2).toLowerCase()))
     throw new Error("net world basket library mismatch");
+  if (!basketCode?.toLowerCase().includes(w.net.basketMarketLibrary.address.slice(2).toLowerCase()))
+    throw new Error("net world basket market library mismatch");
   return w;
 }
 

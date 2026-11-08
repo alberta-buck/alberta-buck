@@ -44,6 +44,7 @@ export const NEEDED = [
   // eq world: the equity basket on the basket machine (the default)
   "BuckBasketEquity",
   "BasketJubileeMath",         // shared bounded claim valuation
+  "BasketMarketOps",          // shared net cash/LP operations and funded ROI arb
   "BuckBasketUniswapV3",       // the venue the shell registers its pools on
   "BasketVenueFacet",          // the machine's venue, once they are seeded
   "BasketUpkeepFacet",
@@ -73,6 +74,7 @@ export const SANDBOX = [
   "JubileeFund",
   "BuckBasketEquity",
   "BasketJubileeMath",
+  "BasketMarketOps",
   "MockERC20",
   "SimLP",
   "UniswapV3Factory",

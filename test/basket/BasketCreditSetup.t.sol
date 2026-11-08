@@ -47,7 +47,8 @@ abstract contract BasketIdentityFixture is IdentityRegistryFixture {
     function _bind() internal {
         _authorize();
         vm.prank(alice);
-        reg.bindContract(address(basket), _g1(".alice.elgamal_kp.pk"), _ct(".alice.ciphertext"), true, false);
+        reg.bindContract(address(basket), _g1(".alice.elgamal_kp.pk"), _ct(".alice.ciphertext"), true, true);
+        vm.prank(GOV); token.setApprovedCarryingIssuer(address(basket), true);
     }
 }
 
@@ -60,7 +61,8 @@ contract BasketCreditSetupTest is BasketIdentityFixture {
     function test_productionBindingAndOpeningCreateOnlyAnInactiveSelfInsuredFacility() public {
         _bind();
         assertTrue(reg.isVerified(address(basket))); assertTrue(reg.isPublicIdentity(address(basket)));
-        assertFalse(reg.isCarrying(address(basket))); assertEq(reg.binderOf(address(basket)), alice);
+        assertTrue(reg.isCarrying(address(basket))); assertEq(reg.binderOf(address(basket)), alice);
+        assertTrue(token.approvedCarryingIssuer(address(basket)));
         _open();
         uint256 id = basket.creditId();
         assertEq(address(basket.credit()), address(credit)); assertEq(credit.ownerOf(id), address(basket));
@@ -92,10 +94,10 @@ contract BasketCreditSetupTest is BasketIdentityFixture {
         bytes32 authorization = reg.pendingBindingAuthorization(address(basket));
         vm.expectRevert();
         vm.prank(alice);
-        reg.bindContract(address(basket), _g1(".alice.elgamal_kp.pk"), _ct(".alice.ciphertext"), true, true);
+        reg.bindContract(address(basket), _g1(".alice.elgamal_kp.pk"), _ct(".alice.ciphertext"), true, false);
         assertEq(reg.pendingBindingAuthorization(address(basket)), authorization);
         vm.prank(alice);
-        reg.bindContract(address(basket), _g1(".alice.elgamal_kp.pk"), _ct(".alice.ciphertext"), true, false);
+        reg.bindContract(address(basket), _g1(".alice.elgamal_kp.pk"), _ct(".alice.ciphertext"), true, true);
         assertTrue(reg.isVerified(address(basket)));
         assertEq(reg.pendingBindingAuthorization(address(basket)), bytes32(0));
     }

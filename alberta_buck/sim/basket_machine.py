@@ -108,6 +108,22 @@ def book_receipt(d, receipt, ctr) -> None:
     if not getattr(d, "equity_machine", False):
         return
     from web3.logs import DISCARD
+    arbs = list(d.basket.events.BasketArbitrage().process_receipt(receipt, errors=DISCARD))
+    if arbs:
+        # Once per authenticated receipt, including callers that reconcile a
+        # known transaction. Exact signed raw amounts stay decimal strings.
+        booked = getattr(d, "_booked_basket_arbs", None)
+        if booked is None:
+            d._booked_basket_arbs = booked = set()
+        key = bytes(arbs[0]["transactionHash"])
+        if key not in booked:
+            for event in arbs:
+                ctr["wh_arb_cycles"] = int(ctr.get("wh_arb_cycles", 0)) + 1
+                for field, counter in (("cashReturn", "cash_net_raw"), ("lpReturn", "lp_net_raw"),
+                                       ("lpFees", "lp_fees_raw"), ("totalReturn", "gain_net_raw")):
+                    name = f"wh_arb_{counter}"
+                    ctr[name] = str(int(ctr.get(name, 0)) + int(event["args"][field]))
+            booked.add(key)
     if d.desk is not None:
         for event in d.desk.events.MonetaryOperation().process_receipt(receipt, errors=DISCARD):
             quadrant = int(event["args"]["quadrant"])
@@ -178,7 +194,8 @@ def activate(d, given=None, turn_seconds=0) -> None:
         chain.send(basket.functions.authorizeIdentityBinding(
             d.reg.address, operator, d.reg.functions.pkOf(operator).call(),
             d.reg.functions.ciphertextOf(operator).call()), sender=gov)
-        idmod.bind_as_operator(chain, d.reg, basket.address, True, False)
+        idmod.bind_as_operator(chain, d.reg, basket.address, True, True)
+        chain.send(d.buck.functions.setApprovedCarryingIssuer(basket.address, True), sender=gov)
     # The upkeep facet is written for a credit marked net: K bounds the BUCKs let out, not those held.
     chain.send(basket.functions.setNetMark(True), sender=gov)
     if getattr(d, "net_stack", None) is not None:

@@ -4,7 +4,9 @@ pragma solidity ^0.8.20;
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {BuckBasketStorage}  from "./BuckBasketStorage.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BasketJubileeMath} from "./BasketJubileeMath.sol";
+import {BasketMarketOps} from "./BasketMarketOps.sol";
 import {BuckTypes} from "../BuckTypes.sol";
 
 interface IBuckKSource {
@@ -32,6 +34,7 @@ interface IBuckHolder {
 
 /// @notice Canonical cash and issuance-age views. No signed wallet or holder relief.
 interface IBuckNetAccount {
+    function approvedCarryingIssuer(address owner) external view returns (bool);
     function netBalanceOf(address a) external view returns (uint256);
     function accountBalancesScaled(address a) external view returns (uint256 gross, uint256 net);
     function totalIssued() external view returns (uint256);
@@ -69,7 +72,7 @@ interface IMarkedCredit {
 ///         share one layout; the venue facet (`BuckBasketUniswapV3`) inherits
 ///         only `BuckBasketStorage`, of which this is a strict extension.
 ///
-///         The basket is an ordinary BUCK credit holder with one self-issued
+///         The canonical basket is an approved Carrying service with one self-issued
 ///         MARKED BuckCredit. In canonical accounting its actual net cash and
 ///         that NFT's issued principal are separate. Transfers change cash;
 ///         only explicit issue/reduce operations change principal. Marking
@@ -105,7 +108,7 @@ interface IMarkedCredit {
 ///         The temporary legacy branch below is for existing signed-token
 ///         fixtures. Its signed balance/holder relief and implicit draw/repay
 ///         behavior are not valid semantics of canonical Buck. Canonical
-///         opening validates the model, public ordinary identity and matching
+///         opening validates the model, public service identity and matching
 ///         credit binding through shared setup in the existing upkeep facets.
 ///
 ///         Value is in BUCK.  A position's fair value is twice its BUCK side
@@ -114,6 +117,11 @@ interface IMarkedCredit {
 ///         incumbents' side of an entry) and LOW (the lower: their side of an
 ///         exit).
 abstract contract BuckBasketEquityStorage is BuckBasketStorage {
+
+    // Shared transient locks: the shell and delegated upkeep operations use
+    // the same slots. These do not add or reorder persistent storage.
+    bool internal transient _positionEntered;
+    bool internal transient _creditEntered;
 
     // --- The equity books (appended) ---------------------------------------- //
 
@@ -202,6 +210,32 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
 
     function _bk() internal view returns (IBuckHolder) {
         return IBuckHolder(address(buck));
+    }
+
+    /// @notice Every policy budget/receipt is net-valued. Only the venue and
+    /// ERC-20 boundary use nominal Carrying units. Legacy fixtures keep their
+    /// original accounting; canonical Ordinary comparisons use the same path.
+    function _marketLeg(uint256 i, bool sellBuck, uint256 amount)
+        internal returns (uint256 spent, uint256 received)
+    {
+        if (netAccounting) return BasketMarketOps.monetaryLeg(address(buck), i, sellBuck, amount);
+        return IBuckBasketVenue(address(this)).monetaryLeg(i, sellBuck, amount);
+    }
+
+    function _mintPosition(uint256 i, uint256 tokens, uint256 netBuck)
+        internal returns (uint128 liquidity, uint256 tokenUsed, uint256 buckUsed)
+    {
+        if (netAccounting) return BasketMarketOps.positionMint(address(buck), i, tokens, netBuck);
+        return IBuckBasketVenue(address(this)).positionMint(i, tokens, netBuck);
+    }
+
+    function _payCash(address to, uint256 value) internal {
+        if (netAccounting) BasketMarketOps.payNet(address(buck), to, value);
+        else IERC20(address(buck)).transfer(to, value);
+    }
+
+    function _cashAvailable() internal view returns (uint256) {
+        return netAccounting ? BasketMarketOps.spendableNet(address(buck)) : _bk().balanceOf(address(this));
     }
 
     // --- Valuation ----------------------------------------------------------- //
@@ -333,7 +367,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         return liquid > t ? liquid - t : 0;
     }
 
-    /// @dev Pre: canonical ordinary basket, one self-insured zero-premium
+    /// @dev Pre: canonical service basket, one self-insured zero-premium
     ///      MARKED NFT. Post: no state change; additional principal fits its
     ///      face/current mark, K, principal, account and supply bounds. A
     ///      matured facility or pending maturity book has no issuance room.
@@ -382,6 +416,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
             }
             if (draw != 0) creditLive = true;
         }
+        funded = Math.min(funded, _cashAvailable());
     }
 
     /// @dev Policy solvency using fresh bare collateral and the independently

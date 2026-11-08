@@ -146,6 +146,65 @@ Normal ticks read current prices, active liquidity, pool fees, LP ownership
 and gross/net BUCK values and re-quote after execution. Read-only valuation
 ticks inside Buck operations must remain free of swaps and LP mutation.
 
+** Implemented Carrying-basket path (2026-11-08)
+
+The canonical basket is a governed Carrying service and an approved Carrying
+credit issuer. Its ERC-20 balance/transfers remain nominal; share value,
+ROI, reserves, credit collateral and redemption promises remain net. This
+preserves fees through ordinary basket routing without a special direct
+pool-to-pool callback protocol. Incoming BUCK mixes into the basket's average
+fee basis; outgoing BUCK carries that average, not a selected lot.
+
+=BasketMarketOps= is one shared linked implementation of net cash conversion,
+swap/LP boundaries, setup validation and funded arb. It serves both existing
+upkeep facets. The existing canonical machine wheel overrides the older
+wheel's direct-profit strategy; no second basket or wheel is deployed.
+Its slots cover N triangles and N*(N-1)/2 cross-TOKEN routes. Each plan
+considers both directions with a bounded numerical search.
+
+Preconditions and maintained invariants:
+
+1. Only the configured wheel executes, outside any position/credit operation.
+   Venue callbacks authenticate the active pool. Partial inputs revert; no
+   intermediate inventory is left unbooked.
+2. Nominal trade inputs fit cash above the *net* liquidity reserve and the
+   pool-depth cap. No credit is minted, LP principal withdrawn or caller
+   reserve used to finance the trade.
+3. Collect/book earlier LP fees before the baseline. Freeze the existing
+   TWAP/net TOKEN marks, without spot fallback. Measure actual wallet cash
+   and LP principal at those same marks before and after the cycle.
+4. Count new LP fees once, excluding protocol fees. A direct cash loss is
+   allowed when combined net return clears the configured edge and two-raw-
+   unit rounding floor. No caller bounty is required. A failed realized
+   return check reverts every swap, collection and book change.
+5. Preserve principal/shares, never increase the existing credit shortfall,
+   and refresh actual collateral. Gross up redemption transfers as needed
+   to deliver promised net value from the basket's pooled fee basis.
+
+The APIs =basketArbPlan(route)= and
+=executeBasketArb(route,direction,nominalInput,minimumNetGain)= expose signed
+=cashReturn=, =lpReturn= and =totalReturn=, plus =lpFees=. Fees are a component
+of LP return, not an additional gain. Route indices cover registered TOKEN
+triangles first, then unordered TOKEN pairs in lexicographic index order.
+The machine's =arbRouteCount= reports their total. The older comparison
+wheel retains its historical flash/caller-share API.
+
+=BasketArbitrage= reports realized attribution. =ArbBuckFlow= reports each
+BUCK leg's nominal amount, delivered net scaled by 1e36, and the basket/pool
+before/after net-to-nominal ratios. Python/Web3 and JavaScript/viem can read
+these receipt logs at the basket address. A block/log cursor supplies trade
+history without another accounting model. Simulation frames also expose
+=net.carrying= for the basket, BUCK/USDC and each BUCK/TOKEN pool; fractional
+amounts/ratios are decimal strings, with no ratio for empty cash. Exact
+=wh_arb_*= counters give aggregate attribution. Do not add those gains to
+already marked portfolio ROI again.
+
+Actual V3 checks cover both directions, four-pool cycles, a direct cash loss
+supported by LP return, a net-cash gain despite nominal cash falling, and
+fee transport from aged TOKEN/BUCK holdings into a fresher BUCK/USDC pool.
+The nominal-only comparison finds no trade in the fee-basis case. These
+are contract results; complete household economies remain a separate gate.
+
 ** Historical fresh-BUCK fee-band illustration
 
 A searcher going round the triangle pays three pool fees.  The basket

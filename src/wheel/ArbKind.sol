@@ -74,6 +74,9 @@ interface IWheelCreditee {
 }
 
 /// @title ArbKind -- the consistency arbitrage, one slot per triangle.
+/// @dev This default executor belongs to the older comparison wheel. The
+///      canonical BasketMachineWheel overrides planning, execution and
+///      distribution with the basket's funded net-ROI implementation.
 ///
 /// @notice (alberta-buck-ethereum-wheel.org, "The consistency cycle".)  A triangle through constituent TOKEN:
 ///         the basket's own TOKEN/BUCK pool, TOKEN/USDC and BUCK/USDC.  A run
@@ -141,7 +144,7 @@ abstract contract ArbKind is WorkWheel {
     }
 
     function setArb(address poolUb_, address creditee_, uint16 shareBp_, uint16 capBp_,
-                    uint16 minEdgeBp_) external onlyGov {
+                    uint16 minEdgeBp_) public virtual onlyGov {
         poolUb = poolUb_;
         creditee = creditee_;
         shareBp = shareBp_;
@@ -149,7 +152,7 @@ abstract contract ArbKind is WorkWheel {
         minEdgeBp = minEdgeBp_;
     }
 
-    function setStartMode(uint8 m) external onlyGov { startMode = m; }
+    function setStartMode(uint8 m) public virtual onlyGov { startMode = m; }
 
     function setTriangle(uint256 k, Triangle calldata t) external onlyGov {
         if (k == triangles.length) triangles.push(t);
@@ -222,7 +225,7 @@ abstract contract ArbKind is WorkWheel {
 
     /// @notice The best cycle on triangle k now: (input TOKEN, direction,
     ///         expected profit TOKEN); x = 0 when none clears minEdgeBp.
-    function plan(uint256 k) public view returns (uint256 x, uint8 dir, uint256 profit) {
+    function plan(uint256 k) public view virtual returns (uint256 x, uint8 dir, uint256 profit) {
         Triangle memory t = triangles[k];
         for (uint8 d = 0; d < 2; d++) {
             (uint256 rho, uint256 kappa, uint256 rIn0) = CycleMath.compose(_legs(t, d));
@@ -245,7 +248,7 @@ abstract contract ArbKind is WorkWheel {
 
     /// @notice Go round triangle k from TOKEN to TOKEN.  Self-call only, so a
     ///         cycle that misses its edge reverts alone and the tick goes on.
-    function arbCycle(uint256 k, uint8 dir, uint256 x) external returns (uint256 profit) {
+    function arbCycle(uint256 k, uint8 dir, uint256 x) external virtual returns (uint256 profit) {
         if (msg.sender != address(this)) revert NotSelf();
         Triangle memory t = triangles[k];
         CycleMath.Leg[3] memory l = _legs(t, dir);
@@ -277,7 +280,7 @@ abstract contract ArbKind is WorkWheel {
     /// @notice Leg callbacks.  The first leg's (tag 1) runs legs two and three
     ///         on what it paid out, then pays its own input from the TOKEN
     ///         they return; the others (tag 0) pay their input.
-    function uniswapV3SwapCallback(int256 a0, int256 a1, bytes calldata data) external {
+    function uniswapV3SwapCallback(int256 a0, int256 a1, bytes calldata data) external virtual {
         if (msg.sender != _cbPool || _cbPool == address(0)) revert BadCallback();
         address pool = msg.sender;
         uint8 tag = abi.decode(data[:32], (uint8));
@@ -292,7 +295,7 @@ abstract contract ArbKind is WorkWheel {
         if (a1 > 0) IERC20(IUniswapV3Pool(pool).token1()).safeTransfer(pool, uint256(a1));
     }
 
-    function _distribute(uint256 k, uint8 dir, uint256 x, uint256 profit) internal {
+    function _distribute(uint256 k, uint8 dir, uint256 x, uint256 profit) internal virtual {
         Triangle memory t = triangles[k];
         IERC20 tok = IERC20(_startToken(t));
         uint256 share = profit * shareBp / 10000;

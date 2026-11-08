@@ -6,6 +6,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 interface IJubileeCashSnapshot {
     function balanceOf(address owner) external view returns (uint256);
     function netBalanceOf(address owner) external view returns (uint256);
+    function accountBalancesScaled(address owner) external view returns (uint256 gross, uint256 net);
     function jubilee() external view returns (address);
     function fundBalancesScaled() external view returns (uint256 gross, uint256 net);
     function selectedClaimSeconds(uint256 id, uint256 principal) external view returns (uint256 selected, uint256 total);
@@ -73,7 +74,10 @@ library BasketJubileeMath {
     {
         IJubileeCashSnapshot token = IJubileeCashSnapshot(token_);
         cash = token.netBalanceOf(address(this));
-        spend = token.balanceOf(address(this));
+        (uint256 nominal, uint256 net) = token.accountBalancesScaled(address(this));
+        // Budget full-value cash actually deliverable by an integer ERC-20
+        // transfer. Fractional nominal dust remains wealth, not spendable cash.
+        spend = nominal == 0 ? 0 : Math.mulDiv(token.balanceOf(address(this)), net, nominal);
         if (credit != address(0)) (principal,) = IJubileeFacilitySnapshot(credit).issuanceOf(id);
         relief = claim(token_, id, principal, gross + cash);
     }

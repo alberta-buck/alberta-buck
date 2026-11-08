@@ -425,7 +425,7 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         // the actual swap input, leave any remainder in the wallet.
         dx = PM.min(dx, swapCap * (10 ** constituents[i].decimals) / s.m[i].pHigh);
         uint256 spent;
-        if (dx > 0) (spent,) = _v().monetaryLeg(i, false, dx);
+        if (dx > 0) (spent,) = _marketLeg(i, false, dx);
         idleToken[i] -= spent;
         return burn > 0 || spent > 0;
     }
@@ -438,10 +438,10 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         uint256 spent;
         if (half > 0) {
             uint256 got;
-            (spent, got) = _v().monetaryLeg(i, true, half);
+            (spent, got) = _marketLeg(i, true, half);
             idleToken[i] += got;
         }
-        (uint128 l, uint256 tokens, uint256 bucks) = _v().positionMint(i, idleToken[i], budget - half);
+        (uint128 l, uint256 tokens, uint256 bucks) = _mintPosition(i, idleToken[i], budget - half);
         liquidityOf[i] += l;
         idleToken[i] -= tokens;
         used = spent + bucks;

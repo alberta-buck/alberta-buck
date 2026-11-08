@@ -190,6 +190,7 @@ class BasketWheelAgent(_ProxyAgent):
     # -- impl "solidity": the contract turns, this agent only calls --------------- #
 
     def _setup_solidity(self, d, scenario, sp) -> None:
+        self.canonical = getattr(d, "buck_accounting", "") == "net" and getattr(d, "equity_machine", False)
         self.profile = PROFILES[str(sp("chain", "l1"))]
         self.profile = replace(self.profile, gwei=float(sp("gwei", self.profile.gwei)),
                                eth_usd=float(sp("eth_usd", self.profile.eth_usd)))
@@ -197,8 +198,10 @@ class BasketWheelAgent(_ProxyAgent):
         self.max_work = int(sp("max_work", 12))
         ms = sp("max_scan", None)
         self.max_scan = 0 if ms is None else int(ms)
-        self.start = str(sp("start", "token"))
-        self.share_bp = int(sp("share_bp", 1000))
+        # Historical start/caller-share comparisons belong to the older
+        # flash wheel. The machine's net ROI already belongs to its basket.
+        self.start = "buck" if self.canonical else str(sp("start", "token"))
+        self.share_bp = 0 if self.canonical else int(sp("share_bp", 1000))
         gov = d.gov
         self.equity = getattr(d, "wheel", None) is not None
         if getattr(d, "equity_machine", False):
@@ -226,8 +229,8 @@ class BasketWheelAgent(_ProxyAgent):
         d.chain.send(wheel.functions.setArb(
             d.pool_ub, d.basket.address, self.share_bp, int(sp("cap_bp", 200)),
             int(sp("min_edge_bp", 1))), sender=gov)
-        d.chain.send(wheel.functions.setStartMode(1 if self.start == "buck" else 0),
-                     sender=gov)
+        if not self.canonical:
+            d.chain.send(wheel.functions.setStartMode(1 if self.start == "buck" else 0), sender=gov)
         k = 0
         for i, tok in enumerate(d.tokens if wheel_arb_enabled(d) else []):
             idx = int(d.basket.functions.indexOf(tok.address).call()) - 1
@@ -280,7 +283,8 @@ class BasketWheelAgent(_ProxyAgent):
         """The caller's simulation: the share of what the due triangles would
         capture now (the contract's own plan), in USD."""
         pay = 0.0
-        n = int(self.sol.functions.triangleCount().call())
+        n = int((self.sol.functions.arbRouteCount() if self.canonical
+                 else self.sol.functions.triangleCount()).call())
         buck = self.start == "buck"
         for k in range(n):
             x, _dir, profit = self.sol.functions.plan(k).call()

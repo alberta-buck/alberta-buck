@@ -1053,6 +1053,56 @@ Keep one canonical Python runtime for the savings server and batch runner,
 and the matching existing JavaScript world. Reuse their households, calendar,
 markets, work wheel and reporting; do not port a second legacy economy engine.
 
+**** Carrying basket is part of the arb milestone (owner instruction)
+
+The canonical basket is to be an approved *Carrying service*, rather than
+an Ordinary wallet. This supersedes the former Ordinary-only basket setup
+and the initial funded prototype's Ordinary wallet assumption. It does not
+change household wallets, the 2% demurrage rule, actual NFT principal, K,
+the Jubilee cash cap or the rule excluding unpaid claims from new credit.
+
+- [X] Centralize net/nominal cash and market operations in the same shared
+  linked helper used by funded arb. Keep existing venue/ERC-20 amounts
+  nominal; keep policy budgets, LP shares/ROI, reserves, collateral and
+  redemption minimums net. A gross nominal balance is never shareholder
+  wealth or full-value credit backing. Avoid separate Ordinary/Carrying
+  basket implementations and duplicated market engines.
+- [X] Permit verified, approved Carrying basket credit owners in the existing
+  setup and bind fresh canonical Python/JS baskets Carrying before approvals
+  freeze their mode. Reuse Buck.setApprovedCarryingIssuer and existing
+  repayment/renewal mechanisms. No new Buck monetary mode is required.
+- [X] Normalize swaps, LP mint/burn, income collection and in-kind/cash exits.
+  Gross up nominal payouts when necessary to deliver promised net value,
+  measure actual changes, and retain net reserve/K postconditions. Include
+  fractional/dust and heavily aged inventory; newly issued fresh cash changes
+  the basket's average fee basis rather than creating a selectable lot.
+- [X] Update funded sizing/guard to track the Carrying basket's own pooled
+  gross/net balances alongside the pools'. Measure combined net inventory
+  and LP return at frozen pre-trade marks, including actual new LP fees once.
+  Accept funded direct cash losses when combined net return is positive;
+  caller rewards remain secondary.
+- [X] Observe actual high-fee BUCK leaving an aged TOKEN/BUCK pool, entering
+  the Carrying basket and later the fresher BUCK/USDC pool. Expose nominal
+  transfer, delivered net and all three before/after fee ratios. Turnover is
+  a hypothesis for a fresher USDC pool, not a guaranteed fee ordering.
+- [X] Replace the attempted special direct pool-to-pool routing workaround
+  with ordinary sequential routing through the Carrying basket. Its outgoing
+  BUCK carries its pooled average fee basis; do not pretend a particular
+  incoming BUCK lot can be selected or its age reset.
+- [ ] Qualify both actual facets/wheel and Python/JS fresh deployment, net
+  deposits/redemptions, Jubilee single receipt and household quotes. Existing
+  live/frozen Ordinary identities cannot simply change flavor; use fresh sim
+  worlds and a separately reviewed real deployment migration.
+
+Contract checkpoint: canonical accounting passed 402 tests; the subsequent
+focused Carrying/arb set passes 52 including aged net-payout fuzzing and a
+mixed-age fractional nominal debit. Both existing wheels and facets fit the
+runtime limit. Python bootstrap/marks/short JSON/PDF integration passes six
+checks. The first full JS run passed 39 checks but exposed one old test using
+an Ordinary-household reader on the Carrying basket; that fixture now reads
+actual NFT/fund state instead. Its corrected full acceptance is still pending.
+Runtime activation, household automation and five-year evidence remain open.
+
 - [X] First canonical arb qualification: real V3, actual NFT-backed public
   basket LP placement, BUCK/USDC shocks in both directions, no caller reward,
   actual LP fee ownership, protocol fee exclusion and aged net collection.
@@ -1065,7 +1115,7 @@ markets, work wheel and reporting; do not port a second legacy economy engine.
   engine to all simple triangles/four-pool cycles. Read current liquidity,
   fees and net/gross balances during normal ticks; never trade inside the
   read-only valuation path used by Buck.
-- [ ] Include actual basket LP fee ownership, protocol fees and carried-fee
+- [X] Include actual basket LP fee ownership, protocol fees and carried-fee
   exchange in the cost/return model. An exchange can replace higher-fee
   BUCK with lower-fee BUCK or TOKEN exposure that a nominal-price-only
   external searcher misses. Use combined net portfolio improvement,
@@ -1424,51 +1474,64 @@ the canonical Buck evidence recorded below.
 The earlier observed-defaults handoff is preserved at =eb0be458=; its
 implementation and validation milestones remain in the journal above.
 
-** Current handoff: minimal ecosystem and basket-ROI arb qualification
+** Current handoff: Carrying basket and funded ROI contract checkpoint
 
-- Branch =feature/household-minimal-ecosystem= in the existing
-  =.claude/worktrees/buck-compound= worktree, based on =6bf53283=.
-- The November 8 priority/checklist above is current. Full save/resume is
-  later work. Reuse the savings server and matching JS world for the complete
-  interactive ecosystem before uninterrupted five-year campaigns; do not
-  convert all eleven historical control-lab stages into another runtime.
-- Basket ROI is the wheel's primary objective. Newly earned actual LP fees
-  and carried-fee exchange belong in the economic score. Caller payments
-  and direct cash surplus are secondary. The old direct-profit-only executor
-  is not the finished funded planner, even when its component tests pass.
-- Canonical arb remains disabled in primary worlds until net inventory,
-  funding and route qualification is complete. First canonical qualification
-  now passes eight real-V3 tests in =BuckCompoundWheelArbTest=. The combined
-  canonical/retained arb, identity, Jubilee and retirement regression run
-  passes *47*, with no skips:
-  =/private/tmp/buck-compound-wheel-arb-regression.log=.
-  Run =make nix-match-'BuckCompoundWheelArbTest|BasketWheelArbTest|BasketMachineIdentityTest|JubileeWheelTest|BasketRetirementWheelTest'=.
-  The eight MockBuck comparison checks within that total are retained
-  regression coverage, not independent canonical accounting evidence.
-- The callback guard now restores the enclosing pool after a nested swap
-  and zero after the outermost swap. The new fixture first reproduced the
-  stale callback authorization, then passed after this repair. No pool
-  retains payment authority at rest. Supply and basket principal remain
-  unchanged by the tested arb/fee collections.
-- Fee tests use the basket's actual full-range active liquidity share and
-  newly accrued fee growth, excluding earlier uncollected fees and protocol
-  fees. Collected BUCK is checked against the pool's current net/gross ratio.
-  Equal exact-output nominal BUCK purchases deliver different actual net
-  values after fresh liquidity changes the pool's carried-fee basis.
-- *Important remaining gate*: a TOKEN-profitable cycle can leave the
-  wheel's nominal BUCK unchanged while reducing its net BUCK inventory.
-  This is a documented characterization, not a successful portfolio-ROI
-  guard. Do not enable the current direct-profit-only executor on that
-  evidence or assume its TOKEN profit is the combined basket return.
-- Runtime after the callback repair: canonical machine wheel *24,217*
-  bytes, older wheel *24,532*, against 24,576. Both deployed sizes pass a
-  regression. The older wheel has only 44 bytes spare. Further route/ROI
-  calculations need code moved into the existing venue/facet structure
-  or a shared linked helper, not another large inline kind/new wheel.
-  Consider funded sequential execution in the existing basket venue so
-  basket cash/TOKEN capital, net return and earned fees are in one custody
-  context; this would avoid mixing the caller reserve into arb inventory.
-  Keep the legacy route checks until their distinct coverage is replaced.
-- Plan/design checkpoint: =1201866d=. This checkpoint records the callback
-  repair, actual component tests and remaining funded ROI work. No corrected
-  five-year household campaign, push, merge or publication is claimed.
+- Branch =feature/household-minimal-ecosystem= in
+  =.claude/worktrees/buck-compound=, based on =6bf53283=. Earlier design and
+  callback checkpoints: =1201866d= and =70b27881=.
+- The owner requires the Carrying conversion in this arb work. The checklist
+  above is current. The canonical basket now binds Carrying, is explicitly
+  approved to issue, and preserves nominal ERC-20 flow while marking policy,
+  reserves, shares, credit collateral and payouts in net BUCK.
+- =BasketMarketOps= is the single new linked helper for conversion, existing
+  swap/LP boundaries, read-only credit validation and funded ROI. Both existing
+  upkeep facets reuse it. No new basket, token, wheel, monetary mode or Notes
+  implementation was deployed. Ordinary fixtures remain comparison coverage.
+- The existing canonical machine overrides the comparison wheel's strategy:
+  N triangles and N*(N-1)/2 cross-TOKEN cycles, both directions, funded only
+  from actual surplus cash. No new issuance, LP-principal sale or reward
+  reserve finances arb. Caller bounty is not a trading prerequisite.
+- Quotes use bounded search and the current pool/fee/cash state. Execution
+  rechecks, collects old fees before its baseline, freezes the existing net
+  TWAP TOKEN marks, and verifies actual wallet + LP principal/new-fee return.
+  Direct cash losses may be profitable; fees count once. Revert all effects
+  on an insufficient net gain or increased credit shortfall.
+- =ArbBuckFlow= exposes nominal/net transport and basket/pool before/after
+  fee ratios; =BasketArbitrage= exposes exact signed return attribution. Saved
+  frames now include =net.carrying= and exact =wh_arb_*= counters. Portfolio
+  NAV uses net wealth; deliverable liquidity is a separate budget. See
+  [[file:../BASKET-WHEEL.org::*Implemented Carrying-basket path (2026-11-08)][BASKET-WHEEL.org]] for invariants, API units and log access.
+- *Contracts*: =make nix-buck-accounting-test= passed *402* without skips in
+  =/private/tmp/buck-carrying-basket-accounting.log=. The subsequent
+  =make nix-basket-arb-test= passed *52* without skips in
+  =/private/tmp/buck-carrying-basket-focused.log=, including the additional
+  256-case aged payout fuzz test and mixed-age fractional cash retirement.
+  The independent nominal-only arb finds no trade in the demonstrated
+  positive-net/negative-nominal fee-basis exchange.
+- Runtime bytes: basket *24,170*; machine upkeep *24,168*; components
+  *17,254*; venue *21,692*; market helper *17,889*; canonical machine wheel
+  *18,824*; retained older wheel *24,532*. All remain under 24,576.
+  Moving validation into the existing shared helper and explicit strategy
+  overrides removed the size overflow without another contract hierarchy.
+- *Python*: the existing bootstrap, marks and short JSON/PDF tests passed
+  *6* through the Nix/venv wrapper:
+  =/private/tmp/buck-carrying-basket-primary-py.log=; reports are under
+  =build/test/carrying-basket/=. Their first run identified the old use of
+  a household-only reader on the basket and old caller-share configuration.
+  Both are corrected; household wallets still require Ordinary mode.
+- *JavaScript*: 71 pure checks pass. First full primary run passed *39*
+  but failed the same outdated basket-as-household assertion (one child and
+  its parent, 41 checks total). Its corrected test reads actual NFT principal
+  and marked fund relief; the corrected complete acceptance is not yet
+  claimed. Log: =/private/tmp/buck-carrying-basket-primary-js.log=.
+- *Next*: finish corrected JS primary/wallet/build/package acceptance;
+  qualify and activate funded arb in the primary Python/JS world with
+  practical bounded scans and actual pool shocks. Keep the old env gate
+  until that is demonstrated. Then finish household autonomous refinancing,
+  reserve-safe surplus saving/paydown and guarded exits; run short complete
+  worlds before actual five-year campaigns and adjacent PDFs. Save/resume
+  stays later work; Notes/proofs and release checks remain separate gates.
+- No corrected five-year household campaign, push, merge or publication is
+  claimed. The normal household act gate remains until its actual scheduler
+  replaces the old behavior; read-only calendar/financial vectors are not
+  a completed household economy.

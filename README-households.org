@@ -8,6 +8,11 @@ retirement policies remain explicit comparisons. The savings sandbox and
 five-year runner use these existing households and population arrivals.
 The [[file:doc/review/bucknet-economy-implementation.org][accounting implementation plan]] is the authoritative completion checklist.
 
+Household wallets remain Ordinary. The basket they invest in is a Carrying
+service: its nominal BUCK is separate from shareholders' net value. Receipt
+marks and redemption minimums use net BUCK; carrying fees cannot inflate
+reported household wealth or create credit collateral.
+
 An insured household now defaults to one asset and one BuckCredit NFT.
 An explicit =asset_count= portfolio (1--32) divides its declared aggregate
 collateral across that many facilities; the last receives the integer

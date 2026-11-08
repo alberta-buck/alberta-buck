@@ -37,9 +37,11 @@ import {BasketCreditSetup} from "./BasketCreditSetup.sol";
 ///         brings it back under the limit, at most 2 x `swapCapBp` of a pool
 ///         a step; until then exits pay in kind.
 ///
-///         The arbitrage stays in the wheel (ArbKind): it needs no float and
-///         credits its captures to the basket (creditDepositors /
-///         creditTreasury).
+///         The canonical machine wheel schedules funded ROI arb in this same
+///         basket's shared facet/library. Its nominal Carrying flow remains
+///         separate from net policy budgets. The older comparison wheel still
+///         credits direct flash-cycle captures through creditDepositors /
+///         creditTreasury.
 contract BuckBasketEquityWheel is BasketCreditSetup {
 
     uint8 internal constant DAILY  = 0;
@@ -143,7 +145,7 @@ contract BuckBasketEquityWheel is BasketCreditSetup {
             if (sell > cap) sell = cap;
             uint256 dx = sell * one / p;
             if (dx > 0) {
-                (uint256 spent, uint256 got) = _v().monetaryLeg(i, false, dx);
+                (uint256 spent, uint256 got) = _marketLeg(i, false, dx);
                 idleToken[i] -= spent;
                 have += got;
                 // Canonical proceeds are cash, not automatic debt retirement.
@@ -153,7 +155,7 @@ contract BuckBasketEquityWheel is BasketCreditSetup {
         }
         (have,) = _fundCash(have);
         (uint128 l, uint256 tokUsed, uint256 buckUsed) =
-            _v().positionMint(i, idleToken[i], have);
+            _mintPosition(i, idleToken[i], have);
         liquidityOf[i] += l;
         idleToken[i] -= tokUsed;
         _finishBuy(openingShortfall);
@@ -248,7 +250,7 @@ contract BuckBasketEquityWheel is BasketCreditSetup {
         uint256 openingShortfall;
         (half, openingShortfall) = _fundCash(half);
         if (half == 0) return 0;
-        (uint256 spent, uint256 got) = _v().monetaryLeg(j, true, half);
+        (uint256 spent, uint256 got) = _marketLeg(j, true, half);
         idleToken[j] += got;
         _finishBuy(openingShortfall);
         emit WheelWork(FUND, j, spent);
@@ -321,7 +323,7 @@ contract BuckBasketEquityWheel is BasketCreditSetup {
         (uint256 tok,) = _v().positionBurn(t, l);
         liquidityOf[t] -= l;
         if (tok > 0) {
-            (uint256 spent,) = _v().monetaryLeg(t, false, tok);
+            (uint256 spent,) = _marketLeg(t, false, tok);
             idleToken[t] += tok - spent;
         }
         if (netAccounting) _markS(_snap());

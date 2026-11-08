@@ -58,8 +58,13 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
         assert net["jubilee"]["cash"] == buck.functions.netBalanceOf(fund.address).call()
         assert net["jubilee"]["publication"]["ready"]
         assert net["jubilee"]["relief_position_mark"] == fund.functions.reliefPositionMark().call()
-        credit_mark = d.net_credit_ops.mark_household(basket.address, [basket.functions.creditId().call()])
-        assert credit_mark.state.issued == frame["eq_lien"] and credit_mark.relief_scaled > 0
+        basket_id = basket.functions.creditId().call()
+        principal, _ = credit.functions.issuanceOf(basket_id).call()
+        marked_relief, _, _ = fund.functions.previewRelief(basket_id, principal).call()
+        assert principal == frame["eq_lien"] and marked_relief > 0
+        assert d.reg.functions.isCarrying(basket.address).call()
+        assert buck.functions.approvedCarryingIssuer(basket.address).call()
+        assert int(net["carrying"]["basket"]["net_scaled"]) == buck.functions.netBalanceScaled(basket.address).call()
         global_rate = d.net_credit_ops.quote_global_relief_rate(block_number=net["block"])
         assert global_rate.position_mark == net["jubilee"]["relief_position_mark"]
         assert global_rate.cash_scaled == int(net["jubilee"]["net_scaled"])
@@ -68,7 +73,7 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
         assert not selected.capped and abs(global_rate.annual_rate_wad - selected.annual_rate_wad) <= 1
         assert int(net["claim_seconds"]) == buck.functions.claimSeconds().call()
         assert int(net["available_relief_scaled"]) == buck.functions.availableReliefScaled().call()
-        assert frame["basketNav"] == basket.functions.gross().call() + basket.functions.liquidity().call()
+        assert frame["basketNav"] == basket.functions.gross().call() + buck.functions.netBalanceOf(basket.address).call()
         assert frame["eq_equity"] == frame["basketNav"] - frame["eq_lien"] + frame["eq_unpaid_relief"]
         held = 0
         for i, pool in enumerate(d.pool_buck):
@@ -97,7 +102,9 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
         assert meta["model"] == Web3.to_hex(Web3.keccak(text="Buck/compounded-cash/per-facility-jubilee/v1"))
         for role in list(meta["roles"].values()) + list(meta["libraries"].values()):
             assert role["code_hash"] == Web3.to_hex(Web3.keccak(evm.w3.eth.get_code(role["address"])))
-        assert len(meta["libraries"]) == 5
+        assert len(meta["libraries"]) == 6
+        assert "basket_market_ops" in meta["libraries"]
+        assert meta["basket_cash_mode"] == "carrying"
         # A real price excursion makes publication refuse without spending
         # money, retiring principal or changing the last published mark.
         d = deployments[0]

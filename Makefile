@@ -25,6 +25,7 @@ help:
 	  '  make nix-test                      # Solidity tests' \
 	  '  make nix-match-BuckCashTest        # unsigned cash and sponsor component tests' \
 	  '  make nix-buck-accounting-test      # canonical Buck compound cash/NFT/Jubilee checks' \
+	  '  make nix-basket-arb-test           # Carrying basket, funded net ROI and fee exchange' \
 	  '  make nix-match-BuckCompoundBasketFlowTest  # real V3 credit issuance and rollback' \
 	  '  make nix-match-BuckCompoundBasketRepaymentTest  # bounded principal settlement and locks' \
 	  '  make nix-match-BuckCompoundDeskTest  # canonical desk issuance, net purchases and real repayment' \
@@ -187,6 +188,15 @@ match-%:
 buck-accounting-test: build-uniswap-artifacts
 	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*Test|BuckBurnModesTest|BuckSponsoredSwapTest|BuckCashTest|NetDemurrageMathTest|NetMathVectorsTest|BuckNetMintMathTest|BuckNetBurnMathTest|BuckNetBurnCompatibilityTest|BuckNetBurnRoundingTest|BasketJubileeMathTest|BasketRetirementWheelTest|BasketCreditSetupTest|BasketPublicLifecycleTest|BasketMachineIdentityTest|Jubilee(Fund|Renewal|BurnValuation|LiquidityRebalance|MarkedRelief|MaturedRelease|MaturityIntegration|EquityIntegration|Claims|ReserveMath|Obligations|Wheel)Test)$$' -vvv
 
+# Focused Carrying basket + wheel ROI acceptance. All figures/guards are net
+# except ERC-20/venue inputs, which remain nominal. Includes funded direct-
+# cash-loss cycles, carried-fee exchange, four-pool routes, public identity,
+# net payouts and runtime limits. No five-year household claim is implied.
+#   make nix-basket-arb-test
+.PHONY: basket-arb-test
+basket-arb-test: build-uniswap-artifacts
+	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*ArbTest|BuckCompoundCarryingBasketTest|BasketCreditSetupTest|BasketPublicLifecycleTest|BasketMachineIdentityTest|BasketWheelArbTest)$$' -vvv
+
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:
 	forge test $(FORGE_OPTS) -vvv --fork-url $(SEPOLIA_RPC_URL) $(ANVIL_FORK_OPTS)
@@ -311,7 +321,7 @@ demurrage-test:
 .PHONY: net-demurrage-smoke
 net-demurrage-smoke: sim-build core-js-check-worktree
 	@command -v anvil >/dev/null || { echo 'anvil missing; use make nix-venv-net-demurrage-smoke'; exit 1; }
-	@for name in Buck BuckCash BuckTransfer BuckFacilities BuckRenewalOps BuckNetQuoter BuckNetSwapGuard JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic BuckKControllerDirect UniswapV3Factory UniswapV3Pool BuckBasketEquity BasketJubileeMath MockERC20 SimLP; do \
+	@for name in Buck BuckCash BuckTransfer BuckFacilities BuckRenewalOps BuckNetQuoter BuckNetSwapGuard JubileeFund IdentityRegistryHarness BuckCredit BuckKControllerStatic BuckKControllerDirect UniswapV3Factory UniswapV3Pool BuckBasketEquity BasketJubileeMath BasketMarketOps MockERC20 SimLP; do \
 	  test -f "out/$$name.sol/$$name.json" || { echo "Missing artifact $$name; run make nix-sim-build"; exit 1; }; \
 	done
 	@test -d core/js/node_modules || { echo 'core/js dependencies missing; run make nix-core-js-deps'; exit 1; }

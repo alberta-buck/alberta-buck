@@ -495,7 +495,7 @@ class Snapshotter:
         if getattr(d, "buck_accounting", "") == "net":
             # Independent seed LPs are outside the basket's owned book.
             # Unpaid relief is a separate asset, not deployable inventory.
-            return int(d.basket.functions.gross().call()) + int(d.basket.functions.liquidity().call())
+            return int(d.basket.functions.gross().call()) + int(d.buck.functions.netBalanceOf(d.basket.address).call())
         total = 0
         for i in range(len(d.tokens)):
             rt = _bal(d.tokens[i], d.pool_buck[i])

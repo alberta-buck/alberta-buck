@@ -412,19 +412,34 @@ contract BuckBasketUniswapV3 is
         }
     }
 
-    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data)
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata)
         external override
     {
         if (!(msg.sender == _swapCallbackPool)) revert BadSwapCallback();
-        address token = abi.decode(data, (address));
-        Constituent storage c = constituents[indexOf[token] - 1];
-        if (c.buckIsToken0) {
-            if (amount0Delta > 0) IERC20(address(buck)).transfer(msg.sender, uint256(amount0Delta));
-            if (amount1Delta > 0) IERC20(c.token).transfer(msg.sender, uint256(amount1Delta));
-        } else {
-            if (amount0Delta > 0) IERC20(c.token).transfer(msg.sender, uint256(amount0Delta));
-            if (amount1Delta > 0) IERC20(address(buck)).transfer(msg.sender, uint256(amount1Delta));
-        }
+        // Authority comes from the active authenticated swap, not user data.
+        // This also supports TOKEN/USDC and BUCK/USDC route legs.
+        IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
+        if (amount0Delta > 0) IERC20(pool.token0()).transfer(msg.sender, uint256(amount0Delta));
+        if (amount1Delta > 0) IERC20(pool.token1()).transfer(msg.sender, uint256(amount1Delta));
+    }
+
+    function arbSwap(address pool, address input, address output, uint256 amount)
+        external override onlySelf returns (uint256 received)
+    {
+        IUniswapV3Pool p = IUniswapV3Pool(pool);
+        bool zeroForOne = p.token0() == input;
+        if (amount == 0 || amount > uint256(type(int256).max)
+            || (zeroForOne ? p.token1() != output : p.token1() != input || p.token0() != output)) revert BadToken();
+        uint256 beforeOut = IERC20(output).balanceOf(address(this));
+        uint256 beforeIn = IERC20(input).balanceOf(address(this));
+        address previous = _swapCallbackPool;
+        _swapCallbackPool = pool;
+        p.swap(address(this), zeroForOne, int256(amount),
+               zeroForOne ? MIN_SQRT_RATIO + 1 : MAX_SQRT_RATIO - 1, "");
+        _swapCallbackPool = previous;
+        if (beforeIn - IERC20(input).balanceOf(address(this)) != amount) revert SwapDeltaSign();
+        received = IERC20(output).balanceOf(address(this)) - beforeOut;
+        if (received == 0) revert NoValue();
     }
 
     // --- Swap helpers ----------------------------------------------------- //

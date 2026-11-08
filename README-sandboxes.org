@@ -15,6 +15,11 @@ estimate, before execution; larger price impact can therefore refuse a trade.
 
 Both machine deployment/bootstrap paths now reuse canonical Buck's linked
 basket and Jubilee fund, with real pool pairing and premium-bearing issuance.
+Their basket is an approved Carrying service: balanceOf/transfers are nominal,
+while portfolio marks, reserves, collateral and redemption minimums are net.
+The shared market helper grosses up cash payouts and records actual values.
+Funded wheel ROI and carried-fee exchange are described in the
+[[file:doc/BASKET-WHEEL.org::*Implemented Carrying-basket path (2026-11-08)][wheel implementation note]].
 =make nix-core-equilibrium-bootstrap-test= tests that stage through the demo
 artifact bundle. =make nix-venv-economy-bootstrap-test= adds the existing
 Python builder, bootstrap agents, desk and component comparisons.

@@ -8,6 +8,7 @@ import {IBasketView} from "../basket/IBasketView.sol";
 import {ArbKind} from "./ArbKind.sol";
 import {JubileeKind} from "./JubileeKind.sol";
 import {IBuckJubilee} from "../IBuckJubilee.sol";
+import {IBasketArb} from "../basket/IBasketArb.sol";
 import {BN254} from "../BN254.sol";
 import {IdentityRegistry} from "../IdentityRegistry.sol";
 
@@ -96,6 +97,43 @@ contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, 
     constructor(address buck, address stable, address gov, uint16 kappa, uint256 reserveCap)
         WorkWheel(buck, gov, kappa, reserveCap) ArbKind(buck, stable) {}
 
+    error InvalidArbConfiguration();
+
+    /// @notice The canonical wheel delegates ROI work to its Carrying basket.
+    /// The older wheel retains the isolated flash comparison implementation.
+    function setArb(address pool, address basket, uint16 share, uint16 cap, uint16 edge)
+        public override onlyGov
+    {
+        if (share != 0 || cap > 500 || edge > 10000) revert InvalidArbConfiguration();
+        super.setArb(pool, basket, share, cap, edge);
+    }
+
+    function setStartMode(uint8) public override onlyGov { revert InvalidArbConfiguration(); }
+
+    function plan(uint256 route) public view override returns (uint256 amount, uint8 direction, uint256 gain) {
+        try IBasketArb(creditee).basketArbPlan(route) returns (IBasketArb.ArbPlan memory p) {
+            return (p.amount, p.direction, p.totalReturn > 0 ? uint256(p.totalReturn) : 0);
+        } catch { return (0, 0, 0); }
+    }
+
+    function arbCycle(uint256 route, uint8 direction, uint256 amount) external override returns (uint256) {
+        if (msg.sender != address(this)) revert NotSelf();
+        IBasketArb.ArbPlan memory result = IBasketArb(creditee).executeBasketArb(route, direction, amount, 2);
+        return uint256(result.totalReturn);
+    }
+
+    // Proceeds and LP fees already belong to the basket. No caller bounty
+    // is required and the reward reserve never supplies arb inventory.
+    function _distribute(uint256, uint8, uint256, uint256) internal pure override {}
+
+    function uniswapV3SwapCallback(int256, int256, bytes calldata) external pure override { revert BadCallback(); }
+
+    /// @notice N triangles plus each unordered cross-TOKEN four-pool cycle.
+    function arbRouteCount() external view returns (uint256) {
+        uint256 n = poolUb == address(0) ? 0 : triangles.length;
+        return n + (n > 1 ? n * (n - 1) / 2 : 0);
+    }
+
     /// @notice Authorize this service's public Carrying identity in BUCK's
     ///         own registry; the certified operator completes the binding.
     /// @dev PRE: current governance, no active work/funding callback, and a
@@ -122,7 +160,10 @@ contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, 
 
     function _slotCount() internal view
         override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (uint256)
-    { return super._slotCount(); }
+    {
+        uint256 n = poolUb == address(0) ? 0 : triangles.length;
+        return super._slotCount() + (n > 1 ? n * (n - 1) / 2 : 0);
+    }
 
     function _due(uint256 s) internal view
         override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (bool)

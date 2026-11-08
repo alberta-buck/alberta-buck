@@ -15,15 +15,15 @@ import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
 ///      flags; production wheel identity/keeper tests are separate. This is
 ///      qualification of the existing direct-profit executor, not yet the
 ///      fee-aware, funded basket-ROI planner or household economy acceptance.
-contract BuckCompoundWheelArbTest is JubileeEquityFixture {
+abstract contract BuckCompoundArbFixture is JubileeEquityFixture {
     EqToken asset;
     EqToken usdc;
-    BasketMachineWheel wheel;
+    ArbKind wheel;
     address own;
     address market;
     address ub;
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
         _bind(address(this), false, address(this));
         _credit(ALICE, 8_000_000e6);
@@ -59,7 +59,11 @@ contract BuckCompoundWheelArbTest is JubileeEquityFixture {
         assertEq(IBasketUpkeep(address(basket)).wheelStep(2, 0), 1);
         assertGt(basket.liquidityOf(0), 0);
 
-        wheel = new BasketMachineWheel(address(buck), address(usdc), GOV, 0, 0);
+        _configureArb(new BasketWheel(address(buck), address(usdc), GOV, 0, 0));
+    }
+
+    function _configureArb(ArbKind next) internal {
+        wheel = next;
         _bind(address(wheel), true, address(this));
         vm.startPrank(GOV);
         (bool ok,) = address(basket).call(abi.encodeWithSignature("setWheel(address)", address(wheel)));
@@ -70,7 +74,7 @@ contract BuckCompoundWheelArbTest is JubileeEquityFixture {
     }
 
     function _pool(address a, uint8 da, address b, uint8 db, uint24 fee)
-        private returns (address p)
+        internal returns (address p)
     {
         p = basket.v3Factory().createPool(a, b, fee);
         bool a0 = IUniswapV3Pool(p).token0() == a;
@@ -80,17 +84,20 @@ contract BuckCompoundWheelArbTest is JubileeEquityFixture {
         IUniswapV3Pool(p).initialize(uint160(Math.sqrt(Math.mulDiv(num, 2 ** 192, den))));
     }
 
-    function _mintPool(address p, int24 spacing, uint128 liquidity) private {
+    function _mintPool(address p, int24 spacing, uint128 liquidity) internal {
         int24 top = (887272 / spacing) * spacing;
         IUniswapV3Pool(p).mint(address(this), -top, top, liquidity, "");
     }
 
-    function _trade(address pool, address input, int256 amount) private {
+    function _trade(address pool, address input, int256 amount) internal {
         bool zeroForOne = IUniswapV3Pool(pool).token0() == input;
         IUniswapV3Pool(pool).swap(address(this), zeroForOne, amount,
             zeroForOne ? MIN_SQRT + 1 : MAX_SQRT - 1, "");
     }
 
+}
+
+contract BuckCompoundWheelArbTest is BuckCompoundArbFixture {
     function _shockAndTick(bool buckSale) private {
         _trade(ub, buckSale ? address(buck) : address(usdc), int256(100_000e6));
         (uint256 input,, uint256 quoted) = wheel.plan(0);
@@ -223,7 +230,7 @@ contract BuckCompoundWheelArbTest is JubileeEquityFixture {
 
     function test_bothExistingWheelsFitRuntimeLimit() public {
         assertLe(address(wheel).code.length, 24_576);
-        BasketWheel comparison = new BasketWheel(address(buck), address(usdc), GOV, 0, 0);
+        BasketMachineWheel comparison = new BasketMachineWheel(address(buck), address(usdc), GOV, 0, 0);
         assertLe(address(comparison).code.length, 24_576);
     }
 }

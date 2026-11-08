@@ -343,7 +343,8 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       [basket.address, MACHINE.interval, MACHINE.maxAge, MACHINE.deviationBp],
       { name: "BasketReference", gas });
     const upkeep = await session.deploy(linkArtifact(artifacts("BasketUpkeepFacet"), {
-      "src/basket/BasketJubileeMath.sol:BasketJubileeMath": world.net.basketValuationLibrary.address }),
+      "src/basket/BasketJubileeMath.sol:BasketJubileeMath": world.net.basketValuationLibrary.address,
+      "src/basket/BasketMarketOps.sol:BasketMarketOps": world.net.basketMarketLibrary.address }),
       [policy.address, parity.address, MACHINE.parityGain, MACHINE.parityGainDear],
       { name: "BasketUpkeepFacet", gas });
     const wheel = await session.deploy(artifacts("BasketMachineWheel"),
@@ -355,7 +356,9 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     // of the same APIs is separately covered by the contract suites.
     await session.send(basket, "authorizeIdentityBinding",
       [reg.address, me, g(operator.kp.pk), ct(operator.E)], { tag: "eq:basket.authorizeIdentity" });
-    await bind(basket.address, false, "eq:bind:basket");
+    await bind(basket.address, true, "eq:bind:basket");
+    await session.send(buck, "setApprovedCarryingIssuer", [basket.address, true],
+      { tag: "eq:basket.approveCarryingIssuer" });
     await session.send(wheel, "authorizeIdentityBinding",
       [me, g(operator.kp.pk), ct(operator.E)], { tag: "eq:wheel.authorizeIdentity" });
     await bind(wheel.address, true, "eq:bind:wheel");

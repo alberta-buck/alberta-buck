@@ -39,7 +39,7 @@ not identify which accounting produced a result. The
 | Demurrage reference | How do net holdings, linear relief and Jubilee funding evolve? | =demurrage-reference=, =demurrage-test= | Event-driven accounting table, optional JSON and tests |
 | Canonical accounting smoke | Can Python and JS link corrected Buck and exercise its basic cash accounting? | =net-demurrage-smoke= | Local Anvil and Tevm tests; Python compared with the independent reference |
 | Canonical money kernel | Do Solidity, native Python and Node/browser WASM agree on compounded cash and baseline facility relief? | =core-net-math-test= | Shared uint256 vectors, overflow checks and exact integer comparisons |
-| Canonical wheel arbitrage | Does the wheel recover actual BUCK/USDC shocks, attribute only basket-owned LP fees and distinguish nominal/net BUCK value? | =make nix-match-BuckCompoundWheelArbTest= | Real V3/canonical Buck component regressions; funded basket-ROI planning and full economy enabling remain separate gates |
+| Canonical wheel arbitrage | Does the Carrying basket improve combined net ROI across three/four-pool routes, LP fees and fee-basis exchange? | =make nix-basket-arb-test= | Actual V3, net payouts/credit, funded cash-loss cases and nominal-only comparisons; runtime integration is tracked separately |
 | JS equilibrium bootstrap | Can the existing primary builder deploy its corrected monetary graph, pair the weighted opening and issue against a premium-bearing facility? | =core-equilibrium-bootstrap-test= | Real Tevm bootstrap through the demo artifact bundle; household decisions and restore remain pending |
 | Both economy bootstraps | Do the existing Python and JS builders construct the canonical graph, issue actual pool money and handle the insurer premium? | =economy-bootstrap-test= | JS check plus Python machine/desk and two retained component setups; no five-year loop |
 | Economy accounting/report integration | Does the existing loop record actual cash, principal and open investor marks and finish its report? | =economy-accounting-test= | Both bootstraps, exact Python/JS marks and a three-day bootstrap-only JSON/PDF check; no household/five-year policy claim |
@@ -50,11 +50,12 @@ not identify which accounting produced a result. The
 Keep these distinct checks. A five-year parity average cannot detect a broken wallet workflow;
 a short diagnostic trace cannot establish an economic equilibrium.
 
-The canonical wheel fixture also records a remaining qualification gate:
-TOKEN trading profit can coexist with a reduction in the net value of
-unchanged nominal BUCK inventory. The normal canonical worlds keep arb
-disabled until the basket's combined ROI, funded execution and routes are
-qualified. See [[file:doc/BASKET-WHEEL.org::*Current accounting and implementation direction (2026-11-08)][the current wheel design]] for LP fee recovery and carried-fee exchange.
+The retained flash fixture shows why TOKEN profit alone is insufficient:
+unchanged nominal wheel BUCK can lose net backing. The canonical machine
+now executes in its Carrying basket, with net portfolio/LP guards and no
+mandatory caller bounty. See [[file:doc/BASKET-WHEEL.org::*Implemented Carrying-basket path (2026-11-08)][the current wheel implementation]] for units, fee recovery, per-trade
+events and the exact =net.carrying= frame fields. Primary-world activation
+and household lifecycle acceptance remain separate from contract evidence.
 
 ** Reading canonical economy observations
 

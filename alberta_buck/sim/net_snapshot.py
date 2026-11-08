@@ -39,13 +39,16 @@ def deployment_manifest(d):
     libraries = {name: getattr(stack, name).address for name in
                  ("cash_library", "transfer_library", "facilities_library", "renewal_library")}
     libraries["basket_valuation"] = d.net_basket.valuation_library.address
+    libraries["basket_market_ops"] = d.net_basket.market_library.address
     return {"model": Web3.to_hex(model), "chain_id": d.w3.eth.chain_id, "scale": str(Q),
             "roles": {name: identity(address) for name, address in addresses.items()},
             "libraries": {name: identity(address) for name, address in libraries.items()},
             "jubilee_policy": [str(v) for v in d.wheel.functions.jubileePolicy().call()],
             "basket_nav_basis": "owned net-marked inventory plus cash; unpaid relief reported separately",
             "position_mark_basis": "receipt valueOf at one block, before exit costs",
-            "lp_fee_basis": "net-deliverable BUCK and day-zero TOKEN/USD prices"}
+            "lp_fee_basis": "net-deliverable BUCK and day-zero TOKEN/USD prices",
+            "basket_cash_mode": "carrying" if d.reg.functions.isCarrying(d.basket.address).call() else "ordinary",
+            "arb_return_basis": "net wallet plus owned LP principal and new fees; TOKEN marks frozen per trade"}
 
 
 def observe(d, agents):
@@ -78,6 +81,17 @@ def observe(d, agents):
            "available_relief_scaled": str(read(buck.functions.availableReliefScaled())),
            "jubilee": {"nominal_scaled": str(gross), "net_scaled": str(net),
                        "nominal": gross // Q, "cash": net // Q}}
+
+    def carrying(address):
+        nominal, actual = map(int, read(buck.functions.accountBalancesScaled(address)))
+        return {"address": address, "nominal_scaled": str(nominal), "net_scaled": str(actual),
+                "net_ratio_scaled": str(actual * Q // nominal) if nominal else None}
+
+    # One block's exact fee bases for plots and per-trade event interpretation.
+    # Empty cash has no ratio. A high-traffic pool is not assumed to be fresh.
+    out["carrying"] = {"basket": carrying(d.basket.address), "buck_usdc": carrying(d.pool_ub),
+                       "buck_tokens": [{"token": token.address, **carrying(pool)}
+                                       for token, pool in zip(d.tokens, d.pool_buck)]}
 
     def marks(owner, ids):
         observed = mark_net_basket_positions(d.chain, d.basket, buck, owner, ids, block_number=block)

@@ -181,8 +181,13 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     await assert.rejects(world.netCreditOps.quoteGlobalReliefRate(), /MarkUnavailable|0x417c0238/);
     await s.send(wheel, "refreshValuation");
     assert.ok((await world.netCreditOps.quoteGlobalReliefRate()).positionMark > 0n);
-    assert.ok((await world.netCreditOps.markHousehold(basket.address,
-      [await s.call(basket, "creditId")])).reliefScaled > 0n);
+    const basketId = await s.call(basket, "creditId");
+    const [principal] = await s.call(credit, "issuanceOf", [basketId]);
+    const [relief] = await s.call(net.fund, "previewRelief", [basketId, principal]);
+    assert.ok(relief > 0n);
+    assert.equal(await s.call(basket, "reliefAccrued"), relief / (10n ** 36n));
+    assert.equal(await s.call(world.reg, "isCarrying", [basket.address]), true);
+    assert.equal(await s.call(buck, "approvedCarryingIssuer", [basket.address]), true);
   });
   await t.test("primary proxy market authenticates net buys, bounded sales and separate bank payments", async () => {
     const RAW = 1_000_000n, debtor = family[0], account = debtor.account;

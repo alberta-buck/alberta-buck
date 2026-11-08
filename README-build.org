@@ -209,12 +209,13 @@ Its fifth constructor argument is the external Jubilee fund; the earlier
 insurance-pool argument is not reused. The helper then deploys the existing
 optional quoter and configures immutable authority bindings. The legacy Notes
 bootstrap does not deploy this graph. The existing basket and upkeep facets
-also link =BasketJubileeMath=, shared valuation code rather than a second
-wheel or fund. =deploy_net_basket= / =deployNetBasket= return its address and
-the fully qualified link map for those facets. Identity, venues, fund wiring
+also link =BasketJubileeMath= for valuation and =BasketMarketOps= for net cash,
+market operations and funded ROI arb. No second wheel or fund is introduced.
+=deploy_net_basket= / =deployNetBasket= return both helper addresses and
+their fully qualified link map. Identity, venues, fund wiring
 and leverage remain explicit. Saved net-world records use version 7, verify
 the canonical accounting identifier and record the four token libraries plus
-the basket valuation library/code bindings. They reject earlier deployments
+the basket valuation/market helper code bindings. They reject earlier deployments
 and incomplete records.
 
 The canonical one-call =burn= supports ordinary owners and approved Carrying services. It

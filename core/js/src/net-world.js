@@ -120,12 +120,15 @@ export async function deployNetBasket(session, artifacts, stack, { factory, gove
   feeTier = 3000, twapWindow = 600, observationCardinality = 64,
   maxDeviationBp = 500n, minSeedLiquidity = 1000n, gas } = {}) {
   const valuationLibrary = await session.deploy(artifacts("BasketJubileeMath"), [], { name: "BasketJubileeMath", gas });
-  const libraries = { "src/basket/BasketJubileeMath.sol:BasketJubileeMath": valuationLibrary.address };
+  const marketLibrary = await session.deploy(artifacts("BasketMarketOps"), [], { name: "BasketMarketOps", gas });
+  const libraries = { "src/basket/BasketJubileeMath.sol:BasketJubileeMath": valuationLibrary.address,
+    "src/basket/BasketMarketOps.sol:BasketMarketOps": marketLibrary.address };
+  // The cash-only shell itself links only valuation; the upkeep facets link both.
   const basket = await session.deploy(linkArtifact(artifacts("BuckBasketEquity"), libraries),
     [stack.token.address, stack.controller.address, factory.address, governance?.address ?? governance ?? session.account.address,
       feeTier, twapWindow, observationCardinality, maxDeviationBp, minSeedLiquidity],
     { name: "BuckBasketEquity", gas });
-  return { basket, valuationLibrary, libraries };
+  return { basket, valuationLibrary, marketLibrary, libraries };
 }
 
 /** Actual per-facility amounts; never synthesize a signed debt from a wallet.

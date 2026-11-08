@@ -71,10 +71,12 @@ def deploy_net_stack(chain, registry, credit, controller, governance, *, credit_
 class NetBasket:
     basket: Any
     valuation_library: Any
+    market_library: Any
 
     @property
     def libraries(self):
-        return {"src/basket/BasketJubileeMath.sol:BasketJubileeMath": self.valuation_library.address}
+        return {"src/basket/BasketJubileeMath.sol:BasketJubileeMath": self.valuation_library.address,
+                "src/basket/BasketMarketOps.sol:BasketMarketOps": self.market_library.address}
 
 
 def deploy_net_basket(chain, stack, factory, governance, *, fee_tier=3000, twap_window=600,
@@ -85,13 +87,15 @@ def deploy_net_basket(chain, stack, factory, governance, *, fee_tier=3000, twap_
     selects no leverage or policy and does not run the wheel.
     """
     library = chain.deploy("BasketJubileeMath")
-    links = {"src/basket/BasketJubileeMath.sol:BasketJubileeMath": library.address}
+    market_library = chain.deploy("BasketMarketOps")
+    links = {"src/basket/BasketJubileeMath.sol:BasketJubileeMath": library.address,
+             "src/basket/BasketMarketOps.sol:BasketMarketOps": market_library.address}
     abi, bytecode = load_artifact("BuckBasketEquity", libraries=links)
     gov = getattr(governance, "address", governance)
     basket = chain.deploy("BuckBasketEquity", stack.token.address, stack.controller.address, factory.address,
                           gov, fee_tier, twap_window, observation_cardinality, max_deviation_bp, min_seed_liquidity,
                           abi=abi, bytecode=bytecode)
-    return NetBasket(basket, library)
+    return NetBasket(basket, library, market_library)
 
 
 @dataclass(frozen=True)

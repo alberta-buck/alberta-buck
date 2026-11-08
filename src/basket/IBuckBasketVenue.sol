@@ -25,6 +25,11 @@ pragma solidity ^0.8.20;
 ///         **withdraw** (liquidity -> both sides).  The facet returns *what it
 ///         did*; the shell books ownership (treasury vs depositor).
 interface IBuckBasketVenue {
+    /// @notice Exact-input route leg, self-call only. Reports the actual
+    /// received wallet balance change, including BUCK's carried demurrage.
+    /// A partial spend reverts so no intermediate inventory is left unbooked.
+    function arbSwap(address pool, address input, address output, uint256 amount)
+        external returns (uint256 received);
     /// @notice Equity basket registration, invoked only by its own governed
     ///         wrapper. Updates the shared constituent prefix; no LP/cash flows.
     function registerToken(address token, uint8 decimals, uint256 initialPriceInBuck,

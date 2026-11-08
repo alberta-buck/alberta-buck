@@ -30,7 +30,7 @@ test("cash-only net basket receipts expose open basis and mark", { skip }, async
   const point = { X: 1n, Y: 2n };
   // This test-only registry bypasses contract binding authorization. The
   // production registry still needs a basket-controlled binding mechanism.
-  await s.send(world.reg, "bindContract", [basket.address, point, { R: point, C: point }, true, false]);
+  await s.send(world.reg, "bindContract", [basket.address, point, { R: point, C: point }, true, true]);
   const holder = await onboard(world, s.account, {
     given_name: "Net", family_name: "Basket", jurisdiction: "Alberta, Canada",
     id_type: "Alberta Identity", id_number: "NET-BASKET-1", date_of_birth: "1990-01-01",
