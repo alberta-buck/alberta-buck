@@ -1,5 +1,5 @@
 #+TITLE: Buck accounting correction: unified implementation plan
-#+DATE: 2026-11-07
+#+DATE: 2026-11-08
 #+OPTIONS: ^:nil toc:3
 
 * Direction, source and current state
@@ -13,7 +13,8 @@ continue to point to one authoritative checklist. The earlier plan and API
 simplification proposals remain available at =32c7d17a= in Git; the progress
 and verification log below is preserved.
 
-Implement in =feature/buck-compound-demurrage= at
+Continue in =feature/household-minimal-ecosystem=, branched from the clean
+calendar-qualified =6bf53283= on =feature/buck-compound-demurrage=, at
 =.claude/worktrees/buck-compound=, created from the reviewed foundation plan
 =5096c7b4=. The foundation and BuckNet worktrees and unrelated main-checkout
 changes remain intact. Buck now uses unsigned compounded cash and actual
@@ -64,8 +65,9 @@ books. Dated bank evidence corrects interest from its effective payment day.
 Both Python runners and the JS day clock now publish one household epoch
 and use absolute targets, preventing wheel waits or fractional ticks from
 accumulating calendar drift. Later arrivals share that same date anchor.
-Automatic policy/surplus/exit scheduling and full restoration still gate the
-normal household loop.
+Automatic policy/surplus/exit scheduling still gates the normal household
+loop. Full restoration is deferred, not a prerequisite for uninterrupted
+interactive and five-year acceptance (November 8 priority below).
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
 Complete household lifecycle,
@@ -1043,6 +1045,51 @@ never credit an unconfirmed mint or payment as liquid funds.
 
 ** Remaining economy sequence
 
+*** November 8 priority: complete minimal ecosystem, then five years
+
+This order supersedes older sequencing that requires full save/resume or
+the legacy control lab's eleven cumulative stages before running an economy.
+Keep one canonical Python runtime for the savings server and batch runner,
+and the matching existing JavaScript world. Reuse their households, calendar,
+markets, work wheel and reporting; do not port a second legacy economy engine.
+
+- [ ] Qualify and enable the existing wheel's arb against canonical Buck and
+  real V3. Cover BUCK/USDC withdrawal shocks, TOKEN moves, aged Carrying
+  pools, existing inventory and both directions. Extend the same bounded
+  engine to all simple triangles/four-pool cycles. Read current liquidity,
+  fees and net/gross balances during normal ticks; never trade inside the
+  read-only valuation path used by Buck.
+- [ ] Include actual basket LP fee ownership, protocol fees and carried-fee
+  exchange in the cost/return model. An exchange can replace higher-fee
+  BUCK with lower-fee BUCK or TOKEN exposure that a nominal-price-only
+  external searcher misses. Use combined net portfolio improvement,
+  without double-counting LP income or funding cash losses with uncollected
+  fees. Maximize basket ROI first; caller rewards and direct cash surplus
+  are secondary. Do not use the ability to pay a caller as an arb eligibility
+  requirement. Funded settlement remains bounded separately. The detailed
+  invariants are in [[file:../BASKET-WHEEL.org::*Current accounting and implementation direction (2026-11-08)][BASKET-WHEEL.org]].
+- [ ] Finish autonomous household decisions in both languages: transfer as
+  much external mortgage principal as practical into actual BUCK issuance,
+  subject to K, conversion liquidity, buffers and whole-programme costs.
+  A household already committed to refinancing should not wait an arbitrary
+  new adoption delay between every affordable tranche. Retain heterogeneous
+  adoption/price/risk thresholds and adaptive surplus saving/paydown.
+- [ ] Exercise the complete small ecosystem interactively first: households,
+  basket, Jubilee, wheel arb and an explicit external-investor off/on
+  comparison. Reuse the savings server and existing JS world; expose
+  calendar/decision histories and aggregate conversion, costs and net marks.
+  Use TOKEN price profiles and actual pool trade shocks. Legacy incomplete
+  control-lab stages remain historical mechanism diagnostics, not the normal
+  path to an equilibrium result. Discuss removal once distinct checks have
+  equivalent coverage; do not silently discard them.
+- [ ] Run a short uninterrupted household world, then the simple five-year
+  baseline/policy/shock comparisons with adjacent JSON/PDFs. Measure route
+  consistency separately from basket-relative purchasing-power stability;
+  arbitrage alone does not establish a USDC peg.
+- [ ] Later: full save/resume, broader exit/arrival stresses and Notes/proofs,
+  with the existing release checks. No persistence claim is needed for the
+  first uninterrupted five-year run. Keep actual monetary guards intact.
+
 *** Next household integration after calendar qualification
 
 Use the existing household, dispatcher and runner. Calendar completion alone
@@ -1056,7 +1103,8 @@ explicit so simplification does not remove an economic source of demand:
 | Debtor refinancing versus saver credit investment | Reuse selected issuance, reserve funding, bounded market operations and one owner receipt dispatcher; distinguish bank payment from investment/cash retention | Extend common execution where it is the same operation. A saver has no mortgage, so it must not manufacture a positive bank allocation to pass the refinance plan's debt bounds or duplicate the whole refinance machine. |
 | First closing versus later tranches | Confirm one actual closing-cost payment; assess a conservative, capital-limited staged programme under existing theta/risk bounds | Activated insurance is not proof that a closing was paid. Retain exact cash costs and per-trade bounds; do not waive the fee or assume that every future tranche will execute unchanged. |
 | Surplus saving and discounted retirement | Protect required issuance cash/reserve, quote full net acquired BUCK including pool-carried fees, then authenticate actual deposit or selected settlement | A nominal pool discount alone is insufficient. Preserve targets through actual uncertainty, but let known waiting intentions coexist with normal income and bills. |
-| Exit and saved-world state | Explicit unused-facility close, guarded principal retirement, receipt redemption, dated books/queues/hashes/cursors and exact fund/insurer graph | Keep burn(0) invalid, K/fund limits intact and imports gated until interruption/restart coverage demonstrates the replacement. |
+| Asset exits | Explicit unused-facility close, guarded principal retirement and receipt redemption | Keep burn(0) invalid and K/fund limits intact. Preserve distinct exit checks as household integration proceeds. |
+| Saved-world state (later) | Dated books/queues/hashes/cursors and exact fund/insurer graph | Keep imports gated until restart coverage demonstrates the replacement; save/resume does not gate uninterrupted economy runs. |
 
 *** Economy acceptance sequence
 
@@ -1302,7 +1350,7 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-07 | Pin both runners and household arrivals to one calendar epoch | Corrected Python batch/interactive ticks to absolute targets, including non-divisor tick counts. JS DayClock now absorbs keeper/transaction time, is idempotent within a day and rejects a whole-day work overrun. Both households share the runner's epoch, including later arrivals and interleaved actor work; personal status exposes the anchor. No inferred driver epoch on restoration. Shared five-year clock properties and actual two-arrival wage/bank fixtures pass. Final Python supported accounting/reporting: 206 passed, no skips, regenerating short JSON/PDFs. Complete unfiltered JS calendar primary acceptance: 40 passed, no skips; later clock addition separately passes 71 pure checks and one focused actual fixture (two checks including its parent). Changed-insurer fixture: five passed. Existing browser equilibrium bundle rebuild passes. No Solidity changed; normal household policy/surplus/exits/import, real five-year economy campaigns and Notes remain gated. | This commit |
 
-** Current handoff: calendar and absolute clocks qualified
+** Calendar-qualified checkpoint (6bf53283)
 
 - Worktree =.claude/worktrees/buck-compound=; branch
   =feature/buck-compound-demurrage=. Earlier checkpoints this sequence:
@@ -1369,3 +1417,21 @@ the canonical Buck evidence recorded below.
 
 The earlier observed-defaults handoff is preserved at =eb0be458=; its
 implementation and validation milestones remain in the journal above.
+
+** Current handoff: minimal ecosystem and basket-ROI arb qualification
+
+- Branch =feature/household-minimal-ecosystem= in the existing
+  =.claude/worktrees/buck-compound= worktree, based on =6bf53283=.
+- The November 8 priority/checklist above is current. Full save/resume is
+  later work. Reuse the savings server and matching JS world for the complete
+  interactive ecosystem before uninterrupted five-year campaigns; do not
+  convert all eleven historical control-lab stages into another runtime.
+- Basket ROI is the wheel's primary objective. Newly earned actual LP fees
+  and carried-fee exchange belong in the economic score. Caller payments
+  and direct cash surplus are secondary. The old direct-profit-only executor
+  is not the finished funded planner, even when its component tests pass.
+- Canonical arb remains disabled in primary worlds until net inventory,
+  funding and route qualification is complete. The new real-V3 fixture is
+  being run through =make nix-match-BuckCompoundWheelArbTest=; final results
+  will be recorded in the next checkpoint, not inferred from older MockBuck
+  tests. No five-year household campaign is claimed.

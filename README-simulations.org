@@ -11,7 +11,8 @@ with signed-balance accounting. The canonical =Buck.sol= now uses compounded
 cash and per-facility Jubilee accounting. Both existing machine builders now
 use that stack for deployment and pool bootstrap. A short Python economy now
 captures canonical books and generates JSON/PDF reports; complete household
-lifecycles and persistent state still need migration. Each
+lifecycles still need migration. Save/resume is deferred and does not gate
+uninterrupted interactive or five-year runs. Each
 bootstrap reuses one linked basket/fund, uses production BuckCredit with
 recipient opt-in, and configures the existing wheel's fund jobs and guarded
 valuation. The JS full-world restore API rejects this partially migrated economy rather
@@ -38,6 +39,7 @@ not identify which accounting produced a result. The
 | Demurrage reference | How do net holdings, linear relief and Jubilee funding evolve? | =demurrage-reference=, =demurrage-test= | Event-driven accounting table, optional JSON and tests |
 | Canonical accounting smoke | Can Python and JS link corrected Buck and exercise its basic cash accounting? | =net-demurrage-smoke= | Local Anvil and Tevm tests; Python compared with the independent reference |
 | Canonical money kernel | Do Solidity, native Python and Node/browser WASM agree on compounded cash and baseline facility relief? | =core-net-math-test= | Shared uint256 vectors, overflow checks and exact integer comparisons |
+| Canonical wheel arbitrage | Does the wheel recover actual BUCK/USDC shocks, attribute only basket-owned LP fees and distinguish nominal/net BUCK value? | =make nix-match-BuckCompoundWheelArbTest= | Real V3/canonical Buck component regressions; funded basket-ROI planning and full economy enabling remain separate gates |
 | JS equilibrium bootstrap | Can the existing primary builder deploy its corrected monetary graph, pair the weighted opening and issue against a premium-bearing facility? | =core-equilibrium-bootstrap-test= | Real Tevm bootstrap through the demo artifact bundle; household decisions and restore remain pending |
 | Both economy bootstraps | Do the existing Python and JS builders construct the canonical graph, issue actual pool money and handle the insurer premium? | =economy-bootstrap-test= | JS check plus Python machine/desk and two retained component setups; no five-year loop |
 | Economy accounting/report integration | Does the existing loop record actual cash, principal and open investor marks and finish its report? | =economy-accounting-test= | Both bootstraps, exact Python/JS marks and a three-day bootstrap-only JSON/PDF check; no household/five-year policy claim |

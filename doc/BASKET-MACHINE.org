@@ -481,6 +481,12 @@ cursor.
 Arbitrage profit goes to a configured creditee. The basket accepts income from its wheel and
 from one governance-appointed arbitrage creditor, which can deposit and nothing else.
 
+The [[file:BASKET-WHEEL.org::*Current accounting and implementation direction (2026-11-08)][current wheel design]] also accounts for the basket's actual share of newly earned LP fees and
+for exchanging BUCK with higher carried demurrage for holdings with lower carried fee
+exposure. Nominal pool-price consistency alone does not measure net portfolio return.
+That design includes BUCK/USDC shocks and four-pool cross-TOKEN cycles; canonical execution
+qualification remains an explicit migration task, not a result established by the older lab.
+
 * Parameters in the lab
 
 | Group | Setting | Value |

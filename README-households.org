@@ -24,7 +24,8 @@ through =start_net_refinance= / =startNetRefinance= with a checkpoint after
 each authenticated receipt. The explicit calendar component now schedules
 arrival capital, wages, bills and mortgage payments with receipt recovery.
 Normal household decisions remain gated while automatic policy scheduling,
-saving/paydown, exits and full restoration are ported. An isolated funded-plan test is not a
+saving/paydown and exits are ported. Save/resume is deferred; it is not a
+prerequisite for uninterrupted household or five-year runs. An isolated funded-plan test is not a
 completed household economy or five-year stability result.
 
 Use the existing acceptance target; it builds the contracts/kernels and runs
@@ -100,8 +101,8 @@ not extra liquid wealth: its mint might already have executed. A provisional
 mortgage awaits bank evidence and/or its block date. The existing public
 decision stream records calendar transitions, due/effective dates, actual
 accounts, arrears and counterfactual balances. These supply future household
-charts and decision tables without a new reporting runner. Full-state import
-and the automatic policy loop remain completion gates.
+charts and decision tables without a new reporting runner. The automatic
+policy loop remains a completion gate; full-state import is a later task.
 
 * Market estimates for reserve funding
 

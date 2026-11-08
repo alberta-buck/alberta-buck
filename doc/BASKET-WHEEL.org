@@ -84,6 +84,70 @@ closes the gap and ends with more of the asset it started with.
 
 * 4. Who can take which gap: the fee-recycling band
 
+** Current accounting and implementation direction (2026-11-08)
+
+The historical fee-band examples below assume fresh BUCK and effectively
+complete basket ownership of its own pool. Under compounded demurrage,
+the wheel must price two additional sources of return explicitly:
+
+- *Basket-owned swap fees.* Swaps still pay the complete configured fee.
+  Only the basket's actual share of active LP liquidity earns it back,
+  after any V3 protocol fee. Fees earned by other LPs remain a cost. Count
+  newly earned fees once, as LP income; do not also add them as trading
+  cash or count previously uncollected fees as this cycle's earnings.
+- *Exchange of carried fee exposure.* Equal nominal BUCK amounts need
+  not have equal net values. A Carrying account can exchange BUCK with
+  higher carried demurrage for BUCK with lower carried demurrage, directly
+  or through TOKEN/USDC routes, or exchange it for TOKEN. An external
+  searcher using only nominal ERC-20 amounts and pool prices may miss
+  this opportunity. Ordinary TOKENs do not themselves acquire a BUCK
+  demurrage charge: their route's BUCK legs and any LP exposure do.
+
+For nominal amount A from a Carrying account with gross G and net N,
+the delivered value is proportional to A*N/G, with the canonical token's
+fractional rounding. Read those balances at the decision block. Incoming
+BUCK mixes with the recipient's existing fee basis; it is not a separately
+selectable lot. For example, exchanging 100 nominal BUCK worth 90 net
+for 100 nominal BUCK worth 99 net improves the receiving portfolio by
+9 net BUCK before other costs. Nominal balances alone show no gain.
+This is a possible route opportunity, not a promise that either counterparty
+will quote that exchange or that a complete cycle remains profitable.
+
+The economic score is the change in net BUCK and consistently marked
+TOKEN holdings, plus the basket's incremental LP return, less execution
+costs. Evaluate the wheel and basket together: shuffling carried fees
+between their own wallet and LP inventory is not new wealth. Preserve
+pre-existing wheel/reserve inventory. LP fees included in a position's
+mark must not be added to that same mark a second time. The execution
+guard must enforce realized portfolio improvement, independently of the
+constant-active-liquidity estimate used for sizing.
+
+*Priority:* maximize the basket's combined net return. A positive direct
+cash surplus and a caller bounty are secondary, not prerequisites for an
+economically beneficial trade. Do not reject the fee-recycling or
+carried-fee-exchange band merely because it cannot fund a caller's reward.
+Any caller payment must fit the basket's return/budget after the operation;
+it must not make an otherwise beneficial operation a net loss. External
+keepers can choose whether to call without introducing a gas-price oracle
+or a mandatory trading-profit hurdle into the basket's policy.
+
+Uncollected LP earnings cannot pay a swap callback. A cycle with a direct
+cash loss but positive combined return requires explicitly bounded funded
+inventory and verified LP income; an optimistic fee rebate is not financing.
+That is a settlement/funding constraint, not a reason to optimize direct
+cash profit instead of basket ROI. The existing direct-profit-only executor
+and its direct-profit-based sizing are not yet that implementation.
+
+The normal mutating wheel should cover each simple cycle in the configured
+BUCK/USDC/TOKEN graph, in both directions: N triangles and N*(N-1)/2
+four-pool cross-TOKEN cycles, such as BUCK/TOKEN-A/USDC/TOKEN-B/BUCK.
+Rotations are the same cycle, not additional independent opportunities.
+Normal ticks read current prices, active liquidity, pool fees, LP ownership
+and gross/net BUCK values and re-quote after execution. Read-only valuation
+ticks inside Buck operations must remain free of swaps and LP mutation.
+
+** Historical fresh-BUCK fee-band illustration
+
 A searcher going round the triangle pays three pool fees.  The basket
 pays two: on its own TOKEN/BUCK pool it is (nearly) the only LP, so the
 fee it pays comes back to it.  With the sim's tiers (TOKEN/USDC 0.30%,
@@ -120,6 +184,10 @@ measured against this cast would overstate its take; the prototype
 must also be measured with the arb margin at its competitive level.
 
 * 5. Paying the caller: the incentive
+
+The November 8 priority above supersedes any interpretation of the following
+historical bounty discussion as a trade-selection rule: basket ROI comes
+first. Caller profitability is not a required edge or sizing objective.
 
 The design question is how the captured profit pays for the call, on
 every chain, without the basket needing to know the gas price.
