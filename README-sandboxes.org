@@ -33,15 +33,20 @@ The primary worlds also expose the existing guarded market and exact USDC
 payment helpers through their ordinary proxies. The [[file:README-households.org][household refinancing machine]]
 can apply a funded plan's confirmed bank principal/costs and recover interrupted
 phases once. The dated calendar now authenticates wages, bills and mortgage
-payments; automatic economic decisions/savings/exits remain gated.
+payments. The automatic debtor component retains keyed initial adoption and
+seeks fresh bounded tranches daily after issuance, resuming known refused
+cash settlements before new loans. Owned sizing cash protects the reserve
+through ordinary demurrage between sends. Complete saving/saver investment,
+working money and exits still gate normal household economic decisions.
 Its exact event stream is already retained by both server frame modes
 for a future individual/aggregate status view.
 Existing debtor/saver/investor account and facility setup now works in both
 languages, with matching SDK credit books and personal portfolio records.
 These records include all custody cash/TOKENs, actual NFT debt, each insurer
 pool's refund mark and exact receipt basis/mark/ROI, without changing the
-underlying cash-flow history. Explicit refinance and calendar operations are
-tested; the normal automatic dispatcher remains gated. The
+underlying cash-flow history. Explicit refinance/calendar operations and the
+automatic debtor component have focused tests; the complete household loop
+remains gated. The
 [[file:doc/review/bucknet-economy-implementation.org][unified Buck accounting plan]] records that boundary. Wallet success is not
 five-year household evidence. The cash-only basket in the wallet world is not
 bound to the K controller; a working household savings lifecycle remains a

@@ -181,8 +181,9 @@ match-%:
 # real private-keeper CP introductions and net delivery of nominal rewards.
 # nix-match-BuckCompoundWheelArbTest qualifies the existing arb on canonical
 # Buck/real V3: BUCK/USDC shocks, zero caller reward, actual LP fee ownership,
-# net fee collection, inventory fee mixing and scoped callbacks. It is not
-# yet the funded basket-ROI planner; canonical world arb remains gated.
+# net fee collection, inventory fee mixing and scoped callbacks. Funded
+# Carrying-basket ROI and runtime activation are covered by basket-arb-test
+# and the existing primary-builder shock fixtures below.
 # See README-simulations.org for units, accounting gates and interpretation.
 .PHONY: buck-accounting-test
 buck-accounting-test: build-uniswap-artifacts
@@ -1715,12 +1716,13 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 # household lifecycle or a completed economy. Includes actual portfolio and
 # guarded proxy market operations, optional reserve acquisition and
 # receipt-backed refinancing. Shared policy cases include proportional
-# external insurance, absolute calendar clocks and dated receipt recovery. Normal automatic
-# policy/surplus/exit decisions remain gated. The active-arb fixture uses
+# external insurance, absolute calendar clocks and dated receipt recovery.
+# The automatic debtor component is included; complete saving/saver/working-
+# money/exit decisions remain gated. The active-arb fixture uses
 # the same builder and keeper with a real USDC withdrawal shock. To run it
 # alone (the household fault suite is slower):
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-equilibrium-arb.tevm.test.js
-# Automatic debtor cadence, staged first closing, receipt/calendar ordering:
+# Automatic debtor cadence, staged closing, timed cash cushion and recovery:
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-programme.tevm.test.js
 # Known export/bank refusals, changed debt, waits and receipt-safe completion:
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-resume.tevm.test.js
