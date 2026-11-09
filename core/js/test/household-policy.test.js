@@ -248,3 +248,28 @@ test("household arrivals reproduce, are keyed, and come sooner while the price g
   assert.equal(new Set(ps.map(p => p.retire_disc)).size, 40);
   assert.ok(new Set(ps.map(p => p.phase)).size > 8);
 });
+test("net surplus guards delivered value and protects current credit capital", async () => {
+  const { netSurplusPurchase, profile } = await import("../src/agents/household-policy.js");
+  const { netPurchaseExpected } = await import("../src/net-market-quote.js");
+  const { readFileSync } = await import("node:fs");
+  const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-surplus.json", import.meta.url)));
+  for (const c of f.cases) {
+    const q = Object.fromEntries(Object.entries({ ...f.market, ...c.market }).map(([k, v]) => [k, BigInt(v)]));
+    const args = Object.fromEntries(Object.entries({ ...f.amounts, ...c.amounts }).map(([k, v]) => [k, BigInt(v)]));
+    const p = profile(41404, "surplus-vector", { ...f.settings, surplus_policy: c.policy });
+    const r = netSurplusPurchase(q, args.cash, args.issued, args.fair_num, args.fair_den, args.cash_floor, p);
+    assert.equal(r.action, c.action, c.name);
+    if (c.spend !== undefined) assert.equal(r.spend_usdc, BigInt(c.spend), c.name);
+    if (c.target !== undefined) assert.equal(r.target_principal, BigInt(c.target), c.name);
+    if (c.spend_between) assert.ok(r.spend_usdc >= BigInt(c.spend_between[0]) && r.spend_usdc <= BigInt(c.spend_between[1]));
+    assert.ok(r.spend_usdc <= (args.cash > args.cash_floor ? args.cash - args.cash_floor : 0n));
+    assert.ok(r.target_principal >= 0n && r.target_principal <= args.issued);
+    if (r.spend_usdc) {
+      assert.equal(r.expected_net, netPurchaseExpected(q, r.spend_usdc));
+      assert.ok(r.expected_net >= r.minimum_net && r.minimum_net > 0n);
+      if (r.action === "retire" && c.policy !== "retire") {
+        assert.ok(r.spend_usdc * args.fair_den * 100n < r.minimum_net * args.fair_num * 99n);
+      }
+    }
+  }
+});

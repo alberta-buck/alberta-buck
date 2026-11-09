@@ -2,7 +2,7 @@
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
   arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, externalPremiumDue, ROLES } from "./household-policy.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
-import { HouseholdRefinance, assessRefinance, assessRemainder, observeRefinanceForecasts } from "./net-household.js";
+import { HouseholdRefinance, assessRefinance, assessRemainder, assessSurplus, observeRefinanceForecasts } from "./net-household.js";
 import { HouseholdCalendar } from "./household-calendar.js";
 
 const E6 = 1_000_000n;
@@ -43,6 +43,7 @@ export class CreditHouseholdAgent {
     this.lastDay = arrive_day;
     this.nextDecision = arrive_day + p.phase;
     this.netRefinanceDay = null; // At most one fresh assessment/resumption per bank day.
+    this.netSurplusDay = null; this.nextSurplus = this.nextDecision;
     this.netDispatching = false;
     this.started = false;
     this.joined = false;
@@ -93,7 +94,10 @@ export class CreditHouseholdAgent {
 
   async setup(world) {
     this.tokenIdx = Math.trunc(uniform(this.seed, this.member, "token") * world.tokens.length);
-    if (this.investor) { await world.proxyFor(this.account); return; }   // its dollars arrive at the proxy
+    await world.proxyFor(this.account);
+    if (world.accounting === "net") await world.netMarket.execute(world.holderAddress(this.account), world.buck, "approve",
+      [world.basket.address, (1n << 256n) - 1n], { tag: "household:prepare-basket" });
+    if (this.investor) return;   // its dollars arrive at the proxy
     const count = this.p.asset_count, per = this.face / BigInt(count);
     if (!per) throw new Error("asset_count exceeds raw insured value");
     const faces = Array.from({ length: count }, (_, i) => i < count - 1 ? per : this.face - BigInt(count - 1) * per);
@@ -261,6 +265,54 @@ export class CreditHouseholdAgent {
 
   async advanceNetCalendar(world, day) {
     return this.calendarMachine.advance(world, day);
+  }
+
+  async assessNetSurplus(world, day, options = {}) { return assessSurplus(this, world, day, options); }
+  async startNetSurplus(world, plan, day, ctr = {}, options = {}) {
+    await this.prepareNetRefinance(world, day);
+    const result = await this.refinanceMachine.startSurplus(world, plan, day, ctr, options);
+    if (!this.refinanceMachine.active && this.netRepaymentTarget !== null) await this.resumeNetRepayment(world);
+    return result;
+  }
+  async resumeNetSurplus(world, day, ctr = this.refinanceMachine.counters ?? {}) {
+    await this.prepareNetRefinance(world, day);
+    return this.refinanceMachine.resumeSurplus(world, day, ctr);
+  }
+  // Same owner dispatcher, with bills and current credit capital protected.
+  // Keyed intervals govern fresh choices; known deposit refusals retry daily.
+  async advanceNetSurplus(world, day, ctr = {}, options = {}) {
+    if (!Number.isSafeInteger(day) || day < 0 || world.accounting !== "net") {
+      throw new Error("household surplus needs canonical accounting and an integer day");
+    }
+    if (day < this.arrive_day || this.exited) return false;
+    if (this.netDispatching) throw new Error("household dispatcher is already running");
+    this.netDispatching = true;
+    try {
+      if (!this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
+      if (await this.recoverPendingOperations(world, day, { continueAfterCalendar: true })) return true;
+      if (this.divestDay !== null && day >= this.divestDay || this.investor && day >= this.exitDay) {
+        throw new Error("canonical household asset exits are not yet integrated");
+      }
+      const m = this.refinanceMachine;
+      if (m.settlementDue) { this.lastAction = "settlement-due"; return true; }
+      if (this.netSurplusDay === day || day < this.nextSurplus && !m.surplusDue) return false;
+      this.netSurplusDay = day;
+      this.nextSurplus += (Math.floor((day - this.nextSurplus) / this.p.decision_days) + 1) * this.p.decision_days;
+      this.lastError = "";
+      try {
+        if (m.surplusDue) return await this.resumeNetSurplus(world, day, ctr);
+        const assessed = await this.assessNetSurplus(world, day, options);
+        if (!assessed.plan) {
+          this.lastAction = "surplus-wait"; m.decisions++;
+          await m.event(world, day, "declined", { kind: "surplus", phase: "assessment", context: assessed.context, reason: assessed.context.reason });
+          return true;
+        }
+        return await this.startNetSurplus(world, assessed.plan, day, ctr, { context: assessed.context });
+      } catch (err) {
+        this.lastAction = "surplus-unavailable"; this.lastError = String(err).slice(0, 200); ctr.household_err = this.lastError;
+        await m.event(world, day, "unavailable", { kind: "surplus", phase: "assessment", reason: this.lastError }); return true;
+      } finally { this.lastSurplus = this.lastAction; }
+    } finally { this.netDispatching = false; }
   }
 
   // PRE: serialized owner, canonical integer bank day, external keeper/control

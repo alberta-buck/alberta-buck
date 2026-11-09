@@ -3,11 +3,11 @@
 // issuance/trade/payment bounds and authenticate each receipt. Only the exact
 // bank payment changes the mortgage; an uncertain phase never sends twice.
 import { IssuancePending } from "../net-world.js";
-import { buyBuckExact, netPurchaseFromReceipt, sellBuck, netSaleFromReceipt } from "../market.js";
+import { buyBuck, buyBuckExact, netPurchaseFromReceipt, sellBuck, netSaleFromReceipt } from "../market.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
-import { markNetBasketPositions } from "../basket.js";
+import { markNetBasketPositions, netBasketOps } from "../basket.js";
 import { observeNetMarket, netPurchaseCost, netSaleExpected, netSaleInput } from "../net-market-quote.js";
-import { externalPremiumDue, terms, bestQuotedRefinance, stagedRefinance, refinanceQuoted } from "./household-policy.js";
+import { externalPremiumDue, terms, bestQuotedRefinance, stagedRefinance, refinanceQuoted, netSurplusPurchase } from "./household-policy.js";
 
 const RAW = 1_000_000n, MAX = (1n << 256n) - 1n;
 const PHASES = ["fund", "issue", "export", "mortgage"];
@@ -25,6 +25,7 @@ const bankTerms = (p) => {
 // Existing 0.1% owned trade cushion; not another demurrage calculation.
 // The actual wallet balance and unchanged reserve guard govern execution.
 const exportable = (held, reserve) => max(0n, held - reserve - (held + 999n) / 1000n);
+const basketOps = (world) => netBasketOps(world.session, world.basket, world.buck, { execute: world.netMarket.execute });
 const snake = (key) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 const wire = (value) => {
   if (typeof value === "bigint") return String(value);
@@ -84,7 +85,7 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
     ((market.reserve_usdc - a.mortgage) * (1_000_000n - market.fee_ppm)));
   const context = { block: blockNumber, considered: 0, issuance_quotes: 0, rejections: {}, feasible: 0,
     forecasts: { relief_rate: expected_relief_rate, refund_growth: expected_refund_growth, wallet_growth: expected_wallet_growth }, protected_buck: reserve_floor };
-  const plans = [], values = [], programmes = [], refunds = new Map(), active = book.facilities.reduce((n, f) => n + f.activated, 0n);
+  const plans = [], values = [], programmes = [], unfunded = [], funding = [], refunds = new Map(), active = book.facilities.reduce((n, f) => n + f.activated, 0n);
   const annual = a.face * BigInt(a.p.premium_bp) / 10000n;
   const reject = (reason) => { context.rejections[reason] = (context.rejections[reason] ?? 0) + 1; };
   const option = async (candidate, wallet, programme = false) => {
@@ -108,7 +109,7 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
     const fixed = candidate ? BigInt(Math.trunc(t.fixed_cost * 1e6)) : 0n;
     const pn = state.at_renewal ? 0n : BigInt(Math.ceil(a.p.apr * a.p.penalty_months / 12 * 1e12));
     const penalty = (minimum * pn + 10n ** 12n - 1n) / 10n ** 12n;
-    if (cash < a.buffer + maximum + fixed + penalty) { reject("cash-buffer"); return; }
+    const cashFront = a.buffer + maximum + fixed + penalty;
     const coverage = candidate ? candidate.afterCoverage - candidate.beforeCoverage : 0n;
     let fraction = 1, saved = 0n;
     if (candidate && premium) {
@@ -123,12 +124,15 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
       present_coverage: Number(coverage) / 1e6, premium: Number(premium) / 1e6, premium_refund_fraction: fraction,
       external_premium_saving: Number(saved) / 1e6, reserve_cost: (Number(maximum) - Number(buy) * t.buck_value) / 1e6,
       reserve_carry: Number(buy) / 1e6 * t.buck_value * (a.p.apr - expected_wallet_growth) };
-    if (programme) programmes.push({ candidate, economics, exported });
+    if (programme) programmes.push({ candidate, economics, exported, cashFront });
     else {
-      plans.push({ candidate, export_buck: exported, minimum_usdc: minimum, mortgage_limit: minimum,
+      const plan = { candidate, export_buck: exported, minimum_usdc: minimum, mortgage_limit: minimum,
         cash_buffer: a.buffer, reserve_floor: floor, switch_cost: fixed, penalty_numerator: pn, penalty_denominator: 10n ** 12n,
-        reserve_buy_net: buy, reserve_buy_max_usdc: maximum });
-      values.push(economics);
+        reserve_buy_net: buy, reserve_buy_max_usdc: maximum };
+      if (cash < cashFront) {
+        reject("cash-buffer"); unfunded.push({ plan, economics, cashFront });
+        if (bestQuotedRefinance(t, [economics]).verdict.go) funding.push({ cashFront, basis: "worthwhile-leg" });
+      } else { plans.push(plan); values.push(economics); }
     }
   };
   const walletLimit = min(max(0n, book.spendable - retained), buckCap);
@@ -155,17 +159,25 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
   };
   await issuanceOptions(maximumNew);
   let { index, verdict } = bestQuotedRefinance(t, values);
-  if (index === null && plans.length && t.fixed_cost > 0 && buckCap) {
+  if (index === null && (plans.length || unfunded.length) && t.fixed_cost > 0 && buckCap) {
     const minimumLeg = netSaleExpected(market, buckCap) * BigInt(10000 - slippage_bp) / 10000n;
     const programmeCap = minimumLeg ? min(creditCap, a.mortgage * buckCap / minimumLeg) : 0n;
     if (programmeCap > maximumNew) await issuanceOptions(programmeCap, true);
-    context.programme_feasible = programmes.length;
+    context.programme_quotes = programmes.length;
+    context.programme_feasible = programmes.filter((p) => p.cashFront <= cash).length;
     let selected = null;
-    for (const [i, plan] of plans.entries()) {
+    const legs = plans.map((plan, i) => ({ i, plan, economics: values[i],
+      cashFront: plan.cash_buffer + plan.reserve_buy_max_usdc + plan.switch_cost + bankTerms(plan).penalty }))
+      .concat(unfunded.map((p) => ({ ...p, i: null })));
+    for (const { i, plan, economics, cashFront } of legs) {
       if (!plan.candidate) continue;
       for (const p of programmes) {
         if (p.candidate.tokenId !== plan.candidate.tokenId) continue;
-        const marginal = stagedRefinance(t, values[i], p.economics);
+        const marginal = stagedRefinance(t, economics, p.economics);
+        if (marginal.verdict.go && max(cashFront, p.cashFront) > cash) {
+          funding.push({ cashFront: max(cashFront, p.cashFront), basis: "worthwhile-programme" });
+        }
+        if (i === null || p.cashFront > cash) continue; // targets do not authorize an unfunded loan
         const better = selected === null || plan.mortgage_limit > selected.usd
           || plan.mortgage_limit === selected.usd && (marginal.verdict.value > selected.value
             || marginal.verdict.value === selected.value && plan.candidate.premium < selected.premium);
@@ -186,6 +198,11 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
     const p = plans[index], retainedCash = book.spendable + (p.candidate?.requestedSpendable ?? 0n) + p.reserve_buy_net - p.export_buck;
     Object.assign(context.selected, { post_export_buck_quote: retainedCash, export_cushion_buck: retainedCash - p.reserve_floor });
   }
+  const p = index === null ? null : plans[index];
+  const hold = p ? { cashFront: p.cash_buffer + p.reserve_buy_max_usdc + p.switch_cost + bankTerms(p).penalty, basis: "selected-leg" }
+    : funding.sort((x, y) => x.cashFront < y.cashFront ? -1 : x.cashFront > y.cashFront ? 1 : x.basis.localeCompare(y.basis))[0]
+      ?? { cashFront: a.buffer, basis: "no-worthwhile-credit" };
+  context.funding = { cash_floor: hold.cashFront, basis: hold.basis, unfunded: hold.cashFront > cash, refinance_ready: index !== null };
   context.reason = context.programme ? "worthwhile-staged-refinance" : index === null ? "no-worthwhile-refinance" : "worthwhile-refinance";
   return { plan: index === null ? null : plans[index], verdict, context };
 }
@@ -274,15 +291,75 @@ export async function assessRemainder(a, world, day, { expected_wallet_growth = 
  * It is neither an economic optimizer nor a complete saved-world importer.
  * The household owns its calendar and counterfactual; receipt evidence does
  * not establish chain finality. All event money uses decimal strings. */
+// Read-only successor for surplus, using the same pinned money graph/menu.
+// Existing wallet cash and worthwhile credit funding stay protected. Actual
+// basket exit simulation uses eth_call; it never bypasses K or mutates the chain.
+export async function assessSurplus(a, world, day, { forecasts = {} } = {}) {
+  const m = a.refinanceMachine, cal = a.calendarMachine;
+  if (!Number.isSafeInteger(day) || day < 0 || world.accounting !== "net" || m.active || m.settlementDue
+      || cal.active || !cal.bound || cal.day !== day) throw new Error("household surplus needs prepared, idle canonical accounting");
+  if (a.savings || a.netRepaymentTarget !== null || a.netTradeUncertain || a.netCancelUncertain || a.netPendingToken !== null
+      || a.netRepaymentInterrupted || m.surplusDue) throw new Error("household custody/repayment must be reconciled before surplus");
+  const s = world.session, owner = world.holderAddress(a.account), ids = world._credits.get(a.account.address) ?? [];
+  const blockNumber = (await s.client.getBlock()).number;
+  const at = (c, functionName, args = []) => s.client.readContract({ address: c.address, abi: c.abi, functionName, args, blockNumber });
+  for (const id of ids) if ((await at(world.buck, "reductionAuthorization", [id]))[0]) throw new Error("household repayment authorization remains pending");
+  const cash = await at(world.usdc, "balanceOf", [owner]), held = await at(world.buck, "balanceOf", [owner]);
+  const book = await world.netCreditOps.household(owner, ids, { blockNumber });
+  const q = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber });
+  const fairNum = await at(world.basket, "basketValueInBuck") * q.price_num, fairDen = 10n ** 18n * q.price_den;
+  const credit = a.mortgage ? (await a.assessNetRefinance(world, day, forecasts)).context.funding
+    : { cash_floor: a.buffer, basis: "no-external-mortgage", unfunded: false, refinance_ready: false };
+  const floor = max(a.buffer, credit.cash_floor), choice = netSurplusPurchase(q, cash, book.issued, fairNum, fairDen, floor, a.p);
+  const context = { block: blockNumber, cash, protected_buck: held, credit_funding: credit, choice,
+    fair_num: fairNum, fair_den: fairDen, reason: choice.reason };
+  let plan = null;
+  if (choice.action === "retire" && a.receipts.length) {
+    const positions = await markNetBasketPositions(s, world.basket, world.buck, owner, a.receipts, { blockNumber });
+    context.basket_exits = [];
+    for (const p of positions.positions) {
+      if (!p.mark || !p.shares) continue;
+      const amount = min(p.shares, (choice.target_principal * p.shares + p.mark - 1n) / p.mark);
+      if (!amount) continue;
+      try {
+        const r = await basketOps(world).previewRedemption(owner, p.tokenId, amount), minimum = r.paid * 9950n / 10000n;
+        if (r.blockNumber !== blockNumber) throw new Error("basket exit observation changed");
+        if (minimum >= RAW) {
+          plan = { action: "retire", cash_buffer: floor, reserve_floor: held, target_principal: choice.target_principal,
+            position_id: p.tokenId, redeem_shares: amount, minimum_buck: minimum, spend_usdc: 0n, minimum_net: 0n, slippage_bp: 50 };
+          context.reason = "redeem-to-retire";
+          context.exit = { block_number: r.blockNumber, position_id: r.positionId, paid: r.paid,
+            shares_retired: r.sharesRetired, shares_remaining: r.sharesRemaining }; break;
+        }
+      } catch (err) { context.basket_exits.push({ token_id: p.tokenId, unavailable: String(err).slice(0, 200) }); }
+    }
+  }
+  if (!plan && choice.spend_usdc) {
+    let id = 0n;
+    if (choice.action === "save") for (const existing of a.receipts) {
+      if ((await at(world.basket, "deposits", [existing]))[2].toLowerCase() === world.buck.address.toLowerCase()) { id = existing; break; }
+    }
+    plan = { action: choice.action, cash_buffer: floor, reserve_floor: held, spend_usdc: choice.spend_usdc,
+      minimum_net: choice.minimum_net, target_principal: choice.target_principal, position_id: id,
+      redeem_shares: 0n, minimum_buck: 0n, slippage_bp: 50 };
+    context.reason = `purchase-to-${choice.action}`;
+  }
+  if ((await s.client.getBlock()).number !== blockNumber) throw new Error("household surplus observation changed");
+  return { plan, context };
+}
+
 export class HouseholdRefinance {
   constructor(agent) { this.agent = agent; this.flow = null; this.events = []; this.decisions = 0; }
   get active() { return this.flow !== null && ["running", "pending"].includes(this.flow.status); }
   get settlementDue() { return this.flow !== null && this.flow.status === "refused" && ["export", "mortgage"].includes(this.flow.phase); }
   get paymentDue() { return this.settlementDue && this.flow.phase === "mortgage"; }
+  get surplusDue() { return Boolean(this.flow?.kind === "surplus" && this.flow.status === "refused" && this.flow.phase === "deposit"); }
   status() {
     const f = this.flow;
     return { schema: 1, decision: this.decisions, status: f?.status ?? "idle", phase: f?.phase ?? null,
       hash: f?.hash ?? null, payment_due: this.paymentDue, settlement_due: this.settlementDue,
+      kind: f?.kind ?? (f ? "refinance" : null), surplus_due: this.surplusDue,
+      last_surplus_day: this.agent.netSurplusDay, next_surplus_day: this.agent.nextSurplus,
       last_attempt_day: this.agent.netRefinanceDay, next_decision_day: this.agent.nextDecision,
       revision: f?.revision ?? 0, events: this.events.length };
   }
@@ -346,9 +423,103 @@ export class HouseholdRefinance {
   async event(world, day, status, detail = {}) {
     let block = null;
     try { block = Number((await world.session.client.getBlock()).number); } catch { /* explicit unavailable */ }
+    if (this.flow?.kind === "surplus") detail = { kind: "surplus", ...detail };
     this.events.push({ schema: 1, seq: this.events.length + 1, member: this.agent.member, decision: this.decisions,
       day, block, phase: this.flow?.phase ?? "idle", status, accounts: await this.accounts(world), ...wire(detail) });
   }
+  // One cash-only intention, with the same receipt cursor as refinancing.
+  // New money never becomes a burn until the existing facility engine settles.
+  async startSurplus(world, p, day, ctr = {}, { context = {} } = {}) {
+    if (this.active || this.settlementDue || this.surplusDue) throw new Error("household has unfinished cash work");
+    if (!p || !["save", "retire"].includes(p.action)) throw new Error("invalid household surplus plan");
+    const values = [p.cash_buffer, p.reserve_floor, p.spend_usdc, p.minimum_net, p.target_principal,
+      p.position_id, p.redeem_shares, p.minimum_buck];
+    if (values.some((v) => typeof v !== "bigint" || v < 0n || v > MAX) || !Number.isSafeInteger(p.slippage_bp)
+        || p.slippage_bp < 0 || p.slippage_bp > 1000 || p.cash_buffer < this.agent.buffer
+        || Boolean(p.spend_usdc) !== Boolean(p.minimum_net) || Boolean(p.redeem_shares) !== Boolean(p.minimum_buck)
+        || Boolean(p.redeem_shares) === Boolean(p.spend_usdc)
+        || p.action === "save" && (p.redeem_shares || p.target_principal) || p.action === "retire" && !p.target_principal
+        || p.redeem_shares && !p.position_id) throw new Error("invalid household surplus bounds");
+    const a = this.agent, owner = world.holderAddress(a.account), s = world.session;
+    const cash = await s.call(world.usdc, "balanceOf", [owner]);
+    if (p.spend_usdc && cash < p.cash_buffer + p.spend_usdc) throw new Error("surplus would spend protected credit capital");
+    if (await s.call(world.buck, "balanceOf", [owner]) < p.reserve_floor) throw new Error("household surplus reserve changed");
+    const book = await world.netCreditOps.household(owner, world._credits.get(a.account.address) ?? []);
+    if (p.target_principal > book.issued) throw new Error("surplus retirement exceeds actual principal");
+    if (p.position_id && !a.receipts.includes(p.position_id)) throw new Error("household surplus names an untracked receipt");
+    this.decisions++; this.counters = ctr;
+    this.flow = { kind: "surplus", plan: { ...p }, phase: p.redeem_shares ? "redeem" : "buy",
+      status: "running", hash: null, terms: null, revision: 0, acquired: 0n };
+    await this.event(world, day, "planned", { plan: p, context, market: await this.market(world), basket: await this.basket(world) });
+    return this.advance(world, day, ctr);
+  }
+  async resumeSurplus(world, day, ctr = this.counters ?? {}) {
+    if (!this.surplusDue) throw new Error("household has no known refused savings deposit");
+    Object.assign(this.flow, { status: "running", hash: null, terms: null, revision: this.flow.revision + 1 });
+    await this.event(world, day, "resumed", { reason: "retain purchased cash; re-quote only the deposit" });
+    return this.advance(world, day, ctr);
+  }
+  async prepareSurplus(world, day) {
+    const a = this.agent, f = this.flow, p = f.plan, s = world.session, owner = world.holderAddress(a.account);
+    const held = await s.call(world.buck, "balanceOf", [owner]);
+    if (f.phase === "buy") {
+      if (await s.call(world.usdc, "balanceOf", [owner]) < p.cash_buffer + p.spend_usdc) {
+        await this.refuse(world, day, "surplus USDC funding reserve changed"); return false;
+      }
+      f.terms = { preserved: max(held, p.reserve_floor) + 1n };
+    } else if (f.phase === "deposit") {
+      const amount = min(f.acquired, exportable(held, p.reserve_floor)), price = await s.call(world.basket, "sharePrice");
+      const minimum = price ? amount * 10n ** 18n / price * BigInt(10000 - p.slippage_bp) / 10000n : 0n;
+      if (!minimum) {
+        f.phase = "complete"; f.retained = true;
+        await this.event(world, day, "retained", { reason: "owned cash below deposit grain/reserve" }); return false;
+      }
+      f.terms = await basketOps(world).prepareDeposit(owner, amount, minimum, { tokenId: p.position_id });
+      await this.event(world, day, "quoted", { basket_terms: Object.fromEntries(Object.entries(f.terms).map(([k, v]) => [snake(k), v])) });
+    } else {
+      f.terms = await basketOps(world).prepareRedemption(owner, p.position_id, p.redeem_shares, p.minimum_buck);
+      f.preserved = max(held, p.reserve_floor) + 1n;
+      await this.event(world, day, "quoted", { basket_terms: Object.fromEntries(Object.entries(f.terms).map(([k, v]) => [snake(k), v])) });
+    }
+    return true;
+  }
+  async applySurplus(world, day, r, ctr) {
+    const a = this.agent, f = this.flow, p = f.plan, phase = f.phase;
+    const receipt = r.receipt ?? { transactionHash: r.transactionHash, blockNumber: r.blockNumber };
+    let amounts, preserved;
+    if (phase === "buy") {
+      if (r.paid <= 0n || r.paid > p.spend_usdc || r.received < p.minimum_net) throw new Error("surplus purchase differs from bounds");
+      a.tradeLoss += r.paid - r.received;
+      if (p.action === "save") a.investedUsd += r.paid;
+      f.acquired = r.received;
+      amounts = { usdc: r.paid, net_buck_scaled: r.receivedScaled, nominal_buck: r.nominalReceived };
+      preserved = f.terms.preserved; f.phase = p.action === "save" ? "deposit" : "complete";
+    } else {
+      const id = r.tokenId, old = a.book.get(id) ?? { principal: 0n, shares: 0n };
+      if (old.principal !== f.terms.priorBasis || old.shares !== f.terms.priorShares) {
+        throw new Error("household basket books differ from prepared receipt");
+      }
+      let shares, basis;
+      if (phase === "deposit") {
+        shares = r.shares; basis = r.basis;
+        if (!a.receipts.includes(id)) { a.receipts.push(id); world.receipts++; }
+        amounts = { buck: r.received, token_id: id, shares_added: r.sharesAdded };
+        ctr.bcdInvested = (ctr.bcdInvested ?? 0n) + r.received; ctr.bcdInvestments = (ctr.bcdInvestments ?? 0) + 1;
+      } else {
+        shares = r.sharesRemaining; basis = r.basisRemaining; preserved = f.preserved;
+        amounts = { buck: r.paid, token_id: id, shares_retired: r.sharesRetired, in_kind: r.inKind };
+      }
+      a.basketPrincipal += basis - old.principal; a.shares += shares - old.shares;
+      if (shares) a.book.set(id, { principal: basis, shares });
+      else { a.book.delete(id); a.receipts = a.receipts.filter((v) => v !== id); }
+      f.phase = "complete";
+    }
+    if (p.action === "retire") { a.netRepaymentReserve = preserved; a.netRepaymentTarget = p.target_principal; }
+    f.hash = null; f.terms = null; f.status = "running";
+    await this.event(world, day, "confirmed", { operation: phase, amounts,
+      transaction_hash: receipt.transactionHash, receipt_block: receipt.blockNumber ?? null });
+  }
+
   async start(world, given, day, ctr = {}, { context = {} } = {}) {
     if (this.active) throw new Error("household refinancing already active");
     if (this.paymentDue) throw new Error("household bank payment due; retry before a new refinance");
@@ -432,10 +603,11 @@ export class HouseholdRefinance {
   async refuse(world, day, reason) {
     this.flow.status = "refused";
     this.agent.fundingPending = false; this.agent.lastError = reason.slice(0, 200);
-    this.agent.lastAction = "refinance-refused";
+    this.agent.lastAction = this.flow.kind === "surplus" ? "surplus-refused" : "refinance-refused";
     await this.event(world, day, "refused", { reason: reason.slice(0, 200), transaction_hash: this.flow.hash });
   }
   async apply(world, day, result, ctr) {
+    if (this.flow.kind === "surplus") return this.applySurplus(world, day, result, ctr);
     const a = this.agent, f = this.flow, phase = f.phase;
     const receipt = result.receipt ?? { transactionHash: result.transactionHash, blockNumber: result.blockNumber };
     let amounts;
@@ -490,6 +662,11 @@ export class HouseholdRefinance {
     const receipt = await world.session.client.getTransactionReceipt({ hash: f.hash });
     if (receipt?.transactionHash?.toLowerCase() !== f.hash.toLowerCase()) throw new Error("household receipt hash mismatch");
     if (receipt.status === "reverted") throw new TransactionReverted(f.phase, "household operation reverted", receipt);
+    if (f.kind === "surplus") {
+      if (f.phase === "buy") return { ...netPurchaseFromReceipt(world, world.netMarket, { address: owner }, receipt, f.hash), receipt };
+      const ops = basketOps(world);
+      return f.phase === "deposit" ? ops.depositFromReceipt(f.terms, receipt, f.hash) : ops.redemptionFromReceipt(f.terms, receipt, f.hash);
+    }
     if (f.phase === "fund") return netPurchaseFromReceipt(world, world.netMarket, { address: owner }, receipt, f.hash);
     if (f.phase === "issue") return world.netCreditOps.issuanceFromReceipt(owner, f.issue_candidate, receipt, f.hash);
     if (f.phase === "export") return netSaleFromReceipt(world, world.netMarket, { address: owner }, receipt,
@@ -512,7 +689,12 @@ export class HouseholdRefinance {
     }
     while (f.phase !== "complete") {
       const p = f.plan, phase = f.phase;
-      if (phase === "issue") {
+      if (f.kind === "surplus") {
+        let prepared;
+        try { prepared = await this.prepareSurplus(world, day); }
+        catch (err) { await this.refuse(world, day, `surplus observation unavailable: ${err}`); return true; }
+        if (!prepared) { if (f.phase === "complete") continue; return true; }
+      } else if (phase === "issue") {
         // A confirmed reserve buy stays committed while an unavailable view
         // is retried. Neither that retry nor a changed quote buys twice.
         const c = p.candidate;
@@ -549,7 +731,11 @@ export class HouseholdRefinance {
       f.status = "pending"; f.hash = null;
       let result;
       try {
-        if (phase === "fund") result = await buyBuckExact(world, world.netMarket, { address: owner },
+        if (f.kind === "surplus") {
+          if (phase === "buy") result = await buyBuck(world, world.netMarket, { address: owner }, p.spend_usdc, { minOut: p.minimum_net });
+          else if (phase === "deposit") result = await basketOps(world).deposit(f.terms);
+          else result = await basketOps(world).redeem(f.terms);
+        } else if (phase === "fund") result = await buyBuckExact(world, world.netMarket, { address: owner },
           p.reserve_buy_net, p.reserve_buy_max_usdc);
         else if (phase === "issue") result = await world.netCreditOps.issueCandidate(owner, f.issue_candidate);
         else if (phase === "export") result = await sellBuck(world, world.netMarket, { address: owner }, p.export_buck,
@@ -568,7 +754,10 @@ export class HouseholdRefinance {
       }
       if (!await this.applyKnown(world, day, result, ctr)) return true;
     }
-    f.status = "complete"; a.fundingPending = false; a.lastAction = f.satisfied ? "refinance-satisfied" : "refinance"; a.lastError = "";
+    f.status = "complete"; a.fundingPending = false;
+    a.lastAction = f.kind === "surplus" ? f.retained ? "save-retained" : f.plan.action === "save" ? "save" : "retirement-funded"
+      : f.satisfied ? "refinance-satisfied" : "refinance";
+    a.lastError = "";
     await this.event(world, day, "complete");
     return true;
   }

@@ -250,6 +250,67 @@ def saving(q, p):
     return 2 ** (-q / p["paydown_double"])
 
 
+def net_surplus_purchase(market, cash, issued, fair_num, fair_den, cash_floor, p, *, slippage_bp=50):
+    """Raw-unit saving/buyback choice from a pinned net market observation.
+
+    PRE: an Ordinary household; caller has retained cash_floor for bills and
+    current credit funding. fair_num/fair_den is USD per full-value BUCK.
+    POST: budget never consumes that floor or the impact cap; discount-only
+    retirement has an integer minimum-net guard including carried fees,
+    trading fee and impact. Target principal is an intention, never a burn.
+    A zero purchase budget can still leave a retirement target for funded
+    basket redemption. This helper neither changes cash nor calculates decay.
+    """
+    if (any(type(v) is not int or not 0 <= v < 2**256 for v in (cash, issued, cash_floor)) or
+            any(type(v) is not int or v <= 0 for v in (fair_num, fair_den)) or
+            type(slippage_bp) is not int or not 0 <= slippage_bp <= 1000 or
+            p["surplus_policy"] not in POLICIES):
+        raise ValueError("invalid net surplus inputs")
+    wad, ppb = 10**18, 10**9
+    spare = max(0, cash - cash_floor)
+    cap = min(spare, market.reserve_usdc * int(p["max_impact_bp"] * 50) // 10**6)
+    out = dict(action="hold", spend_usdc=0, minimum_net=0, expected_net=0, target_principal=0,
+               cash_floor=cash_floor, reason="no-net-delivery", marginal_ratio_wad=None)
+    if not market.net_scaled:
+        return out
+    ratio = (market.price_num * market.gross_scaled * 10**6 * fair_den * wad //
+             (market.price_den * market.net_scaled * (10**6 - market.fee_ppm) * fair_num))
+    d = max(0, wad - ratio) / wad
+    threshold = math.ceil(p["retire_disc"] * ppb)
+    mode = p["surplus_policy"]
+    share = (1. if mode == "retire" or mode == "discount" and d > p["retire_disc"] else
+             paydown(max(0., d - p["retire_disc"]), p) if mode == "adaptive" else 0.)
+    target = issued * int(share * ppb) // ppb
+    action = "retire" if target else "save" if mode in ("adaptive", "basket") else "hold"
+    out.update(action=action, target_principal=target, marginal_ratio_wad=ratio, reason="no-spare-cash")
+    if action == "hold":
+        out["reason"] = "no-retirement-opportunity"
+        return out
+    if action == "save" and mode == "adaptive" and cap:
+        expected = market.buy_expected(cap)
+        average_ratio = cap * fair_den * wad // (expected * fair_num) if expected else wad * 10**6
+        q = min(10**6, max(0, average_ratio - wad) / wad)
+        cap = cap * int(saving(q, p) * ppb) // ppb
+    if action == "retire" and cap:
+        cost = market.buy_cost(target)
+        if cost is not None:
+            cap = min(cap, cost)
+    for spend in sorted({cap * f // 20 for f in (20, 15, 10, 5, 2)}, reverse=True):
+        if not spend:
+            continue
+        expected = market.buy_expected(spend)
+        minimum = expected * (10_000 - slippage_bp) // 10_000
+        if action == "retire" and mode != "retire":
+            if threshold >= ppb:
+                continue
+            minimum = max(minimum, spend * fair_den * ppb // (fair_num * (ppb - threshold)) + 1)
+        if minimum < 10**6 or minimum > expected:
+            continue
+        out.update(spend_usdc=spend, minimum_net=minimum, expected_net=expected, reason="ready")
+        break
+    return out
+
+
 def money_target(days_in, annual_spending, d, p):
     """The BUCK working balance a household wants: the share of its spending it pays in BUCKs (ramping
     from adopt_start to 1 over adopt_years since it arrived) times money_months of that spending, more

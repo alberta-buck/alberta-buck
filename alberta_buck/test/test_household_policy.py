@@ -473,3 +473,32 @@ console.log(JSON.stringify({
     jv = js["quotedSelection"]["verdict"]
     assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
     assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)
+def test_net_surplus_guards_actual_purchase_cost_and_credit_capital():
+    import json
+    from pathlib import Path
+    from fractions import Fraction
+    from buck_core import NetMarketQuote
+    from alberta_buck.sim import household_policy as policy
+    f = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-surplus.json").read_text())
+    for c in f["cases"]:
+        q = NetMarketQuote(**{k: int(v) for k, v in (f["market"] | c.get("market", {})).items()})
+        args = {k: int(v) for k, v in (f["amounts"] | c.get("amounts", {})).items()}
+        p = policy.profile(41404, "surplus-vector", f["settings"] | dict(surplus_policy=c["policy"]))
+        r = policy.net_surplus_purchase(q, **args, p=p)
+        assert r["action"] == c["action"], c["name"]
+        if "spend" in c:
+            assert r["spend_usdc"] == int(c["spend"]), c["name"]
+        if "target" in c:
+            assert r["target_principal"] == int(c["target"]), c["name"]
+        if "spend_between" in c:
+            assert int(c["spend_between"][0]) <= r["spend_usdc"] <= int(c["spend_between"][1])
+        assert r["spend_usdc"] <= max(0, args["cash"] - args["cash_floor"])
+        assert 0 <= r["target_principal"] <= args["issued"]
+        if r["spend_usdc"]:
+            assert r["expected_net"] == q.buy_expected(r["spend_usdc"]) >= r["minimum_net"] > 0
+            if r["action"] == "retire" and c["policy"] != "retire":
+                # Independent rational cash/mark comparison at the GUARDED
+                # minimum, not the nominal pool output or its spot price.
+                price = Fraction(r["spend_usdc"], r["minimum_net"])
+                ceiling = Fraction(args["fair_num"], args["fair_den"]) * Fraction(99, 100)
+                assert price < ceiling

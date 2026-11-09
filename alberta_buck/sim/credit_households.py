@@ -7,7 +7,7 @@ from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
-from alberta_buck.sim.net_household import HouseholdRefinance, assess_refinance, assess_remainder, observe_refinance_forecasts
+from alberta_buck.sim.net_household import HouseholdRefinance, assess_refinance, assess_remainder, assess_surplus, observe_refinance_forecasts
 from alberta_buck.sim.household_calendar import HouseholdCalendar
 from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted
 from buck_core.session import _txhex, custom_error_name
@@ -33,6 +33,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._next_pay          = self.arrive_day + 30
         self._next_decision     = self.arrive_day + p["phase"]
         self._net_refinance_day = None                  # at most one fresh assessment/resumption per bank day
+        self._net_surplus_day   = None
+        self._next_surplus      = self._next_decision
         self._net_dispatching   = False
         self._started           = False
         self._growth_arrived    = False
@@ -128,6 +130,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self.last_error         = ""
         self._token_idx         = int(policy.uniform(scenario.seed, self.member, "token") * len(d.tokens))
         self._bind_proxy(d)
+        if getattr(d, "buck_accounting", "") == "net":
+            self._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.basket.address, 2**256 - 1]))
         if self.investor:
             self._token_ids     = []
             return
@@ -387,6 +391,74 @@ class CreditHouseholdAgent(_HouseholdAccounts):
     def advance_net_calendar(self, d, day, ctr):
         """Explicit recurring-flow component; normal economic decisions remain gated."""
         return self.calendar_machine.advance(d, day, ctr)
+
+    def assess_net_surplus(self, d, day, *, forecasts=None):
+        return assess_surplus(self, d, day, forecasts=forecasts)
+
+    def start_net_surplus(self, d, plan, day, ctr, *, context=None):
+        self._prepare_net_refinance(d, day)
+        result = self.refinance_machine.start_surplus(d, plan, day, ctr, context=context)
+        if not self.refinance_machine.active and self._net_repayment_target is not None:
+            self._resume_net_repayment(d, ctr)
+        return result
+
+    def resume_net_surplus(self, d, day, ctr):
+        self._prepare_net_refinance(d, day)
+        return self.refinance_machine.resume_surplus(d, day, ctr)
+
+    def advance_net_surplus(self, d, day, ctr, *, forecasts=None):
+        """Existing owner dispatcher, with reserve-safe discretionary choices.
+
+        PRE: normal keeper/control work, current integer day and prepared
+        trading. POST: recover earlier evidence/calendar/buybacks first; never
+        spend a credit funding target. Saving/retirement decisions retain the
+        household's keyed interval, with daily retry of a known deposit refusal.
+        Full saver issuance/working money/exits still gate the normal act loop.
+        """
+        if type(day) is not int or not 0 <= day < 2**53 or getattr(d, "buck_accounting", "") != "net":
+            raise ValueError("household surplus needs canonical accounting and an integer day")
+        if day < self.arrive_day or self.exited:
+            return False
+        if self._net_dispatching:
+            raise ValueError("household dispatcher is already running")
+        self._net_dispatching = True
+        try:
+            if not self.calendar_machine.bound:
+                self.calendar_machine.prepare(d, day)
+            if self._recover_pending_operations(d, ctr, day, continue_after_calendar=True):
+                return True
+            if self._divest_day is not None and day >= self._divest_day or self.investor and day >= self._exit_day:
+                raise NotImplementedError("canonical household asset exits are not yet integrated")
+            m = self.refinance_machine
+            if m.settlement_due:
+                self.last_action = "settlement-due"
+                return True
+            if self._net_surplus_day == day or day < self._next_surplus and not m.surplus_due:
+                return False
+            self._net_surplus_day = day
+            period = self.p["decision_days"]
+            self._next_surplus += ((day - self._next_surplus) // period + 1) * period
+            self.last_error = ""
+            try:
+                if m.surplus_due:
+                    return self.resume_net_surplus(d, day, ctr)
+                assessed = self.assess_net_surplus(d, day, forecasts=forecasts)
+                if assessed["plan"] is None:
+                    self.last_action = "surplus-wait"
+                    m.decisions += 1
+                    m._event(d, day, "declined", kind="surplus", phase="assessment", context=assessed["context"],
+                             reason=assessed["context"]["reason"])
+                    return True
+                return self.start_net_surplus(d, assessed["plan"], day, ctr, context=assessed["context"])
+            except Exception as exc:
+                self.last_action, self.last_error = "surplus-unavailable", str(exc)[:200]
+                ctr["household_err"] = self.last_error
+                m._event(d, day, "unavailable", kind="surplus", phase="assessment", reason=self.last_error)
+                return True
+            finally:
+                self.last_surplus = self.last_action
+        finally:
+            self._net_dispatching = False
 
     def advance_net_refinancing(self, d, day, ctr, *, forecasts=None):
         """Automatic debtor component; normal saving/exits remain gated.

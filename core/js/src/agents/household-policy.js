@@ -1,4 +1,5 @@
 // Portable policy, in whole currency units. Python: alberta_buck/sim/household_policy.py and carry.py.
+import { netPurchaseExpected, netPurchaseCost } from "../net-market-quote.js";
 export const DEFAULTS = {
   home_k: [200, 1500], ltv: [.05, .85], income_frac: [.20, .35], living_frac: [.55, .70],
   cash_k: [20, 60], apr: [.045, .075], premium_bp: [25, 100], theta: [.5, 3],
@@ -33,6 +34,59 @@ export const POPULATION = {
 };
 // Older settings, still accepted when no role is named: a total split between savers and debtors.
 export const LEGACY_POPULATION = { initial: 10, arrival_rate: 6, saver_share: .5 };
+
+// Raw-unit successor for canonical saving/discount buyback. PRE: caller has
+// protected bills/current credit capital in cashFloor and pinned the market.
+// POST: exact budgets/output bounds include carried fees and trading impact.
+// A target is an intention; zero purchase cash may still permit LP redemption.
+export function netSurplusPurchase(market, cash, issued, fairNum, fairDen, cashFloor, p, { slippage_bp = 50 } = {}) {
+  const MAX = (1n << 256n) - 1n, WAD = 10n ** 18n, PPB = 1_000_000_000n;
+  if ([cash, issued, cashFloor].some((v) => typeof v !== "bigint" || v < 0n || v > MAX)
+      || [fairNum, fairDen].some((v) => typeof v !== "bigint" || v <= 0n)
+      || !Number.isSafeInteger(slippage_bp) || slippage_bp < 0 || slippage_bp > 1000 || !POLICIES.includes(p.surplus_policy)) {
+    throw new Error("invalid net surplus inputs");
+  }
+  netPurchaseExpected(market, 0n); // share the SDK's market validation, including empty net value
+  const min = (a, b) => a < b ? a : b, max = (a, b) => a > b ? a : b;
+  const spare = max(0n, cash - cashFloor);
+  let cap = min(spare, market.reserve_usdc * BigInt(Math.trunc(p.max_impact_bp * 50)) / 1_000_000n);
+  const out = { action: "hold", spend_usdc: 0n, minimum_net: 0n, expected_net: 0n, target_principal: 0n,
+    cash_floor: cashFloor, reason: "no-net-delivery", marginal_ratio_wad: null };
+  if (!market.net_scaled) return out;
+  const ratio = market.price_num * market.gross_scaled * 1_000_000n * fairDen * WAD
+    / (market.price_den * market.net_scaled * (1_000_000n - market.fee_ppm) * fairNum);
+  const d = Number(max(0n, WAD - ratio)) / 1e18, threshold = BigInt(Math.ceil(p.retire_disc * 1e9));
+  const mode = p.surplus_policy;
+  const share = mode === "retire" || mode === "discount" && d > p.retire_disc ? 1
+    : mode === "adaptive" ? paydown(Math.max(0, d - p.retire_disc), p) : 0;
+  const target = issued * BigInt(Math.trunc(share * 1e9)) / PPB;
+  const action = target ? "retire" : ["adaptive", "basket"].includes(mode) ? "save" : "hold";
+  Object.assign(out, { action, target_principal: target, marginal_ratio_wad: ratio, reason: "no-spare-cash" });
+  if (action === "hold") { out.reason = "no-retirement-opportunity"; return out; }
+  if (action === "save" && mode === "adaptive" && cap) {
+    const expected = netPurchaseExpected(market, cap);
+    const averageRatio = expected ? cap * fairDen * WAD / (expected * fairNum) : WAD * 1_000_000n;
+    const q = Number(min(WAD * 1_000_000n, max(0n, averageRatio - WAD))) / 1e18;
+    cap = cap * BigInt(Math.trunc(saving(q, p) * 1e9)) / PPB;
+  }
+  if (action === "retire" && cap) {
+    const cost = netPurchaseCost(market, target);
+    if (cost !== null) cap = min(cap, cost);
+  }
+  const sizes = [...new Set([20n, 15n, 10n, 5n, 2n].map((f) => cap * f / 20n))].sort((a, b) => a > b ? -1 : a < b ? 1 : 0);
+  for (const spend of sizes) {
+    if (!spend) continue;
+    const expected = netPurchaseExpected(market, spend);
+    let minimum = expected * BigInt(10000 - slippage_bp) / 10000n;
+    if (action === "retire" && mode !== "retire") {
+      if (threshold >= PPB) continue;
+      minimum = max(minimum, spend * fairDen * PPB / (fairNum * (PPB - threshold)) + 1n);
+    }
+    if (minimum < 1_000_000n || minimum > expected) continue;
+    Object.assign(out, { spend_usdc: spend, minimum_net: minimum, expected_net: expected, reason: "ready" }); break;
+  }
+  return out;
+}
 
 export function uniform(seed, member, key) {
   let h = 2166136261;

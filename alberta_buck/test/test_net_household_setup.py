@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from web3.logs import DISCARD
-from buck_core import TransactionReceiptPending, TransactionReverted, observe_net_market
+from buck_core import TransactionReceiptPending, TransactionReverted, observe_net_market, NetBasketOps
 from buck_core.session import _txhex
 
 from alberta_buck.sim import experiment as expmod, identity as idmod
@@ -23,6 +23,7 @@ RAW = 10**6
 Q = 10**36
 YEAR = 365 * 86400 + 6 * 3600
 REFINANCE = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-refinance.json").read_text())
+SURPLUS = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-surplus.json").read_text())["lifecycle"]
 CALENDAR = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-calendar.json").read_text())["flow"]
 
 
@@ -111,6 +112,70 @@ def test_primary_household_setup_and_per_facility_credit_marks(household_world):
     assert debtor.last_action == "repay-pending" and not debtor._started
     d.net_credit_ops.cancel_reduction(debtor.address, first)
     assert not chain.mismatches
+
+
+def test_primary_basket_ops_authenticate_topups_and_partial_net_redemptions(household_world, monkeypatch):
+    d, _, make = household_world
+    a, stranger = make(90, CreditHouseholdAgent), make(91, CreditHouseholdAgent)
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, 200 * RAW])))
+    a._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.basket.address, 2**256 - 1]))
+    ops = NetBasketOps(d.chain, d.basket, d.buck, d.net_market_ops.execute)
+    supply = d.buck.functions.totalIssued().call()
+    def minimum(amount):
+        return max(1, amount * 10**18 // d.basket.functions.sharePrice().call() * 9900 // 10_000)
+    first_plan = ops.prepare_deposit(a.address, 20 * RAW, minimum(20 * RAW))
+    first = ops.deposit(first_plan)
+    assert first.received == first.basis == 20 * RAW and first.shares_added == first.shares
+    token_id = first.token_id
+    again = ops.deposit_from_receipt(first_plan, first.receipt, expected_hash=_txhex(first.receipt["transactionHash"]))
+    assert again == first  # authenticating evidence never submits or books another deposit
+    with pytest.raises(ValueError, match="hash"):
+        ops.deposit_from_receipt(first_plan, first.receipt, expected_hash="0x" + "00" * 32)
+    with pytest.raises(ValueError, match="foreign"):
+        ops.prepare_deposit(stranger.address, RAW, 1, token_id=token_id)
+    with pytest.raises(ValueError, match="positive"):
+        ops.prepare_deposit(a.address, RAW, 0)
+    topup = ops.prepare_deposit(a.address, 10 * RAW, minimum(10 * RAW), token_id=token_id)
+    execute, sent = ops.execute, []
+    def lost(*args):
+        receipt = execute(*args)
+        sent.append(receipt)
+        raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
+    with monkeypatch.context() as patch:
+        patch.setattr(ops, "execute", lost)
+        with pytest.raises(TransactionReceiptPending) as pending:
+            ops.deposit(topup)
+    updated = ops.deposit_from_receipt(topup, sent[0], expected_hash=pending.value.transaction_hash)
+    assert updated.token_id == token_id and updated.basis == 30 * RAW
+    assert updated.shares == first.shares + updated.shares_added
+    assert d.buck.functions.totalIssued().call() == supply
+    refused = replace(topup, prior_shares=updated.shares, prior_basis=updated.basis, minimum_shares=2**120)
+    with pytest.raises(TransactionReverted):
+        ops.deposit(refused)
+    assert d.basket.functions.holdings(token_id).call() == [updated.shares, updated.basis]
+    d.anvil.warp_to(d.w3.eth.get_block("latest")["timestamp"] + 30 * 86400)
+    d.chain.send(d.kctrl.functions.compute())
+    shares = updated.shares // 4
+    worth = d.basket.functions.valueOf(token_id).call() * shares // updated.shares
+    redemption = ops.prepare_redemption(a.address, token_id, shares, worth * 9900 // 10_000)
+    before = d.w3.eth.block_number
+    preview = ops.preview_redemption(a.address, token_id, shares)
+    assert preview["paid"] >= redemption.minimum_buck and preview["shares_retired"] == shares
+    assert d.w3.eth.block_number == before and d.basket.functions.holdings(token_id).call() == [updated.shares, updated.basis]
+    with monkeypatch.context() as patch:
+        patch.setattr(ops, "execute", lost)
+        with pytest.raises(TransactionReceiptPending) as pending:
+            ops.redeem(redemption)
+    reduced = ops.redemption_from_receipt(redemption, sent[-1], expected_hash=pending.value.transaction_hash)
+    assert reduced.paid >= redemption.minimum_buck and reduced.shares_retired == shares
+    assert reduced.shares_remaining == updated.shares - shares and 0 < reduced.basis_remaining < updated.basis
+    assert reduced.in_kind == ()
+    transfers = d.buck.events.NetValueTransfer().process_receipt(reduced.receipt, errors=DISCARD)
+    nominal = sum(e["args"]["nominal"] for e in transfers if e["args"]["to"].lower() == a.address.lower())
+    assert nominal > reduced.paid, "aged Carrying basket grosses up the actual net cash payout"
+    assert d.buck.functions.totalIssued().call() == supply
+    assert d.net_credit_ops.household(a.address, a._token_ids).issued == 0
+    assert not d.chain.mismatches
 
 
 def test_household_defaults_use_one_facility_per_insured_asset(household_world):
@@ -1083,6 +1148,96 @@ def test_calendar_dates_refinance_receipts_and_keeps_its_paydays(household_world
     assert a.external_paid == b["mortgage_limit"] + a.payment and len(sends) == 4
     assert a.switch_paid == b["switch_cost"] and a.refis == 1
     assert not m.active and m.income_due == 0
+
+
+@pytest.mark.parametrize("source", ["cash", "basket"])
+def test_household_surplus_saves_in_place_then_retires_actual_discounted_liability(household_world, source):
+    d, _, make = household_world
+    a = make(84, CreditSaverAgent, settings=SURPLUS["settings"] | dict(surplus_policy="basket"))
+    for contract, method, args in ((d.usdc, "approve", [d.swap_guard.address, 2**256 - 1]),
+                                   (d.buck, "approve", [d.permit2.address, 2**256 - 1]),
+                                   (d.permit2, "approve", [d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1])):
+        a._proxy_exec(d, contract.address, contract.encode_abi(method, args=args))
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, int(SURPLUS["seed_buck"])])))
+    ctr, supply = {}, d.buck.functions.totalIssued().call()
+    a.advance_net_calendar(d, 0, ctr)
+    if source == "basket":
+        for day in (0, 1):
+            d.anvil.warp_to(a.calendar_machine.epoch + day * 86400)
+            d.chain.send(d.kctrl.functions.compute())
+            a.calendar_machine.prepare(d, day)
+            before = d.w3.eth.block_number
+            quote = a.assess_net_surplus(d, day)
+            assert d.w3.eth.block_number == before and quote["plan"].action == "save"
+            assert quote["plan"].cash_buffer == a.cash_buffer
+            a.advance_net_surplus(d, day, ctr)
+            assert a.last_action == "save" and not a.refinance_machine.active, a.last_error
+            assert len(a._basket_receipts) == 1 and a._savings_proxy is None
+            assert d.buck.functions.balanceOf(a.address).call() >= quote["plan"].reserve_floor
+            assert d.usdc.functions.balanceOf(a.address).call() >= a.cash_buffer
+            assert d.buck.functions.totalIssued().call() == supply
+        rid = a._basket_receipts[0]
+        shares, basis = d.basket.functions.holdings(rid).call()
+        assert shares == a._basket_shares and basis == a._basket_in == a._receipt_book[rid][0]
+        assert sum(e["status"] == "confirmed" and e.get("operation") == "deposit" for e in a.refinance_machine.events) == 2
+        assert ctr["bcdInvestments"] == 2
+    current = d.net_credit_ops.assess_issue_candidate(a.address, a._token_ids[0], int(SURPLUS["coverage"]),
+        int(SURPLUS["spendable"]), int(SURPLUS["premium"]))
+    d.net_credit_ops.issue_candidate(a.address, current)
+    total_principal = d.net_credit_ops.household(a.address, a._token_ids).issued
+    # Real BUCK export shocks the pool. Nothing fabricates a price or a burn.
+    q = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub)
+    amount = min(q.reserve_buck // 10, d.buck.functions.balanceOf(d.simlp.address).call() // 2)
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1])))
+    d.chain.send(d.simlp.functions.exec(d.permit2.address, d.permit2.encode_abi(
+        "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1])))
+    d.net_market_ops.sell_exact_input(d.simlp.address, d.pool_ub, amount, 1, d.simlp.address, d.fee_ub)
+    day = 2
+    d.anvil.warp_to(a.calendar_machine.epoch + day * 86400)
+    d.chain.send(d.kctrl.functions.compute())
+    a.calendar_machine.prepare(d, day)
+    a.p["surplus_policy"] = "adaptive"
+    observed_block = d.w3.eth.block_number
+    quote = a.assess_net_surplus(d, day)
+    assert d.w3.eth.block_number == observed_block and quote["plan"] is not None and quote["plan"].action == "retire", quote["context"]
+    assert bool(quote["plan"].redeem_shares) == (source == "basket")
+    if source == "basket":
+        assert quote["plan"].redeem_shares < shares
+        assert quote["context"]["exit"]["paid"] >= quote["plan"].minimum_buck
+    a.advance_net_surplus(d, day, ctr)
+    assert a.last_action != "surplus-unavailable", a.last_error
+    for _ in range(5):
+        if a._net_repayment_target is None:
+            break
+        a._recover_pending_operations(d, ctr, day)
+    book = d.net_credit_ops.household(a.address, a._token_ids)
+    assert book.issued == 0 and a.unwound == total_principal, (a.last_error, book)
+    assert d.buck.functions.totalIssued().call() == supply
+    assert book.spendable >= quote["plan"].reserve_floor
+    assert a.mortgage == a.external_paid == a.switch_paid == 0
+    if source == "basket":
+        assert len(a._basket_receipts) == 1
+        assert 0 < a._basket_in < basis and 0 < a._basket_shares < shares
+        assert a._receipt_book[rid] == tuple(reversed(d.basket.functions.holdings(rid).call()))
+    assert not d.chain.mismatches
+
+
+def test_refinance_funding_target_is_saved_capital_not_an_unfunded_loan(household_world):
+    d, _, make = household_world
+    spec = REFINANCE["programme"]
+    a = make(83, CreditHouseholdAgent, settings=spec["settings"] | dict(surplus_policy="basket"))
+    d.chain.send(d.usdc.functions.mint(a.address, a.cash_buffer))
+    block, supply = d.w3.eth.block_number, d.buck.functions.totalIssued().call()
+    result = a.assess_net_refinance(d, 1, **spec["forecasts"])
+    hold = result["context"]["funding"]
+    assert result["plan"] is None and hold["unfunded"] and not hold["refinance_ready"]
+    assert hold["cash_floor"] > a.cash_buffer and hold["basis"] == "worthwhile-programme"
+    assert d.w3.eth.block_number == block and d.buck.functions.totalIssued().call() == supply
+    d.chain.send(d.usdc.functions.mint(a.address, hold["cash_floor"] - a.cash_buffer + RAW))
+    funded = a.assess_net_refinance(d, 1, **spec["forecasts"])
+    assert funded["plan"] is not None and funded["context"]["funding"]["refinance_ready"]
+    assert not funded["context"]["funding"]["unfunded"]
+    assert d.buck.functions.totalIssued().call() == supply and not a.refinance_machine.events
 
 
 def test_assessed_refinance_leaves_owned_cash_for_time_between_issue_and_export(household_world, monkeypatch):

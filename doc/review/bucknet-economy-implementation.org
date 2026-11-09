@@ -1515,6 +1515,8 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-08 | Qualify automatic debtor dispatch and timed cash sizing in both runtimes | Final actual JS checks pass: primary bootstrap plus two selected assessment/activated-credit cases, and the complete automatic debtor chronology (four Node checks including the primary parent). The chronology includes an explicit minute of actual demurrage between issuance/export, concurrent triggers, different adoption days, multiple loans, one closing fee, known cash resumption, unavailable marks, lost wage/bank replies and a hashless bank outcome blocking the next payday's sends. About sixteen minutes; unrelated primary children were explicitly filtered. Fast JS: 77 passed; complete supported Python SDK/policy/calendar/actual/report set: 190 passed, with fresh short JSON/PDFs; browser rebuild passes. Resolve source checkpoints at =a81088e6= (cash resumption), =56831c40= (dispatcher) and =b66c82c3= (timing correction). Updated root/build/household/sandbox guides and stale Make comments. No Solidity or guard relaxation. Normal saving/saver/working-money/exits and five-year campaigns remain next. | This commit |
 
+| 2026-11-08 | Checkpoint reserve-safe surplus migration in progress | Added current-quote cash funding targets without admitting unfunded credit, shared raw net-cost surplus choices and vectors, Python/JS basket deposit/top-up/redemption helpers, and new saving phases on the existing household receipt cursor. Explicit surplus APIs and main-account single-receipt saving are implemented; normal act stays gated. Fast JS Make target: 78 passed; browser build passes. Initial changed Python refinance subset: nine passed; actual funding target passes; an earlier SDK case passed top-ups, lost replies and aged fractional payout. The expanded SDK case now fails its new direct contract-owner redemption preview; the lifecycle's two retirement arms fail their basket-discount opportunity check after actual saving/top-ups pass. Documented the exact logs, remaining transient/permanent reserve distinction, missing retirement history/fault coverage and absent actual JS surplus fixture. This is a work-in-progress handoff, not complete lifecycle or five-year acceptance. | This commit |
+
 ** Calendar-qualified checkpoint (6bf53283)
 
 - Worktree =.claude/worktrees/buck-compound=; branch
@@ -1783,7 +1785,7 @@ implementation and validation milestones remain in the journal above.
   guarded exits. Normal act remains gated until those cash paths work;
   short complete worlds and actual five-year JSON/PDF campaigns follow.
 
-** Current handoff: automatic debtor refinancing
+** Automatic debtor refinancing checkpoint (8ef4ebbd)
 
 - Branch/worktree remain =feature/household-minimal-ecosystem= /
   =.claude/worktrees/buck-compound=. Cash-only resumption is committed at
@@ -1840,3 +1842,178 @@ implementation and validation milestones remain in the journal above.
   complete, then exercise the same path in both primary runtimes, short
   complete economies and actual five-year JSON/PDF campaigns. Save/resume
   remains later, as do Notes/proof restoration and release acceptance.
+
+** Current milestone: reserve-safe surplus saving and retirement
+
+Continue in the same worktree/branch from =8ef4ebbd=. Preserve the qualified
+automatic debtor component and its cash-only resumption. Normal act remains
+gated while this milestone is completed; no corrected five-year run is claimed.
+
+- [X] Expose the cash needed to front a worthwhile current refinance even
+  when that amount is not yet affordable. Reuse the same quoted menu and
+  economics, retain all executable-plan cash checks, and never treat future
+  wages or an unfunded target as current financing. Surplus must preserve
+  this target so always-invest cannot spend away the issuance front.
+  Implemented in both assessors as context.funding, with funded plans still
+  selected only from affordable observations. Python actual funding target
+  and the earlier nine-case refinance subset pass; actual JS acceptance for
+  this addition remains open.
+- [X] Use full net purchase costs, including the pool's carried fees and
+  trading impact, for adaptive/discount retirement. Retain heterogeneous
+  discount thresholds and the always-invest/retirement-only comparisons.
+  Exact integer execution bounds must enforce the chosen discount.
+  Shared eleven-case vectors pass in both policy implementations. The actual
+  retirement signal/route-consistency qualification remains open below.
+- [ ] Add shared ordinary-owner BUCK basket operations to the existing
+  SDK basket modules: bounded deposit, in-place top-up, partial redemption
+  and receipt authentication. Reuse the current contract APIs; no new
+  monetary contract, quote oracle or transaction journal.
+- [ ] Extend the existing household receipt machine for saving cash flows,
+  then hand authenticated retirement proceeds to the existing selected-NFT
+  repayment/recovery engine. Keep unknown outcomes stopped and calendar
+  work moving through known waiting intentions.
+- [X] Keep canonical basket positions in the household's Ordinary account,
+  with explicit protected cash. Reuse a BUCK receipt for repeated saving;
+  preserve multiple-position/custody readers and focused coverage.
+  Implemented. The lifecycle fixture completes two actual saving/top-up
+  operations and verifies one receipt, real basis/shares, cash/reserve
+  preservation and unchanged supply before reaching its failing retirement
+  decision. No full lifecycle acceptance is implied.
+- [ ] Exercise actual Python/JS saving/top-ups, discounted paydown and
+  partial basket redemption, including refusal and lost/hashless evidence;
+  retain full actual principal, cash, basis/mark/ROI and decision histories.
+  Qualify through existing Make/Nix/venv targets, update guides and check in
+  implementation and acceptance checkpoints.
+
+Then port the working wallet, saver credit investment and asset exits before
+opening the normal household act loop, short complete worlds and five-year
+JSON/PDF campaigns. Full save/resume and Notes/proofs remain later tasks.
+
+*** Compaction handoff: implementation present; surplus acceptance is open
+
+- *Worktree/branch*: =.claude/worktrees/buck-compound= on
+  =feature/household-minimal-ecosystem=. The previous fully qualified source
+  is =8ef4ebbd=. This checkpoint is deliberately work in progress: normal
+  household act is still gated and no five-year campaign has been started.
+  No Solidity, demurrage kernel, K rule or Jubilee allowance changed.
+- *Refinance capital protection*: =assess_refinance= / =assessRefinance=
+  retain economically worthwhile but cash-limited observations separately.
+  The executable list remains affordable only, including whole-programme
+  bounds. =context.funding= exposes =cash_floor=, =basis=, =unfunded= and
+  =refinance_ready=. A target is a saving requirement, not current financing.
+  =test_refinance_funding_target_is_saved_capital_not_an_unfunded_loan=
+  proves that accumulating actual USDC can make a previously unfunded target
+  executable without any issuance during either read-only assessment.
+- *Portable policy*: =household_policy.net_surplus_purchase= and JS
+  =netSurplusPurchase= use the existing integer market estimators, exact
+  fair-value ratios and raw budgets. The adaptive threshold now uses each
+  household's retire_disc against full net delivery, not nominal output.
+  A strict integer minimum enforces the discount after fees/impact. The
+  existing paydown/saving urgency functions and five size fractions remain.
+  Retirement-only may accept a premium as an explicit comparison; an
+  unleveraged household never manufactures a retirement target. A zero
+  purchase budget may still permit a funded basket redemption.
+- *SDK basket operations*: =core/python/buck_core/basket.py= adds
+  =NetBasketOps=, deposit/redemption plan/result dataclasses and public
+  exports. =core/js/src/basket.js= mirrors these with =netBasketOps=.
+  They prepare Ordinary BUCK deposits, increasePosition top-ups and
+  redeemShares exits; authenticate owner/asset/amount/hash, NetValueTransfer
+  evidence and dated holding changes before returning. Post-read failure
+  preserves a submitted hash. They do not grant permissions or keep another
+  transaction journal. =preview_redemption= / =previewRedemption= currently
+  attempts the actual redemption through eth_call to discard all writes;
+  this preview is NOT yet qualified (failure below).
+- *Shared household execution*: =SurplusPlan= / its JS record shares the
+  existing HouseholdRefinance.flow with =kind=surplus=. New phases are
+  buy/deposit/redeem; receipt recovery/apply/refusal still uses the same
+  cursor. Saving protects every pre-existing wallet BUCK and the current
+  credit cash target. It buys guarded net BUCK, leaves an owned sizing
+  cushion, and creates/tops up a receipt in the main Ordinary account.
+  Retained cash is real money; no auxiliary savings proxy is created.
+  Authenticated retirement proceeds set the existing selected-NFT engine's
+  target/reserve; no purchase/redemption is itself a principal reduction.
+  Actual ordinary basket allowance is prepared during canonical setup.
+- *Agent APIs*: assess/start/resume/advance_net_surplus and the JS
+  assess/start/resume/advanceNetSurplus are present. They reuse owner
+  serialization, calendar/recovery and keyed decision cadence. A proved
+  refused saving deposit exposes surplus_due and retries that deposit only.
+  Unknown/hashless outcomes remain stopped. A known pre-submission view
+  failure refuses the attempt so it cannot prevent later recurring income.
+  Machine status exposes kind and last/next surplus dates. Full automatic
+  act, saver credit issuance, working money and asset exits remain gated.
+- *Passing evidence*: =make nix-core-equilibrium-policy-test= passes *78*
+  with no skips: =/private/tmp/buck-household-surplus-policy-make-js.log=.
+  The direct JS household-policy set passes *58*, including the shared new
+  vectors; the focused Python new policy case passes (*eleven vector arms*).
+  Logs: =/private/tmp/buck-household-surplus-policy-js.log= and
+  =/private/tmp/buck-household-surplus-policy-py.log=.
+  The initial changed refinance subset passed *nine* in
+  =/private/tmp/buck-household-surplus-funding-py.log=. The earlier new
+  primary SDK case passed actual deposit/top-up, known revert, lost replies
+  and aged fractional net payout in
+  =/private/tmp/buck-household-surplus-sdk-py.log=. That was BEFORE the new
+  preview assertion was added. The current browser bundle builds:
+  =/private/tmp/buck-household-surplus-build-js.log=. JS source syntax checks
+  pass. These do not qualify actual JS surplus execution.
+- *Current failures, keep visible*: the final lifecycle subset is *two
+  passed, two failed* in
+  =/private/tmp/buck-household-surplus-handoff-py.log=. The funding and SDK
+  cases passed there; the cash retirement arm selects save instead of
+  retire, and the basket arm has no plan after its two successful saves.
+  A fixture calendar-preparation omission was fixed before that run.
+  Both failures remain at the retirement opportunity check, before any
+  retirement attempt. After adding the actual exit preview assertion, the
+  latest SDK/funding subset is *one passed, one failed* in
+  =/private/tmp/buck-household-surplus-sdk-final-py.log=: the funding target
+  passes, but direct contract-owner eth_call for redeemShares reverts with
+  empty data. Do not report the expanded SDK case or surplus lifecycle green.
+- *Continue here, in order*:
+  1. Diagnose preview dispatch using the existing SimLP execution path.
+     Determine whether the direct contract-owner RPC call is refused by
+     the backend or by the real exit. If needed, supply a read-only proxy
+     dispatch adapter to the SDK; reuse SimLP.exec and decode its returned
+     bytes. No new contract or weakened K/exit check is justified. Prove
+     simulation changes neither holdings nor chain height before relying on it.
+  2. Diagnose the retirement signal with complete choice/market context:
+     actual funded shock amount, pool reserves, net/gross ratio, BVIB,
+     fair numerator/denominator and target. The fixture shocks only the
+     BUCK/USDC pool and does not run normal wheel route repair. Current fair
+     value is the existing BVIB times BUCK/USD spot, so an isolated route
+     dislocation need not establish a basket-relative purchasing-power
+     discount. Test a coherent real shock/arb/TWAP sequence, and review the
+     fair reference rather than forcing a policy result or inventing BVIB.
+  3. Separate the lasting credit-front policy reserve from a surplus
+     operation's temporary protection of every pre-existing wallet BUCK.
+     assess_refinance currently defaults to the previous flow's reserve_floor;
+     after a surplus flow that means all prior cash, not necessarily the
+     original credit front. Do not let saving/retirement silently freeze
+     wallet cash out of later mortgage conversion or discard the required
+     issuance front. Retain the proper policy reserve independently of the
+     one-operation cursor and add a refinance/save/refinance interleave test.
+  4. Finish actual cash and partial-basket retirement in Python. Verify
+     actual principal/supply reduction, protected prior cash, remaining
+     basis/shares and fund/K refusals. Preserve the two new failing cases.
+  5. Extend the existing public history to the selected-facility engine's
+     confirmed reductions/recovery, with exact receipt hashes. Funding a
+     target must not appear as a completed burn. Expose its retained target,
+     reserve and uncertainty in status; currently only the old internal
+     fields/counters carry these. Clean up refinance-named generic pending
+     messages for surplus flows while retaining recovery behavior.
+  6. Add shared refused/lost/hashless purchase/deposit/redemption cases and
+     run actual JS surplus execution through the existing primary builder
+     (two TOKENs suffice for these cash cases; route arb has separate checks).
+     No actual JS surplus fixture has been written/run in this checkpoint.
+     Include the fixture in the existing Make target, not another runner.
+  7. Run the broader supported Python household/policy/report set and current
+     actual JS component acceptance, rebuild the browser, then update this
+     checklist and guides before opening any normal act path. The preceding
+     *190 Python* acceptance belongs to =8ef4ebbd=; it was not rerun against
+     these additions and must not be claimed as this checkpoint's result.
+- *Commands for focused continuation*:
+  #+begin_src sh
+  make nix-core-equilibrium-policy-test
+  make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py PYTEST_ARGS='-k "surplus_saves or funding_target or primary_basket_ops" --basetemp=build/test/household-surplus-handoff -q'
+  make nix-core-demo-eqworld
+  #+end_src
+  Temporary logs are diagnostic, not durable acceptance artifacts; commands,
+  vectors, tests and this status are committed for the next session.

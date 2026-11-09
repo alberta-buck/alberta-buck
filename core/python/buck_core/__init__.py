@@ -9,7 +9,8 @@ Dependency rule: buck_core never imports alberta_buck.
 """
 
 from buck_core.artifacts import link_bytecode, load_artifact, repo_root
-from buck_core.basket import BasketPositionMark, HouseholdBasketMark, mark_net_basket_positions
+from buck_core.basket import (BasketPositionMark, HouseholdBasketMark, mark_net_basket_positions, NetBasketOps,
+                             BasketDepositPlan, BasketRedemptionPlan, BasketDeposit, BasketRedemption)
 from buck_core.session import (
     CALL_GAS, DEPLOY_GAS, Expect, Journal, TransactionReceiptPending, TransactionReverted, Web3Session,
 )
@@ -27,4 +28,5 @@ __all__ = [
     "NetSale", "NetTransferValue", "GlobalReliefRateQuote", "PremiumRefundQuote", "ReliefRateQuote", "SettlementOps", "SettlementPayment", "net_transfer_value",
     "NetMarketQuote", "observe_net_market",
     "BasketPositionMark", "HouseholdBasketMark", "mark_net_basket_positions",
+    "NetBasketOps", "BasketDepositPlan", "BasketRedemptionPlan", "BasketDeposit", "BasketRedemption",
 ]

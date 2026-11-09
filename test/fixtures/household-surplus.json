@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "money": "raw six-decimal integers; fair ratio is USD per full-value BUCK",
+  "market": {"block_number": "1", "reserve_usdc": "1000000000000", "reserve_buck": "1250000000000",
+    "gross_scaled": "1000000000000", "net_scaled": "1000000000000", "fee_ppm": "500", "price_num": "4", "price_den": "5"},
+  "amounts": {"cash": "20000000000", "issued": "100000000000", "fair_num": "1", "fair_den": "1", "cash_floor": "10000000000"},
+  "settings": {"retire_disc": 0.01, "paydown_share": 0.01, "paydown_double": 0.005, "max_impact_bp": 100},
+  "lifecycle": {
+    "settings": {"home_k": 1000, "premium_bp": 100, "cash_k": 20, "buffer_k": 10, "decision_days": 1,
+      "theta": 3, "risk": 0, "switch_k": 0, "max_impact_bp": 100, "divest_rate": 0,
+      "retire_disc": 0.01, "paydown_share": 0.01, "paydown_double": 0.005},
+    "seed_buck": "20000000", "coverage": "100000000", "spendable": "40000000", "premium": "10000000"
+  },
+  "cases": [
+    {"name": "adaptive buys actual discounted net cash", "policy": "adaptive", "action": "retire", "spend": "5000000000", "target": "100000000000"},
+    {"name": "carried fees erase the nominal discount", "policy": "adaptive", "market": {"net_scaled": "800000000000"}, "action": "save", "spend_between": ["1", "4999999999"]},
+    {"name": "always invest retains policy comparison", "policy": "basket", "market": {"price_num": "21", "price_den": "20", "reserve_buck": "952380952380"}, "action": "save", "spend": "5000000000", "target": "0"},
+    {"name": "retirement only accepts a premium", "policy": "retire", "market": {"price_num": "21", "price_den": "20", "reserve_buck": "952380952380"}, "action": "retire", "spend": "5000000000", "target": "100000000000"},
+    {"name": "discount comparison waits at a premium", "policy": "discount", "market": {"price_num": "21", "price_den": "20", "reserve_buck": "952380952380"}, "action": "hold", "spend": "0", "target": "0"},
+    {"name": "credit front leaves no market budget", "policy": "adaptive", "amounts": {"cash_floor": "21000000000"}, "action": "retire", "spend": "0", "target": "100000000000"},
+    {"name": "no liability cannot invent retirement", "policy": "retire", "amounts": {"issued": "0"}, "action": "hold", "spend": "0", "target": "0"},
+    {"name": "unleveraged adaptive savings", "policy": "adaptive", "amounts": {"issued": "0"}, "action": "save", "spend": "5000000000", "target": "0"},
+    {"name": "zero net cash has no deliverable bargain", "policy": "adaptive", "market": {"net_scaled": "0"}, "action": "hold", "spend": "0", "target": "0"},
+    {"name": "price impact cannot bypass the discount guard", "policy": "discount", "market": {"price_num": "1979", "price_den": "2000", "reserve_buck": "1010611419909"}, "action": "retire", "spend": "0", "target": "100000000000"},
+    {"name": "dust cannot become a fabricated trade", "policy": "basket", "amounts": {"cash": "10000000001"}, "action": "save", "spend": "0", "target": "0"}
+  ]
+}
