@@ -40,17 +40,15 @@ new-credit assessments still include the closing cost. Later tranches do not
 pay it again. A completed wallet-only prepayment does not switch insurance.
 
 After a proved bank refusal, the machine exposes =payment_due= and retains
-its confirmed issue/export and bank allocation. New refinancing is refused
-until =retry_net_refinance_payment= / =retryNetRefinancePayment= completes
-that bank leg. The retry keeps its amount and cash-buffer bounds and shares
-normal receipt recovery: an unknown hash never permits another send. If the
-mortgage has fallen below the saved principal, that allocation needs explicit
-reassessment. Calendar flows and buyback reconciliation remain serialized.
-These fields also appear in personal observations and decision events.
-The broader =settlement_due= flag also retains a refused export after credit
-was issued. It blocks a new assessment/loan while those BUCKs await resolution.
-Explicit export resumption/reassessment is the next migration step before
-normal automatic decisions are enabled.
+its confirmed issue/export. The broader =settlement_due= flag also retains
+a refused export. Both block a new assessment/loan while the existing cash
+awaits resolution. Preview the remaining work with
+=assess_net_refinance_remainder= / =assessNetRefinanceRemainder=, then execute
+=resume_net_refinance= / =resumeNetRefinance=. The bank-only
+=retry_net_refinance_payment= / =retryNetRefinancePayment= delegates to that
+same path. Calendar flows and buyback reconciliation remain serialized.
+Unknown outcomes never permit repricing or another send. These fields also
+appear in personal observations and decision events.
 
 Use the existing acceptance target; it builds the contracts/kernels and runs
 the primary-world, household, receipt and reporting tests:
@@ -65,6 +63,8 @@ For focused work on the existing primary fixtures:
 make nix-core-equilibrium-policy-test  # pure quote/policy/calendar checks, no EVM
 make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py
 make nix-core-equilibrium-bootstrap-test
+# Focus only the shared live resumption cases:
+make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-resume.tevm.test.js
 #+end_src
 
 The shared interruption cases are in =test/fixtures/household-refinance.json=
@@ -133,7 +133,7 @@ policy loop remains a completion gate; full-state import is a later task.
 
 The Python SDK's =observe_net_market= / =NetMarketQuote= and JavaScript's
 =observeNetMarket= / =netPurchaseExpected= / =netPurchaseCost= /
-=netSaleExpected= share integer vectors. They pin price, active virtual
+=netSaleExpected= / =netSaleInput= share integer vectors. They pin price, active virtual
 reserves, pool nominal/net cash and fee to one block, and require the expected
 pair, fee and verified Carrying mode. The refinancing event uses this same
 reader rather than another valuation implementation.
@@ -141,7 +141,11 @@ reader rather than another valuation implementation.
 Sales estimate nominal input and USDC output. A buy estimate discounts
 nominal output by the pool's current net/gross ratio. Exact-net acquisition
 cost first grosses up for carried fees, then rounds input/trading fees up
-with a small raw-unit cushion. No local quote is represented by null/None,
+with a small raw-unit cushion. =sell_input= / =netSaleInput= returns the
+smallest nominal sale input reaching a USDC target under the same local
+forward estimate, with no Carrying fee discount on the sale input. Carrying
+callers must separately budget the net value of their nominal input.
+No local quote is represented by null/None,
 including exhausted active reserves or zero deliverable net value.
 These are constant-active-liquidity estimates; crossed ticks and subsequent
 prices can change execution. The household must retain a maximum USDC
@@ -289,6 +293,25 @@ allocations separately. This eliminates partial fee-payment states. The
 simulation's bank is a standard-USDC sink; this does not establish how an
 external lender credits a real loan.
 
+Resumption keeps the original export/principal caps, buffers and unpaid
+closing cost. It rechecks the remaining actual mortgage and cash, and saves
+revised bounds for authenticating any later lost reply. It never repeats a
+confirmed reserve purchase or issuance. Bank-only work uses existing USDC
+without a BUCK market, K, insurer or Jubilee quote. If another actual payment
+has retired the mortgage, the bank can receive only the committed closing
+fee. If nothing remains due, completion needs no transaction and adds no
+principal-retirement count.
+
+A refused export uses only already-owned Ordinary BUCK, current route depth
+and the existing five size fractions. Retain the BUCK reserve and the usual
+0.1% owned sizing cushion; inverse sizing avoids selling the old amount when
+less mortgage remains. Its marginal comparison adds no new insurance or
+Jubilee benefit. The original startup fee is already committed economically
+but still payable in full in the bank cash budget. A poor cash/market result
+leaves an explicit waiting intention; normal wages/bills continue. Concurrent
+resume triggers recheck the saved revision before dispatch so they cannot
+spend twice.
+
 The caller serializes each owner's work. Existing pending buybacks and
 authorizations block a new refinance. Recovery runs before new household
 income or decisions. Receipt evidence assumes the local EVM's immediate
@@ -348,6 +371,9 @@ status. A UI can group by member for an individual timeline or aggregate
 confirmed amounts and current books across the population. It must not count
 =planned=, =pending= or a sale as mortgage retirement.
 
-The current event scope is refinancing. Extend the same records to declined
+Resumption adds =resumed= and =waiting= events with current observations,
+original caps and the revised plan; =satisfied= records completion without a
+payment. These distinguish an intention from confirmed money movement.
+The current event scope is refinancing and calendar work. Extend the same records to declined
 economic decisions, saving, paydown and exits as those transitions
 are ported. No separate dashboard or second simulation runner is introduced.

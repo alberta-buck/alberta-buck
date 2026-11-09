@@ -27,6 +27,18 @@ export function netPurchaseExpected(q, usdc) {
   const nominal = q.reserve_buck * effective / (q.reserve_usdc + effective);
   return nominal * q.net_scaled / q.gross_scaled;
 }
+// Smallest nominal BUCK input whose local sale estimate reaches usdc.
+// This shares the forward estimate's constant-active-liquidity limits.
+// Ordinary households spend full-value units; Carrying callers budget their
+// own net cost separately from the nominal quantity passed to the venue.
+export function netSaleInput(q, usdc) {
+  validate(q); amount(usdc);
+  if (!usdc) return 0n;
+  if (usdc >= q.reserve_usdc) return null;
+  const effective = ceil(usdc * q.reserve_buck, q.reserve_usdc - usdc);
+  const needed = ceil(effective * PPM, PPM - q.fee_ppm);
+  return needed <= MAX ? needed : null;
+}
 export function netPurchaseCost(q, netBuck) {
   validate(q); amount(netBuck);
   if (!netBuck) return 0n;

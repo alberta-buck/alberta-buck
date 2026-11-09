@@ -1077,11 +1077,28 @@ never credit an unconfirmed mint or payment as liquid funds.
   export and mortgage refusal; payment_due identifies the bank-only retry.
   A new assessment/loan cannot erase the old export and manufacture a free
   wallet-only closing or duplicate existing issuance.
-- [ ] Complete explicit export resumption/reassessment after a proved refusal,
+- [X] Complete explicit export resumption/reassessment after a proved refusal,
   including reduced remaining mortgage allocations. Preserve actual funded
   cash and issuance and their original closing obligation; no replayed mint
   or artificial disposal of the remaining BUCKs. Unknown outcomes remain
   pending. This must precede the automatic dispatcher, not be bypassed by it.
+  Implementation now reuses the same receipt machine. The original plan
+  retains its caps; a revision holds the new unfinished cash bounds for
+  receipt authentication. Reassessments quote current Ordinary cash and
+  conversion capacity without another facility/fund/insurer quote. Prior
+  premium, insurance saving and relief are already in the books; only the
+  marginal wallet trade is scored, while the full committed closing fee stays
+  in its bank cash budget. A bank-only remainder uses existing USDC and no
+  market quote. Zero principal can pay a due fee; zero total finishes without
+  a transfer or repayment count. Same-owner concurrent attempts recheck the
+  revision before dispatch. Shared actual Python and JS qualification is
+  complete, including lost replies, waits, zero/fee-only completion and
+  concurrent JS triggers; results are recorded in the current handoff.
+- [X] Add an exact integer local sale-input estimator to both SDKs, using
+  the same units as the existing forward quote. Independent binary-search
+  vectors cover aged/heavily fee-carrying pools, dust, full-width values and
+  exhausted output/input bounds. Inversion avoids overselling BUCK when the
+  remaining external mortgage has become smaller.
 
 ** Remaining economy sequence
 
@@ -1464,7 +1481,9 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-08 | Separate insurance activation from confirmed household closing | Both agents now retain the closing fee until an authenticated issuance-backed bank payment, expose confirmed closing in histories/personal state and reject a second charge. A proved-refused bank leg retains its original issue/export and allocation; bank-only retry keeps the original buffers and normal receipt recovery. Shared vectors lose the retry response and recover without another send, issuance, export or fee. Initial Python policy/calendar/actual-household set: 163 passed; pure JS: 74. Complete actual JS primary acceptance was started and its result is recorded in the current handoff. No Solidity changed; normal automatic decisions remain gated. | =278bc3f1= |
 
-| 2026-11-08 | Admit affordable staged refinancing while paying startup costs in full | Both existing assessors reuse the bounded SDK coverage menu to forecast a same-asset programme from current credit, capital and a conservative per-tranche price. The programme must pass with all startup costs; the current leg must pass its proportional economic allocation while its actual first bank payment still pays the whole fee. Prefer the largest eligible current principal and authorize only that leg; later quotes use confirmed closing state. Current-capacity shortfalls and incompatible programme dimensions cannot be funded by future wages/K. Known refused export/mortgage prefixes now block fresh assessments/issuance rather than turning existing debt into an apparently free wallet prepayment. Final Python policy/calendar/actual-household checks: 167 passed; strengthened pure-policy boundary rerun: 108 passed (subset). Final JS pure quote/policy/calendar: 77 passed; fresh actual programme/three-leg refusal case: one passed; complete existing actual JS closing/calendar acceptance: 41 passed, no skips. Existing equilibrium browser build passed. Added a fast policy Make target and focused file selection to the normal acceptance; no new runner or Solidity. Export resumption/reduced bank allocation, automatic decisions/surplus/saver/exits and real five-year runs remain open. | This commit |
+| 2026-11-08 | Admit affordable staged refinancing while paying startup costs in full | Both existing assessors reuse the bounded SDK coverage menu to forecast a same-asset programme from current credit, capital and a conservative per-tranche price. The programme must pass with all startup costs; the current leg must pass its proportional economic allocation while its actual first bank payment still pays the whole fee. Prefer the largest eligible current principal and authorize only that leg; later quotes use confirmed closing state. Current-capacity shortfalls and incompatible programme dimensions cannot be funded by future wages/K. Known refused export/mortgage prefixes now block fresh assessments/issuance rather than turning existing debt into an apparently free wallet prepayment. Final Python policy/calendar/actual-household checks: 167 passed; strengthened pure-policy boundary rerun: 108 passed (subset). Final JS pure quote/policy/calendar: 77 passed; fresh actual programme/three-leg refusal case: one passed; complete existing actual JS closing/calendar acceptance: 41 passed, no skips. Existing equilibrium browser build passed. Added a fast policy Make target and focused file selection to the normal acceptance; no new runner or Solidity. Export resumption/reduced bank allocation, automatic decisions/surplus/saver/exits and real five-year runs remain open. | =acffbc25= |
+
+| 2026-11-08 | Resume refused household cash settlement without new credit | Both households preview and resume the original intent through the same receipt machine, capping current exports/principal by the original plan. Saved revisions authenticate lost replies; unknown outcomes stay stopped. Existing cash economics excludes duplicate premium/relief benefits while retaining the full committed closing cost in the bank budget. Bank-only work needs no market/credit read; smaller mortgages, fee-only and no-payment completion preserve actual money and counters. Shared inverse sale sizing uses independent binary-search vectors. Final Python SDK/policy/calendar/actual/report set: 188 passed with fresh short JSON/PDFs. Fast JS checks: 77 passed. Actual JS: all 11 shared live cases passed (12 including parent), covering waits with wages, aged cash, lost/unknown replies and concurrent triggers. Browser equilibrium build passed. Existing Make target includes the focused resumption fixture. No Solidity or second engine; normal autonomous saving/exits and five-year campaigns remain open. | This commit |
 
 ** Calendar-qualified checkpoint (6bf53283)
 
@@ -1629,7 +1648,7 @@ implementation and validation milestones remain in the journal above.
   replaces the old behavior; read-only calendar/financial vectors are not
   a completed household economy.
 
-** Current handoff: household closing and staged refinance admission
+** Closing/staged admission checkpoint (acffbc25)
 
 - Continue =feature/household-minimal-ecosystem= in
   =.claude/worktrees/buck-compound=. The Carrying/arb checkpoint is complete
@@ -1686,3 +1705,50 @@ implementation and validation milestones remain in the journal above.
   money, saver credit investment and guarded exits before opening normal act.
   Reuse that same path in both primary runtimes, then short complete worlds
   and actual five-year JSON/PDF campaigns. Save/resume and Notes remain later.
+
+** Current handoff: cash-only refinance resumption
+
+- Branch/worktree remain =feature/household-minimal-ecosystem= at
+  =.claude/worktrees/buck-compound=. Completed predecessor checkpoints:
+  =278bc3f1= closing responsibility and =acffbc25= staged admission. No
+  Solidity or monetary-kernel calculation changes in this milestone.
+- Added shared Python/JS sale-input inversion, exposed as
+  =NetMarketQuote.sell_input= / =netSaleInput=. It is the smallest nominal
+  local input whose existing forward quote reaches a settlement target;
+  Carrying users still budget their own net fee basis. Expected values came
+  from independent binary search, including full-width and dust cases.
+- The same household now previews =assess_net_refinance_remainder= /
+  =assessNetRefinanceRemainder= and executes =resume_net_refinance= /
+  =resumeNetRefinance=. The bank-only retry delegates to this shared path.
+  The original plan retains export/principal caps, fee and buffers. Revised
+  cash terms authenticate later receipt recovery. No issue/funding step can
+  replay, and pending/unknown evidence cannot be repriced. A changed phase,
+  revision, calendar or block invalidates the observation before dispatch.
+- Export decisions use actual Ordinary balance, remaining principal,
+  current route capacity and the existing five size fractions. A 0.1%
+  sizing cushion stays owned cash. Existing issuance/premiums/relief are
+  excluded from new benefit forecasts, while the full unpaid closing fee
+  remains due in the cash budget. Bank-only completion uses existing USDC
+  without any BUCK market or credit quote. A fully paid mortgage can settle
+  only its committed fee; zero total completes with no transfer or principal
+  retirement count. Calendar status distinguishes pending fee-only payments
+  from unconfirmed mortgage principal.
+- Shared live cases cover normal repricing, smaller debt, lost export/bank
+  replies, unknown hashes, cash/economic waits with wages/bills, aged cash,
+  fee-only/no-payment completion and concurrent JS resume triggers. Final
+  Python policy/calendar/actual/report set currently passes *188* with no
+  skips in =/private/tmp/buck-household-remainder-all-py.log=, regenerating
+  short JSON/PDFs under =build/test/household-remainder/=. SDK/policy subset:
+  *116 Python*; fast JS policy/quote/calendar: *77 passed*. Actual JS: *11
+  shared cases* pass (*12* including parent), no skips, in
+  =/private/tmp/buck-household-remainder-js.log= (about eleven minutes here).
+  The equilibrium browser rebuild passes in
+  =/private/tmp/buck-household-remainder-browser.log=.
+- The existing Make target now includes the focused resume file; select it
+  with =CORE_EQUILIBRIUM_TEST_FILES=test/net-household-resume.tevm.test.js=.
+  Next: connect the automatic household dispatcher to the existing calendar,
+  pending-receipt recovery and resumption before new borrowing. Preserve
+  heterogeneous adoption and prompt fresh tranches after commitment, then
+  implement reserve-safe surplus/working money, saver credit investment and
+  guarded exits. Normal act remains gated until those cash paths work;
+  short complete worlds and actual five-year JSON/PDF campaigns follow.

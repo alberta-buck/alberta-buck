@@ -16,6 +16,14 @@ def test_net_market_estimates_preserve_carried_fees_and_full_width(case):
     assert q.sell_expected(int(case["amount"])) == int(case["sale"])
     assert q.buy_expected(int(case["amount"])) == int(case["purchase"])
     assert q.buy_cost(int(case["target"])) == (int(case["cost"]) if case["cost"] is not None else None)
+    target = int(case["target"])
+    required = q.sell_input(target)
+    assert required == (int(case["sale_input"]) if case["sale_input"] is not None else None)
+    if required is not None:
+        assert q.sell_expected(required) >= target
+        assert q.sell_expected(required - 1) < target
+    assert q.sell_input(q.reserve_usdc) is None
+    assert q.sell_input(0) == 0
     assert q.buy_cost(0) == q.buy_expected(0) == q.sell_expected(0) == 0
 
 
@@ -26,6 +34,7 @@ def test_invalid_quotes_and_amounts_do_not_become_zero_money():
         with pytest.raises(ValueError, match="quote"):
             replace(q, **fields)
     for amount in (-1, 2**256, True, 1.5):
-        for method in (q.buy_cost, q.buy_expected, q.sell_expected):
+        for method in (q.buy_cost, q.buy_expected, q.sell_expected, q.sell_input):
             with pytest.raises(ValueError, match="amount"):
                 method(amount)
+    assert replace(q, reserve_usdc=2, reserve_buck=2**256 - 1, fee_ppm=1).sell_input(1) is None

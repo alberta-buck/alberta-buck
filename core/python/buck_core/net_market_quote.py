@@ -50,6 +50,24 @@ class NetMarketQuote:
         nominal = self.reserve_buck * effective // (self.reserve_usdc + effective)
         return nominal * self.net_scaled // self.gross_scaled
 
+    def sell_input(self, usdc):
+        """Smallest local nominal BUCK input delivering at least usdc.
+
+        Inverts sell_expected with integer fee/price rounding. None means
+        exhausted USDC reserves or input beyond uint256. This remains a
+        constant-active-liquidity estimate, not an execution guarantee.
+        Ordinary households spend that input in full-value units; Carrying
+        callers budget its net cost using their own carried fee basis.
+        """
+        _amount(usdc)
+        if not usdc:
+            return 0
+        if usdc >= self.reserve_usdc:
+            return None
+        effective = _ceil(usdc * self.reserve_buck, self.reserve_usdc - usdc)
+        needed = _ceil(effective * PPM, PPM - self.fee_ppm)
+        return needed if needed <= MAX else None
+
     def buy_cost(self, net_buck):
         """Estimate exact-net acquisition cost; None means no such local quote.
 

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from web3.logs import DISCARD
 from buck_core import TransactionReceiptPending, TransactionReverted, observe_net_market
+from buck_core.session import _txhex
 
 from alberta_buck.sim import experiment as expmod, identity as idmod
 from alberta_buck.sim.chain import Chain
@@ -357,6 +358,130 @@ def test_refinance_phases_apply_actual_receipts_once(household_world, monkeypatc
         assert "ag" not in lite
         snap.capture(1, ctr, [a], 0)
         assert "household_events" not in snap.frames[1]
+
+
+@pytest.mark.parametrize("case", REFINANCE["resumption"]["cases"], ids=lambda c: c["name"])
+def test_refinance_remainder_keeps_confirmed_steps_and_reprices_only_cash(household_world, monkeypatch, case):
+    from alberta_buck.sim import net_household
+    d, scenario, make = household_world
+    a = make(51, CreditHouseholdAgent, settings=REFINANCE["resumption"]["settings"])
+    a.advance_net_calendar(d, 0, {})
+    b = {k: int(v) for k, v in REFINANCE["base"].items()}
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[a.address, b["seed_buck"]])))
+    a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("approve", args=[d.swap_guard.address, 2**256 - 1]))
+    a._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1]))
+    a._proxy_exec(d, d.permit2.address, d.permit2.encode_abi(
+        "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
+    c = d.net_credit_ops.assess_issue_candidate(a.address, a._token_ids[0], b["coverage"], b["new_spendable"], b["premium"])
+    initial = RefinancePlan(c, b["export_buck"], 5000 * RAW if case["phase"] == "export" else b["minimum_usdc"],
+        b["mortgage_limit"], b["cash_buffer"], b["reserve_floor"], int(case.get("switch_cost", b["switch_cost"])),
+        b["penalty_numerator"], b["penalty_denominator"])
+    bank_send = d.net_settlement_ops.execute
+    with monkeypatch.context() as patch:
+        if case["phase"] == "mortgage":
+            patch.setattr(d.net_settlement_ops, "execute", lambda owner, target, name, args:
+                          bank_send(owner, target, name, [a.SINK, 2**256 - 1]))
+        a.start_net_refinance(d, initial, 0, {})
+    m, ctr = a.refinance_machine, {}
+    assert m.settlement_due and m.flow["phase"] == case["phase"]
+    assert a.joined and not a.refinance_closed and a.refis == 0
+    principal, supply = d.credit.functions.issuanceOf(c.token_id).call()[0], d.buck.functions.totalIssued().call()
+    assert principal == b["new_spendable"] + b["premium"]
+    if case.get("outside_principal"):
+        amount = int(case["outside_principal"])
+        paid = d.net_settlement_ops.pay_exact(a.address, a.SINK, amount)
+        a.calendar_machine.record_mortgage(d, paid.receipt, amount)
+    if case.get("held_buck"):
+        held = d.buck.functions.balanceOf(a.address).call()
+        a._proxy_exec(d, d.buck.address, d.buck.encode_abi("transfer", args=[d.simlp.address, held - int(case["held_buck"])]))
+    if case.get("wait") == "cash" or "leave_cash" in case:
+        penalty = (initial.mortgage_limit * initial.penalty_numerator + initial.penalty_denominator - 1) // initial.penalty_denominator
+        leave = int(case.get("leave_cash", initial.cash_buffer + initial.mortgage_limit + initial.switch_cost + penalty - 1))
+        cash = d.usdc.functions.balanceOf(a.address).call()
+        a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("transfer", args=[d.simlp.address, cash - leave]))
+
+    def unavailable(*_args, **_kwargs):
+        raise AssertionError("resumption must not quote or issue new credit")
+    for name in ("issue", "issue_candidate", "assess_issue_candidate", "issue_coverage_menu", "quote_global_relief_rate"):
+        monkeypatch.setattr(d.net_credit_ops, name, unavailable)
+    if case["phase"] == "mortgage":
+        monkeypatch.setattr(net_household, "observe_net_market", unavailable)
+    options = {"expected_wallet_growth": .5} if case.get("wait") == "economics" else {}
+    before = d.w3.eth.block_number, len(m.events), m.flow["plan"], a.mortgage
+    quote = a.assess_net_refinance_remainder(d, 0, **options)
+    assert before == (d.w3.eth.block_number, len(m.events), m.flow["plan"], a.mortgage)
+    assert quote["context"]["new_credit"] is False
+    assert m.flow["origin"] is initial and m.status()["revision"] == 0
+    if case.get("wait"):
+        assert quote["plan"] is None
+        block = d.w3.eth.block_number
+        a.resume_net_refinance(d, 0, ctr, **options)
+        assert m.settlement_due and a.funding_pending and a.last_action == "refinance-wait"
+        assert d.w3.eth.block_number == block and m.status()["revision"] == 0
+    day = case.get("days", 0)
+    if day:
+        d.anvil.warp_to(a.calendar_machine.epoch + day * 86400)
+        a.advance_net_calendar(d, day, ctr)
+        assert a.income_total > 0 and a.hypo_paid > 0, "known waiting intentions must not freeze wages/bills"
+    quote = a.assess_net_refinance_remainder(d, day)
+    plan = quote["plan"]
+    assert plan is not None, quote["context"]
+    assert plan.candidate is None and plan.reserve_buy_net == plan.reserve_buy_max_usdc == 0
+    assert plan.mortgage_limit <= min(initial.mortgage_limit, a.mortgage)
+    assert plan.switch_cost == initial.switch_cost and plan.cash_buffer >= initial.cash_buffer
+    assert plan.reserve_floor == initial.reserve_floor
+    if case["phase"] == "export" and plan.mortgage_limit:
+        assert 0 < plan.export_buck < initial.export_buck
+        assert quote["context"]["score"]["parts"]["relief"] == quote["context"]["score"]["parts"]["premium"] == 0
+    if case.get("held_buck"):
+        assert plan.export_buck < int(case["held_buck"]) - initial.reserve_floor
+    bank_before, debt_before, paid_before = d.usdc.functions.balanceOf(a.SINK).call(), a.mortgage, a.external_paid
+    events_before = len(m.events)
+    market_send, bank_send = d.net_market_ops.execute, d.net_settlement_ops.execute
+    sends = []
+    def intercept(dispatch):
+        def send(*args):
+            phase = m.flow["phase"]
+            sends.append(phase)
+            if case.get("unknown") == phase:
+                raise RuntimeError("submission outcome unknown")
+            receipt = dispatch(*args)
+            if case.get("lost") == phase:
+                raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
+            return receipt
+        return send
+    monkeypatch.setattr(d.net_market_ops, "execute", intercept(market_send))
+    monkeypatch.setattr(d.net_settlement_ops, "execute", intercept(bank_send))
+    a.resume_net_refinance(d, day, ctr)
+    if case.get("lost") or case.get("unknown"):
+        assert m.active and m.flow["phase"] == case.get("lost", case.get("unknown"))
+        assert a.calendar_machine.status()["mortgage_provisional"] == bool(m.flow["phase"] == "mortgage" and plan.mortgage_limit)
+        with pytest.raises(ValueError, match="refused settlement"):
+            a.resume_net_refinance(d, day, ctr)
+        before_sends = list(sends)
+        a.act(d, scenario, day, 0, ctr)
+        if case.get("unknown"):
+            assert m.active and m.flow["hash"] is None and sends == before_sends
+            assert "hash unavailable" in a.last_error
+            assert a.mortgage == debt_before and a.external_paid == paid_before and a.switch_paid == 0
+            return
+    assert m.status()["status"] == "complete" and not m.settlement_due
+    assert m.status()["revision"] == 1 and m.flow["origin"] is initial
+    assert sends.count("export") <= 1 and sends.count("mortgage") <= 1
+    assert d.buck.functions.totalIssued().call() == supply
+    assert d.credit.functions.issuanceOf(c.token_id).call()[0] == principal
+    penalty = (plan.mortgage_limit * plan.penalty_numerator + plan.penalty_denominator - 1) // plan.penalty_denominator
+    assert d.usdc.functions.balanceOf(a.SINK).call() - bank_before == plan.mortgage_limit + plan.switch_cost + penalty
+    assert a.mortgage == debt_before - plan.mortgage_limit and a.external_paid == paid_before + plan.mortgage_limit
+    assert a.switch_paid == plan.switch_cost and a.penalty_paid == penalty
+    assert a.refis == (1 if plan.mortgage_limit else 0)
+    assert a.refinance_closed is bool(plan.mortgage_limit or plan.switch_cost)
+    confirmed = [e["operation"] for e in m.events[events_before:] if e["status"] == "confirmed"]
+    assert confirmed == sends
+    if not plan.mortgage_limit and not plan.switch_cost:
+        assert not sends and a.last_action == "refinance-satisfied"
+    with pytest.raises(ValueError, match="refused settlement"):
+        a.resume_net_refinance(d, day, ctr)
 
 
 def test_staged_refinance_pays_one_full_closing_and_only_issues_each_bounded_leg(household_world):

@@ -14,6 +14,24 @@
     "seed_usdc": "40000000000", "insufficient_utilization": 0.0001,
     "forecasts": {"expected_relief_rate": 0.02, "expected_refund_growth": -0.02, "expected_wallet_growth": -0.02}
   },
+  "resumption": {
+    "settings": {"home_k": 1000, "premium_bp": 100, "apr": 0.06, "ltv": 0.000004, "theta": 3,
+      "risk": 0, "switch_k": 0.0001, "max_impact_bp": 100, "cash_k": 20, "buffer_k": 10,
+      "income_frac": 0.2, "living_frac": 0.6, "divest_rate": 0},
+    "cases": [
+      {"name": "reprice only the refused export", "phase": "export"},
+      {"name": "bank shrinks after another repayment", "phase": "mortgage", "outside_principal": "2000000"},
+      {"name": "lost resumed export reply", "phase": "export", "lost": "export"},
+      {"name": "lost resumed bank reply", "phase": "mortgage", "outside_principal": "2000000", "lost": "mortgage"},
+      {"name": "unknown resumed export stays stopped", "phase": "export", "unknown": "export"},
+      {"name": "economic wait permits normal wages", "phase": "export", "wait": "economics", "days": 30},
+      {"name": "cash wait permits normal wages", "phase": "mortgage", "wait": "cash", "days": 30},
+      {"name": "aged wallet exports only remaining cash", "phase": "export", "held_buck": "5000000", "days": 30},
+      {"name": "fully repaid debt still pays committed fee", "phase": "mortgage", "outside_principal": "4000000", "lost": "mortgage"},
+      {"name": "no debt or fee finishes without a payment", "phase": "export", "outside_principal": "4000000", "switch_cost": "0", "leave_cash": "0"},
+      {"name": "two resume triggers cannot spend twice", "phase": "export", "concurrent": true}
+    ]
+  },
   "cases": [
     {"name": "confirmed", "fault": null, "phase": null, "final": "complete"},
     {"name": "wide cash book", "fault": null, "phase": null, "final": "complete", "seed_usdc": "1237940039285380274899124231"},

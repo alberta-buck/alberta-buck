@@ -142,7 +142,8 @@ class HouseholdCalendar:
                     epoch=str(self.epoch) if self.bound else None,
                     queued=len(self.queue), income_due=str(self.income_due),
                     mortgage_provisional=bool(f and f["phase"] == "mortgage" and f["status"] == "pending" or
-                                              refi and refi["phase"] == "mortgage" and refi["status"] == "pending"),
+                                              refi and refi["phase"] == "mortgage" and refi["status"] == "pending" and
+                                              (refi.get("terms") is None or refi["terms"]["principal"] > 0)),
                     phase=f["phase"] if f else None, status=f["status"] if f else "idle",
                     hash=f.get("hash") if f else None)
 

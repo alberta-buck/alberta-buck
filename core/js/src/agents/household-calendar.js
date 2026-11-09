@@ -95,7 +95,7 @@ export class HouseholdCalendar {
       epoch: this.bound ? String(this.epoch) : null,
       queued: this.queue.length, income_due: String(this.incomeDue),
       mortgage_provisional: Boolean(f?.phase === "mortgage" && f.status === "pending"
-        || refi?.phase === "mortgage" && refi.status === "pending"),
+        || refi?.phase === "mortgage" && refi.status === "pending" && (refi.terms?.principal ?? 1n) > 0n),
       phase: f?.phase ?? null, status: f?.status ?? "idle", hash: f?.hash ?? null };
   }
   sync() {

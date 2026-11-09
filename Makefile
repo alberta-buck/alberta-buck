@@ -1722,8 +1722,10 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-equilibrium-arb.tevm.test.js
 # Staged mortgage admission/actual first-closing and later-tranche payments:
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-programme.tevm.test.js
+# Known export/bank refusals, changed debt, waits and receipt-safe completion:
+#   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-resume.tevm.test.js
 CORE_EQUILIBRIUM_TEST_ARGS ?=
-CORE_EQUILIBRIUM_TEST_FILES ?= test/net-equilibrium-bootstrap.tevm.test.js test/net-equilibrium-arb.tevm.test.js test/net-household-programme.tevm.test.js
+CORE_EQUILIBRIUM_TEST_FILES ?= test/net-equilibrium-bootstrap.tevm.test.js test/net-equilibrium-arb.tevm.test.js test/net-household-programme.tevm.test.js test/net-household-resume.tevm.test.js
 # Fast policy/quote/calendar boundary checks; no EVM or contract compilation.
 #   make nix-core-equilibrium-policy-test
 core-equilibrium-policy-test: core-build-wasm

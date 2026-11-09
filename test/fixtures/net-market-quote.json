@@ -17,7 +17,8 @@
       "target": "1000000",
       "sale": "999499",
       "purchase": "999499",
-      "cost": "1000504"
+      "cost": "1000504",
+      "sale_input": "1000503"
     },
     {
       "name": "aged",
@@ -35,7 +36,8 @@
       "target": "1000000",
       "sale": "999499",
       "purchase": "979509",
-      "cost": "1020923"
+      "cost": "1020923",
+      "sale_input": "1000503"
     },
     {
       "name": "heavy carried fees",
@@ -53,7 +55,8 @@
       "target": "123456789",
       "sale": "492103394",
       "purchase": "295116808",
-      "cost": "412930845"
+      "cost": "412930845",
+      "sale_input": "247687127"
     },
     {
       "name": "dust rounding",
@@ -71,7 +74,8 @@
       "target": "3",
       "sale": "5",
       "purchase": "3",
-      "cost": "7"
+      "cost": "7",
+      "sale_input": "5"
     },
     {
       "name": "no net liquidity",
@@ -89,7 +93,8 @@
       "target": "1000000",
       "sale": "999499",
       "purchase": "0",
-      "cost": null
+      "cost": null,
+      "sale_input": "1000503"
     },
     {
       "name": "full width",
@@ -107,7 +112,8 @@
       "target": "2722258935367507707706996859454145691659",
       "sale": "678523039640043665260841601303174835105",
       "purchase": "1357046079279472068751429028673396001959",
-      "cost": "2730450286231152926644079626632895632832"
+      "cost": "2730450286231152926644079626632895632832",
+      "sale_input": "5460900572462305853288159253265791265660"
     },
     {
       "name": "local reserve exhausted",
@@ -125,7 +131,8 @@
       "target": "501",
       "sale": "90",
       "purchase": "45",
-      "cost": null
+      "cost": null,
+      "sale_input": "1006"
     }
   ]
 }

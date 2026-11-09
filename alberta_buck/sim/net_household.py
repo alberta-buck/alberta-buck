@@ -12,7 +12,7 @@ decision/sequence identifiers. They are suitable for saved JSON and live UI
 consumers; recording an unavailable account observation never invents a zero
 or reverses an already applied financial transition.
 """
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import math
 from alberta_buck.sim import carry, household_policy as policy
 from alberta_buck.sim.household_policy import external_premium_due
@@ -23,6 +23,7 @@ from buck_core.session import _txhex
 
 RAW = 10**6
 PHASES = ("fund", "issue", "export", "mortgage")
+SIZE_FRACTIONS = (20, 15, 10, 5, 2)
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,13 @@ class RefinancePlan:
 
 def _reserve_for(candidate):
     return candidate.reserve_required + (candidate.reserve_buffer if candidate.premium else 0)
+
+
+def _bank_terms(plan):
+    principal = plan.mortgage_limit
+    penalty = (principal * plan.penalty_numerator + plan.penalty_denominator - 1) // plan.penalty_denominator
+    return dict(amount=principal + plan.switch_cost + penalty, principal=principal,
+                switch=plan.switch_cost, penalty=penalty)
 
 
 def observe_refinance_forecasts(d):
@@ -115,7 +123,7 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
     if agent.mortgage < market.reserve_usdc:
         buck_cap = min(buck_cap, market.reserve_buck * agent.mortgage * 10**6 //
                        ((market.reserve_usdc - agent.mortgage) * (10**6 - market.fee_ppm)))
-    fractions = (20, 15, 10, 5, 2)  # same five sizes as the existing policy
+    fractions = SIZE_FRACTIONS
     context = dict(block=block, considered=0, issuance_quotes=0, rejections={}, feasible=0,
                    forecasts=dict(relief_rate=expected_relief_rate, refund_growth=expected_refund_growth,
                                   wallet_growth=expected_wallet_growth), protected_buck=reserve_floor)
@@ -247,6 +255,105 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
     return dict(plan=plans[index] if index is not None else None, verdict=verdict, context=context)
 
 
+def assess_remainder(agent, d, day, *, expected_wallet_growth=None, slippage_bp=50):
+    """Read-only reassessment of a proved-refused export/bank remainder.
+
+    PRE: serialized ordinary household, prepared/idle calendar and no unknown
+    transaction. POST: only unfinished cash operations are proposed, within
+    the original export/principal caps, reserve and cash buffer. No credit,
+    insurer or fund quote is needed. Prior activation, premium and relief are
+    existing holdings, not benefits earned a second time. The entire unpaid
+    closing fee remains in the bank cash budget, independent of its sunk-cost
+    exclusion from the marginal wallet-export comparison.
+    """
+    machine = agent.refinance_machine
+    if (type(day) is not int or day < 0 or getattr(d, "buck_accounting", "") != "net" or not machine.settlement_due or
+            agent.calendar_machine.active):
+        raise ValueError("household remainder needs a refused settlement and idle calendar")
+    if agent.calendar_machine.bound and agent.calendar_machine.day != day:
+        raise ValueError("household calendar books must be prepared before remainder assessment")
+    if type(slippage_bp) is not int or not 0 <= slippage_bp <= 1000:
+        raise ValueError("invalid household remainder slippage")
+    growth = math.expm1(-.02) if expected_wallet_growth is None else expected_wallet_growth
+    if not carry._finite_forecast(growth) or growth < -1:
+        raise ValueError("invalid expected wallet growth")
+    flow, block = machine.flow, d.w3.eth.block_number
+    phase, revision = flow["phase"], flow.get("revision", 0)
+    origin = flow.get("origin", flow["plan"])
+    principal = min(origin.mortgage_limit, agent.mortgage)
+    cash = d.usdc.functions.balanceOf(agent.address).call(block_identifier=block)
+    closing = 0 if agent.refinance_closed else origin.switch_cost
+    base = replace(flow["plan"], candidate=None, mortgage_limit=principal, switch_cost=closing,
+                   cash_buffer=max(origin.cash_buffer, agent.cash_buffer), reserve_floor=origin.reserve_floor,
+                   penalty_numerator=origin.penalty_numerator, penalty_denominator=origin.penalty_denominator,
+                   reserve_buy_net=0, reserve_buy_max_usdc=0)
+    context = dict(block=block, phase=phase, revision=revision, usdc=cash, mortgage=agent.mortgage,
+        export_cap=origin.export_buck, principal_cap=origin.mortgage_limit, reserve_floor=base.reserve_floor,
+        cash_buffer=base.cash_buffer, committed_closing_usdc=closing,
+        premium_already_paid=origin.candidate.premium if origin.candidate else 0,
+        new_credit=False)
+    plan, next_phase = None, phase
+    if phase == "mortgage" or not principal:
+        # Existing USDC can settle even if BUCK credit/fund/markets are unavailable.
+        next_phase = "mortgage"
+        terms = _bank_terms(base)
+        context.update(basis="existing-exported-usdc", bank=terms,
+                       reason="ready" if not terms["amount"] or cash >= base.cash_buffer + terms["amount"] else "cash-buffer")
+        if context["reason"] == "ready":
+            plan = base
+    else:
+        read = lambda fn: fn.call(block_identifier=block)
+        if not read(d.reg.functions.isVerified(agent.address)) or read(d.reg.functions.isCarrying(agent.address)):
+            raise ValueError("household remainder needs a verified ordinary wallet")
+        held = read(d.buck.functions.balanceOf(agent.address))
+        market = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
+        fair = read(d.basket.functions.basketValueInBuck()) / 10**18 * (market.price_num / market.price_den)
+        t = carry.RefiTerms(debt=agent.mortgage / RAW, rate=agent.apr, face=agent._face0 / RAW,
+            premium_bp=agent.premium_rate, joined=True, payback_y=agent.p["theta"], risk=agent.p["risk"],
+            headroom=held / RAW, buck_value=fair, penalty_months=0, fixed_cost=0,
+            expected_relief_rate=0, expected_refund_growth=0, expected_wallet_growth=growth,
+            wallet_already_issued=True, issuance_limit=0)
+        # Same 0.1% sizing cushion used by the existing trade policies. It stays
+        # owned cash; it is not another demurrage calculation or trading fee.
+        available = max(0, held - base.reserve_floor - (held + 999) // 1000)
+        cap = min(origin.export_buck, available, market.reserve_buck * int(agent.max_impact_bp * 50) // 10**6)
+        target = (principal * 10_000 + 9999 - slippage_bp) // (10_000 - slippage_bp)
+        needed = market.sell_input(target) if target < 2**256 else None
+        if needed is not None:
+            cap = min(cap, needed)
+        context.update(basis="existing-buck/marginal", held_buck=held, available_buck=available,
+                       export_budget=cap, expected_wallet_growth=growth, rejections={},
+                       reason="no-worthwhile-remainder" if cap else "export-budget")
+        selected = None
+        for amount in sorted({cap * f // 20 for f in SIZE_FRACTIONS}, reverse=True):
+            minimum = market.sell_expected(amount) * (10_000 - slippage_bp) // 10_000
+            retired = min(principal, minimum)
+            if not amount or not retired:
+                continue
+            candidate = replace(base, export_buck=amount, minimum_usdc=minimum, mortgage_limit=retired)
+            bank = _bank_terms(candidate)
+            if cash + minimum < candidate.cash_buffer + bank["amount"]:
+                context["rejections"]["cash-buffer"] = context["rejections"].get("cash-buffer", 0) + 1
+                continue
+            # Original penalty terms are retained exactly, including rounding.
+            v = carry.refinance_quoted(t, retired / RAW, amount / RAW, 0, 0, 0)
+            penalty = bank["penalty"] / RAW
+            v.parts["penalty"] = -penalty
+            v.one_time += penalty
+            v.value -= penalty
+            v.go = v.go and v.value > 0
+            if not v.go:
+                context["rejections"]["economics"] = context["rejections"].get("economics", 0) + 1
+            key = retired, v.value, -amount
+            if v.go and (selected is None or key > selected):
+                plan, selected = candidate, key
+                context.update(reason="ready", score=asdict(v), bank=bank)
+    if (d.w3.eth.block_number != block or machine.flow is not flow or not machine.settlement_due or agent.calendar_machine.active or
+            flow["phase"] != phase or flow.get("revision", 0) != revision):
+        raise ValueError("household remainder observation changed")
+    return dict(plan=plan, phase=next_phase, context=context)
+
+
 def _wire(value):
     if isinstance(value, float) and not math.isfinite(value):
         raise ValueError("non-finite household event value")
@@ -296,7 +403,8 @@ class HouseholdRefinance:
         f = self.flow
         return {"schema": 1, "decision": self.decisions, "status": f["status"] if f else "idle",
                 "phase": f["phase"] if f else None, "hash": f.get("hash") if f else None,
-                "payment_due": self.payment_due, "settlement_due": self.settlement_due, "events": len(self.events)}
+                "payment_due": self.payment_due, "settlement_due": self.settlement_due,
+                "revision": f.get("revision", 0) if f else 0, "events": len(self.events)}
 
     def _accounts(self, d):
         a = self.agent
@@ -421,18 +529,18 @@ class HouseholdRefinance:
         fresh = c.requested_spendable if c else 0
         if book.spendable + fresh + plan.reserve_buy_net < plan.export_buck + plan.reserve_floor:
             raise ValueError("refinance would consume the BUCK reserve")
-        penalty = (plan.mortgage_limit * plan.penalty_numerator + plan.penalty_denominator - 1) // plan.penalty_denominator
-        if plan.mortgage_limit + plan.switch_cost + penalty >= 2**256:
+        bank = _bank_terms(plan)
+        if bank["amount"] >= 2**256:
             raise ValueError("household bank allocation overflows uint256")
         cash = d.usdc.functions.balanceOf(self.agent.address).call()
         if funding and cash < plan.cash_buffer + plan.reserve_buy_max_usdc:
             raise ValueError("reserve purchase would consume the USDC buffer")
-        if cash + plan.minimum_usdc < (plan.cash_buffer + plan.reserve_buy_max_usdc + plan.switch_cost +
-                                        plan.mortgage_limit + penalty):
+        if cash + plan.minimum_usdc < plan.cash_buffer + plan.reserve_buy_max_usdc + bank["amount"]:
             raise ValueError("refinance would consume the USDC buffer")
         context = _wire(context or {})
         self.decisions += 1
-        self.flow = {"plan": plan, "phase": "fund" if funding else "issue" if c else "export",
+        self.flow = {"plan": plan, "origin": plan, "revision": 0,
+                     "phase": "fund" if funding else "issue" if c else "export",
                      "status": "running", "hash": None, "issue_candidate": None,
                      "initial_closed": self.agent.refinance_closed, "terms": None}
         self.agent.funding_pending = True
@@ -443,17 +551,35 @@ class HouseholdRefinance:
         return self.advance(d, day, ctr)
 
     def retry_payment(self, d, day, ctr):
-        """PRE: a proved-refused bank leg, idle owner and calendar. POST:
-        only that leg is retried, under its original amount/buffer bounds;
-        no issue/export is replayed. Unknown outcomes are never retryable.
-        """
+        """Compatibility bank-only entry; use the shared remainder assessment."""
         if not self.payment_due:
             raise ValueError("household has no refused bank payment to retry")
-        if self.agent.mortgage < self.flow["plan"].mortgage_limit:
-            raise ValueError("household mortgage changed; bank allocation needs reassessment")
-        self.flow.update(status="running", hash=None, terms=None)
+        return self.resume(d, day, ctr)
+
+    def resume(self, d, day, ctr, **options):
+        """PRE: proved refusal, original intent and an idle owner/calendar.
+        POST: only reassessed unfinished cash phases can run. Their latest
+        bounds authenticate recovery; original caps/confirmed steps survive.
+        A declined quote retains the intent and sends nothing. Unknown receipts
+        cannot be repriced or retried through this entry point.
+        """
+        source = self.flow
+        assessment = assess_remainder(self.agent, d, day, **options)
+        if (self.flow is not source or not self.settlement_due or self.agent.calendar_machine.active or
+                source["phase"] != assessment["context"]["phase"] or
+                source.get("revision", 0) != assessment["context"]["revision"]):
+            raise ValueError("household remainder observation changed")
         self.agent.funding_pending = True
-        self._event(d, day, "retry", operation="mortgage")
+        if assessment["plan"] is None:
+            self.agent.last_action = "refinance-wait"
+            self.agent.last_error = assessment["context"]["reason"]
+            self._event(d, day, "waiting", context=assessment["context"])
+            return True
+        previous = self.flow["plan"]
+        self.flow.update(plan=assessment["plan"], phase=assessment["phase"], status="running", hash=None,
+                         terms=None, revision=self.flow.get("revision", 0) + 1)
+        self._event(d, day, "resumed", context=assessment["context"], prior_plan=asdict(previous),
+                    plan=asdict(assessment["plan"]), revision=self.flow["revision"])
         return self.advance(d, day, ctr)
 
     def _refuse(self, d, day, reason):
@@ -485,20 +611,21 @@ class HouseholdRefinance:
             terms = f["terms"]
             if result.amount != terms["amount"] or a.mortgage < terms["principal"]:
                 raise ValueError("household bank allocation changed")
-            if a.calendar_machine.bound:
+            if a.calendar_machine.bound and terms["principal"]:
                 a.calendar_machine.record_mortgage(d, receipt, terms["principal"])
-            else:
+            elif terms["principal"]:
                 a.mortgage -= terms["principal"]
                 a.external_paid += terms["principal"]
             a.switch_paid += terms["switch"]
             a.penalty_paid += terms["penalty"]
-            if f["plan"].candidate is not None:
+            if f.get("origin", f["plan"]).candidate is not None:
                 a.refinance_closed = True
-            a.refis += 1
-            a.deploys += 1
-            key = "rtrTopUps" if f["initial_closed"] else "rtrRefis"
-            ctr[key] = ctr.get(key, 0) + 1
-            ctr["rtrUsdRetired"] = ctr.get("rtrUsdRetired", 0) + terms["principal"] // RAW
+            if terms["principal"]:
+                a.refis += 1
+                a.deploys += 1
+                key = "rtrTopUps" if f["initial_closed"] else "rtrRefis"
+                ctr[key] = ctr.get(key, 0) + 1
+                ctr["rtrUsdRetired"] = ctr.get("rtrUsdRetired", 0) + terms["principal"] // RAW
             moved = {"usdc": result.amount, "principal_usdc": terms["principal"],
                      "switch_usdc": terms["switch"], "penalty_usdc": terms["penalty"]}
         # Commit the financial transition and cursor before optional observations.
@@ -591,12 +718,15 @@ class HouseholdRefinance:
                     self._refuse(d, day, "refinance reserve USDC buffer changed")
                     return True
             elif phase == "mortgage":
-                penalty = (p.mortgage_limit * p.penalty_numerator + p.penalty_denominator - 1) // p.penalty_denominator
-                amount = p.mortgage_limit + p.switch_cost + penalty
-                if d.usdc.functions.balanceOf(a.address).call() < amount + p.cash_buffer:
+                terms = _bank_terms(p)
+                if not terms["amount"]:
+                    f["phase"], f["satisfied"] = "complete", True
+                    self._event(d, day, "satisfied", reason="mortgage already retired; no bank amount due")
+                    continue
+                if d.usdc.functions.balanceOf(a.address).call() < terms["amount"] + p.cash_buffer:
                     self._refuse(d, day, "refinance USDC buffer changed")
                     return True
-                f["terms"] = {"amount": amount, "principal": p.mortgage_limit, "switch": p.switch_cost, "penalty": penalty}
+                f["terms"] = terms
             elif phase == "export" and d.buck.functions.balanceOf(a.address).call() < p.export_buck + p.reserve_floor:
                 self._refuse(d, day, "refinance BUCK reserve changed")
                 return True
@@ -632,6 +762,6 @@ class HouseholdRefinance:
             if not self._apply_known(d, day, result, ctr):
                 return True
         f["status"] = "complete"
-        a.funding_pending, a.last_action, a.last_error = False, "refinance", ""
+        a.funding_pending, a.last_action, a.last_error = False, "refinance-satisfied" if f.get("satisfied") else "refinance", ""
         self._event(d, day, "complete")
         return True

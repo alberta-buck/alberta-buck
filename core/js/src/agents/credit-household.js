@@ -2,7 +2,7 @@
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
   arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, externalPremiumDue, ROLES } from "./household-policy.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
-import { HouseholdRefinance, assessRefinance, observeRefinanceForecasts } from "./net-household.js";
+import { HouseholdRefinance, assessRefinance, assessRemainder, observeRefinanceForecasts } from "./net-household.js";
 import { HouseholdCalendar } from "./household-calendar.js";
 
 const E6 = 1_000_000n;
@@ -235,6 +235,15 @@ export class CreditHouseholdAgent {
   async retryNetRefinancePayment(world, day, ctr = this.refinanceMachine.counters ?? {}) {
     await this.prepareNetRefinance(world, day);
     return this.refinanceMachine.retryPayment(world, day, ctr);
+  }
+
+  async assessNetRefinanceRemainder(world, day, options = {}) {
+    return assessRemainder(this, world, day, options);
+  }
+
+  async resumeNetRefinance(world, day, ctr = this.refinanceMachine.counters ?? {}, options = {}) {
+    await this.prepareNetRefinance(world, day);
+    return this.refinanceMachine.resume(world, day, ctr, options);
   }
 
   async prepareNetRefinance(world, day) {

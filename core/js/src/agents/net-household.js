@@ -6,13 +6,21 @@ import { IssuancePending } from "../net-world.js";
 import { buyBuckExact, netPurchaseFromReceipt, sellBuck, netSaleFromReceipt } from "../market.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 import { markNetBasketPositions } from "../basket.js";
-import { observeNetMarket, netPurchaseCost, netSaleExpected } from "../net-market-quote.js";
-import { externalPremiumDue, terms, bestQuotedRefinance, stagedRefinance } from "./household-policy.js";
+import { observeNetMarket, netPurchaseCost, netSaleExpected, netSaleInput } from "../net-market-quote.js";
+import { externalPremiumDue, terms, bestQuotedRefinance, stagedRefinance, refinanceQuoted } from "./household-policy.js";
 
 const RAW = 1_000_000n, MAX = (1n << 256n) - 1n;
 const PHASES = ["fund", "issue", "export", "mortgage"];
 const BANK = "0x000000000000000000000000000000000000dEaD";
 const reserveFor = (c) => c.reserveRequired + (c.premium ? c.reserveBuffer : 0n);
+const min = (...v) => v.reduce((x, y) => x < y ? x : y), max = (x, y) => x > y ? x : y;
+const SIZE_FRACTIONS = [20n, 15n, 10n, 5n, 2n];
+const sizes = (cap) => [...new Set(SIZE_FRACTIONS.map((f) => cap * f / 20n))]
+  .sort((x, y) => x > y ? -1 : x < y ? 1 : 0);
+const bankTerms = (p) => {
+  const penalty = (p.mortgage_limit * p.penalty_numerator + p.penalty_denominator - 1n) / p.penalty_denominator;
+  return { amount: p.mortgage_limit + p.switch_cost + penalty, principal: p.mortgage_limit, switch: p.switch_cost, penalty };
+};
 const snake = (key) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 const wire = (value) => {
   if (typeof value === "bigint") return String(value);
@@ -66,13 +74,10 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
   const t = terms(state, a.p);
   const utilization = a.face * k * BigInt(Math.trunc(a.p.utilization * 1e9)) / (10n ** 18n * 10n ** 9n);
   const impactPpm = BigInt(Math.trunc(a.p.max_impact_bp * 50));
-  const min = (...v) => v.reduce((x, y) => x < y ? x : y), max = (x, y) => x > y ? x : y;
   let buckCap = market.reserve_buck * impactPpm / 1_000_000n;
   const cashCap = market.reserve_usdc * impactPpm / 1_000_000n;
   if (a.mortgage < market.reserve_usdc) buckCap = min(buckCap, market.reserve_buck * a.mortgage * 1_000_000n /
     ((market.reserve_usdc - a.mortgage) * (1_000_000n - market.fee_ppm)));
-  const fractions = [20n, 15n, 10n, 5n, 2n], sizes = (cap) => [...new Set(fractions.map((f) => cap * f / 20n))]
-    .sort((x, y) => x > y ? -1 : x < y ? 1 : 0);
   const context = { block: blockNumber, considered: 0, issuance_quotes: 0, rejections: {}, feasible: 0,
     forecasts: { relief_rate: expected_relief_rate, refund_growth: expected_refund_growth, wallet_growth: expected_wallet_growth }, protected_buck: reserve_floor };
   const plans = [], values = [], programmes = [], refunds = new Map(), active = book.facilities.reduce((n, f) => n + f.activated, 0n);
@@ -174,6 +179,86 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
   return { plan: index === null ? null : plans[index], verdict, context };
 }
 
+/** Read-only cash remainder assessment after a proved refusal. No new credit,
+ * fund or insurer quote: existing principal/premium/relief stay in the books.
+ * Keep original export/principal caps and reserves. The committed closing fee
+ * remains in the bank cash budget, rather than being earned/charged a second
+ * time in the marginal wallet-export score. */
+export async function assessRemainder(a, world, day, { expected_wallet_growth = null, slippage_bp = 50 } = {}) {
+  const m = a.refinanceMachine;
+  if (!Number.isSafeInteger(day) || day < 0 || world.accounting !== "net" || !m.settlementDue || a.calendarMachine.active) {
+    throw new Error("household remainder needs a refused settlement and idle calendar");
+  }
+  if (a.calendarMachine.bound && a.calendarMachine.day !== day) throw new Error("household calendar books must be prepared before remainder assessment");
+  if (!Number.isInteger(slippage_bp) || slippage_bp < 0 || slippage_bp > 1000) throw new Error("invalid household remainder slippage");
+  const growth = expected_wallet_growth ?? Math.expm1(-.02);
+  if (typeof growth !== "number" || !Number.isFinite(growth) || growth < -1) {
+    throw new Error("invalid expected wallet growth");
+  }
+  const flow = m.flow, phase = flow.phase, revision = flow.revision ?? 0, origin = flow.origin ?? flow.plan;
+  const s = world.session, owner = world.holderAddress(a.account), block = (await s.client.getBlock()).number;
+  const at = (c, functionName, args = []) => s.client.readContract({ address: c.address, abi: c.abi, functionName, args, blockNumber: block });
+  const principal = min(origin.mortgage_limit, a.mortgage), cash = await at(world.usdc, "balanceOf", [owner]);
+  const closing = a.refinanceClosed ? 0n : origin.switch_cost;
+  const base = { ...flow.plan, candidate: null, mortgage_limit: principal, switch_cost: closing,
+    cash_buffer: max(origin.cash_buffer, a.buffer), reserve_floor: origin.reserve_floor,
+    penalty_numerator: origin.penalty_numerator, penalty_denominator: origin.penalty_denominator,
+    reserve_buy_net: 0n, reserve_buy_max_usdc: 0n };
+  const context = { block, phase, revision, usdc: cash, mortgage: a.mortgage, export_cap: origin.export_buck,
+    principal_cap: origin.mortgage_limit, reserve_floor: base.reserve_floor, cash_buffer: base.cash_buffer,
+    committed_closing_usdc: closing, premium_already_paid: origin.candidate?.premium ?? 0n, new_credit: false };
+  let plan = null, nextPhase = phase;
+  if (phase === "mortgage" || !principal) {
+    nextPhase = "mortgage";
+    const bank = bankTerms(base);
+    Object.assign(context, { basis: "existing-exported-usdc", bank,
+      reason: !bank.amount || cash >= base.cash_buffer + bank.amount ? "ready" : "cash-buffer" });
+    if (context.reason === "ready") plan = base;
+  } else {
+    if (!await at(world.reg, "isVerified", [owner]) || await at(world.reg, "isCarrying", [owner])) {
+      throw new Error("household remainder needs a verified ordinary wallet");
+    }
+    const held = await at(world.buck, "balanceOf", [owner]);
+    const market = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber: block });
+    const fair = Number(await at(world.basket, "basketValueInBuck")) / 1e18 * (Number(market.price_num) / Number(market.price_den));
+    const t = { debt: Number(a.mortgage) / 1e6, rate: a.p.apr, face: Number(a.face) / 1e6,
+      premium_bp: a.p.premium_bp, joined: true, payback_y: a.p.theta, risk: a.p.risk,
+      headroom: Number(held) / 1e6, buck_value: fair, penalty_months: 0, fixed_cost: 0,
+      expected_relief_rate: 0, expected_refund_growth: 0, expected_wallet_growth: growth,
+      premium_refund_fraction: 1, wallet_already_issued: true, issuance_limit: 0 };
+    // Same owned 0.1% sizing cushion as the existing trade policies; it is
+    // neither another demurrage calculation nor a paid trading fee.
+    const available = max(0n, held - base.reserve_floor - (held + 999n) / 1000n);
+    let cap = min(origin.export_buck, available, market.reserve_buck * BigInt(Math.trunc(a.p.max_impact_bp * 50)) / 1_000_000n);
+    const target = (principal * 10000n + BigInt(9999 - slippage_bp)) / BigInt(10000 - slippage_bp);
+    const needed = target <= MAX ? netSaleInput(market, target) : null;
+    if (needed !== null) cap = min(cap, needed);
+    Object.assign(context, { basis: "existing-buck/marginal", held_buck: held, available_buck: available,
+      export_budget: cap, expected_wallet_growth: growth, rejections: {}, reason: cap ? "no-worthwhile-remainder" : "export-budget" });
+    let selected = null;
+    for (const amount of sizes(cap)) {
+      const minimum = netSaleExpected(market, amount) * BigInt(10000 - slippage_bp) / 10000n, retired = min(principal, minimum);
+      if (!amount || !retired) continue;
+      const candidate = { ...base, export_buck: amount, minimum_usdc: minimum, mortgage_limit: retired }, bank = bankTerms(candidate);
+      if (cash + minimum < candidate.cash_buffer + bank.amount) {
+        context.rejections["cash-buffer"] = (context.rejections["cash-buffer"] ?? 0) + 1; continue;
+      }
+      const v = refinanceQuoted(t, Number(retired) / 1e6, Number(amount) / 1e6, 0, 0, 0), penalty = Number(bank.penalty) / 1e6;
+      v.parts.penalty = -penalty; v.one_time += penalty; v.value -= penalty; v.go = v.go && v.value > 0;
+      if (!v.go) context.rejections.economics = (context.rejections.economics ?? 0) + 1;
+      const better = selected === null || retired > selected.principal
+        || retired === selected.principal && (v.value > selected.value || v.value === selected.value && amount < selected.amount);
+      if (v.go && better) {
+        plan = candidate; selected = { principal: retired, value: v.value, amount };
+        Object.assign(context, { reason: "ready", score: v, bank });
+      }
+    }
+  }
+  if ((await s.client.getBlock()).number !== block || m.flow !== flow || !m.settlementDue || a.calendarMachine.active
+      || flow.phase !== phase || (flow.revision ?? 0) !== revision) throw new Error("household remainder observation changed");
+  return { plan, phase: nextPhase, context };
+}
+
 /** One serialized local-EVM operation and append-only public event stream.
  * It is neither an economic optimizer nor a complete saved-world importer.
  * The household owns its calendar and counterfactual; receipt evidence does
@@ -186,7 +271,8 @@ export class HouseholdRefinance {
   status() {
     const f = this.flow;
     return { schema: 1, decision: this.decisions, status: f?.status ?? "idle", phase: f?.phase ?? null,
-      hash: f?.hash ?? null, payment_due: this.paymentDue, settlement_due: this.settlementDue, events: this.events.length };
+      hash: f?.hash ?? null, payment_due: this.paymentDue, settlement_due: this.settlementDue,
+      revision: f?.revision ?? 0, events: this.events.length };
   }
   async accounts(world) {
     const a = this.agent, owner = world.holderAddress(a.account);
@@ -283,11 +369,11 @@ export class HouseholdRefinance {
     if (book.spendable + (c?.requestedSpendable ?? 0n) + p.reserve_buy_net < p.export_buck + p.reserve_floor) {
       throw new Error("refinance would consume the BUCK reserve");
     }
-    const penalty = (p.mortgage_limit * p.penalty_numerator + p.penalty_denominator - 1n) / p.penalty_denominator;
-    if (p.mortgage_limit + p.switch_cost + penalty > MAX) throw new Error("household bank allocation overflows uint256");
+    const bank = bankTerms(p);
+    if (bank.amount > MAX) throw new Error("household bank allocation overflows uint256");
     const cash = await world.session.call(world.usdc, "balanceOf", [owner]);
     if (funding && cash < p.cash_buffer + p.reserve_buy_max_usdc) throw new Error("reserve purchase would consume the USDC buffer");
-    if (cash + p.minimum_usdc < p.cash_buffer + p.reserve_buy_max_usdc + p.switch_cost + p.mortgage_limit + penalty) {
+    if (cash + p.minimum_usdc < p.cash_buffer + p.reserve_buy_max_usdc + bank.amount) {
       throw new Error("refinance would consume the USDC buffer");
     }
     context = wire(context);
@@ -295,7 +381,8 @@ export class HouseholdRefinance {
     this.counters = ctr;
     this.flow = { plan: { ...p, candidate: c ? { ...c, reasons: [...c.reasons] } : null },
       phase: funding ? "fund" : c ? "issue" : "export", status: "running", hash: null, issue_candidate: null,
-      initial_closed: a.refinanceClosed, terms: null };
+      initial_closed: a.refinanceClosed, terms: null, revision: 0 };
+    this.flow.origin = this.flow.plan;
     a.fundingPending = true;
     const limits = Object.fromEntries(["surplus_policy", "theta", "issue_premium", "retire_disc", "utilization", "max_impact_bp"]
       .map((k) => [k, a.p[k]]));
@@ -303,14 +390,31 @@ export class HouseholdRefinance {
     await this.event(world, day, "planned", { plan, context, limits, market: await this.market(world), basket: await this.basket(world) });
     return this.advance(world, day, ctr);
   }
-  /** Only a proved-refused bank leg can retry; original amount/buffer bounds
-   * remain, and confirmed issue/export phases cannot be replayed. */
+  /** Compatibility bank-only entry; reuse the shared remainder assessment. */
   async retryPayment(world, day, ctr = this.counters ?? {}) {
     if (!this.paymentDue) throw new Error("household has no refused bank payment to retry");
-    if (this.agent.mortgage < this.flow.plan.mortgage_limit) throw new Error("household mortgage changed; bank allocation needs reassessment");
-    Object.assign(this.flow, { status: "running", hash: null, terms: null });
+    return this.resume(world, day, ctr);
+  }
+  /** Only known refused cash phases can resume. Keep original caps and all
+   * confirmed steps; authenticate recovery against the new saved bounds.
+   * A declined quote sends nothing, and an unknown outcome cannot reprice. */
+  async resume(world, day, ctr = this.counters ?? {}, options = {}) {
+    const source = this.flow;
+    const assessed = await assessRemainder(this.agent, world, day, options);
+    if (this.flow !== source || !this.settlementDue || this.agent.calendarMachine.active
+        || source.phase !== assessed.context.phase || (source.revision ?? 0) !== assessed.context.revision) {
+      throw new Error("household remainder observation changed");
+    }
     this.agent.fundingPending = true;
-    await this.event(world, day, "retry", { operation: "mortgage" });
+    if (assessed.plan === null) {
+      this.agent.lastAction = "refinance-wait"; this.agent.lastError = assessed.context.reason;
+      await this.event(world, day, "waiting", { context: assessed.context }); return true;
+    }
+    const previous = this.flow.plan;
+    Object.assign(this.flow, { plan: assessed.plan, phase: assessed.phase, status: "running", hash: null,
+      terms: null, revision: (this.flow.revision ?? 0) + 1 });
+    await this.event(world, day, "resumed", { context: assessed.context, prior_plan: previous,
+      plan: assessed.plan, revision: this.flow.revision });
     return this.advance(world, day, ctr);
   }
   async refuse(world, day, reason) {
@@ -340,14 +444,16 @@ export class HouseholdRefinance {
     } else {
       const t = f.terms;
       if (result.amount !== t.amount || a.mortgage < t.principal) throw new Error("household bank allocation changed");
-      if (a.calendarMachine.bound) await a.calendarMachine.recordMortgage(world, receipt, t.principal);
-      else { a.mortgage -= t.principal; a.externalPaid += t.principal; }
+      if (a.calendarMachine.bound && t.principal) await a.calendarMachine.recordMortgage(world, receipt, t.principal);
+      else if (t.principal) { a.mortgage -= t.principal; a.externalPaid += t.principal; }
       a.switchPaid += t.switch; a.penaltyPaid += t.penalty;
-      if (f.plan.candidate) a.refinanceClosed = true;
-      a.refis++; a.deploys++;
-      const key = f.initial_closed ? "rtrTopUps" : "rtrRefis";
-      ctr[key] = (ctr[key] ?? 0) + 1;
-      ctr.rtrUsdRetired = (ctr.rtrUsdRetired ?? 0n) + t.principal / RAW;
+      if ((f.origin ?? f.plan).candidate) a.refinanceClosed = true;
+      if (t.principal) {
+        a.refis++; a.deploys++;
+        const key = f.initial_closed ? "rtrTopUps" : "rtrRefis";
+        ctr[key] = (ctr[key] ?? 0) + 1;
+        ctr.rtrUsdRetired = (ctr.rtrUsdRetired ?? 0n) + t.principal / RAW;
+      }
       amounts = { usdc: result.amount, principal_usdc: t.principal, switch_usdc: t.switch, penalty_usdc: t.penalty };
     }
     // Commit financial effects/cursor before optional account observations.
@@ -416,12 +522,15 @@ export class HouseholdRefinance {
           await this.refuse(world, day, "refinance reserve USDC buffer changed"); return true;
         }
       } else if (phase === "mortgage") {
-        const penalty = (p.mortgage_limit * p.penalty_numerator + p.penalty_denominator - 1n) / p.penalty_denominator;
-        const amount = p.mortgage_limit + p.switch_cost + penalty;
-        if (await s.call(world.usdc, "balanceOf", [owner]) < amount + p.cash_buffer) {
+        const bank = bankTerms(p);
+        if (!bank.amount) {
+          f.phase = "complete"; f.satisfied = true;
+          await this.event(world, day, "satisfied", { reason: "mortgage already retired; no bank amount due" }); continue;
+        }
+        if (await s.call(world.usdc, "balanceOf", [owner]) < bank.amount + p.cash_buffer) {
           await this.refuse(world, day, "refinance USDC buffer changed"); return true;
         }
-        f.terms = { amount, principal: p.mortgage_limit, switch: p.switch_cost, penalty };
+        f.terms = bank;
       } else if (phase === "export" && await s.call(world.buck, "balanceOf", [owner]) < p.export_buck + p.reserve_floor) {
         await this.refuse(world, day, "refinance BUCK reserve changed"); return true;
       }
@@ -447,7 +556,7 @@ export class HouseholdRefinance {
       }
       if (!await this.applyKnown(world, day, result, ctr)) return true;
     }
-    f.status = "complete"; a.fundingPending = false; a.lastAction = "refinance"; a.lastError = "";
+    f.status = "complete"; a.fundingPending = false; a.lastAction = f.satisfied ? "refinance-satisfied" : "refinance"; a.lastError = "";
     await this.event(world, day, "complete");
     return true;
   }

@@ -7,7 +7,7 @@ from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
-from alberta_buck.sim.net_household import HouseholdRefinance, assess_refinance, observe_refinance_forecasts
+from alberta_buck.sim.net_household import HouseholdRefinance, assess_refinance, assess_remainder, observe_refinance_forecasts
 from alberta_buck.sim.household_calendar import HouseholdCalendar
 from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted
 from buck_core.session import _txhex, custom_error_name
@@ -361,6 +361,14 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         """Retry only a proved-refused bank leg; keep its confirmed issue/export."""
         self._prepare_net_refinance(d, day)
         return self.refinance_machine.retry_payment(d, day, ctr)
+
+    def assess_net_refinance_remainder(self, d, day, **options):
+        """Read current cash-only completion choices; never quote another issue."""
+        return assess_remainder(self, d, day, **options)
+
+    def resume_net_refinance(self, d, day, ctr, **options):
+        self._prepare_net_refinance(d, day)
+        return self.refinance_machine.resume(d, day, ctr, **options)
 
     def _prepare_net_refinance(self, d, day):
         """Serialize refinancing with calendar flows and the saved buyback intent."""
