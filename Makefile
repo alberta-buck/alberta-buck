@@ -1720,7 +1720,7 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 # the same builder and keeper with a real USDC withdrawal shock. To run it
 # alone (the household fault suite is slower):
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-equilibrium-arb.tevm.test.js
-# Staged mortgage admission/actual first-closing and later-tranche payments:
+# Automatic debtor cadence, staged first closing, receipt/calendar ordering:
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-programme.tevm.test.js
 # Known export/bank refusals, changed debt, waits and receipt-safe completion:
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-resume.tevm.test.js

@@ -404,6 +404,7 @@ class HouseholdRefinance:
         return {"schema": 1, "decision": self.decisions, "status": f["status"] if f else "idle",
                 "phase": f["phase"] if f else None, "hash": f.get("hash") if f else None,
                 "payment_due": self.payment_due, "settlement_due": self.settlement_due,
+                "last_attempt_day": self.agent._net_refinance_day, "next_decision_day": self.agent._next_decision,
                 "revision": f.get("revision", 0) if f else 0, "events": len(self.events)}
 
     def _accounts(self, d):

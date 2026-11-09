@@ -70,8 +70,10 @@ books. Dated bank evidence corrects interest from its effective payment day.
 Both Python runners and the JS day clock now publish one household epoch
 and use absolute targets, preventing wheel waits or fractional ticks from
 accumulating calendar drift. Later arrivals share that same date anchor.
-Automatic policy/surplus/exit scheduling still gates the normal household
-loop. Full restoration is deferred, not a prerequisite for uninterrupted
+The explicit automatic debtor component now reuses that dispatcher/calendar,
+retaining keyed adoption timing and seeking fresh bounded tranches daily
+after issuance. Full policy/surplus/exit scheduling still gates the normal
+household loop. Full restoration is deferred, not a prerequisite for uninterrupted
 interactive and five-year acceptance (November 8 priority below).
 Nominal issuance references and net liquidation/buyback units have distinct
 real-pool vectors; no controller-policy change is required by that distinction.
@@ -1198,6 +1200,16 @@ final logs and the remaining household/five-year boundary.
   A household already committed to refinancing should not wait an arbitrary
   new adoption delay between every affordable tranche. Retain heterogeneous
   adoption/price/risk thresholds and adaptive surplus saving/paydown.
+- [X] Implement the automatic debtor refinancing component on the existing
+  owner dispatcher. Recover previous receipts and buybacks, process healthy
+  due calendar work, resume known refused cash settlement before new credit.
+  Preserve keyed pre-adoption phase/cadence; actual issuers seek a fresh
+  bounded tranche daily. Limit new assessment/resumption to once per day;
+  uncertain evidence blocks later sends and recovered uncertainty consumes
+  the call. Expose next/last attempt days and declined/unavailable histories.
+  Python actual qualification passes; matching JS acceptance is in progress.
+  This completes the component, not saver/surplus/working-money/exits or the
+  full normal act gate.
 - [ ] Exercise the complete small ecosystem interactively first: households,
   basket, Jubilee, wheel arb and an explicit external-investor off/on
   comparison. Reuse the savings server and existing JS world; expose
@@ -1485,6 +1497,8 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-08 | Resume refused household cash settlement without new credit | Both households preview and resume the original intent through the same receipt machine, capping current exports/principal by the original plan. Saved revisions authenticate lost replies; unknown outcomes stay stopped. Existing cash economics excludes duplicate premium/relief benefits while retaining the full committed closing cost in the bank budget. Bank-only work needs no market/credit read; smaller mortgages, fee-only and no-payment completion preserve actual money and counters. Shared inverse sale sizing uses independent binary-search vectors. Final Python SDK/policy/calendar/actual/report set: 188 passed with fresh short JSON/PDFs. Fast JS checks: 77 passed. Actual JS: all 11 shared live cases passed (12 including parent), covering waits with wages, aged cash, lost/unknown replies and concurrent triggers. Browser equilibrium build passed. Existing Make target includes the focused resumption fixture. No Solidity or second engine; normal autonomous saving/exits and five-year campaigns remain open. | This commit |
 
+| 2026-11-08 | Drive the existing debtor refinance component automatically | Added matching explicit Python/JS dispatcher entries: recover prior receipts/buybacks, process healthy due calendar work, resume refused cash before new borrowing. Keep keyed pre-adoption timing and a daily fresh-tranche cadence after actual issuance, with one fresh assessment/resumption per day and a concurrent JS guard. Expose last/next attempt dates and declined/unavailable decision histories. Extended the existing staged-programme fixture instead of adding a world/runner; both languages use the same settings, phases and interruption chronology. Final Python supported SDK/policy/calendar/actual/report set: 189 passed, regenerating short JSON/PDFs; fast JS: 77 passed; browser build passed. Matching actual JS chronology is running at this checkpoint and its final acceptance is not yet claimed. No Solidity changed. Complete normal saving/saver/working-money/exit behavior and five-year acceptance remain gated. | This commit |
+
 ** Calendar-qualified checkpoint (6bf53283)
 
 - Worktree =.claude/worktrees/buck-compound=; branch
@@ -1706,7 +1720,7 @@ implementation and validation milestones remain in the journal above.
   Reuse that same path in both primary runtimes, then short complete worlds
   and actual five-year JSON/PDF campaigns. Save/resume and Notes remain later.
 
-** Current handoff: cash-only refinance resumption
+** Cash-only refinance resumption checkpoint (a81088e6)
 
 - Branch/worktree remain =feature/household-minimal-ecosystem= at
   =.claude/worktrees/buck-compound=. Completed predecessor checkpoints:
@@ -1752,3 +1766,39 @@ implementation and validation milestones remain in the journal above.
   implement reserve-safe surplus/working money, saver credit investment and
   guarded exits. Normal act remains gated until those cash paths work;
   short complete worlds and actual five-year JSON/PDF campaigns follow.
+
+** Current handoff: automatic debtor refinancing
+
+- Branch/worktree remain =feature/household-minimal-ecosystem= /
+  =.claude/worktrees/buck-compound=. Cash-only resumption is committed at
+  =a81088e6=, with complete Python/JS live cases and browser build above.
+- =advance_net_refinancing= / =advanceNetRefinancing= now handles the debtor's
+  calendar/recovery, known cash remainders and fresh assessment through the
+  existing components. No new engine/calendar, Solidity or monetary model.
+  Healthy wages/bills can precede the same day's decision; recovered
+  uncertain outcomes consume the call, and unknown outcomes stop new sends.
+  Existing recovery callers keep their prior calendar-consumes-turn default.
+- Initial keyed phase/cadence still separates households. Once issuance has
+  actually committed them, fresh bounded legs are considered daily. A
+  pre-adoption decline retains its cadence. At most one new assessment or
+  known-refusal resumption is attempted each day. JS rejects simultaneous
+  dispatcher triggers. Expose last/next attempt days and declined/unavailable
+  observations through the existing personal machine and event stream.
+- The existing staged-programme JS fixture now exercises automatic dispatch
+  as well as its previous whole-programme/full-closing assertions. Matching
+  Python uses the same settings, deterministic member phases and chronology:
+  multiple real loans, lost bank reply, refused export/cash-only resume,
+  unavailable fund mark, adoption decline, due exit gate, lost wage receipt
+  and a hashless bank outcome blocking the following payday's sends.
+  Final Python supported SDK/policy/calendar/actual/report set: *189 passed*,
+  no skips, in =/private/tmp/buck-household-dispatch-all-py.log=, with fresh
+  short JSON/PDFs under =build/test/household-dispatch/=. Fast JS checks:
+  *77 passed*. The matching actual JS chronology remains running in
+  =/private/tmp/buck-household-dispatch-js.log=; record the final result
+  before the next checkpoint. The equilibrium browser build passes in
+  =/private/tmp/buck-household-dispatch-browser.log=.
+- Next: reserve-safe discretionary saving/paydown and working wallet, saver
+  credit investment and guarded exits. Keep normal act gated until these
+  complete, then exercise the same path in both primary runtimes, short
+  complete economies and actual five-year JSON/PDF campaigns. Save/resume
+  remains later, as do Notes/proof restoration and release acceptance.

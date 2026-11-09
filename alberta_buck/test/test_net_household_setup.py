@@ -36,8 +36,10 @@ def household_world(monkeypatch):
     with PyrevmAnvil(port=0) as evm:
         chain = Chain(evm.w3, evm.w3.eth.accounts[0])
         d = deploy(chain, evm, scenario, rng, verbose=False, basket_impl="equity-ops", equity_machine=True)
-        def make(i, cls, *, assets=1, settings=None, arrive_day=None):
+        def make(i, cls, *, assets=1, settings=None, arrive_day=None, member=None):
             agent = cls(i)
+            if member is not None:
+                agent.member = member
             if arrive_day is not None:
                 agent.arrive_day = arrive_day
             agent.settings = dict(home_k=1000, premium_bp=100, asset_count=assets) | (settings or {})
@@ -1081,3 +1083,140 @@ def test_calendar_dates_refinance_receipts_and_keeps_its_paydays(household_world
     assert a.external_paid == b["mortgage_limit"] + a.payment and len(sends) == 4
     assert a.switch_paid == b["switch_cost"] and a.refis == 1
     assert not m.active and m.income_due == 0
+
+
+def test_automatic_debtor_prioritizes_calendar_and_remainders_before_fresh_credit(household_world, monkeypatch):
+    d, scenario, make = household_world
+    spec = REFINANCE["programme"]
+    a, b = [make(80 + i, CreditHouseholdAgent, settings=spec["settings"], member=member)
+            for i, member in enumerate(spec["members"])]
+    assert [x.p["phase"] for x in (a, b)] == spec["adoption_phases"]
+    for x in (a, b):
+        x._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("approve", args=[d.swap_guard.address, 2**256 - 1]))
+        x._proxy_exec(d, d.buck.address, d.buck.encode_abi("approve", args=[d.permit2.address, 2**256 - 1]))
+        x._proxy_exec(d, d.permit2.address, d.permit2.encode_abi(
+            "approve", args=[d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1]))
+    d.household_epoch = d.w3.eth.get_block("latest")["timestamp"]
+    ctr = {}
+    def at(day):
+        d.anvil.warp_to(d.household_epoch + day * 86400)
+        d.chain.send(d.kctrl.functions.compute())
+    def step(x, day, *, explicit=False):
+        return x.advance_net_refinancing(d, day, ctr, forecasts=spec["forecasts"] if explicit else None)
+    def principal(x):
+        return d.net_credit_ops.household(x.address, x._token_ids).issued
+
+    for x in (a, b):
+        assert not step(x, 0)
+        assert x._started and d.usdc.functions.balanceOf(x.address).call() == int(spec["seed_usdc"])
+        assert principal(x) == 0 and x._net_refinance_day is None
+    at(1)
+    a.calendar_machine.prepare(d, 1)
+    before = (d.w3.eth.block_number, a.mortgage, a.hypo_mortgage)
+    a.p["utilization"] = spec["insufficient_utilization"]
+    assert a.assess_net_refinance(d, 1, **spec["forecasts"])["plan"] is None
+    a.p["utilization"] = spec["settings"]["utilization"]
+    assessed = a.assess_net_refinance(d, 1, **spec["forecasts"])
+    assert before == (d.w3.eth.block_number, a.mortgage, a.hypo_mortgage)
+    assert assessed["context"]["reason"] == "worthwhile-staged-refinance"
+    assert assessed["context"]["programme"]["tranches"] > 1
+    fixed = int(spec["settings"]["switch_k"] * 1000 * RAW)
+    assert assessed["plan"].switch_cost == fixed
+    allocated = assessed["context"]["programme"]["fixed_cost_allocated"]
+    assert 0 < allocated < fixed / RAW
+    assert assessed["verdict"].value - fixed / RAW + allocated < 0
+    assert step(a, 1, explicit=True)
+    assert a.refis == 1 and a.refinance_closed and a.switch_paid == fixed, a.last_error
+    assert a._next_decision == 2 and not step(b, 1)
+    stamp, issued = d.w3.eth.block_number, principal(a)
+    assert not step(a, 1) and d.w3.eth.block_number == stamp and principal(a) == issued
+
+    at(2)
+    pay = d.net_settlement_ops.pay_exact
+    def lost(*args):
+        result = pay(*args)
+        raise TransactionReceiptPending(_txhex(result.receipt["transactionHash"]))
+    with monkeypatch.context() as patch:
+        patch.setattr(d.net_settlement_ops, "pay_exact", lost)
+        assert step(a, 2)
+    m = a.refinance_machine
+    assert m.active and m.flow["phase"] == "mortgage" and m.flow["status"] == "pending"
+    issued, paid, bank = principal(a), a.external_paid, d.usdc.functions.balanceOf(a.SINK).call()
+    at(3)
+    assert step(a, 3)
+    assert not m.active and a.refis == 2 and principal(a) == issued
+    assert a.external_paid > paid and d.usdc.functions.balanceOf(a.SINK).call() == bank
+    assert a.switch_paid == fixed
+
+    at(4)
+    start = a.start_net_refinance
+    def refuse(world, plan, *args, **kwargs):
+        return start(world, replace(plan, minimum_usdc=plan.export_buck * 2), *args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(a, "start_net_refinance", refuse)
+        assert step(a, 4)
+    assert m.settlement_due and m.flow["phase"] == "export" and a.refis == 2
+    issued = principal(a)
+    at(5)
+    with monkeypatch.context() as patch:
+        patch.setattr(a, "assess_net_refinance", lambda *a, **k: pytest.fail("unsettled export cannot request new credit"))
+        assert step(a, 5)
+    assert not m.settlement_due and a.refis == 3 and principal(a) == issued, a.last_error
+
+    at(6)
+    issued, paid = principal(a), a.external_paid
+    with monkeypatch.context() as patch:
+        def unavailable():
+            raise RuntimeError("fund mark unavailable")
+        patch.setattr(d.net_credit_ops, "quote_global_relief_rate", unavailable)
+        assert step(a, 6)
+        assert a.last_action == "refinance-unavailable"
+        assert not step(a, 6)
+    assert principal(a) == issued and a.external_paid == paid
+    assert m.events[-1]["status"] == "unavailable" and a._next_decision == 7
+    at(7)
+    assert step(a, 7) and a.refis == 4, a.last_error
+
+    at(9)
+    b.p["utilization"] = spec["insufficient_utilization"]
+    assert step(b, 9, explicit=True) and b.last_action == "declined" and not b.joined
+    assert b._next_decision == 21 and b.refinance_machine.events[-1]["status"] == "declined"
+    at(10)
+    assert not step(b, 10) and principal(b) == 0
+    at(21)
+    b.p["utilization"] = spec["settings"]["utilization"]
+    assert step(b, 21, explicit=True) and b.refis == 1 and b._next_decision == 22, b.last_error
+    at(22)
+    b._divest_day = 22
+    with pytest.raises(NotImplementedError, match="asset exits"):
+        step(b, 22)
+
+    at(30)
+    issued = principal(a)
+    mint = a.calendar_machine._mint
+    def lost_income(*args):
+        receipt = mint(*args)
+        raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
+    with monkeypatch.context() as patch:
+        patch.setattr(a.calendar_machine, "_mint", lost_income)
+        assert step(a, 30)
+    assert a.calendar_machine.active and a.income_total == 0 and principal(a) == issued
+    assert step(a, 30)  # recovered wage/bills consume the call before any fresh loan
+    assert not a.calendar_machine.active and a.income_total == a.income_annual // 12
+    assert principal(a) == issued and a.refis == 4
+    at(31)
+    with monkeypatch.context() as patch:
+        def unknown(*args):
+            pay(*args)
+            raise TransactionReceiptPending(None)
+        patch.setattr(d.net_settlement_ops, "pay_exact", unknown)
+        assert step(a, 31)
+    assert m.active and m.flow["status"] == "pending" and m.flow["hash"] is None
+    issued, wages, bank = principal(a), a.income_total, d.usdc.functions.balanceOf(a.SINK).call()
+    at(60)
+    assert step(a, 60)
+    assert a.income_total == wages and principal(a) == issued and d.usdc.functions.balanceOf(a.SINK).call() == bank
+    assert a.calendar_machine.income_due == a.income_annual // 12
+    assert a.hypo_paid > 0 and a.hypo_interest > 0
+    assert [e["day"] for e in m.events if e["status"] == "planned" and e.get("kind") != "calendar"] == [1, 2, 4, 7, 31]
+    assert not a._net_dispatching and not d.chain.mismatches

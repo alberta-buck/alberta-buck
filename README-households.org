@@ -28,8 +28,9 @@ bounded net BUCK reserve when needed, then execute
 through =start_net_refinance= / =startNetRefinance= with a checkpoint after
 each authenticated receipt. The explicit calendar component now schedules
 arrival capital, wages, bills and mortgage payments with receipt recovery.
-Normal household decisions remain gated while automatic policy scheduling,
-saving/paydown and exits are ported. Save/resume is deferred; it is not a
+The automatic debtor refinancing component is implemented below. Normal
+household decisions remain gated while saving/paydown, saver investment,
+working money and exits are ported. Save/resume is deferred; it is not a
 prerequisite for uninterrupted household or five-year runs. An isolated funded-plan test is not a
 completed household economy or five-year stability result.
 
@@ -126,8 +127,51 @@ not extra liquid wealth: its mint might already have executed. A provisional
 mortgage awaits bank evidence and/or its block date. The existing public
 decision stream records calendar transitions, due/effective dates, actual
 accounts, arrears and counterfactual balances. These supply future household
-charts and decision tables without a new reporting runner. The automatic
+charts and decision tables without a new reporting runner. The full
 policy loop remains a completion gate; full-state import is a later task.
+
+* Automatic debtor refinancing
+
+=advance_net_refinancing(d, day, counters)= /
+=await advanceNetRefinancing(world, day, counters)= drives the existing
+receipt and calendar components for one debtor. Prepare trading approvals
+and perform normal external wheel/controller upkeep before calling it at
+the current EVM day. Neither a forecast nor this scheduler can bypass K,
+liquidity, the required issuance front or cash buffers. Its default assessment
+uses the observed Jubilee rate; explicit comparison forecasts use the same
+all-three-rates option as the read-only assessor.
+
+The dispatcher first recovers outstanding transactions, then processes due
+income/bills and any known buyback target. A healthy calendar can finish
+before the day's refinancing choice. Recovering an uncertain transaction
+consumes the call; a missing outcome keeps all later sends stopped, while
+the independent counterfactual and queued obligations continue advancing.
+Known refused exports/bank payments resume from current cash before another
+loan can be assessed.
+
+Before adoption, the existing keyed phase and decision interval spread
+choices across days. After confirmed issuance, the household seeks the next
+affordable bounded tranche daily, with fresh credit/market economics. A
+pre-adoption decline retains its interval. At most one fresh assessment or
+known-refusal resumption runs per household per day; repeated observation
+can still recover a receipt. Concurrent JS dispatcher calls are refused.
+There is no loop issuing the forecast programme at once.
+
+Personal machine status exposes =last_attempt_day= and =next_decision_day=.
+Declined and unavailable assessments append =kind=decision= observations
+with context/reason, so a UI can distinguish an economic refusal from an
+unavailable mark. The existing staged-programme fixture now also qualifies
+this chronology, including different adoption dates, actual successive
+loans, interrupted wage/bank receipts and cash-only resumption:
+
+#+begin_src sh
+make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-programme.tevm.test.js
+make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py PYTEST_ARGS='-k automatic_debtor -q'
+#+end_src
+
+This debtor component stops at a due asset exit. It does not run saver
+investment or discretionary saving; those paths still gate the normal
+=act= loop and complete five-year economies.
 
 * Market estimates for reserve funding
 
@@ -234,11 +278,8 @@ largest eligible current mortgage payment. Never issue the programme's
 forecast amount at once. The decision context labels this admission and
 exposes its forecast, tranche count and allocated versus actual upfront fee.
 
-The actual two-tranche fixture runs through the same JS builder:
-
-#+begin_src sh
-make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-programme.tevm.test.js
-#+end_src
+The automatic-dispatch fixture above runs this staged admission and multiple
+actual tranches through the same JS builder.
 
 A reserve purchase counts its acquisition friction and annual opportunity /
 demurrage cost, while retaining the reserve's owned mark value. A previously
@@ -254,7 +295,7 @@ The context supplies rejection counts, quote/option counts, explicit
 forecasts and the selected cost breakdown for a decision table. The pinned
 books/market are reused; a changed observation block aborts assessment.
 This finite menu is not an exhaustive optimizer. The normal household loop
-still needs its calendar/surplus/exit wiring.
+still needs its surplus, saver investment, working-money and exit wiring.
 An assessed plan can be reviewed or passed to the same execution machine:
 
 #+begin_src python

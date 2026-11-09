@@ -32,6 +32,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._last_day          = self.arrive_day
         self._next_pay          = self.arrive_day + 30
         self._next_decision     = self.arrive_day + p["phase"]
+        self._net_refinance_day = None                  # at most one fresh assessment/resumption per bank day
+        self._net_dispatching   = False
         self._started           = False
         self._growth_arrived    = False
         self._otc               = False
@@ -386,7 +388,72 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         """Explicit recurring-flow component; normal economic decisions remain gated."""
         return self.calendar_machine.advance(d, day, ctr)
 
-    def _recover_pending_operations(self, d, ctr, day=None):
+    def advance_net_refinancing(self, d, day, ctr, *, forecasts=None):
+        """Automatic debtor component; normal saving/exits remain gated.
+
+        PRE: one owner dispatcher, a canonical world at this integer day and
+        normal external keeper/control maintenance. POST: recover earlier
+        evidence/calendar/buybacks before new work; resume committed cash
+        before borrowing again. One fresh assessment or known-refusal resume
+        per day. Adoption uses the existing keyed phase/cadence; after actual
+        issuance, retry fresh bounded tranches daily. No forecast is funding.
+        A recovery consumes this call and does not reset the daily limit on
+        fresh assessments. Healthy due calendar work can precede a choice.
+        """
+        if type(day) is not int or day < 0 or getattr(d, "buck_accounting", "") != "net":
+            raise ValueError("household refinancing needs canonical accounting and an integer day")
+        if self.p["role"] != "debtor":
+            raise ValueError("automatic refinancing requires a debtor household")
+        if day < self.arrive_day or self.exited:
+            return False
+        if self._net_dispatching:
+            raise ValueError("household dispatcher is already running")
+        self._net_dispatching = True
+        try:
+            if not self.calendar_machine.bound:
+                self.calendar_machine.prepare(d, day)
+            if self._recover_pending_operations(d, ctr, day, continue_after_calendar=True):
+                return True
+            if self._divest_day is not None and day >= self._divest_day:
+                raise NotImplementedError("canonical household asset exits are not yet integrated")
+            machine = self.refinance_machine
+            if self._net_refinance_day == day:
+                return False
+            if not machine.settlement_due and not self.mortgage:
+                self.last_action = "mortgage-paid"
+                return False
+            if not (self.joined or machine.settlement_due) and day < self._next_decision:
+                return False
+            self._net_refinance_day = day
+            period = self.p["decision_days"]
+            self._next_decision = (day + 1 if self.joined or machine.settlement_due else
+                                   self._next_decision + ((day - self._next_decision) // period + 1) * period)
+            self.last_error = ""
+            try:
+                if machine.settlement_due:
+                    return self.resume_net_refinance(d, day, ctr)
+                assessed = self.assess_net_refinance(d, day, **(forecasts or {}))
+                self._last_verdict = assessed["context"].get("selected")
+                if assessed["plan"] is None:
+                    self.last_action = "declined"
+                    machine.decisions += 1
+                    machine._event(d, day, "declined", kind="decision", phase="assessment",
+                                   reason=assessed["context"]["reason"], context=assessed["context"], limits=self.p)
+                    return True
+                return self.start_net_refinance(d, assessed["plan"], day, ctr, context=assessed["context"])
+            except Exception as exc:
+                self.last_action, self.last_error = "refinance-unavailable", str(exc)[:200]
+                ctr["household_err"] = self.last_error
+                machine._event(d, day, "unavailable", kind="decision", phase="assessment", reason=self.last_error)
+                return True
+            finally:
+                if self.joined:
+                    self._next_decision = day + 1
+                self.last_issue = self.last_action
+        finally:
+            self._net_dispatching = False
+
+    def _recover_pending_operations(self, d, ctr, day=None, *, continue_after_calendar=False):
         """Reconcile one known receipt before this household submits more work.
 
         A recovered outcome consumes this turn. Unknown hashes, an untracked
@@ -434,8 +501,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             if self._pending_repayment(d):
                 return True
             if self.calendar_machine.active:
+                recovering = self.calendar_machine.flow is not None and self.calendar_machine.flow["status"] == "pending"
                 self.calendar_machine.advance(d, self._last_day if day is None else day, ctr)
-                return True  # reconciled recurring work consumes this turn
+                if self.calendar_machine.active or recovering or not continue_after_calendar:
+                    return True  # recovered/uncertain recurring work always consumes this turn
             return self._resume_net_repayment(d, ctr)
         except Exception as exc:
             self.last_action    = ("buy-pending" if getattr(self, "_net_trade_uncertain", False) else

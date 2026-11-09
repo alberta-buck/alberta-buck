@@ -272,6 +272,7 @@ export class HouseholdRefinance {
     const f = this.flow;
     return { schema: 1, decision: this.decisions, status: f?.status ?? "idle", phase: f?.phase ?? null,
       hash: f?.hash ?? null, payment_due: this.paymentDue, settlement_due: this.settlementDue,
+      last_attempt_day: this.agent.netRefinanceDay, next_decision_day: this.agent.nextDecision,
       revision: f?.revision ?? 0, events: this.events.length };
   }
   async accounts(world) {

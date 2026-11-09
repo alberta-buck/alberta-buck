@@ -132,8 +132,10 @@ new accounting uses =net_decay=, =net_fund_after= and =net_target_relief=.
 kernel, regenerates the demo bundle and uses that exact bundle to bootstrap
 the existing machine world. It checks the single fund/basket graph, weighted
 opening pools, governed wheel binding, zero-allowance keeper introduction,
-real insurer acceptance, premium funding and independent principal. It does
-not run the household decision loop; that lifecycle remains gated. Full
+real insurer acceptance, premium funding and independent principal. It also
+checks explicit household refinancing/calendar recovery, automatic debtor
+cadence and cash-only settlement resumption. The complete household decision
+loop remains gated by saving, saver investment, working money and exits. Full
 economy save/restore is deferred. Synthetic SimLP/router binding
 still uses the labelled registry harness; production service authorization
 is separately tested by the Solidity suites.
@@ -193,8 +195,12 @@ explicit comparisons. The explicit calendar now authenticates wages/bills
 once and keeps dated actual/counterfactual mortgage books moving through
 receipt delays. Both Python runners and the JS day clock use absolute
 calendar targets and a shared household epoch, so rounding and wheel waits
-cannot accumulate extra modeled bank days. Normal automatic policy/surplus/exits and restoration remain
-separate gates. Tests stream exact histories through full/lite JSON
+cannot accumulate extra modeled bank days. The automatic debtor component
+now retains keyed initial adoption, seeks fresh tranches daily after issuance
+and resumes refused cash settlements before new credit. Shared live cases
+include smaller mortgages and fee-only completion. Normal surplus, saver
+investment, working money, exits and restoration remain separate gates.
+Tests stream exact histories through full/lite JSON
 without depending on the optional compact action log.
 The sim-build dependency now includes the vendored Permit2 build.
 Ordinary households use one facility per asset; explicit multi-asset fixtures

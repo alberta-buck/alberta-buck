@@ -42,6 +42,8 @@ export class CreditHouseholdAgent {
     this.nextPay = arrive_day + 30;
     this.lastDay = arrive_day;
     this.nextDecision = arrive_day + p.phase;
+    this.netRefinanceDay = null; // At most one fresh assessment/resumption per bank day.
+    this.netDispatching = false;
     this.started = false;
     this.joined = false;
     this.refinanceClosed = false; // Confirmed bank closing, separate from insurance activation.
@@ -261,7 +263,55 @@ export class CreditHouseholdAgent {
     return this.calendarMachine.advance(world, day);
   }
 
-  async recoverPendingOperations(world, day = this.lastDay) {
+  // PRE: serialized owner, canonical integer bank day, external keeper/control
+  // maintenance completed. POST: recover receipts/calendar/buybacks first,
+  // resume committed cash before another loan, assess at most once/day.
+  // Keyed adoption cadence precedes joining; actual issuers seek fresh bounded
+  // tranches daily. This component does not enable unported saving/asset exits.
+  async advanceNetRefinancing(world, day, ctr = {}, { forecasts = {} } = {}) {
+    if (!Number.isSafeInteger(day) || day < 0 || world.accounting !== "net") {
+      throw new Error("household refinancing needs canonical accounting and an integer day");
+    }
+    if (this.p.role !== "debtor") throw new Error("automatic refinancing requires a debtor household");
+    if (day < this.arrive_day || this.exited) return false;
+    if (this.netDispatching) throw new Error("household dispatcher is already running");
+    this.netDispatching = true;
+    try {
+      if (!this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
+      if (await this.recoverPendingOperations(world, day, { continueAfterCalendar: true })) return true;
+      if (this.divestDay !== null && day >= this.divestDay) throw new Error("canonical household asset exits are not yet integrated");
+      const machine = this.refinanceMachine;
+      if (this.netRefinanceDay === day) return false;
+      if (!machine.settlementDue && !this.mortgage) { this.lastAction = "mortgage-paid"; return false; }
+      if (!(this.joined || machine.settlementDue) && day < this.nextDecision) return false;
+      this.netRefinanceDay = day;
+      this.nextDecision = this.joined || machine.settlementDue ? day + 1
+        : this.nextDecision + (Math.floor((day - this.nextDecision) / this.p.decision_days) + 1) * this.p.decision_days;
+      this.lastError = "";
+      try {
+        if (machine.settlementDue) return await this.resumeNetRefinance(world, day, ctr);
+        const assessed = await this.assessNetRefinance(world, day, forecasts);
+        this.lastVerdict = assessed.context.selected;
+        if (!assessed.plan) {
+          this.lastAction = "declined"; machine.decisions++;
+          await machine.event(world, day, "declined", { kind: "decision", phase: "assessment",
+            reason: assessed.context.reason, context: assessed.context, limits: this.p });
+          return true;
+        }
+        return await this.startNetRefinance(world, assessed.plan, day, ctr, { context: assessed.context });
+      } catch (err) {
+        this.lastAction = "refinance-unavailable"; this.lastError = String(err).slice(0, 200);
+        ctr.household_err = this.lastError;
+        await machine.event(world, day, "unavailable", { kind: "decision", phase: "assessment", reason: this.lastError });
+        return true;
+      } finally {
+        if (this.joined) this.nextDecision = day + 1;
+        this.lastIssue = this.lastAction;
+      }
+    } finally { this.netDispatching = false; }
+  }
+
+  async recoverPendingOperations(world, day = this.lastDay, { continueAfterCalendar = false } = {}) {
     if (world.accounting !== "net") return false;
     if (this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
     try {
@@ -290,7 +340,11 @@ export class CreditHouseholdAgent {
         return true;
       }
       if (await this.pendingRepayment(world)) return true;
-      if (this.calendarMachine.active) { await this.calendarMachine.advance(world, day); return true; }
+      if (this.calendarMachine.active) {
+        const recovering = this.calendarMachine.flow?.status === "pending";
+        await this.calendarMachine.advance(world, day);
+        if (this.calendarMachine.active || recovering || !continueAfterCalendar) return true;
+      }
       return await this.resumeNetRepayment(world);
     } catch (err) {
       this.lastAction = this.netTradeUncertain ? "buy-pending" : this.netCancelUncertain ? "cancel-pending" : "repay-pending";
