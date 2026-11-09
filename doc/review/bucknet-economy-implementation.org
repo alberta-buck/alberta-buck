@@ -1207,9 +1207,20 @@ final logs and the remaining household/five-year boundary.
   bounded tranche daily. Limit new assessment/resumption to once per day;
   uncertain evidence blocks later sends and recovered uncertainty consumes
   the call. Expose next/last attempt days and declined/unavailable histories.
-  Python actual qualification passes; matching JS acceptance is in progress.
+  Python actual qualification passes. The first JS chronology exposed an
+  exact-balance export boundary after a later adoption; its corrected cash
+  sizing acceptance is in progress in the current handoff.
   This completes the component, not saver/surplus/working-money/exits or the
   full normal act gate.
+- [X] Retain owned execution cash above the protected reserve in fresh plans,
+  reusing the same 0.1% sizing helper as refused-export reassessment. Funding,
+  issuance and sale are separate transactions; compounding continues between
+  them. Full requested issuance/premium remains real debt, independently of
+  the smaller sale. Forecast the full liability conservatively and report
+  unexported cash in actual marks. Expose projected post-export cash/cushion.
+  A one-minute actual Python reproducer failed before this fix with a
+  0.000197 BUCK shortfall; it now closes with the original reserve intact.
+  Matching actual JS qualification remains in progress.
 - [ ] Exercise the complete small ecosystem interactively first: households,
   basket, Jubilee, wheel arb and an explicit external-investor off/on
   comparison. Reuse the savings server and existing JS world; expose
@@ -1499,6 +1510,8 @@ the canonical Buck evidence recorded below.
 
 | 2026-11-08 | Drive the existing debtor refinance component automatically | Added matching explicit Python/JS dispatcher entries: recover prior receipts/buybacks, process healthy due calendar work, resume refused cash before new borrowing. Keep keyed pre-adoption timing and a daily fresh-tranche cadence after actual issuance, with one fresh assessment/resumption per day and a concurrent JS guard. Expose last/next attempt dates and declined/unavailable decision histories. Extended the existing staged-programme fixture instead of adding a world/runner; both languages use the same settings, phases and interruption chronology. Final Python supported SDK/policy/calendar/actual/report set: 189 passed, regenerating short JSON/PDFs; fast JS: 77 passed; browser build passed. Matching actual JS chronology is running at this checkpoint and its final acceptance is not yet claimed. No Solidity changed. Complete normal saving/saver/working-money/exit behavior and five-year acceptance remain gated. | This commit |
 
+| 2026-11-08 | Leave owned execution cash above the issuance reserve | The first automatic JS chronology exposed a day-21 adopter's exact-balance export refusal. A one-minute actual Python delay reproduced the 0.000197 BUCK deficit. Fresh plans now reuse the same 0.1% owned sizing helper as remainder assessment. Protect the original reserve, retain full requested issuance/premium as debt, and base the bank allocation on only the bounded smaller export. Personal marks retain the cash; conservative full-issuance forecasts do not invent an offsetting gain. Publish quoted retained cash/cushion. Fixed activated-room assertions that had equated new liability with cash sold. Final Python supported set: 190 passed with fresh short reports; fast JS: 77 passed; browser build passed. The same actual JS chronology now includes the minute delay, and assessment/activated-room primary cases are rerunning; final acceptance remains pending. No monetary contract change. | This commit |
+
 ** Calendar-qualified checkpoint (6bf53283)
 
 - Worktree =.claude/worktrees/buck-compound=; branch
@@ -1772,6 +1785,8 @@ implementation and validation milestones remain in the journal above.
 - Branch/worktree remain =feature/household-minimal-ecosystem= /
   =.claude/worktrees/buck-compound=. Cash-only resumption is committed at
   =a81088e6=, with complete Python/JS live cases and browser build above.
+  Automatic dispatch is checkpointed at =56831c40=; the timed cash sizing
+  correction and its qualification are recorded below.
 - =advance_net_refinancing= / =advanceNetRefinancing= now handles the debtor's
   calendar/recovery, known cash remainders and fresh assessment through the
   existing components. No new engine/calendar, Solidity or monetary model.
@@ -1790,13 +1805,28 @@ implementation and validation milestones remain in the journal above.
   multiple real loans, lost bank reply, refused export/cash-only resume,
   unavailable fund mark, adoption decline, due exit gate, lost wage receipt
   and a hashless bank outcome blocking the following payday's sends.
-  Final Python supported SDK/policy/calendar/actual/report set: *189 passed*,
-  no skips, in =/private/tmp/buck-household-dispatch-all-py.log=, with fresh
-  short JSON/PDFs under =build/test/household-dispatch/=. Fast JS checks:
-  *77 passed*. The matching actual JS chronology remains running in
-  =/private/tmp/buck-household-dispatch-js.log=; record the final result
-  before the next checkpoint. The equilibrium browser build passes in
-  =/private/tmp/buck-household-dispatch-browser.log=.
+  Initial Python supported SDK/policy/calendar/actual/report set: *189 passed*,
+  no skips, in =/private/tmp/buck-household-dispatch-all-py.log=. The first
+  actual JS chronology passed initial adoption and cash resumption but
+  stopped on the day-21 adopter's export reserve boundary after about
+  thirteen minutes: =/private/tmp/buck-household-dispatch-js.log=.
+- This exposed a real cross-transaction sizing problem, not a reason to
+  relax the reserve. A one-minute delay after actual Python issuance
+  reproduced it: 5,178.883406 BUCK held against an export plus reserve of
+  5,178.883603. Log: =/private/tmp/buck-household-timing-before-py.log=.
+  Fresh plans now use the same owned 0.1% sizing cushion as remainders. Their
+  full requested issuance/premium stays in liability/forecast accounting;
+  mortgage payment follows only the bounded smaller export. Actual MTM
+  books retain all unsold cash. An old activated-room test equated debt
+  issued with cash sold; both language assertions now use requested issuance.
+- Final corrected Python set: *190 passed*, no skips, including the timed
+  reproducer, in =/private/tmp/buck-household-cushion-all-py.log=. Fresh short
+  JSON/PDFs: =build/test/household-cushion/=. Fast JS: *77 passed*. The actual
+  JS rerun uses the existing programme fixture with the same timed delay and
+  the primary fixture's assessment/activated-room cases, explicitly filtering
+  other unchanged primary cases: =/private/tmp/buck-household-cushion-js.log=.
+  Record final acceptance before closing this milestone. Browser rebuild passes:
+  =/private/tmp/buck-household-cushion-browser.log=.
 - Next: reserve-safe discretionary saving/paydown and working wallet, saver
   credit investment and guarded exits. Keep normal act gated until these
   complete, then exercise the same path in both primary runtimes, short

@@ -380,7 +380,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
       await a.startNetRefinance(world, plan, 1, {}, { context });
       assert.equal(a.refinanceMachine.status().status, "complete", JSON.stringify({ error: a.lastError,
         phase: a.refinanceMachine.status(), refusal: s.lastRevertReason }, (_, v) => typeof v === "bigint" ? String(v) : v));
-      assert.equal((await world.netCreditOps.household(owner, [id])).issued, book.issued + plan.export_buck);
+      assert.equal((await world.netCreditOps.household(owner, [id])).issued, book.issued + plan.candidate.requestedSpendable);
       assert.ok(await s.call(buck, "balanceOf", [owner]) >= actualReserve);
     }
   });

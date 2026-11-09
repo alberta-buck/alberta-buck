@@ -21,6 +21,10 @@ const bankTerms = (p) => {
   const penalty = (p.mortgage_limit * p.penalty_numerator + p.penalty_denominator - 1n) / p.penalty_denominator;
   return { amount: p.mortgage_limit + p.switch_cost + penalty, principal: p.mortgage_limit, switch: p.switch_cost, penalty };
 };
+
+// Existing 0.1% owned trade cushion; not another demurrage calculation.
+// The actual wallet balance and unchanged reserve guard govern execution.
+const exportable = (held, reserve) => max(0n, held - reserve - (held + 999n) / 1000n);
 const snake = (key) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 const wire = (value) => {
   if (typeof value === "bigint") return String(value);
@@ -89,7 +93,10 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
     const floor = candidate ? max(retained, reserveFor(candidate)) : retained;
     const buy = candidate ? max(0n, floor - book.spendable) : 0n, cost = netPurchaseCost(market, buy);
     if (cost === null) { reject("reserve-liquidity"); return; }
-    const maximum = (cost * BigInt(10000 + slippage_bp) + 9999n) / 10000n, exported = newly + wallet;
+    const maximum = (cost * BigInt(10000 + slippage_bp) + 9999n) / 10000n;
+    // Funding/issuance and export are distinct blocks. Keep an owned cushion
+    // rather than requiring the exact quoted net balance to survive them.
+    const projected = book.spendable + newly + buy, exported = min(newly + wallet, exportable(projected, floor));
     if (exported < RAW || (!programme && exported > buckCap) || maximum > cashCap || buy * market.gross_scaled > buckCap * market.net_scaled) {
       reject("trade-size"); return;
     }
@@ -112,7 +119,7 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
       fraction = Number(q.refundFractionWad) / 1e18;
     }
     if (candidate?.coverage) saved = externalPremiumDue(annual, a.face, active) - externalPremiumDue(annual, a.face, active + candidate.coverage);
-    const economics = { usd: Number(minimum) / 1e6, wallet_used: Number(wallet) / 1e6, new_spendable: Number(newly) / 1e6,
+    const economics = { usd: Number(minimum) / 1e6, wallet_used: Number(max(0n, exported - newly)) / 1e6, new_spendable: Number(newly) / 1e6,
       present_coverage: Number(coverage) / 1e6, premium: Number(premium) / 1e6, premium_refund_fraction: fraction,
       external_premium_saving: Number(saved) / 1e6, reserve_cost: (Number(maximum) - Number(buy) * t.buck_value) / 1e6,
       reserve_carry: Number(buy) / 1e6 * t.buck_value * (a.p.apr - expected_wallet_growth) };
@@ -175,6 +182,10 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
   if ((await s.client.getBlock()).number !== blockNumber) throw new Error("household assessment block changed");
   context.feasible = plans.length;
   context.selected = index === null ? null : { economics: values[index], score: verdict };
+  if (index !== null) {
+    const p = plans[index], retainedCash = book.spendable + (p.candidate?.requestedSpendable ?? 0n) + p.reserve_buy_net - p.export_buck;
+    Object.assign(context.selected, { post_export_buck_quote: retainedCash, export_cushion_buck: retainedCash - p.reserve_floor });
+  }
   context.reason = context.programme ? "worthwhile-staged-refinance" : index === null ? "no-worthwhile-refinance" : "worthwhile-refinance";
   return { plan: index === null ? null : plans[index], verdict, context };
 }
@@ -228,7 +239,7 @@ export async function assessRemainder(a, world, day, { expected_wallet_growth = 
       premium_refund_fraction: 1, wallet_already_issued: true, issuance_limit: 0 };
     // Same owned 0.1% sizing cushion as the existing trade policies; it is
     // neither another demurrage calculation nor a paid trading fee.
-    const available = max(0n, held - base.reserve_floor - (held + 999n) / 1000n);
+    const available = exportable(held, base.reserve_floor);
     let cap = min(origin.export_buck, available, market.reserve_buck * BigInt(Math.trunc(a.p.max_impact_bp * 50)) / 1_000_000n);
     const target = (principal * 10000n + BigInt(9999 - slippage_bp)) / BigInt(10000 - slippage_bp);
     const needed = target <= MAX ? netSaleInput(market, target) : null;

@@ -52,6 +52,15 @@ def _bank_terms(plan):
                 switch=plan.switch_cost, penalty=penalty)
 
 
+def _exportable(held, reserve):
+    """Leave 0.1% of projected Ordinary cash owned for execution-time drift.
+
+    This is the existing trade sizing cushion, not a demurrage calculator.
+    Actual balanceOf and the original reserve guard still decide execution.
+    """
+    return max(0, held - reserve - (held + 999) // 1000)
+
+
 def observe_refinance_forecasts(d):
     """Current fund/age ratio and the explicitly modeled idle-cash baseline.
 
@@ -144,7 +153,10 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
             reject("reserve-liquidity")
             return
         maximum = (cost * (10_000 + slippage_bp) + 9999) // 10_000
-        export = new + wallet
+        # Issuance/funding and export are separate blocks. Do not plan to
+        # spend exactly every last net unit above the protected reserve.
+        projected = book.spendable + new + buy
+        export = min(new + wallet, _exportable(projected, floor))
         if (export < RAW or (not programme and export > buck_cap) or maximum > cash_cap or
                 buy * market.gross_scaled > buck_cap * market.net_scaled):
             reject("trade-size")
@@ -180,7 +192,7 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
         if candidate and candidate.coverage:
             saving = (external_premium_due(annual, agent._face0, active) -
                       external_premium_due(annual, agent._face0, active + candidate.coverage))
-        economics = dict(usd=minimum / RAW, wallet_used=wallet / RAW, new_spendable=new / RAW,
+        economics = dict(usd=minimum / RAW, wallet_used=max(0, export - new) / RAW, new_spendable=new / RAW,
             present_coverage=coverage / RAW, premium=premium / RAW, premium_refund_fraction=fraction,
             external_premium_saving=saving / RAW, reserve_cost=(maximum - buy * t.buck_value) / RAW,
             reserve_carry=buy / RAW * t.buck_value * (agent.apr - expected_wallet_growth))
@@ -250,6 +262,11 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
         raise ValueError("household assessment block changed")
     context["feasible"] = len(plans)
     context["selected"] = None if index is None else dict(economics=values[index], score=asdict(verdict))
+    if index is not None:
+        p = plans[index]
+        retained_cash = book.spendable + (p.candidate.requested_spendable if p.candidate else 0) + p.reserve_buy_net - p.export_buck
+        context["selected"].update(post_export_buck_quote=retained_cash,
+                                   export_cushion_buck=retained_cash - p.reserve_floor)
     context["reason"] = ("worthwhile-staged-refinance" if "programme" in context else
                          "worthwhile-refinance" if index is not None else "no-worthwhile-refinance")
     return dict(plan=plans[index] if index is not None else None, verdict=verdict, context=context)
@@ -315,7 +332,7 @@ def assess_remainder(agent, d, day, *, expected_wallet_growth=None, slippage_bp=
             wallet_already_issued=True, issuance_limit=0)
         # Same 0.1% sizing cushion used by the existing trade policies. It stays
         # owned cash; it is not another demurrage calculation or trading fee.
-        available = max(0, held - base.reserve_floor - (held + 999) // 1000)
+        available = _exportable(held, base.reserve_floor)
         cap = min(origin.export_buck, available, market.reserve_buck * int(agent.max_impact_bp * 50) // 10**6)
         target = (principal * 10_000 + 9999 - slippage_bp) // (10_000 - slippage_bp)
         needed = market.sell_input(target) if target < 2**256 else None

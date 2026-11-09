@@ -291,6 +291,18 @@ buffer; the sale minimum goes to mortgage principal. This keeps bank costs
 separate from the forecast trading loss. The actual payment is rounded up
 in raw units; forecasts remain whole-unit floating-point comparisons.
 
+Fresh plans and cash-only resumption share the existing 0.1% cash sizing
+cushion, measured against projected Ordinary cash after funding/issuance.
+The export leaves this owned money above its protected reserve, so ordinary
+demurrage between transactions need not force a refusal at an exact balance
+boundary. Actual balances and the original reserve check remain authoritative;
+a long delay can still require reassessment. No fee or extra credit is
+invented. Full requested issuance plus premium remains the liability; the
+smaller export alone determines the mortgage payment. The forecast scores
+the full new issuance conservatively, while actual personal marks include
+all unexported cash. Selected context exposes =post_export_buck_quote= and
+=export_cushion_buck= for inspection.
+
 The context supplies rejection counts, quote/option counts, explicit
 forecasts and the selected cost breakdown for a decision table. The pinned
 books/market are reused; a changed observation block aborts assessment.

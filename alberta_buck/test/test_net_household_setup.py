@@ -627,7 +627,7 @@ def test_refinance_assessment_uses_existing_room_without_redundant_reserve_buys(
     assert plan.reserve_floor == actual_reserve and plan.export_buck > 0
     a.start_net_refinance(d, plan, 1, {}, context=assessed["context"])
     assert a.refinance_machine.status()["status"] == "complete"
-    assert d.net_credit_ops.household(a.address, a._token_ids).issued == book.issued + plan.export_buck
+    assert d.net_credit_ops.household(a.address, a._token_ids).issued == book.issued + plan.candidate.requested_spendable
     assert d.buck.functions.balanceOf(a.address).call() >= actual_reserve
 
 
@@ -1083,6 +1083,36 @@ def test_calendar_dates_refinance_receipts_and_keeps_its_paydays(household_world
     assert a.external_paid == b["mortgage_limit"] + a.payment and len(sends) == 4
     assert a.switch_paid == b["switch_cost"] and a.refis == 1
     assert not m.active and m.income_due == 0
+
+
+def test_assessed_refinance_leaves_owned_cash_for_time_between_issue_and_export(household_world, monkeypatch):
+    d, _, make = household_world
+    spec = REFINANCE["programme"]
+    a = make(82, CreditHouseholdAgent, settings=spec["settings"], member=spec["members"][0])
+    for contract, method, args in ((d.usdc, "approve", [d.swap_guard.address, 2**256 - 1]),
+                                   (d.buck, "approve", [d.permit2.address, 2**256 - 1]),
+                                   (d.permit2, "approve", [d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1])):
+        a._proxy_exec(d, contract.address, contract.encode_abi(method, args=args))
+    a.advance_net_refinancing(d, 0, {})
+    d.anvil.warp_to(a.calendar_machine.epoch + 86400)
+    d.chain.send(d.kctrl.functions.compute())
+    issue, observations = d.net_credit_ops.issue_candidate, []
+    def delayed(*args, **kwargs):
+        result = issue(*args, **kwargs)
+        before = d.buck.functions.netBalanceScaled(a.address).call()
+        d.anvil.warp_to(d.w3.eth.get_block("latest")["timestamp"] + 60)
+        after = d.buck.functions.netBalanceScaled(a.address).call()
+        observations.append((before, after))
+        return result
+    with monkeypatch.context() as patch:
+        patch.setattr(d.net_credit_ops, "issue_candidate", delayed)
+        a.advance_net_refinancing(d, 1, {}, forecasts=spec["forecasts"])
+    assert observations and observations[0][1] < observations[0][0]
+    plan = a.refinance_machine.flow["plan"]
+    held = d.buck.functions.balanceOf(a.address).call()
+    assert a.refis == 1, dict(error=a.last_error, held=held, exported=plan.export_buck, reserve=plan.reserve_floor)
+    assert held >= plan.reserve_floor
+    assert d.net_credit_ops.household(a.address, a._token_ids).issued == plan.candidate.requested_spendable + plan.candidate.premium
 
 
 def test_automatic_debtor_prioritizes_calendar_and_remainders_before_fresh_credit(household_world, monkeypatch):

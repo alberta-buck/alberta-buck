@@ -57,10 +57,25 @@ test("automatic debtors stage closing, resume cash and serialize calendar/receip
   assert.ok(verdict.value - fixed + allocated < 0, "the standalone first tranche would decline the full startup fee");
   assert.equal(-context.programme.score.parts.fixed, fixed);
   assert.ok(context.programme.economics.new_spendable > context.selected.economics.new_spendable);
-  const concurrent = await Promise.allSettled([step(a, 1, true), step(a, 1, true)]);
+  assert.ok(context.selected.export_cushion_buck > 0n);
+  const issue = world.netCreditOps.issueCandidate, observations = [];
+  let concurrent;
+  try {
+    world.netCreditOps.issueCandidate = async (...args) => {
+      const result = await issue(...args), owner = world.holderAddress(a.account);
+      const before = await s.call(world.buck, "netBalanceScaled", [owner]);
+      await advanceTime(world, 60);
+      observations.push([before, await s.call(world.buck, "netBalanceScaled", [owner])]);
+      return result;
+    };
+    concurrent = await Promise.allSettled([step(a, 1, true), step(a, 1, true)]);
+  } finally { world.netCreditOps.issueCandidate = issue; }
   assert.equal(concurrent.filter((r) => r.status === "fulfilled" && r.value).length, 1);
   assert.equal(concurrent.filter((r) => r.status === "rejected" && /dispatcher is already/.test(r.reason)).length, 1);
   assert.equal(a.refis, 1, a.lastError); assert.ok(a.refinanceClosed); assert.equal(a.switchPaid, BigInt(fixed) * RAW);
+  assert.ok(observations.length && observations[0][1] < observations[0][0]);
+  assert.ok(await s.call(world.buck, "balanceOf", [world.holderAddress(a.account)]) >= plan.reserve_floor);
+  assert.equal(await principal(a), plan.candidate.requestedSpendable + plan.candidate.premium);
   assert.equal(a.nextDecision, 2); assert.equal(await step(b, 1), false);
   let block = (await s.client.getBlock()).number, issued = await principal(a);
   assert.equal(await step(a, 1), false); assert.equal((await s.client.getBlock()).number, block);
@@ -118,7 +133,10 @@ test("automatic debtors stage closing, resume cash and serialize calendar/receip
   assert.equal(b.nextDecision, 21); assert.equal(b.refinanceMachine.events.at(-1).status, "declined");
   await at(10); assert.equal(await step(b, 10), false); assert.equal(await principal(b), 0n);
   await at(21); b.p.utilization = spec.settings.utilization;
-  assert.ok(await step(b, 21, true)); assert.equal(b.refis, 1, b.lastError); assert.equal(b.nextDecision, 22);
+  assert.ok(await step(b, 21, true)); assert.equal(b.refis, 1, JSON.stringify({ error: b.lastError,
+    status: b.refinanceMachine.status(), plan: b.refinanceMachine.flow?.plan,
+    accounts: b.refinanceMachine.events.at(-1)?.accounts }, (_, v) => typeof v === "bigint" ? String(v) : v));
+  assert.equal(b.nextDecision, 22);
   await at(22); b.divestDay = 22;
   await assert.rejects(step(b, 22), /asset exits/);
   t.diagnostic("unavailable marks stop sends; pre-adoption declines retain cadence; issuers assess daily");
