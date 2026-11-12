@@ -424,6 +424,12 @@ console.log(JSON.stringify({
  population: hp.population({initial: 24, arrival_rate: 12, saver_share: .25}),
  divest: Array.from({length: 8}, (_, i) => hp.divestDay(f.seed, `0/debtor/${i}`, 30, .1)),
  decisions: f.issuance.map(c => hp.issuance({...f.state, ...c.state}, hp.profile(f.seed, '0', {...f.settings, ...c.settings}))),
+ wants: f.issuance.map(c => hp.investmentWant({...f.state, ...c.state}, hp.profile(f.seed, '0', {...f.settings, ...c.settings}))),
+ quotedInvestment: f.quoted_refinance.filter(c => c.new_spendable > 0).map(c => hp.investmentQuoted(hp.terms(
+     {...f.state, ...f.net_refinance.at(-1).state, mortgage: 0, spendable: 0, expected_wallet_growth: .1, ...(c.state ?? {})},
+     hp.profile(f.seed, '0', {...f.settings, apr: .03, theta: 3}), true), c.usd, c.new_spendable, c.coverage, c.premium,
+     {reserveCost: c.reserve_cost ?? 0, reserveCarry: c.reserve_carry ?? 0,
+       premiumRefundFraction: c.premium_refund_fraction ?? null, expectedRefundGrowth: c.expected_refund_growth ?? null})),
  netRefinance: f.net_refinance.map(c => hp.refinance(hp.terms({...f.state, ...c.state},
      hp.profile(f.seed, '0', {...f.settings, apr: .03, theta: 3})), c.usd, c.buck)),
  quotedRefinance: f.quoted_refinance.map(c => hp.refinanceQuoted(hp.terms({...f.state, ...f.net_refinance.at(-1).state,
@@ -454,6 +460,28 @@ console.log(JSON.stringify({
         assert kind == jkind
         assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
         assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)
+    wants = [hp.investment_want(FIXTURE["state"] | case["state"], hp.profile(
+        FIXTURE["seed"], "0", FIXTURE["settings"] | case["settings"])) for case in FIXTURE["issuance"]]
+    assert [w[1] for w in wants] == [w[1] for w in js["wants"]] and {w[1] for w in wants} > {"hold"}
+    assert [w[0] for w in js["wants"]] == pytest.approx([w[0] for w in wants], rel=1e-12, abs=1e-8)
+    # The same quoted candidates, kept rather than sold: no external debt bounds them.
+    quoted = [c for c in FIXTURE["quoted_refinance"] if c["new_spendable"] > 0]
+    assert quoted and len(js["quotedInvestment"]) == len(quoted)
+    for case, jv in zip(quoted, js["quotedInvestment"]):
+        p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"apr": .03, "theta": 3})
+        state = FIXTURE["state"] | FIXTURE["net_refinance"][-1]["state"] | dict(
+            mortgage=0, spendable=0, expected_wallet_growth=.1) | case.get("state", {})
+        t = hp.terms(state, p, investment=True)
+        assert t.debt == 0 and t.rate == 0
+        pv = asdict(carry.investment_quoted(t, case["usd"], case["new_spendable"], case["coverage"], case["premium"],
+            reserve_cost=case.get("reserve_cost", 0), reserve_carry=case.get("reserve_carry", 0),
+            premium_refund_fraction=case.get("premium_refund_fraction"),
+            expected_refund_growth=case.get("expected_refund_growth")))
+        assert pv["parts"]["interest"] == pv["parts"]["penalty"] == pv["parts"]["wallet_carry"] == 0
+        assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
+        assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)
+    with pytest.raises(ValueError, match="investment"):
+        carry.investment_quoted(quoted_terms(), 1., 1., 1., 0.)  # refinance terms save interest; not an investment
     for case, jv in zip(FIXTURE["net_refinance"], js["netRefinance"]):
         p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"apr": .03, "theta": 3})
         pv = asdict(carry.refinance(hp.terms(FIXTURE["state"] | case["state"], p), case["usd"], case["buck"]))

@@ -431,6 +431,29 @@ def terms(state, p, investment=False):
         issuance_limit=state["issuance_limit"] if net else None)
 
 
+def investment_want(state, p):
+    """The BUCK a mortgage-free household would issue to invest now, in whole units, and why.
+
+    Room that could be sold while the BUCK keeps a net premium of issue_premium over basket value
+    ("premium"); otherwise the carry line ("carry"): the share carry_utilization of its K-scaled
+    limit kept drawn and invested while the BUCK trades at no discount -- the same line where paying
+    down begins, so the two never alternate. Zero with "hold" when neither applies or the policy
+    does not invest credit. Exact feasibility belongs to the caller's quotes."""
+    if not p["credit_invest"] or p["surplus_policy"] in ("retire", "discount"):
+        return 0., "hold"
+    ru, rb, fee                 = state["ru"], state["rb"], state["fee"]
+    t                           = terms(state, p, investment=True)
+    limit                       = state["face"] * state["k"] * p["utilization"] - state["drawn"]
+    buck                        = premium_sale(min(t.capacity, max(0., limit)), ru, rb, fee,
+                                               state["basket_usd"], p["issue_premium"], p["max_impact_bp"])
+    if buck > 0:
+        return buck, "premium"
+    keep                        = state["face"] * state["k"] * p["carry_utilization"] - state["drawn"]
+    if keep > 0 and discount(ru / rb, state["basket_usd"], fee) <= 0:
+        return max(0., min(t.capacity, keep, rb * p["max_impact_bp"] / 20_000) * .999), "carry"
+    return 0., "hold"
+
+
 def issuance(state, p):
     """Choose mortgage refinancing first; otherwise a bounded premium-funded investment."""
     ru, rb, fee                 = state["ru"], state["rb"], state["fee"]
@@ -442,14 +465,6 @@ def issuance(state, p):
         return "refinance", carry.best_refinance(t, ru, rb, fee)
     if not p["credit_invest"] or p["surplus_policy"] in ("retire", "discount"):
         return "hold", carry.NO
-    t                           = terms(state, p, investment=True)
-    limit                       = state["face"] * state["k"] * p["utilization"] - state["drawn"]
-    buck                        = premium_sale(min(t.capacity, max(0., limit)), ru, rb, fee,
-                                               state["basket_usd"], p["issue_premium"], p["max_impact_bp"])
-    keep                        = state["face"] * state["k"] * p["carry_utilization"] - state["drawn"]
-    if buck <= 0 and keep > 0 and discount(ru / rb, state["basket_usd"], fee) <= 0:
-        # Carry: keep this share of the K-scaled limit drawn and invested while the BUCK trades at no
-        # discount -- the same line where paying down begins, so the two never alternate.
-        buck                    = max(0., min(t.capacity, keep, rb * p["max_impact_bp"] / 20_000) * .999)
-    v                           = carry.refinance(t, carry.usdc_out(buck, ru, rb, fee), buck)
+    buck, _                     = investment_want(state, p)
+    v                           = carry.refinance(terms(state, p, investment=True), carry.usdc_out(buck, ru, rb, fee), buck)
     return "invest", v

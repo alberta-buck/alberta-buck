@@ -336,6 +336,47 @@ def refinance_quoted(t: RefiTerms, usd: float, wallet_used: float, new_spendable
                             new_spendable, wallet_used, (reserve_cost, reserve_carry), external_premium_saving)
 
 
+def investment_quoted(t: RefiTerms, usd: float, new_spendable: float, present_coverage: float, premium: float, *,
+                      reserve_cost: float = 0., reserve_carry: float = 0., premium_refund_fraction: float | None = None,
+                      expected_refund_growth: float | None = None, external_premium_saving: float = 0.) -> RefiVerdict:
+    """Value one quoted issue whose BUCK is kept and invested, not sold to repay a bank.
+
+    ``usd`` is what the new BUCK would fetch at the pinned dollar pool: the
+    execution value set against its par liability, never debt retired. No
+    external debt bounds it and no wallet money is spent, so a mortgage-free
+    household needs no invented bank allocation. ``t`` must be investment
+    terms (no interest saved, no prepayment penalty). The other inputs,
+    forecasts and limits are refinance_quoted's, as is the caller's duty to
+    establish exact integer feasibility first.
+    """
+    overrides = (premium_refund_fraction, expected_refund_growth)
+    if any(v is not None and (type(v) not in (int, float) or not math.isfinite(v)) for v in overrides):
+        raise ValueError("invalid quoted refund forecast")
+    if any(v is not None for v in overrides):
+        t = replace(t, premium_refund_fraction=(t.premium_refund_fraction
+                                                 if premium_refund_fraction is None else premium_refund_fraction),
+                    expected_refund_growth=(t.expected_refund_growth if expected_refund_growth is None
+                                            else expected_refund_growth))
+    amounts = (usd, new_spendable, present_coverage, premium)
+    if (not t.wallet_already_issued or t.expected_relief_rate is None or t.expected_refund_growth is None or
+            t.rate or t.penalty_months or new_spendable <= 0 or
+            any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in amounts) or
+            any(type(v) not in (int, float) or not math.isfinite(v) for v in (reserve_cost, reserve_carry))):
+        raise ValueError("invalid quoted investment inputs")
+    if premium == 0 and (reserve_cost or reserve_carry):
+        raise ValueError("quoted investment has reserve costs without a premium")
+    if t.issuance_limit is None or new_spendable + premium > t.issuance_limit:
+        raise ValueError("quoted investment exceeds shared issuance limit")
+    if premium > present_coverage:
+        raise ValueError("quoted investment premium exceeds added coverage")
+    if (type(external_premium_saving) not in (int, float) or not math.isfinite(external_premium_saving) or
+            not 0 <= external_premium_saving <= t.face * t.premium_bp / 10_000.0 or
+            external_premium_saving and not present_coverage):
+        raise ValueError("invalid incremental external premium saving")
+    return _score_refinance(t, usd, new_spendable, present_coverage, premium, new_spendable, 0.,
+                            (reserve_cost, reserve_carry), external_premium_saving)
+
+
 def best_quoted_refinance(t: RefiTerms, candidates):
     """Choose the best worthwhile candidate from an explicitly supplied menu.
 

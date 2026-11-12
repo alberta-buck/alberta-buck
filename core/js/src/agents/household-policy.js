@@ -416,6 +416,39 @@ export function refinanceQuoted(t, usd, walletUsed, newSpendable, presentCoverag
     { cost: reserveCost, carry: reserveCarry }, externalPremiumSaving);
 }
 
+/** Value one quoted issue whose BUCK is kept and invested, not sold to repay a
+ * bank (carry.investment_quoted). `usd` is what the new BUCK would fetch at
+ * the pinned dollar pool: execution value against its par liability, never
+ * debt retired, so no external debt bounds it and no wallet money is spent.
+ * `t` must be investment terms. Feasibility remains the caller's duty. */
+export function investmentQuoted(t, usd, newSpendable, presentCoverage, premium,
+  { reserveCost = 0, reserveCarry = 0, premiumRefundFraction = null, expectedRefundGrowth = null,
+    externalPremiumSaving = 0 } = {}) {
+  if ((premiumRefundFraction !== null && !Number.isFinite(premiumRefundFraction))
+      || (expectedRefundGrowth !== null && !Number.isFinite(expectedRefundGrowth))) {
+    throw new Error("invalid quoted refund forecast");
+  }
+  t = { ...t, premium_refund_fraction: premiumRefundFraction ?? t.premium_refund_fraction,
+    expected_refund_growth: expectedRefundGrowth ?? t.expected_refund_growth };
+  if (!t.wallet_already_issued || t.expected_relief_rate == null || t.expected_refund_growth == null
+      || t.rate || t.penalty_months || !(newSpendable > 0)
+      || [usd, newSpendable, presentCoverage, premium].some((v) => !Number.isFinite(v) || v < 0)
+      || !Number.isFinite(reserveCost) || !Number.isFinite(reserveCarry)) {
+    throw new Error("invalid quoted investment inputs");
+  }
+  validateForecast(t.expected_relief_rate, t.premium_refund_fraction ?? 1, t.expected_refund_growth, t.expected_wallet_growth ?? 0);
+  validateIssuanceLimit(t.issuance_limit);
+  if (premium === 0 && (reserveCost || reserveCarry)) throw new Error("quoted investment has reserve costs without a premium");
+  if (t.issuance_limit == null || newSpendable + premium > t.issuance_limit) throw new Error("quoted investment exceeds shared issuance limit");
+  if (premium > presentCoverage) throw new Error("quoted investment premium exceeds added coverage");
+  if (!Number.isFinite(externalPremiumSaving) || externalPremiumSaving < 0
+      || externalPremiumSaving > t.face * t.premium_bp / 10000 || externalPremiumSaving && !presentCoverage) {
+    throw new Error("invalid incremental external premium saving");
+  }
+  return scoreRefinance(t, usd, newSpendable, presentCoverage, premium, newSpendable, 0,
+    { cost: reserveCost, carry: reserveCarry }, externalPremiumSaving);
+}
+
 /** Choose among an explicit menu of already feasible candidates; do not infer
  * that capacity is monotone. Exact value ties prefer less coverage and then
  * less new issuance. This finite menu is not a proof of a global optimum. */
@@ -521,23 +554,33 @@ export function terms(s, p, investment = false) {
     expected_wallet_growth: s.expected_wallet_growth ?? 0, activated_capacity: activatedCapacity, issuance_limit: issuanceLimit };
 }
 
+/** The BUCK a mortgage-free household would issue to invest now, in whole units, and why
+ * (household_policy.investment_want): room that could be sold while the BUCK keeps a net premium of
+ * issue_premium over basket value ("premium"); otherwise the carry line ("carry"), the share
+ * carry_utilization of its K-scaled limit kept drawn and invested while the BUCK trades at no
+ * discount -- the same line where paying down begins, so the two never alternate. */
+export function investmentWant(s, p) {
+  if (!p.credit_invest || ["retire", "discount"].includes(p.surplus_policy)) return [0, "hold"];
+  const { ru, rb, fee } = s, t = terms(s, p, true);
+  const limit = s.face * s.k * p.utilization - s.drawn;
+  const buck = premiumSale(Math.min(capacity(t), Math.max(0, limit)), ru, rb, fee,
+                           s.basket_usd, p.issue_premium, p.max_impact_bp);
+  if (buck > 0) return [buck, "premium"];
+  const keep = s.face * s.k * p.carry_utilization - s.drawn;
+  if (keep > 0 && discount(ru / rb, s.basket_usd, fee) <= 0) {
+    return [Math.max(0, Math.min(capacity(t), keep, rb * p.max_impact_bp / 20000) * .999), "carry"];
+  }
+  return [0, "hold"];
+}
+
 export function issuance(s, p) {
   const { ru, rb, fee } = s;
-  let t = terms(s, p);
+  const t = terms(s, p);
   if (s.mortgage > 1) {
     t.debt = Math.min(t.debt, usdcOut(rb * p.max_impact_bp / 20000, ru, rb, fee));
     return ["refinance", bestRefinance(t, ru, rb, fee)];
   }
   if (!p.credit_invest || ["retire", "discount"].includes(p.surplus_policy)) return ["hold", NO];
-  t = terms(s, p, true);
-  const limit = s.face * s.k * p.utilization - s.drawn;
-  let buck = premiumSale(Math.min(capacity(t), Math.max(0, limit)), ru, rb, fee,
-                         s.basket_usd, p.issue_premium, p.max_impact_bp);
-  const keep = s.face * s.k * p.carry_utilization - s.drawn;
-  // Carry: keep this share of the K-scaled limit drawn and invested while the BUCK trades at no
-  // discount -- the same line where paying down begins, so the two never alternate.
-  if (buck <= 0 && keep > 0 && discount(ru / rb, s.basket_usd, fee) <= 0) {
-    buck = Math.max(0, Math.min(capacity(t), keep, rb * p.max_impact_bp / 20000) * .999);
-  }
-  return ["invest", refinance(t, usdcOut(buck, ru, rb, fee), buck)];
+  const [buck] = investmentWant(s, p);
+  return ["invest", refinance(terms(s, p, true), usdcOut(buck, ru, rb, fee), buck)];
 }
