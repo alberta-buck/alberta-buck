@@ -2,7 +2,7 @@
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
   arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, externalPremiumDue, ROLES } from "./household-policy.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
-import { HouseholdRefinance, assessRefinance, assessRemainder, assessSurplus, observeRefinanceForecasts } from "./net-household.js";
+import { HouseholdRefinance, assessRefinance, assessRemainder, assessSurplus, assessWallet, observeRefinanceForecasts } from "./net-household.js";
 import { HouseholdCalendar } from "./household-calendar.js";
 
 const E6 = 1_000_000n;
@@ -45,6 +45,9 @@ export class CreditHouseholdAgent {
     this.netRefinanceDay = null; // At most one fresh assessment/resumption per bank day.
     this.netSurplusDay = null; this.nextSurplus = this.nextDecision;
     this.netCreditReserve = 0n; // lasting BUCK issuance front; outlives each operation
+    this.netFunding = null;      // { key: block:day:forecasts, funding }: the credit dollar front read there
+    this.nextWallet = arrive_day + 30; // working money is tended once after each payday
+    this.walletReady = false; this.walletSold = 0n; this.lastWallet = "waiting";
     this.netDispatching = false;
     this.started = false;
     this.joined = false;
@@ -231,6 +234,11 @@ export class CreditHouseholdAgent {
       if (result.context.block !== observed.observation.blockNumber) throw new Error("household forecast block changed");
       Object.assign(result.context.forecasts, { source: observed.source, basis: observed.basis });
     }
+    // Later same-block saving/working-money choices reuse this front.
+    if (Object.keys(forecasts).every((key) => keys.includes(key))) {
+      this.netFunding = { key: `${result.context.block}:${day}:${JSON.stringify(Object.entries(forecasts).sort())}`,
+        funding: result.context.funding };
+    }
     return result;
   }
 
@@ -268,6 +276,53 @@ export class CreditHouseholdAgent {
     return this.calendarMachine.advance(world, day);
   }
 
+  // The working balance's own bound Ordinary account, able to sell for dollars.
+  async ensureWallet(world) {
+    const account = { address: `wallet:${this.account.address}` };
+    this.wallet ??= await world.proxyFor(account);
+    if (!this.walletReady) { await world.households.openTrading(account); this.walletReady = true; }
+    return this.wallet;
+  }
+  async assessNetWallet(world, day, options = {}) { return assessWallet(this, world, day, options); }
+  async startNetWallet(world, plan, day, ctr = {}, options = {}) {
+    await this.prepareNetRefinance(world, day);
+    return this.refinanceMachine.startWallet(world, plan, day, ctr, options);
+  }
+  // Same owner dispatcher: tend the BUCK working balance after a payday. At
+  // most one trade per pay period, from dollars above the buffer and credit
+  // front; a refused or declined attempt waits for the next payday. The
+  // wallet's account and approvals are created on first use, before a flow.
+  async advanceNetWallet(world, day, ctr = {}, options = {}) {
+    if (!Number.isSafeInteger(day) || day < 0 || world.accounting !== "net") {
+      throw new Error("household wallet needs canonical accounting and an integer day");
+    }
+    if (day < this.arrive_day || this.exited) return false;
+    if (this.netDispatching) throw new Error("household dispatcher is already running");
+    this.netDispatching = true;
+    try {
+      if (!this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
+      if (await this.recoverPendingOperations(world, day, { continueAfterCalendar: true })) return true;
+      const m = this.refinanceMachine;
+      if (m.settlementDue || m.surplusDue) { this.lastAction = m.settlementDue ? "settlement-due" : "surplus-due"; return true; }
+      if (day < this.nextWallet) return false;
+      this.nextWallet += (Math.floor((day - this.nextWallet) / 30) + 1) * 30;
+      this.lastError = "";
+      try {
+        const assessed = await this.assessNetWallet(world, day, options);
+        if (!assessed.plan) {
+          this.lastAction = "wallet-hold"; m.decisions++;
+          await m.event(world, day, "declined", { kind: "wallet", phase: "assessment", context: assessed.context,
+            reason: assessed.context.reason, market: await m.market(world) });
+          return true;
+        }
+        const wallet = await this.ensureWallet(world);
+        return await this.startNetWallet(world, { ...assessed.plan, wallet: wallet.address }, day, ctr, { context: assessed.context });
+      } catch (err) {
+        this.lastAction = "wallet-unavailable"; this.lastError = String(err).slice(0, 200); ctr.household_err = this.lastError;
+        await m.event(world, day, "unavailable", { kind: "wallet", phase: "assessment", reason: this.lastError }); return true;
+      } finally { this.lastWallet = this.lastAction; }
+    } finally { this.netDispatching = false; }
+  }
   async assessNetSurplus(world, day, options = {}) { return assessSurplus(this, world, day, options); }
   async startNetSurplus(world, plan, day, ctr = {}, options = {}) {
     await this.prepareNetRefinance(world, day);

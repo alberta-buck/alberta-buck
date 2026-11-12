@@ -311,6 +311,47 @@ def net_surplus_purchase(market, cash, issued, fair_num, fair_den, cash_floor, p
     return out
 
 
+def net_wallet_adjustment(market, cash, held, target, cash_floor, p, *, slippage_bp=50):
+    """Raw-unit working-balance choice from a pinned net market observation.
+
+    PRE: the wallet is an Ordinary account in its own custody; target is the
+    net BUCK balance wanted there, held its actual net balance; the caller
+    retained cash_floor for bills and current credit funding.
+    POST: one capped bite toward the target: buy below 95% of it, sell the
+    excess above 110%, otherwise hold. Bounds are integer minimums after
+    carried fees, trading fee and impact; nothing under one whole unit
+    trades. Neither side issues or retires principal. No cash moves here.
+    """
+    if (any(type(v) is not int or not 0 <= v < 2**256 for v in (cash, held, target, cash_floor)) or
+            type(slippage_bp) is not int or not 0 <= slippage_bp <= 1000):
+        raise ValueError("invalid net wallet inputs")
+    grain, impact = 10**6, int(p["max_impact_bp"] * 50)
+    out = dict(action="hold", spend_usdc=0, minimum_net=0, expected_net=0, sell_buck=0, minimum_usdc=0,
+               expected_usdc=0, target=target, reason="within-band")
+    if held * 100 < target * 95:
+        if not market.net_scaled:
+            out["reason"] = "no-net-delivery"
+            return out
+        cap = min(max(0, cash - cash_floor), market.reserve_usdc * impact // 10**6)
+        cost = market.buy_cost(target - held)
+        spend = cap if cost is None else min(cap, cost)
+        expected = market.buy_expected(spend)
+        minimum = expected * (10_000 - slippage_bp) // 10_000
+        if spend < grain or minimum < grain:
+            out["reason"] = "no-spare-cash" if cap < grain else "below-grain"
+            return out
+        out.update(action="buy", spend_usdc=spend, minimum_net=minimum, expected_net=expected, reason="ready")
+    elif held * 100 > target * 110:
+        bite = min(held - target, market.reserve_buck * impact // 10**6)
+        expected = market.sell_expected(bite)
+        minimum = expected * (10_000 - slippage_bp) // 10_000
+        if bite < grain or minimum < grain:
+            out["reason"] = "below-grain"
+            return out
+        out.update(action="sell", sell_buck=bite, minimum_usdc=minimum, expected_usdc=expected, reason="ready")
+    return out
+
+
 def money_target(days_in, annual_spending, d, p):
     """The BUCK working balance a household wants: the share of its spending it pays in BUCKs (ramping
     from adopt_start to 1 over adopt_years since it arrived) times money_months of that spending, more
@@ -318,6 +359,17 @@ def money_target(days_in, annual_spending, d, p):
     share                       = min(1., p["adopt_start"] + (1 - p["adopt_start"]) * days_in / (365.25 * p["adopt_years"]))
     held                        = share * annual_spending * p["money_months"] / 12
     return held * min(p["money_cap"], 1 + p["money_gain"] * max(0., d))
+
+
+def net_wallet_target(ratio_wad, days_in, annual_spending, p):
+    """Raw net BUCK working balance wanted at a marginal cost/fair ratio (1e18 is parity; None, no quote).
+
+    The discount is taken in parts per billion before any float arithmetic,
+    so every runtime sizes the same target from the same observation."""
+    if ratio_wad is not None and (type(ratio_wad) is not int or ratio_wad < 0):
+        raise ValueError("invalid cost/fair ratio")
+    discount                    = max(0, 10**18 - ratio_wad) // 10**9 / 10**9 if ratio_wad is not None else 0.
+    return int(money_target(days_in, annual_spending, discount, p) * 10**6)
 
 
 def divest_day(seed, member, arrive_day, rate):

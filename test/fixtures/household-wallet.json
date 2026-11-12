@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "money": "raw six-decimal integers; target and held are net BUCK in the wallet's own custody",
+  "market": {"block_number": "1", "reserve_usdc": "1000000000000", "reserve_buck": "1250000000000",
+    "gross_scaled": "1000000000000", "net_scaled": "1000000000000", "fee_ppm": "500", "price_num": "4", "price_den": "5"},
+  "amounts": {"cash": "20000000000", "held": "0", "target": "1000000000", "cash_floor": "10000000000"},
+  "settings": {"max_impact_bp": 100},
+  "targets": {
+    "about": "net_wallet_target(ratio, days, annual_spending): cost/fair ratio in wad (1e18 parity), raw BUCK out",
+    "settings": {"money_months": 1, "adopt_start": 0.5, "adopt_years": 1, "money_gain": 200, "money_cap": 8},
+    "annual_spending": 60000,
+    "cases": [
+      {"name": "parity at the first payday", "ratio": "1000000000000000000", "days": 30, "target": "2705338809"},
+      {"name": "a premium never shrinks the target", "ratio": "1050000000000000000", "days": 30, "target": "2705338809"},
+      {"name": "a tenth of a percent cheap adds a fifth", "ratio": "999000000000000000", "days": 30, "target": "3246406570"},
+      {"name": "a deep discount stops at the cap", "ratio": "908000000000000000", "days": 30, "target": "21642710472"},
+      {"name": "sub-ppb discounts round to parity", "ratio": "999999999000000001", "days": 30, "target": "2705338809"},
+      {"name": "no quote is parity", "ratio": null, "days": 30, "target": "2705338809"},
+      {"name": "adoption is complete after its ramp", "ratio": "1000000000000000000", "days": 400, "target": "5000000000"},
+      {"name": "an uneven ratio and day", "ratio": "987654321098765432", "days": 173, "target": "12780713461"}
+    ]
+  },
+  "lifecycle": {
+    "settings": {"home_k": 1000, "premium_bp": 100, "cash_k": 20, "buffer_k": 10, "decision_days": 1,
+      "theta": 3, "risk": 0, "switch_k": 0, "max_impact_bp": 100, "divest_rate": 0, "income_frac": 0.12, "living_frac": 0.5,
+      "money_months": 1, "adopt_start": 0.5, "adopt_years": 1, "money_gain": 200, "money_cap": 8,
+      "retire_disc": 0.01, "paydown_share": 0.01, "paydown_double": 0.005},
+    "gift_buck": "20000000000"
+  },
+  "flow": {
+    "about": "one real working-balance trade per case, faulted like test/fixtures/household-surplus.json flow",
+    "refuse_argument": {"buyExactInput": 2},
+    "cases": [
+      {"name": "lost wallet purchase is applied once", "action": "buy", "lost": "buy"},
+      {"name": "refused wallet purchase waits for the next payday", "action": "buy", "refused": "buy"},
+      {"name": "unknown wallet sale stays stopped", "action": "sell", "unknown": "sell"}
+    ]
+  },
+  "cases": [
+    {"name": "below the band buys the shortfall", "action": "buy", "reason": "ready", "spend": "801041035", "minimum_net": "995000000"},
+    {"name": "inside the band holds", "amounts": {"held": "960000000"}, "action": "hold", "reason": "within-band"},
+    {"name": "above the band sells the excess", "amounts": {"held": "2000000000"}, "action": "sell", "reason": "ready", "sell": "1000000000", "minimum_usdc": "794966344"},
+    {"name": "the credit front leaves no budget", "amounts": {"cash_floor": "20000000000"}, "action": "hold", "reason": "no-spare-cash"},
+    {"name": "impact bounds a large shortfall", "amounts": {"target": "10000000000000"}, "action": "buy", "reason": "ready", "spend": "5000000000", "minimum_net": "6184732424"},
+    {"name": "carried fees raise the cost of net cash", "market": {"net_scaled": "800000000000"}, "action": "buy", "reason": "ready", "spend": "1001501754", "minimum_net": "995000000"},
+    {"name": "zero net cash has nothing to deliver", "market": {"net_scaled": "0"}, "action": "hold", "reason": "no-net-delivery"},
+    {"name": "a dust shortfall does not trade", "amounts": {"held": "9400000", "target": "10000000"}, "action": "hold", "reason": "below-grain"},
+    {"name": "a dust excess does not trade", "amounts": {"held": "1200000", "target": "1000000"}, "action": "hold", "reason": "below-grain"},
+    {"name": "impact bounds a large excess", "amounts": {"held": "10000000000000"}, "action": "sell", "reason": "ready", "sell": "6250000000", "minimum_usdc": "4947785939"}
+  ]
+}

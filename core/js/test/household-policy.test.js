@@ -273,3 +273,40 @@ test("net surplus guards delivered value and protects current credit capital", a
     }
   }
 });
+test("net wallet takes one capped bite toward its money target", async () => {
+  const { netWalletAdjustment } = await import("../src/agents/household-policy.js");
+  const { netPurchaseExpected, netSaleExpected } = await import("../src/net-market-quote.js");
+  const { readFileSync } = await import("node:fs");
+  const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-wallet.json", import.meta.url)));
+  let q, args;
+  for (const c of f.cases) {
+    q = Object.fromEntries(Object.entries({ ...f.market, ...c.market }).map(([k, v]) => [k, BigInt(v)]));
+    args = Object.fromEntries(Object.entries({ ...f.amounts, ...c.amounts }).map(([k, v]) => [k, BigInt(v)]));
+    const r = netWalletAdjustment(q, args.cash, args.held, args.target, args.cash_floor, f.settings);
+    assert.deepEqual([r.action, r.reason], [c.action, c.reason], c.name);
+    assert.equal(r.spend_usdc, BigInt(c.spend ?? 0), c.name); assert.equal(r.minimum_net, BigInt(c.minimum_net ?? 0), c.name);
+    assert.equal(r.sell_buck, BigInt(c.sell ?? 0), c.name); assert.equal(r.minimum_usdc, BigInt(c.minimum_usdc ?? 0), c.name);
+    assert.ok(r.spend_usdc <= (args.cash > args.cash_floor ? args.cash - args.cash_floor : 0n));
+    assert.ok(r.spend_usdc <= q.reserve_usdc * 5000n / 1_000_000n && r.sell_buck <= q.reserve_buck * 5000n / 1_000_000n);
+    assert.ok(!(r.spend_usdc && r.sell_buck));
+    if (r.action === "buy") {
+      assert.ok(args.held * 100n < args.target * 95n && r.minimum_net >= 1_000_000n && r.minimum_net <= r.expected_net);
+      assert.equal(r.expected_net, netPurchaseExpected(q, r.spend_usdc));
+    } else if (r.action === "sell") {
+      assert.ok(args.held * 100n > args.target * 110n && r.sell_buck <= args.held - args.target);
+      assert.ok(r.minimum_usdc >= 1_000_000n && r.minimum_usdc <= r.expected_usdc);
+      assert.equal(r.expected_usdc, netSaleExpected(q, r.sell_buck));
+    }
+  }
+  for (const bad of [{ cash: -1n }, { held: 1 }, { target: 1n << 256n }]) {
+    const a = { ...args, ...bad };
+    assert.throws(() => netWalletAdjustment(q, a.cash, a.held, a.target, a.cash_floor, f.settings), /invalid net wallet/);
+  }
+  // The target every runtime must size identically from one observation.
+  const { netWalletTarget } = await import("../src/agents/household-policy.js");
+  for (const c of f.targets.cases) {
+    assert.equal(netWalletTarget(c.ratio === null ? null : BigInt(c.ratio), c.days, f.targets.annual_spending, f.targets.settings),
+      BigInt(c.target), c.name);
+  }
+  assert.throws(() => netWalletTarget(1, 30, 60000, f.targets.settings), /ratio/);
+});

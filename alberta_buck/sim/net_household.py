@@ -55,6 +55,20 @@ class SurplusPlan:
     slippage_bp: int = 50
 
 
+@dataclass(frozen=True)
+class WalletPlan:
+    action: str                  # buy: dollars -> wallet BUCK; sell: wallet BUCK -> dollars
+    wallet: str                   # the working balance's own Ordinary custody account
+    cash_buffer: int              # dollars that stay home: bills and the current credit front
+    target: int                   # net BUCK wanted in the wallet when assessed
+    held: int                     # net BUCK actually there when assessed
+    spend_usdc: int = 0
+    minimum_net: int = 0
+    sell_buck: int = 0
+    minimum_usdc: int = 0
+    slippage_bp: int = 50
+
+
 def _basket_ops(d):
     return NetBasketOps(d.chain, d.basket, d.buck, d.net_market_ops.execute, getattr(d, "net_simulate", None))
 
@@ -445,8 +459,7 @@ def assess_surplus(agent, d, day, *, forecasts=None):
     book = d.net_credit_ops.household(agent.address, agent._token_ids, block_number=block)
     q = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
     fair_num, fair_den = read(d.basket.functions.basketValueInBuck()) * q.price_num, 10**18 * q.price_den
-    credit = (agent.assess_net_refinance(d, day, **(forecasts or {}))["context"]["funding"] if agent.mortgage else
-              dict(cash_floor=agent.cash_buffer, basis="no-external-mortgage", unfunded=False, refinance_ready=False))
+    credit = credit_cash_floor(agent, d, day, block, forecasts)
     floor = max(agent.cash_buffer, credit["cash_floor"])
     choice = policy.net_surplus_purchase(q, cash, book.issued, fair_num, fair_den, floor, agent.p)
     context = dict(block=block, cash=cash, protected_buck=held, credit_funding=credit, choice=choice,
@@ -486,6 +499,67 @@ def assess_surplus(agent, d, day, *, forecasts=None):
         context["reason"] = "purchase-to-" + choice["action"]
     if d.w3.eth.block_number != block:
         raise ValueError("household surplus observation changed")
+    return dict(plan=plan, context=context)
+
+
+def credit_cash_floor(agent, d, day, block, forecasts=None):
+    """Dollars a discretionary operation must leave: buffer and credit front.
+
+    A debtor's front comes from the whole refinance assessor. That read is
+    reused when the same day's assessment was made at this same block (a
+    declined decision sends nothing), so saving and working money after it
+    do not assess twice. A mortgage-free household keeps only its buffer.
+    """
+    if not agent.mortgage:
+        return dict(cash_floor=agent.cash_buffer, basis="no-external-mortgage", unfunded=False, refinance_ready=False)
+    key = (block, day, tuple(sorted((forecasts or {}).items())))
+    cached = getattr(agent, "_net_funding", None)
+    if cached is None or cached[0] != key:
+        funding = agent.assess_net_refinance(d, day, **(forecasts or {}))["context"]["funding"]
+        agent._net_funding = cached = (key, funding)
+    return cached[1]
+
+
+def assess_wallet(agent, d, day, *, forecasts=None):
+    """Read-only payday choice for the household's BUCK working balance.
+
+    The wallet is ordinary money held apart from the credit account, sized
+    by household_policy.money_target and bought or trimmed in one capped
+    bite. It spends only dollars above the buffer and current credit front,
+    never the main account's BUCK, and neither issues nor retires principal.
+    The same basket-relative discount as saving enlarges the target.
+    """
+    m, cal = agent.refinance_machine, agent.calendar_machine
+    if (type(day) is not int or day < 0 or getattr(d, "buck_accounting", "") != "net" or m.active or
+            m.settlement_due or m.surplus_due or cal.active or not cal.bound or cal.day != day):
+        raise ValueError("household wallet needs prepared, idle canonical accounting")
+    if (agent._net_repayment_target is not None or agent._net_trade_uncertain or agent._net_cancel_uncertain or
+            agent._net_pending_token is not None or agent._net_repayment_interrupted):
+        raise ValueError("household repayment must be reconciled before working money")
+    spending = agent.income_annual * agent.p["living_frac"] / RAW
+    if agent.investor or agent._sold or spending <= 0 or agent.p["money_months"] <= 0:
+        return dict(plan=None, context=dict(reason="no-working-balance"))
+    block = d.w3.eth.block_number
+    read = lambda fn: fn.call(block_identifier=block)
+    wallet = agent._wallet.address if agent._wallet is not None else ""
+    cash = read(d.usdc.functions.balanceOf(agent.address))
+    held = read(d.buck.functions.balanceOf(wallet)) if wallet else 0
+    q = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
+    bvib = read(d.basket.functions.basketValueInBuck())
+    # cost/fair of a marginal net BUCK; the dollar pool's own price cancels.
+    ratio = (q.gross_scaled * 10**6 * 10**36 // (q.net_scaled * (10**6 - q.fee_ppm) * bvib)) if q.net_scaled and bvib else None
+    target = policy.net_wallet_target(ratio, day - agent.arrive_day, spending, agent.p)
+    credit = credit_cash_floor(agent, d, day, block, forecasts)
+    floor = max(agent.cash_buffer, credit["cash_floor"])
+    choice = policy.net_wallet_adjustment(q, cash, held, target, floor, agent.p)
+    context = dict(block=block, cash=cash, wallet=wallet, held=held, target=target, credit_funding=credit, choice=choice,
+                   marginal_ratio_wad=ratio, fair_basis="basket-in-buck x dollar-pool spot", reason=choice["reason"])
+    plan = None
+    if choice["action"] in ("buy", "sell"):
+        plan = WalletPlan(choice["action"], wallet, floor, target, held, choice["spend_usdc"], choice["minimum_net"],
+                          choice["sell_buck"], choice["minimum_usdc"])
+    if d.w3.eth.block_number != block:
+        raise ValueError("household wallet observation changed")
     return dict(plan=plan, context=context)
 
 
@@ -540,7 +614,8 @@ class HouseholdRefinance:
                     self.flow["status"] == "refused" and self.flow["phase"] == "deposit")
 
     def _label(self):
-        return "surplus" if self.flow and self.flow.get("kind") == "surplus" else "refinance"
+        kind = self.flow.get("kind") if self.flow else None
+        return kind if kind in ("surplus", "wallet") else "refinance"
 
     def retirement(self):
         """The selected-facility engine's retained intent; None when idle.
@@ -569,6 +644,7 @@ class HouseholdRefinance:
                 "payment_due": self.payment_due, "settlement_due": self.settlement_due,
                 "kind": f.get("kind", "refinance") if f else None, "surplus_due": self.surplus_due,
                 "last_surplus_day": self.agent._net_surplus_day, "next_surplus_day": self.agent._next_surplus,
+                "next_wallet_day": self.agent._next_wallet,
                 "last_attempt_day": self.agent._net_refinance_day, "next_decision_day": self.agent._next_decision,
                 "credit_reserve": self.agent._net_credit_reserve, "retirement": self.retirement(),
                 "revision": f.get("revision", 0) if f else 0, "events": len(self.events)}
@@ -589,8 +665,9 @@ class HouseholdRefinance:
             issued = sum(f["issued"] for f in facilities)
             premium = sum(f["premium_nominal"] for f in facilities)
             limit = read(d.buck.functions.creditLimit(a.address))
-            surplus = bool(self.flow and self.flow.get("kind") == "surplus")
-            buffer = self.flow["plan"].cash_buffer if self.flow and not surplus else a.cash_buffer
+            kind = self.flow.get("kind") if self.flow else None
+            surplus = kind == "surplus"
+            buffer = self.flow["plan"].cash_buffer if self.flow and kind not in ("surplus", "wallet") else a.cash_buffer
             reserve = a._net_credit_reserve
             # One surplus operation's own floors; never the lasting policy.
             protection = ({"usdc": self.flow["plan"].cash_buffer, "buck": self.flow["plan"].reserve_floor}
@@ -656,12 +733,70 @@ class HouseholdRefinance:
             block = d.w3.eth.block_number
         except Exception:
             block = None
-        if f and f.get("kind") == "surplus":
-            detail.setdefault("kind", "surplus")
+        if f and f.get("kind") in ("surplus", "wallet"):
+            detail.setdefault("kind", f["kind"])
         self.events.append({"schema": 1, "seq": len(self.events) + 1, "member": self.agent.member,
                             "decision": self.decisions, "day": day, "block": block,
                             "phase": f["phase"] if f else "idle", "status": status, "accounts": self._accounts(d),
                             **_wire(detail)})
+
+    def start_wallet(self, d, plan, day, ctr, *, context=None):
+        """Start one quoted working-balance trade on the existing receipt cursor.
+
+        PRE: prepared owner/calendar, no earlier outcome or due cash work, and
+        an existing bound wallet account with its own trading approvals.
+        POST: dollars buy net BUCK delivered to the wallet, or the wallet sells
+        BUCK for dollars delivered home. Credit and the main BUCK are untouched.
+        """
+        if self.active or self.settlement_due or self.surplus_due:
+            raise ValueError("household has unfinished cash work")
+        if not isinstance(plan, WalletPlan) or plan.action not in ("buy", "sell"):
+            raise ValueError("invalid household wallet plan")
+        amounts = (plan.cash_buffer, plan.target, plan.held, plan.spend_usdc, plan.minimum_net, plan.sell_buck, plan.minimum_usdc)
+        buying = plan.action == "buy"
+        a = self.agent
+        if (any(type(v) is not int or not 0 <= v < 2**256 for v in amounts) or
+                type(plan.slippage_bp) is not int or not 0 <= plan.slippage_bp <= 1000 or
+                plan.cash_buffer < a.cash_buffer or a._wallet is None or
+                not isinstance(plan.wallet, str) or plan.wallet.lower() != a._wallet.address.lower() or
+                buying != bool(plan.spend_usdc and plan.minimum_net) or
+                buying == bool(plan.sell_buck and plan.minimum_usdc) or
+                buying and (plan.sell_buck or plan.minimum_usdc) or not buying and (plan.spend_usdc or plan.minimum_net)):
+            raise ValueError("invalid household wallet bounds")
+        self.decisions += 1
+        self.flow = dict(kind="wallet", plan=plan, phase=plan.action, status="running", hash=None, terms=None, revision=0)
+        self._event(d, day, "planned", plan=asdict(plan), context=context or {}, market=self._market(d))
+        return self.advance(d, day, ctr)
+
+    def _prepare_wallet(self, d, day):
+        a, p = self.agent, self.flow["plan"]
+        if p.action == "buy":
+            if d.usdc.functions.balanceOf(a.address).call() < p.cash_buffer + p.spend_usdc:
+                self._refuse(d, day, "wallet USDC funding reserve changed")
+                return False
+        elif d.buck.functions.balanceOf(p.wallet).call() < p.sell_buck:
+            self._refuse(d, day, "wallet BUCK balance changed")
+            return False
+        return True
+
+    def _apply_wallet(self, d, day, result, ctr):
+        a, f = self.agent, self.flow
+        p, receipt = f["plan"], result.receipt
+        if p.action == "buy":
+            if not 0 < result.paid <= p.spend_usdc or result.received < p.minimum_net:
+                raise ValueError("wallet purchase differs from bounds")
+            a.wallet_bought += result.received
+            moved = dict(usdc=result.paid, net_buck_scaled=result.net_scaled, nominal_buck=result.nominal_received)
+        else:
+            if not 0 < result.paid <= p.sell_buck or result.received < p.minimum_usdc:
+                raise ValueError("wallet sale differs from bounds")
+            a.wallet_sold += result.paid
+            moved = dict(buck=result.paid, nominal_buck=result.nominal_paid, usdc=result.received)
+        # Dollars against BUCK at one-for-one, the households' existing trade-cost convention.
+        a.trade_loss += result.paid - result.received
+        f["hash"], f["terms"], f["status"], f["phase"] = None, None, "running", "complete"
+        self._event(d, day, "confirmed", operation=p.action, amounts=moved,
+                    transaction_hash=_txhex(receipt["transactionHash"]), receipt_block=receipt.get("blockNumber"))
 
     def start_surplus(self, d, plan, day, ctr, *, context=None):
         """Start one quoted cash-only intention on the existing receipt cursor.
@@ -877,12 +1012,14 @@ class HouseholdRefinance:
         self.flow["status"] = "refused"
         self.agent.funding_pending = False
         self.agent.last_error = reason[:200]
-        self.agent.last_action = "surplus-refused" if self.flow.get("kind") == "surplus" else "refinance-refused"
+        self.agent.last_action = f"{self._label()}-refused"
         self._event(d, day, "refused", reason=reason[:200], transaction_hash=self.flow.get("hash"))
 
     def _apply(self, d, day, result, ctr):
         if self.flow.get("kind") == "surplus":
             return self._apply_surplus(d, day, result, ctr)
+        if self.flow.get("kind") == "wallet":
+            return self._apply_wallet(d, day, result, ctr)
         a, f = self.agent, self.flow
         phase, receipt = f["phase"], result.receipt
         moved = {}
@@ -951,6 +1088,11 @@ class HouseholdRefinance:
         if receipt.get("status") == 0:
             raise TransactionReverted(f["phase"], "household operation reverted", receipt)
         p = f["plan"]
+        if f.get("kind") == "wallet":
+            if f["phase"] == "buy":
+                return d.net_market_ops.purchase_from_receipt(a.address, d.pool_ub, p.wallet, receipt, expected_hash=f["hash"])
+            return d.net_market_ops.sale_from_receipt(p.wallet, d.pool_ub, a.address, p.sell_buck, p.minimum_usdc, receipt,
+                                                      expected_hash=f["hash"])
         if f.get("kind") == "surplus":
             if f["phase"] == "buy":
                 return d.net_market_ops.purchase_from_receipt(a.address, d.pool_ub, a.address, receipt, expected_hash=f["hash"])
@@ -1004,6 +1146,14 @@ class HouseholdRefinance:
                     if f["phase"] == "complete":
                         continue
                     return True
+            elif f.get("kind") == "wallet":
+                try:
+                    prepared = self._prepare_wallet(d, day)
+                except Exception as exc:
+                    self._refuse(d, day, f"wallet observation unavailable: {exc}")
+                    return True
+                if not prepared:
+                    return True
             elif phase == "issue":
                 # Funding is a real prior transaction. A failed view can be
                 # retried here without buying twice or submitting an issue.
@@ -1043,7 +1193,13 @@ class HouseholdRefinance:
             # never turn an unknown outcome into permission to send again.
             f["status"], f["hash"] = "pending", None
             try:
-                if f.get("kind") == "surplus":
+                if f.get("kind") == "wallet":
+                    if phase == "buy":
+                        result = d.net_market_ops.buy_exact_input(a.address, d.pool_ub, p.spend_usdc, p.minimum_net, p.wallet)
+                    else:
+                        result = d.net_market_ops.sell_exact_input(p.wallet, d.pool_ub, p.sell_buck, p.minimum_usdc,
+                                                                    a.address, d.fee_ub)
+                elif f.get("kind") == "surplus":
                     if phase == "buy":
                         result = d.net_market_ops.buy_exact_input(a.address, d.pool_ub, p.spend_usdc, p.minimum_net, a.address)
                     elif phase == "deposit":
@@ -1078,13 +1234,17 @@ class HouseholdRefinance:
             if not self._apply_known(d, day, result, ctr):
                 return True
         f["status"] = "complete"
-        action = ("save-retained" if f.get("retained") else "save" if f["plan"].action == "save" else "retirement-funded") if f.get("kind") == "surplus" else (
-                  "refinance-satisfied" if f.get("satisfied") else "refinance")
+        kind = f.get("kind")
+        action = (f"wallet-{f['plan'].action}" if kind == "wallet" else
+                  "save-retained" if f.get("retained") else "save" if f["plan"].action == "save" else "retirement-funded"
+                  ) if kind in ("surplus", "wallet") else ("refinance-satisfied" if f.get("satisfied") else "refinance")
         a.funding_pending, a.last_action, a.last_error = False, action, ""
-        if f.get("kind") == "surplus":
+        if kind == "surplus":
             # Completion of a retire plan funds a target; principal changes
             # only in the selected-facility engine's own confirmed records.
             self._event(d, day, "complete", outcome=action, retirement=self.retirement())
+        elif kind == "wallet":
+            self._event(d, day, "complete", outcome=action)
         else:
             self._event(d, day, "complete")
         return True

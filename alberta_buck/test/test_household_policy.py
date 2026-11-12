@@ -502,3 +502,41 @@ def test_net_surplus_guards_actual_purchase_cost_and_credit_capital():
                 price = Fraction(r["spend_usdc"], r["minimum_net"])
                 ceiling = Fraction(args["fair_num"], args["fair_den"]) * Fraction(99, 100)
                 assert price < ceiling
+
+
+def test_net_wallet_takes_one_capped_bite_toward_its_money_target():
+    import json
+    from pathlib import Path
+    from buck_core import NetMarketQuote
+    from alberta_buck.sim import household_policy as policy
+    f = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-wallet.json").read_text())
+    for c in f["cases"]:
+        q = NetMarketQuote(**{k: int(v) for k, v in (f["market"] | c.get("market", {})).items()})
+        args = {k: int(v) for k, v in (f["amounts"] | c.get("amounts", {})).items()}
+        r = policy.net_wallet_adjustment(q, **args, p=f["settings"])
+        assert (r["action"], r["reason"]) == (c["action"], c["reason"]), c["name"]
+        assert r["spend_usdc"] == int(c.get("spend", 0)) and r["minimum_net"] == int(c.get("minimum_net", 0)), c["name"]
+        assert r["sell_buck"] == int(c.get("sell", 0)) and r["minimum_usdc"] == int(c.get("minimum_usdc", 0)), c["name"]
+        # Independent bounds: never the protected dollars, never past the
+        # target, never beyond half the impact allowance, never under a unit.
+        assert r["spend_usdc"] <= max(0, args["cash"] - args["cash_floor"])
+        assert r["spend_usdc"] <= q.reserve_usdc * 5000 // 10**6 and r["sell_buck"] <= q.reserve_buck * 5000 // 10**6
+        assert not (r["spend_usdc"] and r["sell_buck"])
+        if r["action"] == "buy":
+            assert args["held"] * 100 < args["target"] * 95 and 10**6 <= r["minimum_net"] <= r["expected_net"]
+            assert r["expected_net"] == q.buy_expected(r["spend_usdc"]) <= args["target"] - args["held"] + 10**6
+        elif r["action"] == "sell":
+            assert args["held"] * 100 > args["target"] * 110 and r["sell_buck"] <= args["held"] - args["target"]
+            assert 10**6 <= r["minimum_usdc"] <= r["expected_usdc"] == q.sell_expected(r["sell_buck"])
+        else:
+            assert not r["spend_usdc"] and not r["sell_buck"]
+    for bad in (dict(cash=-1), dict(held=1.0), dict(target=2**256)):
+        with pytest.raises(ValueError, match="invalid net wallet"):
+            policy.net_wallet_adjustment(q, **(args | bad), p=f["settings"])
+    # The target every runtime must size identically from one observation.
+    t = f["targets"]
+    for c in t["cases"]:
+        ratio = None if c["ratio"] is None else int(c["ratio"])
+        assert policy.net_wallet_target(ratio, c["days"], float(t["annual_spending"]), t["settings"]) == int(c["target"]), c["name"]
+    with pytest.raises(ValueError, match="ratio"):
+        policy.net_wallet_target(1.0, 30, 60000., t["settings"])

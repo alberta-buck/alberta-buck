@@ -1,5 +1,5 @@
 // Portable policy, in whole currency units. Python: alberta_buck/sim/household_policy.py and carry.py.
-import { netPurchaseExpected, netPurchaseCost } from "../net-market-quote.js";
+import { netPurchaseExpected, netPurchaseCost, netSaleExpected } from "../net-market-quote.js";
 export const DEFAULTS = {
   home_k: [200, 1500], ltv: [.05, .85], income_frac: [.20, .35], living_frac: [.55, .70],
   cash_k: [20, 60], apr: [.045, .075], premium_bp: [25, 100], theta: [.5, 3],
@@ -86,6 +86,46 @@ export function netSurplusPurchase(market, cash, issued, fairNum, fairDen, cashF
     Object.assign(out, { spend_usdc: spend, minimum_net: minimum, expected_net: expected, reason: "ready" }); break;
   }
   return out;
+}
+
+/** Raw-unit working-balance choice from a pinned net market observation
+ * (household_policy.net_wallet_adjustment). PRE: an Ordinary wallet in its own
+ * custody; `target`/`held` are net BUCK there; the caller retained cashFloor.
+ * POST: one capped bite: buy below 95% of the target, sell the excess above
+ * 110%, else hold; integer minimums after carried/trading fees and impact;
+ * nothing under one whole unit trades. Principal never changes. */
+export function netWalletAdjustment(market, cash, held, target, cashFloor, p, { slippage_bp = 50 } = {}) {
+  const MAX = (1n << 256n) - 1n, GRAIN = 1_000_000n;
+  if ([cash, held, target, cashFloor].some((v) => typeof v !== "bigint" || v < 0n || v > MAX)
+      || !Number.isSafeInteger(slippage_bp) || slippage_bp < 0 || slippage_bp > 1000) throw new Error("invalid net wallet inputs");
+  const min = (a, b) => a < b ? a : b, impact = BigInt(Math.trunc(p.max_impact_bp * 50)), keep = BigInt(10000 - slippage_bp);
+  const out = { action: "hold", spend_usdc: 0n, minimum_net: 0n, expected_net: 0n, sell_buck: 0n, minimum_usdc: 0n,
+    expected_usdc: 0n, target, reason: "within-band" };
+  if (held * 100n < target * 95n) {
+    if (!market.net_scaled) return { ...out, reason: "no-net-delivery" };
+    const spare = cash > cashFloor ? cash - cashFloor : 0n, cap = min(spare, market.reserve_usdc * impact / 1_000_000n);
+    const cost = netPurchaseCost(market, target - held), spend = cost === null ? cap : min(cap, cost);
+    const expected = netPurchaseExpected(market, spend), minimum = expected * keep / 10000n;
+    if (spend < GRAIN || minimum < GRAIN) return { ...out, reason: cap < GRAIN ? "no-spare-cash" : "below-grain" };
+    return { ...out, action: "buy", spend_usdc: spend, minimum_net: minimum, expected_net: expected, reason: "ready" };
+  }
+  if (held * 100n > target * 110n) {
+    const bite = min(held - target, market.reserve_buck * impact / 1_000_000n);
+    const expected = netSaleExpected(market, bite), minimum = expected * keep / 10000n;
+    if (bite < GRAIN || minimum < GRAIN) return { ...out, reason: "below-grain" };
+    return { ...out, action: "sell", sell_buck: bite, minimum_usdc: minimum, expected_usdc: expected, reason: "ready" };
+  }
+  return out;
+}
+
+/** Raw net BUCK working balance wanted at a marginal cost/fair ratio (1e18 is
+ * parity; null, no quote). The discount is taken in parts per billion before
+ * any float arithmetic, so every runtime sizes the same target. */
+export function netWalletTarget(ratioWad, daysIn, annualSpending, p) {
+  if (ratioWad !== null && (typeof ratioWad !== "bigint" || ratioWad < 0n)) throw new Error("invalid cost/fair ratio");
+  const WAD = 10n ** 18n;
+  const discount = ratioWad === null || ratioWad >= WAD ? 0 : Number((WAD - ratioWad) / 1_000_000_000n) / 1e9;
+  return BigInt(Math.trunc(moneyTarget(daysIn, annualSpending, discount, p) * 1e6));
 }
 
 export function uniform(seed, member, key) {

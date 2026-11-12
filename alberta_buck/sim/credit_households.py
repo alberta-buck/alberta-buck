@@ -1,5 +1,6 @@
 """Households, insured savers and investors with portable decisions and separate, real contract accounts."""
 
+from dataclasses import replace
 import math
 
 from alberta_buck.sim import carry, household_policy as policy
@@ -7,7 +8,8 @@ from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
-from alberta_buck.sim.net_household import HouseholdRefinance, assess_refinance, assess_remainder, assess_surplus, observe_refinance_forecasts
+from alberta_buck.sim.net_household import (HouseholdRefinance, assess_refinance, assess_remainder, assess_surplus, assess_wallet,
+                                            observe_refinance_forecasts)
 from alberta_buck.sim.household_calendar import HouseholdCalendar
 from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted
 from buck_core.session import _txhex, custom_error_name
@@ -35,6 +37,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._net_refinance_day = None                  # at most one fresh assessment/resumption per bank day
         self._net_surplus_day   = None
         self._net_credit_reserve = 0                    # lasting BUCK issuance front; outlives each operation
+        self._net_funding       = None                  # (block, day, forecasts) -> the credit dollar front read there
+        self._next_wallet       = self.arrive_day + 30  # working money is tended once after each payday
+        self._wallet_ready      = False
+        self.wallet_sold        = 0
         self._next_surplus      = self._next_decision
         self._net_dispatching   = False
         self._started           = False
@@ -128,6 +134,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self.last_action        = "waiting"
         self.last_issue         = "waiting"
         self.last_surplus       = "waiting"
+        self.last_wallet        = "waiting"
         self.last_error         = ""
         self._token_idx         = int(policy.uniform(scenario.seed, self.member, "token") * len(d.tokens))
         self._bind_proxy(d)
@@ -358,6 +365,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             if result["context"]["block"] != observed["observation"]["block_number"]:
                 raise ValueError("household forecast block changed")
             result["context"]["forecasts"].update(source=observed["observation"], basis=observed["basis"])
+        if set(forecasts) <= set(keys):
+            # Later same-block saving/working-money choices reuse this front.
+            self._net_funding = ((result["context"]["block"], day, tuple(sorted(forecasts.items()))),
+                                 result["context"]["funding"])
         return result
 
     def start_net_refinance(self, d, plan, day, ctr, *, context=None):
@@ -392,6 +403,76 @@ class CreditHouseholdAgent(_HouseholdAccounts):
     def advance_net_calendar(self, d, day, ctr):
         """Explicit recurring-flow component; normal economic decisions remain gated."""
         return self.calendar_machine.advance(d, day, ctr)
+
+    def _ensure_wallet(self, d):
+        """The working balance's own bound Ordinary account, able to sell for dollars."""
+        if self._wallet is None:
+            self._wallet        = self._new_proxy(d)
+            self._wallet_ready  = False
+        if not self._wallet_ready:
+            for contract, method, args in ((d.buck, "approve", [d.permit2.address, 2**256 - 1]),
+                                           (d.permit2, "approve", [d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1])):
+                self._proxy_exec(d, contract.address, contract.encode_abi(method, args=args), proxy=self._wallet)
+            self._wallet_ready  = True
+        return self._wallet
+
+    def assess_net_wallet(self, d, day, *, forecasts=None):
+        return assess_wallet(self, d, day, forecasts=forecasts)
+
+    def start_net_wallet(self, d, plan, day, ctr, *, context=None):
+        self._prepare_net_refinance(d, day)
+        return self.refinance_machine.start_wallet(d, plan, day, ctr, context=context)
+
+    def advance_net_wallet(self, d, day, ctr, *, forecasts=None):
+        """Existing owner dispatcher: tend the BUCK working balance after a payday.
+
+        PRE: normal keeper/control work, current integer day and prepared
+        trading for the main account. POST: recover earlier evidence, calendar
+        and buybacks first; then at most one working-balance trade per pay
+        period, from dollars above the buffer and credit front. A refused or
+        declined attempt waits for the next payday. The wallet's own account
+        and approvals are created on first use, before any flow starts.
+        """
+        if type(day) is not int or not 0 <= day < 2**53 or getattr(d, "buck_accounting", "") != "net":
+            raise ValueError("household wallet needs canonical accounting and an integer day")
+        if day < self.arrive_day or self.exited:
+            return False
+        if self._net_dispatching:
+            raise ValueError("household dispatcher is already running")
+        self._net_dispatching = True
+        try:
+            if not self.calendar_machine.bound:
+                self.calendar_machine.prepare(d, day)
+            if self._recover_pending_operations(d, ctr, day, continue_after_calendar=True):
+                return True
+            m = self.refinance_machine
+            if m.settlement_due or m.surplus_due:
+                self.last_action = "settlement-due" if m.settlement_due else "surplus-due"
+                return True
+            if day < self._next_wallet:
+                return False
+            self._next_wallet  += ((day - self._next_wallet) // 30 + 1) * 30
+            self.last_error     = ""
+            try:
+                assessed        = self.assess_net_wallet(d, day, forecasts=forecasts)
+                if assessed["plan"] is None:
+                    self.last_action = "wallet-hold"
+                    m.decisions += 1
+                    m._event(d, day, "declined", kind="wallet", phase="assessment", context=assessed["context"],
+                             reason=assessed["context"]["reason"], market=m._market(d))
+                    return True
+                wallet          = self._ensure_wallet(d)
+                return self.start_net_wallet(d, replace(assessed["plan"], wallet=wallet.address), day, ctr,
+                                             context=assessed["context"])
+            except Exception as exc:
+                self.last_action, self.last_error = "wallet-unavailable", str(exc)[:200]
+                ctr["household_err"] = self.last_error
+                m._event(d, day, "unavailable", kind="wallet", phase="assessment", reason=self.last_error)
+                return True
+            finally:
+                self.last_wallet = self.last_action
+        finally:
+            self._net_dispatching = False
 
     def assess_net_surplus(self, d, day, *, forecasts=None):
         return assess_surplus(self, d, day, forecasts=forecasts)

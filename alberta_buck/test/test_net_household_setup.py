@@ -11,7 +11,7 @@ from web3.logs import DISCARD
 from buck_core import TransactionReceiptPending, TransactionReverted, observe_net_market, NetBasketOps
 from buck_core.session import _txhex
 
-from alberta_buck.sim import experiment as expmod, identity as idmod
+from alberta_buck.sim import experiment as expmod, household_policy as policy, identity as idmod
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.credit_households import CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent
 from alberta_buck.sim.deploy import deploy
@@ -26,6 +26,7 @@ YEAR = 365 * 86400 + 6 * 3600
 REFINANCE = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-refinance.json").read_text())
 SURPLUS_FILE = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-surplus.json").read_text())
 SURPLUS, SURPLUS_FLOW = SURPLUS_FILE["lifecycle"], SURPLUS_FILE["flow"]
+WALLET = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-wallet.json").read_text())
 CALENDAR = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-calendar.json").read_text())["flow"]
 
 
@@ -1471,6 +1472,170 @@ def test_household_surplus_applies_known_outcomes_once_and_stops_on_unknown(hous
         assert waits[0]["accounts"]["issued"] == str(principal) and waits[0]["seq"] < reductions[0]["seq"]
         assert waits[0]["retirement"]["target"] == str(principal) and int(waits[0]["retirement"]["reserve"]) > wallet - RAW
     assert not d.chain.mismatches
+
+
+def _wallet_saver(d, make, index):
+    """A mortgage-free saver with wages, bills and prepared trading; no wallet account yet."""
+    a = make(index, CreditSaverAgent, settings=WALLET["lifecycle"]["settings"])
+    for contract, method, args in ((d.usdc, "approve", [d.swap_guard.address, 2**256 - 1]),
+                                   (d.buck, "approve", [d.permit2.address, 2**256 - 1]),
+                                   (d.permit2, "approve", [d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1])):
+        a._proxy_exec(d, contract.address, contract.encode_abi(method, args=args))
+    a.advance_net_calendar(d, 0, {})
+    return a
+
+
+def _wallet_day(d, a, day):
+    d.anvil.warp_to(a.calendar_machine.epoch + day * 86400)
+    d.chain.send(d.kctrl.functions.compute())
+
+
+def test_household_wallet_keeps_a_buck_working_balance_in_its_own_custody(household_world):
+    d, _, make = household_world
+    a = _wallet_saver(d, make, 87)
+    m, ctr = a.refinance_machine, {}
+    main = lambda: (d.usdc.functions.balanceOf(a.address).call(), d.buck.functions.netBalanceScaled(a.address).call())
+    wallet = lambda: d.buck.functions.balanceOf(a._wallet.address).call()
+    supply = d.buck.functions.totalIssued().call()
+    assert a.advance_net_wallet(d, 0, ctr) is False and a._wallet is None, "nothing is tended before a payday"
+    assert m.status()["next_wallet_day"] == 30
+    spending = a.income_annual * a.p["living_frac"] / RAW
+
+    # First payday: wages and bills settle, then dollars above the buffer buy
+    # the working balance. It is delivered to the wallet's own account.
+    _wallet_day(d, a, 30)
+    assert a.advance_net_wallet(d, 30, ctr) is True and a.last_action == "wallet-buy", a.last_error
+    assert a.income_total == a.income_annual // 12 and a.living_paid > 0, "the payday came first"
+    plan = m.flow["plan"]
+    def wanted(day):
+        # The assessment's own recorded cost/fair ratio sizes the target.
+        context = [e for e in m.events if e.get("kind") == "wallet" and e["status"] == "planned"][-1]["context"]
+        return policy.net_wallet_target(int(context["marginal_ratio_wad"]), day, spending, a.p)
+    target = wanted(30)
+    assert target >= int(policy.money_target(30, spending, 0, a.p) * RAW) > 0
+    assert plan.action == "buy" and plan.target == target and plan.held == 0 and plan.cash_buffer == a.cash_buffer
+    assert d.reg.functions.isVerified(a._wallet.address).call() and not d.reg.functions.isCarrying(a._wallet.address).call()
+    assert a._wallet.address != a.address and plan.wallet == a._wallet.address
+    bought = [e for e in m.events if e.get("kind") == "wallet" and e["status"] == "confirmed"]
+    assert [e["operation"] for e in bought] == ["buy"] and m.events[-1]["outcome"] == "wallet-buy"
+    received = int(bought[0]["amounts"]["net_buck_scaled"]) // Q
+    assert plan.minimum_net <= received == wallet() <= target + RAW and a.wallet_bought == received
+    assert received * 100 >= target * 99, "the shortfall was bought, less only impact and fees"
+    planned = [e for e in m.events if e.get("kind") == "wallet" and e["status"] == "planned"][0]
+    cash_before = int(planned["accounts"]["usdc"])
+    assert cash_before - main()[0] == int(bought[0]["amounts"]["usdc"]) <= plan.spend_usdc
+    assert main()[0] >= a.cash_buffer and main()[1] == int(planned["accounts"]["buck_scaled"]), "the main BUCK is untouched"
+    assert bought[0]["accounts"]["custody"]["wallet"]["buck_scaled"] == bought[0]["amounts"]["net_buck_scaled"]
+    assert d.buck.functions.totalIssued().call() == supply and d.net_credit_ops.household(a.address, a._token_ids).issued == 0
+    assert m.status()["kind"] == "wallet" and m.status()["next_wallet_day"] == 60
+    block = d.w3.eth.block_number
+    assert a.advance_net_wallet(d, 30, ctr) is False and d.w3.eth.block_number == block, "once a pay period"
+
+    # Second payday: adoption has ramped and the balance has decayed a
+    # month. Only that shortfall is bought, into the same account.
+    _wallet_day(d, a, 60)
+    held = wallet()
+    assert held < received, "wallet money carries demurrage like any other"
+    address = a._wallet.address
+    assert a.advance_net_wallet(d, 60, ctr) is True and a.last_action == "wallet-buy", a.last_error
+    plan = m.flow["plan"]
+    assert plan.target == wanted(60) and plan.held == held
+    assert policy.money_target(60, spending, 0, a.p) > policy.money_target(30, spending, 0, a.p), "adoption ramps"
+    assert a._wallet.address == address and 0 < wallet() - held <= plan.target - held + RAW
+    assert plan.spend_usdc * 5 < cash_before - int(bought[0]["accounts"]["usdc"]), "a top-up, not the balance again"
+
+    # An excess (here a real transfer in) is sold from the wallet's own
+    # custody, one impact-capped bite, for dollars delivered home.
+    d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi(
+        "transfer", args=[address, int(WALLET["lifecycle"]["gift_buck"])])))
+    _wallet_day(d, a, 90)
+    held, sold_before = wallet(), a.wallet_sold
+    a.calendar_machine.prepare(d, 90)
+    cash, home = main()
+    q = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub)
+    assert a.advance_net_wallet(d, 90, ctr) is True and a.last_action == "wallet-sell", a.last_error
+    plan = m.flow["plan"]
+    assert plan.action == "sell" and plan.sell_buck == min(held - plan.target, q.reserve_buck * 5000 // 10**6)
+    sold = [e for e in m.events if e.get("kind") == "wallet" and e["status"] == "confirmed" and e["operation"] == "sell"]
+    assert len(sold) == 1 and int(sold[0]["amounts"]["buck"]) == plan.sell_buck == a.wallet_sold - sold_before
+    assert held - wallet() >= plan.sell_buck and held - wallet() <= plan.sell_buck + RAW
+    usdc = int(sold[0]["amounts"]["usdc"])
+    assert usdc >= plan.minimum_usdc and int(sold[0]["accounts"]["usdc"]) - int(m.events[-3]["accounts"]["usdc"]) >= 0
+    assert int(sold[0]["accounts"]["buck_scaled"]) <= home, "selling the wallet's BUCK never touches the main account's"
+    assert int(sold[0]["accounts"]["usdc"]) >= cash + usdc - 1, "the dollars came home (wages and bills aside)"
+    assert d.buck.functions.totalIssued().call() == supply
+    assert [e["seq"] for e in m.events] == list(range(1, len(m.events) + 1)) and not d.chain.mismatches
+
+
+@pytest.mark.parametrize("case", WALLET["flow"]["cases"], ids=lambda c: c["name"])
+def test_household_wallet_applies_known_outcomes_once_and_stops_on_unknown(household_world, monkeypatch, case):
+    d, _, make = household_world
+    a = _wallet_saver(d, make, 88)
+    m, ctr = a.refinance_machine, {}
+    _wallet_day(d, a, 30)
+    day = 30
+    if case["action"] == "sell":
+        # A real working balance first, then a real excess to trim next payday.
+        assert a.advance_net_wallet(d, 30, ctr) is True and a.last_action == "wallet-buy", a.last_error
+        d.chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi(
+            "transfer", args=[a._wallet.address, int(WALLET["lifecycle"]["gift_buck"])])))
+        _wallet_day(d, a, 60)
+        day = 60
+    a.calendar_machine.prepare(d, day)
+    held = lambda: d.buck.functions.balanceOf(a._wallet.address).call() if a._wallet is not None else 0
+    books = lambda: (held(), a.wallet_bought, a.wallet_sold, d.buck.functions.totalIssued().call())
+    before = books()
+    dispatch, sends, fault = d.net_market_ops.execute, [], [True]
+    index = WALLET["flow"]["refuse_argument"]
+    def send(owner, target, method, args):
+        phase = m.flow["phase"] if m.flow and m.flow.get("kind") == "wallet" and m.flow["status"] != "complete" else "other"
+        sends.append((phase, method, owner))
+        hit = fault[0] and phase in (case.get("lost"), case.get("unknown"), case.get("refused"))
+        if hit and case.get("unknown"):
+            fault[0] = False
+            raise RuntimeError("submission outcome unknown")
+        if hit and case.get("refused"):
+            fault[0] = False
+            args = list(args)
+            args[index[method]] = 2**200
+        receipt = dispatch(owner, target, method, args)
+        if hit and case.get("lost"):
+            fault[0] = False
+            raise TransactionReceiptPending(_txhex(receipt["transactionHash"]))
+        return receipt
+    monkeypatch.setattr(d.net_market_ops, "execute", send)
+    trades = lambda: [x for x in sends if x[0] in ("buy", "sell")]
+    assert a.advance_net_wallet(d, day, ctr) is True
+    phase = case.get("lost") or case.get("unknown") or case.get("refused")
+    assert m.flow["kind"] == "wallet" and m.flow["phase"] == phase
+
+    if case.get("unknown"):
+        assert m.active and m.flow["status"] == "pending" and m.flow["hash"] is None and a.last_action == "wallet-pending"
+        for later in (day, day + 1):
+            d.anvil.warp_to(a.calendar_machine.epoch + later * 86400)
+            assert a.advance_net_wallet(d, later, ctr) is True and "wallet hash unavailable" in a.last_error
+        assert len(trades()) == 1 and books() == (held(), *before[1:]) and held() <= before[0]
+        return
+    if case.get("lost"):
+        assert m.active and m.flow["status"] == "pending" and m.flow["hash"] and a.last_action == "wallet-pending"
+        assert (a.wallet_bought, a.wallet_sold) == before[1:3], "nothing is booked from an unauthenticated reply"
+        lost_hash = m.flow["hash"]
+        assert a.advance_net_wallet(d, day, ctr) is True
+        applied = [e for e in m.events if e.get("kind") == "wallet" and e["status"] == "confirmed"][-1]
+        assert applied["transaction_hash"] == lost_hash and len(trades()) == 1
+        assert m.flow["status"] == "complete" and a.last_action == "wallet-buy"
+        assert a.wallet_bought == held() == int(applied["amounts"]["net_buck_scaled"]) // Q > 0
+        return
+    refusal = [e for e in m.events if e["status"] == "refused"][-1]
+    assert a.last_action == "wallet-refused" and not m.active and not m.surplus_due and not m.settlement_due
+    assert d.w3.eth.get_transaction_receipt(refusal["transaction_hash"])["status"] == 0
+    assert books() == before and a._wallet is not None, "a proved refusal moved no money; the empty account stays"
+    assert a.advance_net_wallet(d, day, ctr) is False and m.status()["next_wallet_day"] == day + 30
+    # A known refusal blocks nothing: the next payday tends the balance afresh.
+    _wallet_day(d, a, day + 30)
+    assert a.advance_net_wallet(d, day + 30, ctr) is True and a.last_action == "wallet-buy", a.last_error
+    assert len(trades()) == 2 and a.wallet_bought == held() > 0
+    assert a.income_total == 2 * (a.income_annual // 12)
 
 
 def test_refinance_funding_target_is_saved_capital_not_an_unfunded_loan(household_world):

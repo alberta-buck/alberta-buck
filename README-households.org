@@ -279,8 +279,55 @@ make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-ho
 #+end_src
 
 The shared vectors are in =test/fixtures/household-surplus.json= (=cases= for
-the policy, =lifecycle= and =flow= for actual execution). Working-wallet money,
-saver credit investment and asset exits still gate the normal =act= loop.
+the policy, =lifecycle= and =flow= for actual execution). Saver credit
+investment and asset exits still gate the normal =act= loop.
+
+* Working balance: the household wallet
+
+A household that pays part of its spending in BUCK keeps a working balance of
+them: ordinary money, in an account of its own, apart from the credit account
+and its issuance front. =advance_net_wallet(d, day, counters)= /
+=await advanceNetWallet(world, day, counters)= tends it once after each payday
+on the same owner dispatcher and receipt cursor (=kind=wallet=).
+
+The target is the existing =money_target=: the share of spending paid in BUCK
+(ramping from =adopt_start= to 1 over =adopt_years=) times =money_months= of
+that spending, enlarged while the BUCK is cheap against the basket
+(=money_gain=, capped at =money_cap=). The discount is the same
+basket-relative cost/fair ratio saving uses, taken in parts per billion so both
+languages size the same target.
+
+| Balance against target | Action |
+|------------------------+--------|
+| Below 95% | Buy the shortfall with dollars above the buffer and credit front; the guard delivers net BUCK straight to the wallet's account. |
+| Within 95% to 110% | Hold. Recorded as a declined =kind=wallet= observation with its market record. |
+| Above 110% | Sell the excess from the wallet's own custody; the dollars are delivered home. |
+
+Either trade is one bite capped at half the household's impact allowance of
+the dollar pool's active reserves, with integer minimums after carried and
+trading fees; nothing under one whole unit trades. Neither issues nor retires
+principal, and neither touches the main account's BUCK. The wallet's balance
+carries demurrage like any other, so a steady target still needs small
+top-ups. A refused or declined attempt waits for the next payday; lost and
+unknown outcomes follow the shared rules in the table above.
+
+The wallet account, its binding and its trading approvals are created on first
+use, before any flow starts. =status()= reports =next_wallet_day=; personal
+accounts report the wallet under =custody=; =wallet_bought= / =wallet_sold=
+accumulate net BUCK bought and nominal BUCK sold.
+
+A debtor's dollar front comes from the whole refinance assessor. That read is
+now shared: when the day's refinancing assessment was made at the same block
+(a declined decision sends nothing), saving and working money reuse it instead
+of assessing again.
+
+#+begin_src sh
+make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py PYTEST_ARGS='-k wallet -q'
+make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-wallet.tevm.test.js
+#+end_src
+
+Shared vectors: =test/fixtures/household-wallet.json=. Saver credit investment
+and asset exits still gate the normal =act= loop.
 
 * Market estimates for reserve funding
 

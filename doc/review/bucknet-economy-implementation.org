@@ -75,8 +75,9 @@ retaining keyed adoption timing and seeking fresh bounded tranches daily
 after issuance. Reserve-safe saving, basket redemption and discounted
 retirement now run on that same receipt cursor in both languages, with the
 selected-facility engine's reductions in the public history and the lasting
-credit front kept apart from each operation's own protection. Working
-money, saver credit investment and asset exits still gate the normal
+credit front kept apart from each operation's own protection. The BUCK
+working balance is tended after each payday in its own custody on that same
+cursor. Saver credit investment and asset exits still gate the normal
 household loop. Full restoration is deferred, not a prerequisite for uninterrupted
 interactive and five-year acceptance (November 8 priority below).
 Nominal issuance references and net liquidation/buyback units have distinct
@@ -1251,7 +1252,7 @@ explicit so simplification does not remove an economic source of demand:
 | Existing path | Required canonical successor | Simplification boundary |
 |---------------+------------------------------+-------------------------|
 | Floating monthly/advance and direct payments | Dated calendar, authenticated income/bills and independent shadow books | After the calendar is qualified, move the old insurance-cost fixture onto it and make the old path legacy-only. Its separate working-wallet action still needs migration. |
-| Working-wallet payday action | Guarded net purchases/sales from surplus after actual bills and buffers; preserve distinct custody | Retain its ordinary money-demand behavior before removing the old monthly caller or an overlapping spending agent. Reading the wallet mark is already supported; the new calendar intentionally does not submit this discretionary trade. |
+| Working-wallet payday action | Guarded net purchases/sales from surplus after actual bills and buffers; preserve distinct custody | *Done as a component* (working-money checkpoint): one capped trade a pay period on the shared receipt cursor, the wallet in its own Ordinary account. The legacy monthly caller stays legacy-only; the calendar still submits no discretionary trade. |
 | Debtor refinancing versus saver credit investment | Reuse selected issuance, reserve funding, bounded market operations and one owner receipt dispatcher; distinguish bank payment from investment/cash retention | Extend common execution where it is the same operation. A saver has no mortgage, so it must not manufacture a positive bank allocation to pass the refinance plan's debt bounds or duplicate the whole refinance machine. |
 | First closing versus later tranches | Confirmed one-time closing plus current-credit/capital staged admission now implemented | Activation alone does not pay a fee. Allocate it only for economics, pay it fully on the first bank receipt, and recheck every later tranche. Resolve refused export prefixes before automatic scheduling. |
 | Surplus saving and discounted retirement | Protect required issuance cash/reserve, quote full net acquired BUCK including pool-carried fees, then authenticate actual deposit or selected settlement | *Done as components* (surplus checkpoint). A nominal pool discount alone is insufficient, and neither is one dislocated dollar route. Targets survive actual uncertainty; known waiting intentions coexist with normal income and bills. |
@@ -1887,9 +1888,10 @@ five-year run is claimed.
   retain full actual principal, cash, basis/mark/ROI and decision histories.
   Qualified through the existing Make/Nix/venv targets; guides updated.
 
-Next: port the working wallet, saver credit investment and asset exits, then
-open the normal household act loop, short complete worlds and five-year
-JSON/PDF campaigns. Full save/resume and Notes/proofs remain later tasks.
+Next (at that checkpoint): port the working wallet, saver credit investment
+and asset exits, then open the normal household act loop, short complete
+worlds and five-year JSON/PDF campaigns. Full save/resume and Notes/proofs
+remain later tasks. The working wallet follows below.
 
 *** Surplus saving and retirement checkpoint
 
@@ -2125,3 +2127,115 @@ a bootstrapped leveraged basket, two TOKENs).
     still draws with the numeric =mint= overload and swaps through its own
     callback. Both remain in canonical Buck, but neither was exercised here.
     Qualify it with the first savings-sandbox world.
+
+** Working-money milestone: the household wallet (complete)
+
+Continued from the surplus checkpoint =44ea3f6c=. No Solidity, demurrage
+kernel, K rule or Jubilee allowance changed. Normal act remains gated.
+
+- [X] Size the working balance with the existing =money_target= from the
+  same basket-relative cost/fair ratio as saving, taking the discount in
+  parts per billion so Python and JavaScript size the same raw target
+  (=net_wallet_target= / =netWalletTarget=, shared vectors).
+- [X] Choose one capped bite toward that target from a pinned market
+  (=net_wallet_adjustment= / =netWalletAdjustment=): buy below 95%, sell the
+  excess above 110%, never the protected dollars, never past half the impact
+  allowance, never under one whole unit. Ten shared vectors.
+- [X] Execute on the existing receipt cursor as =kind=wallet=. A purchase is
+  paid by the main account and delivered by the guard straight to the
+  wallet's own Ordinary account; a sale is made from the wallet's custody
+  with the dollars delivered home. Neither touches credit or the main BUCK.
+- [X] Tend once after each payday on the existing owner dispatcher
+  (=advance_net_wallet= / =advanceNetWallet=), after recovery and the
+  calendar; a refused or declined attempt waits for the next payday.
+- [X] Share the debtor's credit dollar front between the day's refinance
+  assessment and later same-block saving and working-money choices
+  (=credit_cash_floor= / =creditCashFloor=), the first half of
+  recommendation 12 above.
+- [X] Actual Python and JavaScript lifecycle (first purchase, ramp and
+  decay top-up, capped trim) and lost, refused and unknown outcomes.
+
+*** Working-money checkpoint
+
+- *What the wallet is*: ordinary money in a second bound Ordinary account,
+  created with its trading approvals on first use and before any flow. Its
+  balance carries demurrage. The legacy =_tend_wallet= remains for legacy
+  accounting only; it bought from all cash, where the canonical component
+  spends only dollars above the buffer and credit front.
+- *Machine*: =WalletPlan=, =assess_wallet= / =assessWallet=,
+  =start_wallet= / =startWallet= and one =buy= or =sell= phase. Lost replies
+  are authenticated from the saved hash (a purchase by buyer, recipient and
+  pool; a sale by seller, pool and dollar recipient) and applied once.
+  Completion reports =outcome=wallet-buy= or =wallet-sell=; a hold is a
+  declined =kind=wallet= observation with its market record.
+  =status()= gains =next_wallet_day=; the agent accumulates =wallet_bought=
+  and =wallet_sold=.
+- *Evidence at this checkpoint* (final sources; counts, not log paths):
+  - Python, the same sixteen supported files: *263 passed*, no skips, 82 s
+    (five more than the surplus checkpoint: the wallet policy vectors, the
+    lifecycle and three fault cases).
+  - Fast JavaScript, =make nix-core-equilibrium-policy-test=: *79 passed*.
+  - Actual JavaScript wallet fixture
+    (=test/net-household-wallet.tevm.test.js=, one Tevm world): *11 Node
+    checks passed* (ten children and the parent), no skips, three and a
+    half minutes.
+  - Full actual JavaScript equilibrium acceptance, now six files run
+    together: *99 passed*, no skips, about thirty minutes.
+  - =make nix-venv-net-demurrage-smoke=: *35 Python and 20 JavaScript
+    passed*; the browser equilibrium bundle rebuilds.
+- *Commands*:
+  #+begin_src sh
+  make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py PYTEST_ARGS='-k wallet -q'
+  make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-wallet.tevm.test.js
+  #+end_src
+
+*** Observations and recommendations for the five-year runs and sandboxes (working money)
+
+Additions to the list above; the same caution applies. Fixture A is the
+Python =household_world=; the household spends 60k a year, holds one month of
+it, and starts at half adoption.
+
+**** Measured in this phase
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 9 | A | First payday: a 2,705.34-BUCK target cost 2,718.51 dollars, 0.49% over one for one in fee and impact on a 1M pool, and landed on target to the unit. |
+| 10 | A | Thirty days later the untouched balance was 2,700.90 (the 2% a year), the ramped target 2,910.68, and the top-up 211.77 dollars. A steady target still buys about 0.16% of itself a month. |
+| 11 | A | A 19,757-BUCK excess sold 4,985 BUCK in its one bite, the impact cap of 0.5% of the pool; shedding it takes four paydays. |
+| 12 | policy | =money_gain= 200 makes the target very sensitive: a 0.1% basket-relative discount adds a fifth, 0.5% doubles it, and 3.5% reaches the eightfold cap. The 5% sell-off of observation 4 would ask each household for eight times its balance at its next payday. |
+| 13 | C | Under Tevm a payday with its wallet trade takes 13 to 19 s for a mortgage-free saver (wages, two bills, then the trade; the first also creates and approves the wallet account). The whole wallet fixture runs in three and a half minutes. Tevm's clock also moves with every transaction, so a balance read before a payday is a few raw units older by the time it is assessed; pyrevm's does not. |
+
+**** Recommendations
+
+17. /Put the wallet where the legacy loop had it./ Working money was tended
+    inside the monthly flow, before issuance and saving. Keep that in the
+    act loop: calendar, known remainders, a due exit, then on a payday the
+    wallet, then the decision-day choices. It already declines while a
+    settlement or deposit retry is due.
+18. /Paydays are synchronized./ Every household's payday is its arrival day
+    plus thirty, so an opening cohort tends its wallets on the same days for
+    five years. Each bite is capped against the reserves it sees, but the
+    bites add within the day (observation 9: about a quarter of a percent
+    of a 1M pool's dollars per household). With the eightfold discount
+    response of
+    observation 12 this is the largest single-day BUCK demand in the model.
+    Before the campaigns, either confirm the cohort's summed payday demand
+    is small against =deploy.target_buck_lp_m=, or stagger paydays by the
+    member's keyed phase. That is a modelling decision; the legacy loop has
+    the same synchronization, so results are comparable either way only if
+    both runs make the same choice.
+19. /Expect asymmetric unwinding./ A discount fills wallets quickly (each
+    buys toward eight times its balance), and parity afterwards leaves them
+    above 110% of target, selling one capped bite a payday (observation 11).
+    A shock is followed by months of small scheduled BUCK sales from
+    wallets. Chart wallet balances against target, and =wallet_bought= and
+    =wallet_sold= by day, so that tail is not read as a second shock.
+20. /Wallet demand is the model's standing BUCK demand./ Unlike savings it
+    is not deposited: it sits in Ordinary accounts and pays demurrage to
+    the fund. Report total wallet BUCK beside basket deposits and issued
+    principal in the supply reconciliation, and include wallets when
+    asking who holds the float (the earlier hoarding artifact was found
+    that way).
+21. /A lost wallet reply stops the household, as any other./ The sandbox
+    remarks under recommendation 11 apply unchanged; the wallet's own
+    account adds one more address the operator may need to see.
