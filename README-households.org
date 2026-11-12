@@ -76,8 +76,21 @@ They exercise actual contracts, not a substitute monetary model.
 
 Call =advance_net_calendar(d, day, counters)= or
 =await advanceNetCalendar(world, day)= on arrival, then at least on each
-30-day payday. Daily observation is supported and required by the eventual
-normal runner. The integer day must match elapsed EVM time; changing an
+payday. Daily observation is supported and required by the eventual
+normal runner.
+
+Each household is paid on its own fixed day of the 30-day month, counted from
+the simulation's day 0 (not from its arrival): =pay_day=, a keyed random day
+0 to 29 by default, so that an opening cohort's wages, bills, mortgage
+instalments and wallet purchases do not all fall on one day. The first payday
+is the first such day strictly after arrival (1 to 30 days later: the
+household was already earning), and the rest follow every 30 days
+(=first_payday= / =firstPayday=). A whole number pins it; the test fixtures
+pin theirs to the arrival's day of the month, which gives a first payday
+thirty days after arrival. Because the first period is usually shorter than a
+month, households differ by at most one payday over a run; the counterfactual
+mortgage book keeps the same paydays, so each household's comparison is fair.
+The keyed draw moves no other household parameter. The integer day must match elapsed EVM time; changing an
 actor's day label cannot substitute for advancing the world. Missing a payday
 is an explicit error because today's activated insurance coverage cannot
 reconstruct an unobserved historical premium.

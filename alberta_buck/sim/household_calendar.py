@@ -6,6 +6,7 @@ settlement-token units. Payment dates are simulation days, after that day's
 interest. The counterfactual uses the same convention.
 """
 from dataclasses import dataclass
+from alberta_buck.sim.household_policy import first_payday
 from buck_core import TransactionReceiptPending, TransactionReverted
 from buck_core.session import Expect, _txhex
 from web3.logs import DISCARD
@@ -169,7 +170,7 @@ class HouseholdCalendar:
         self.interest_offset, self.paid_offset = a.external_interest, a.external_paid
         self.hypo_interest_offset, self.hypo_paid_offset = a.hypo_interest, a.hypo_paid
         self.epoch = epoch
-        self.day, self.next_pay = day, day + 30
+        self.day, self.next_pay = day, first_payday(day, a.p["pay_day"])
         opening = int(a.p["invest_cash_k" if a.investor else "cash_k"] * 1000 * 10**6)
         _money(opening)
         self.queue.append(dict(kind="opening", day=day, income=opening))

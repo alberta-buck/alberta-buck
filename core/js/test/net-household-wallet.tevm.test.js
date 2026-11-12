@@ -28,13 +28,13 @@ test("households keep a BUCK working balance in its own custody and tend it afte
   const { buck, usdc } = world, execute = world.netMarket.execute;
   const owner = (a) => world.holderAddress(a.account);
   let serial = 0;
-  const saver = async (name) => {
+  const saver = async (name, extra = {}) => {
     const a = new CreditSaverAgent({ account: { address: `0x${(0xabf300n + BigInt(serial++)).toString(16).padStart(40, "0")}` },
-      member: name, settings: life.settings });
+      member: name, settings: { ...life.settings, ...extra } });
     await a.setup(world); await world.households.openTrading(a.account);
     return a;
   };
-  const w = await saver("wallet-life");
+  const w = await saver("wallet-life"), early = await saver("wallet-paid-on-the-7th", { pay_day: 7 });
   const cases = [];
   for (const [i, c] of flow.cases.entries()) cases.push({ c, a: await saver(`wallet-flow-${i}`), ctr: {}, sends: [], fault: true });
   world.householdEpoch = (await s.client.getBlock()).timestamp;
@@ -42,7 +42,7 @@ test("households keep a BUCK working balance in its own custody and tend it afte
     await advanceTime(world, world.householdEpoch + BigInt(day * DAY) - (await s.client.getBlock()).timestamp);
     await s.send(world.kctrl, "compute");
   };
-  for (const a of [w, ...cases.map((x) => x.a)]) await a.advanceNetCalendar(world, 0);
+  for (const a of [w, early, ...cases.map((x) => x.a)]) await a.advanceNetCalendar(world, 0);
   const cashOf = (a) => s.call(usdc, "balanceOf", [owner(a)]);
   const homeScaled = (a) => s.call(buck, "netBalanceScaled", [owner(a)]);
   const walletOf = async (a) => a.wallet ? s.call(buck, "balanceOf", [a.wallet.address]) : 0n;
@@ -78,6 +78,17 @@ test("households keep a BUCK working balance in its own custody and tend it afte
   await t.test("nothing is tended before a payday", async () => {
     assert.equal(await w.advanceNetWallet(world, 0, ctr), false); assert.equal(w.wallet ?? null, null);
     assert.equal(m.status().next_wallet_day, 30);
+  });
+
+  await at(7);
+  await t.test("each household is paid, and tends its wallet, on its own day of the month", async () => {
+    assert.deepEqual([w.p.pay_day, early.p.pay_day], [0, 7]);
+    assert.equal(early.refinanceMachine.status().next_wallet_day, 7); assert.equal(early.calendarMachine.nextPay, 7);
+    assert.equal(await early.advanceNetWallet(world, 7, {}), true); assert.equal(early.lastAction, "wallet-buy", early.lastError);
+    assert.equal(early.incomeTotal, early.incomeAnnual / 12n); assert.ok(early.walletBought > 0n);
+    assert.equal(early.calendarMachine.nextPay, 37); assert.equal(early.refinanceMachine.status().next_wallet_day, 37);
+    assert.equal(await w.advanceNetWallet(world, 7, ctr), false); assert.equal(w.incomeTotal, 0n); assert.equal(w.wallet ?? null, null);
+    assert.equal(w.calendarMachine.nextPay, 30);
   });
 
   await at(30);

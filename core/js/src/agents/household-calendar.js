@@ -3,6 +3,7 @@
 // movements and Buck/Jubilee accounting remain the existing SDK's concern.
 import { parseEventLogs, zeroAddress } from "viem";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
+import { firstPayday } from "./household-policy.js";
 const MAX = (1n << 256n) - 1n, DENOMINATOR = 365n * 1_000_000_000n;
 const DAY = 86400n, BANK = "0x000000000000000000000000000000000000dEaD";
 const PHASES = ["income", "living", "insurance", "mortgage"];
@@ -121,7 +122,7 @@ export class HouseholdCalendar {
     this.interestOffset = a.externalInterest; this.paidOffset = a.externalPaid;
     this.hypoInterestOffset = a.hypoInterest; this.hypoPaidOffset = a.hypoPaid;
     this.epoch = epoch;
-    this.day = day; this.nextPay = day + 30;
+    this.day = day; this.nextPay = firstPayday(day, a.p.pay_day);
     const opening = BigInt(Math.trunc(a.p[a.investor ? "invest_cash_k" : "cash_k"] * 1000 * 1e6));
     money(opening);
     this.queue.push({ kind: "opening", day, income: opening }); this.incomeDue += opening; a.hypoCash += opening;

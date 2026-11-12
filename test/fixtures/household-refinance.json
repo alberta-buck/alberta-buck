@@ -9,7 +9,7 @@
     "switch_cost": "100000", "penalty_numerator": "1", "penalty_denominator": "100"
   },
   "programme": {
-    "settings": {"home_k": 1000, "premium_bp": 50, "apr": 0.06, "ltv": 0.4, "theta": 3,
+    "settings": {"pay_day": 0, "home_k": 1000, "premium_bp": 50, "apr": 0.06, "ltv": 0.4, "theta": 3,
       "risk": 0, "switch_k": 2, "max_impact_bp": 100, "utilization": 0.8, "renew_frac": 0, "divest_rate": 0,
       "cash_k": 40, "decision_days": 12},
     "members": ["dispatch-a", "dispatch-b"], "adoption_phases": [1, 9],
@@ -17,7 +17,7 @@
     "forecasts": {"expected_relief_rate": 0.02, "expected_refund_growth": -0.02, "expected_wallet_growth": -0.02}
   },
   "resumption": {
-    "settings": {"home_k": 1000, "premium_bp": 100, "apr": 0.06, "ltv": 0.000004, "theta": 3,
+    "settings": {"pay_day": 0, "home_k": 1000, "premium_bp": 100, "apr": 0.06, "ltv": 0.000004, "theta": 3,
       "risk": 0, "switch_k": 0.0001, "max_impact_bp": 100, "cash_k": 20, "buffer_k": 10,
       "income_frac": 0.2, "living_frac": 0.6, "divest_rate": 0},
     "cases": [

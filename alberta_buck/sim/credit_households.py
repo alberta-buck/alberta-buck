@@ -32,13 +32,13 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         p                       = self.p
         self.arrive_day         = getattr(self, "arrive_day", int(spec(scenario, cls, "arrive_day", 0)))
         self._last_day          = self.arrive_day
-        self._next_pay          = self.arrive_day + 30
+        self._next_pay          = policy.first_payday(self.arrive_day, p["pay_day"])
         self._next_decision     = self.arrive_day + p["phase"]
         self._net_refinance_day = None                  # at most one fresh assessment/resumption per bank day
         self._net_surplus_day   = None
         self._net_credit_reserve = 0                    # lasting BUCK issuance front; outlives each operation
         self._net_funding       = None                  # (block, day, forecasts) -> the credit dollar front read there
-        self._next_wallet       = self.arrive_day + 30  # working money is tended once after each payday
+        self._next_wallet       = self._next_pay        # working money is tended once after each payday
         self._wallet_ready      = False
         self.wallet_sold        = 0
         self._next_surplus      = self._next_decision

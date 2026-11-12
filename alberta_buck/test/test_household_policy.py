@@ -532,6 +532,30 @@ def test_net_surplus_guards_actual_purchase_cost_and_credit_capital():
                 assert price < ceiling
 
 
+def test_each_household_keeps_one_keyed_day_of_the_month_for_its_payday():
+    import json
+    from pathlib import Path
+    from alberta_buck.sim import household_policy as policy
+    f = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-calendar.json").read_text())["paydays"]
+    for arrive, pay_day, first in f["cases"]:
+        assert policy.first_payday(arrive, pay_day) == first
+        assert arrive < first <= arrive + 30 and first % 30 == pay_day
+    for bad in ((-1, 0), (0, 30), (0, -1), (0, 1.0), (1.0, 0)):
+        with pytest.raises(ValueError, match="pay day"):
+            policy.first_payday(*bad)
+    days = [policy.profile(41404, f"payday/{i}")["pay_day"] for i in range(200)]
+    assert all(type(day) is int and 0 <= day < 30 for day in days)
+    assert len(set(days)) == 30, "a cohort's paydays spread over the whole month"
+    assert max(days.count(day) for day in range(30)) < 20
+    assert days == [policy.profile(41404, f"payday/{i}")["pay_day"] for i in range(200)], "keyed, so reproducible"
+    assert policy.profile(41404, "payday/0", {"pay_day": 7})["pay_day"] == 7
+    assert policy.profile(41404, "payday/0", {"pay_day": 7}) | {"pay_day": days[0]} == policy.profile(41404, "payday/0"), \
+        "pinning the payday moves no other draw"
+    for bad in (30, -1, float("nan"), "7"):
+        with pytest.raises(ValueError, match="pay_day"):
+            policy.profile(41404, "payday/0", {"pay_day": bad})
+
+
 def test_net_wallet_takes_one_capped_bite_toward_its_money_target():
     import json
     from pathlib import Path

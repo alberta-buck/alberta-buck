@@ -89,7 +89,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     const agents = [];
     for (const [i, Agent] of [CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent].entries()) {
       const account = { address: `0x${(0xabc00n + BigInt(i)).toString(16).padStart(40, "0")}` };
-      const a = new Agent({ account, member: `books-${i}`, settings: { home_k: 1000, premium_bp: 100, asset_count: 4 } });
+      const a = new Agent({ account, member: `books-${i}`, settings: { pay_day: 0, home_k: 1000, premium_bp: 100, asset_count: 4 } });
       await a.setup(world);
       agents.push(a);
       const owner = world.holderAddress(account), ids = world._credits.get(account.address) ?? [];
@@ -155,7 +155,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   await t.test("one facility per insured asset is the household default", async () => {
     for (const [i, Agent] of [CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent].entries()) {
       const account = { address: `0x${(0xabc60n + BigInt(i)).toString(16).padStart(40, "0")}` };
-      const a = new Agent({ account, member: `default-assets-${i}`, settings: { home_k: 1000, premium_bp: 100 } });
+      const a = new Agent({ account, member: `default-assets-${i}`, settings: { pay_day: 0, home_k: 1000, premium_bp: 100 } });
       await a.setup(world);
       const owner = world.holderAddress(account), ids = world._credits.get(account.address) ?? [];
       assert.equal(ids.length, a.investor ? 0 : 1); assert.equal(a.p.asset_count, ids.length);
@@ -265,7 +265,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   });
   await t.test("external insurance follows actual coverage and restores costs after retirement", async () => {
     const account = { address: "0x00000000000000000000000000000000000abe00" };
-    const a = new CreditHouseholdAgent({ account, member: "insurance-activation", settings: { home_k: 1000, premium_bp: 100 } });
+    const a = new CreditHouseholdAgent({ account, member: "insurance-activation", settings: { pay_day: 0, home_k: 1000, premium_bp: 100 } });
     await a.setup(world);
     const owner = world.holderAddress(account), [id] = world._credits.get(account.address);
     const full = a.face * 100n / 10000n / 12n;
@@ -295,7 +295,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   await t.test("refinance assessment reads exact affordable options before any transaction", async () => {
     for (const [i, [cashK, explicit]] of [[40n, true], [10n, false], [40n, false]].entries()) {
       const account = { address: `0x${(0xabe10n + BigInt(i)).toString(16).padStart(40, "0")}` };
-      const a = new CreditHouseholdAgent({ account, member: `assessment-${i}`, settings: { home_k: 1000, premium_bp: 100,
+      const a = new CreditHouseholdAgent({ account, member: `assessment-${i}`, settings: { pay_day: 0, home_k: 1000, premium_bp: 100,
         apr: .06, ltv: .4, theta: 3, risk: 0, switch_k: 0, max_impact_bp: 100, divest_rate: 0 } });
       await a.setup(world); await world.households.openTrading(account);
       const owner = world.holderAddress(account), ids = world._credits.get(account.address);
@@ -353,7 +353,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   await t.test("available activated credit issues without redundant reserve purchases", async () => {
     for (const [i, keepReserve] of [true, false].entries()) {
       const account = { address: `0x${(0xabe20n + BigInt(i)).toString(16).padStart(40, "0")}` };
-      const a = new CreditHouseholdAgent({ account, member: `existing-room-${i}`, settings: { home_k: 1000, premium_bp: 100,
+      const a = new CreditHouseholdAgent({ account, member: `existing-room-${i}`, settings: { pay_day: 0, home_k: 1000, premium_bp: 100,
         apr: .06, ltv: .4, theta: 3, risk: 0, switch_k: 0, max_impact_bp: 100, penalty_months: 0, utilization: .0001, divest_rate: 0 } });
       await a.setup(world); await world.households.openTrading(account);
       const owner = world.holderAddress(account), [id] = world._credits.get(account.address), proxy = await world.proxyFor(account);
@@ -388,7 +388,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     const b = Object.fromEntries(Object.entries(REFINANCE.base).map(([k, v]) => [k, BigInt(v)]));
     for (const [index, vector] of REFINANCE.cases.entries()) await t.test(vector.name, async () => {
       const account = { address: `0x${(0xabd00n + BigInt(index)).toString(16).padStart(40, "0")}` };
-      const a = new CreditHouseholdAgent({ account, member: `refinance-vectors-${index}`, settings: { home_k: 1000, premium_bp: 100 } });
+      const a = new CreditHouseholdAgent({ account, member: `refinance-vectors-${index}`, settings: { pay_day: 0, home_k: 1000, premium_bp: 100 } });
       await a.setup(world);
       const owner = world.holderAddress(account), ids = world._credits.get(account.address), machine = a.refinanceMachine;
       await world.households.openTrading(account);
@@ -537,7 +537,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
     const phases = ["income", "living", "insurance", "mortgage"], BANK = "0x000000000000000000000000000000000000dEaD";
     for (const [index, c] of CALENDAR.cases.entries()) await t.test(c.name, async () => {
       const account = { address: `0x${(0xbca00n + BigInt(index)).toString(16).padStart(40, "0")}` };
-      const a = new CreditHouseholdAgent({ account, member: `calendar-${index}`, settings: CALENDAR.settings });
+      const a = new CreditHouseholdAgent({ account, member: `calendar-${index}`, settings: { pay_day: 0, ...CALENDAR.settings } });
       await a.setup(world);
       const m = a.calendarMachine, owner = world.holderAddress(account), initialDebt = a.mortgage;
       const [opening, income, living, premium] = ["opening", "income", "living", "full_premium"].map((k) => BigInt(CALENDAR[k]));
@@ -630,7 +630,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   });
   await t.test("calendar charges only unactivated external insurance", async () => {
     const account = { address: "0x00000000000000000000000000000000000bcaf0" };
-    const a = new CreditHouseholdAgent({ account, member: "calendar-insurance", settings: CALENDAR.settings });
+    const a = new CreditHouseholdAgent({ account, member: "calendar-insurance", settings: { pay_day: 0, ...CALENDAR.settings } });
     await a.setup(world); await a.advanceNetCalendar(world, 0);
     const owner = world.holderAddress(account), [id] = world._credits.get(account.address);
     await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi, functionName: "transfer", args: [owner, 20n * RAW] })]);
@@ -645,7 +645,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   await t.test("calendar dates refinance receipts and keeps its paydays", async (t) => {
     for (const [index, fault] of ["lost", "date-unavailable"].entries()) await t.test(fault, async () => {
       const account = { address: `0x${(0xbcb00n + BigInt(index)).toString(16).padStart(40, "0")}` };
-      const a = new CreditHouseholdAgent({ account, member: `calendar-refinance-${index}`, settings: CALENDAR.settings });
+      const a = new CreditHouseholdAgent({ account, member: `calendar-refinance-${index}`, settings: { pay_day: 0, ...CALENDAR.settings } });
       await a.setup(world); await a.advanceNetCalendar(world, 0); await world.households.openTrading(account);
       const m = a.calendarMachine, initial = a.mortgage, owner = world.holderAddress(account), [id] = world._credits.get(account.address);
       const b = Object.fromEntries(Object.entries(REFINANCE.base).map(([k, v]) => [k, BigInt(v)]));
@@ -689,7 +689,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   });
   await t.test("calendar refuses skipped paydays and labels without chain time", async () => {
     const a = new CreditHouseholdAgent({ account: { address: "0x00000000000000000000000000000000000bcb10" },
-      member: "calendar-clock", settings: CALENDAR.settings });
+      member: "calendar-clock", settings: { pay_day: 0, ...CALENDAR.settings } });
     await a.setup(world); await a.advanceNetCalendar(world, 0);
     const before = [a.mortgage, a.hypoCash, a.hypoPaid, a.livingArrears, a.householdEventsSince().length];
     await assert.rejects(a.advanceNetCalendar(world, 30), /chain clock/);
@@ -700,7 +700,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   });
   await t.test("recurring cash flows run after buyback reconciliation with an open target", async () => {
     const account = { address: "0x00000000000000000000000000000000000bcb20" };
-    const a = new CreditHouseholdAgent({ account, member: "calendar-buyback", settings: CALENDAR.settings });
+    const a = new CreditHouseholdAgent({ account, member: "calendar-buyback", settings: { pay_day: 0, ...CALENDAR.settings } });
     await a.setup(world); await a.advanceNetCalendar(world, 0); await world.households.openTrading(account);
     const owner = world.holderAddress(account), [id] = world._credits.get(account.address);
     await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
@@ -734,7 +734,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   await t.test("absolute clock dates different household arrivals consistently", async () => {
     const make = async (member, arrive_day) => {
       const a = new CreditHouseholdAgent({ account: { address: `0x${(0xbd000n + BigInt(arrive_day)).toString(16).padStart(40, "0")}` },
-        member, arrive_day, settings: CALENDAR.settings });
+        member, arrive_day, settings: { pay_day: arrive_day % 30, ...CALENDAR.settings } });
       await a.setup(world); return a;
     };
     const a = await make("clock-first", 0), b = await make("clock-later", 1), clock = new DayClock();

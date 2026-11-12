@@ -3,6 +3,11 @@
   "money": "raw decimal strings",
   "apr": "parts per billion",
   "interest": "floor daily, APR / 365; payment after daily interest",
+  "paydays": {
+    "about": "[arrival day, pay day of the 30-day month, first payday]: strictly after arrival, then every 30 days",
+    "cases": [[0, 0, 30], [0, 3, 3], [0, 29, 29], [5, 5, 35], [5, 4, 34], [5, 6, 6], [29, 0, 30], [30, 0, 60],
+              [31, 0, 60], [59, 29, 89], [1000, 10, 1030], [1000, 11, 1001], [1000, 9, 1029]]
+  },
   "flow": {
     "settings": {"home_k": 1000, "ltv": 0.4, "cash_k": 20, "income_frac": 0.24, "living_frac": 0.5, "apr": 0.06, "premium_bp": 100},
     "opening": "20000000000", "income": "20000000000", "living": "10000000000", "full_premium": "833333333",

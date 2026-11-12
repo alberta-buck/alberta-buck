@@ -46,7 +46,10 @@ def household_world(monkeypatch):
                 agent.member = member
             if arrive_day is not None:
                 agent.arrive_day = arrive_day
-            agent.settings = dict(home_k=1000, premium_bp=100, asset_count=assets) | (settings or {})
+            # Fixture households are paid on the day of the month they arrive, so a
+            # first payday is thirty days later unless a case pins another day.
+            agent.settings = dict(home_k=1000, premium_bp=100, asset_count=assets,
+                                  pay_day=(arrive_day or 0) % 30) | (settings or {})
             agent.setup(d, scenario, rng)
             return agent
         yield d, scenario, make
@@ -1474,9 +1477,9 @@ def test_household_surplus_applies_known_outcomes_once_and_stops_on_unknown(hous
     assert not d.chain.mismatches
 
 
-def _wallet_saver(d, make, index):
+def _wallet_saver(d, make, index, **settings):
     """A mortgage-free saver with wages, bills and prepared trading; no wallet account yet."""
-    a = make(index, CreditSaverAgent, settings=WALLET["lifecycle"]["settings"])
+    a = make(index, CreditSaverAgent, settings=WALLET["lifecycle"]["settings"] | settings)
     for contract, method, args in ((d.usdc, "approve", [d.swap_guard.address, 2**256 - 1]),
                                    (d.buck, "approve", [d.permit2.address, 2**256 - 1]),
                                    (d.permit2, "approve", [d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1])):
@@ -1500,6 +1503,19 @@ def test_household_wallet_keeps_a_buck_working_balance_in_its_own_custody(househ
     assert a.advance_net_wallet(d, 0, ctr) is False and a._wallet is None, "nothing is tended before a payday"
     assert m.status()["next_wallet_day"] == 30
     spending = a.income_annual * a.p["living_frac"] / RAW
+
+    # Paydays are each household's own day of the month. A neighbour who
+    # arrived the same day but is paid on the 7th is paid, and tends its
+    # wallet, on day 7; this household waits for its own day.
+    early = _wallet_saver(d, make, 89, pay_day=7)
+    assert (a.p["pay_day"], early.p["pay_day"]) == (0, 7)
+    assert early.refinance_machine.status()["next_wallet_day"] == 7 == early.calendar_machine.next_pay
+    _wallet_day(d, a, 7)
+    assert early.advance_net_wallet(d, 7, {}) is True and early.last_action == "wallet-buy", early.last_error
+    assert early.income_total == early.income_annual // 12 and early.wallet_bought > 0
+    assert (early.calendar_machine.next_pay, early.refinance_machine.status()["next_wallet_day"]) == (37, 37)
+    assert a.advance_net_wallet(d, 7, ctr) is False and a.income_total == 0 and a._wallet is None
+    assert a.calendar_machine.next_pay == 30
 
     # First payday: wages and bills settle, then dollars above the buffer buy
     # the working balance. It is delivered to the wallet's own account.

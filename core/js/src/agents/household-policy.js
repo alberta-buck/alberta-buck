@@ -7,6 +7,10 @@ export const DEFAULTS = {
   retire_disc: [.005, .03], issue_premium: [.005, .025], utilization: [.65, .85],
   buffer_k: 10, max_impact_bp: [25, 100], decision_days: [5, 20], surplus_policy: "adaptive",
   role: "debtor", credit_invest: true, asset_count: 1,
+  // Each household is paid on its own fixed day of the 30-day month, counted from the simulation's
+  // day 0: by default a keyed random one, so wages, bills, instalments and working money do not
+  // fall on the same day for a whole cohort. A whole number 0..29 pins it.
+  pay_day: [0, 30],
   // Share of the K-scaled limit a household with no mortgage keeps drawn and invested while the BUCK
   // is not cheap (0: it borrows only at a premium).
   carry_utilization: 0,
@@ -137,6 +141,16 @@ export function uniform(seed, member, key) {
   return ((h >>> 0) + .5) / 4294967296;
 }
 
+/** The first day strictly after arrival that is the household's day of the 30-day month
+ * (household_policy.first_payday). Months are counted from the shared simulation day 0, so a
+ * household keeps one payday for the whole run; the first comes 1 to 30 days after arrival. */
+export function firstPayday(arriveDay, payDay) {
+  if (!Number.isSafeInteger(arriveDay) || arriveDay < 0 || !Number.isSafeInteger(payDay) || payDay < 0 || payDay >= 30) {
+    throw new Error("invalid arrival day or pay day");
+  }
+  return arriveDay + (((payDay - arriveDay - 1) % 30) + 30) % 30 + 1;
+}
+
 export function profile(seed, member, overrides = {}) {
   const p = {};
   for (const [key, setting] of Object.entries({ ...DEFAULTS, ...overrides })) {
@@ -168,6 +182,8 @@ export function profile(seed, member, overrides = {}) {
     throw new Error("asset_count must be a whole number from 1 to 32 for insured households");
   }
   p.asset_count = p.role === "investor" ? 0 : p.asset_count;
+  if (!Number.isFinite(p.pay_day) || p.pay_day < 0 || p.pay_day >= 30) throw new Error("pay_day must be a day of the 30-day month, 0 to 29");
+  p.pay_day = Math.trunc(p.pay_day);
   if (!(p.retire_disc >= 0 && p.retire_disc < 1 && p.issue_premium >= 0)) throw new Error("invalid household price thresholds");
   if (!(p.utilization > 0 && p.utilization <= 1 && p.living_frac >= 0 && p.living_frac <= 1
     && p.carry_utilization >= 0 && p.carry_utilization <= 1)) {

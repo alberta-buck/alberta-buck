@@ -310,3 +310,20 @@ test("net wallet takes one capped bite toward its money target", async () => {
   }
   assert.throws(() => netWalletTarget(1, 30, 60000, f.targets.settings), /ratio/);
 });
+test("each household keeps one keyed day of the month for its payday", async () => {
+  const { firstPayday, profile } = await import("../src/agents/household-policy.js");
+  const { readFileSync } = await import("node:fs");
+  const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-calendar.json", import.meta.url))).paydays;
+  for (const [arrive, payDay, first] of f.cases) {
+    assert.equal(firstPayday(arrive, payDay), first);
+    assert.ok(arrive < first && first <= arrive + 30 && first % 30 === payDay);
+  }
+  for (const bad of [[-1, 0], [0, 30], [0, -1], [0, 1.5], [1.5, 0]]) assert.throws(() => firstPayday(...bad), /pay day/);
+  const days = Array.from({ length: 200 }, (_, i) => profile(41404, `payday/${i}`).pay_day);
+  assert.ok(days.every((day) => Number.isSafeInteger(day) && day >= 0 && day < 30));
+  assert.equal(new Set(days).size, 30, "a cohort's paydays spread over the whole month");
+  assert.equal(profile(41404, "payday/0", { pay_day: 7 }).pay_day, 7);
+  assert.deepEqual({ ...profile(41404, "payday/0", { pay_day: 7 }), pay_day: days[0] }, profile(41404, "payday/0"),
+    "pinning the payday moves no other draw");
+  for (const bad of [30, -1, NaN, "7"]) assert.throws(() => profile(41404, "payday/0", { pay_day: bad }), /pay_day/);
+});

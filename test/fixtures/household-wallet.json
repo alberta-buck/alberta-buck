@@ -21,7 +21,7 @@
     ]
   },
   "lifecycle": {
-    "settings": {"home_k": 1000, "premium_bp": 100, "cash_k": 20, "buffer_k": 10, "decision_days": 1,
+    "settings": {"pay_day": 0, "home_k": 1000, "premium_bp": 100, "cash_k": 20, "buffer_k": 10, "decision_days": 1,
       "theta": 3, "risk": 0, "switch_k": 0, "max_impact_bp": 100, "divest_rate": 0, "income_frac": 0.12, "living_frac": 0.5,
       "money_months": 1, "adopt_start": 0.5, "adopt_years": 1, "money_gain": 200, "money_cap": 8,
       "retire_disc": 0.01, "paydown_share": 0.01, "paydown_double": 0.005},

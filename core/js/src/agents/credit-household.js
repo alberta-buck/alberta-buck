@@ -1,6 +1,7 @@
 // The same household as alberta_buck/sim/credit_households.py. No independent income agent is needed.
 import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, investorAction, population,
-  arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, externalPremiumDue, ROLES } from "./household-policy.js";
+  arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, externalPremiumDue, firstPayday,
+  ROLES } from "./household-policy.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 import { HouseholdRefinance, assessRefinance, assessRemainder, assessSurplus, assessWallet, observeRefinanceForecasts } from "./net-household.js";
 import { HouseholdCalendar } from "./household-calendar.js";
@@ -39,14 +40,14 @@ export class CreditHouseholdAgent {
     this.withdrawnUsd = 0n;
     this.refusals = 0;
     this.book = new Map();                  // receipt -> {principal, shares}, taken off at exit
-    this.nextPay = arrive_day + 30;
+    this.nextPay = firstPayday(arrive_day, p.pay_day);
     this.lastDay = arrive_day;
     this.nextDecision = arrive_day + p.phase;
     this.netRefinanceDay = null; // At most one fresh assessment/resumption per bank day.
     this.netSurplusDay = null; this.nextSurplus = this.nextDecision;
     this.netCreditReserve = 0n; // lasting BUCK issuance front; outlives each operation
     this.netFunding = null;      // { key: block:day:forecasts, funding }: the credit dollar front read there
-    this.nextWallet = arrive_day + 30; // working money is tended once after each payday
+    this.nextWallet = this.nextPay; // working money is tended once after each payday
     this.walletReady = false; this.walletSold = 0n; this.lastWallet = "waiting";
     this.netDispatching = false;
     this.started = false;

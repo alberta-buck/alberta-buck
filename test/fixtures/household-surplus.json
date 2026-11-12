@@ -6,7 +6,7 @@
   "amounts": {"cash": "20000000000", "issued": "100000000000", "fair_num": "1", "fair_den": "1", "cash_floor": "10000000000"},
   "settings": {"retire_disc": 0.01, "paydown_share": 0.01, "paydown_double": 0.005, "max_impact_bp": 100},
   "lifecycle": {
-    "settings": {"home_k": 1000, "premium_bp": 100, "cash_k": 20, "buffer_k": 10, "decision_days": 1,
+    "settings": {"pay_day": 0, "home_k": 1000, "premium_bp": 100, "cash_k": 20, "buffer_k": 10, "decision_days": 1,
       "theta": 3, "risk": 0, "switch_k": 0, "max_impact_bp": 100, "divest_rate": 0,
       "retire_disc": 0.01, "paydown_share": 0.01, "paydown_double": 0.005},
     "seed_buck": "20000000", "coverage": "100000000", "spendable": "40000000", "premium": "10000000"

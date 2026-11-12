@@ -12,6 +12,10 @@ DEFAULTS                        = dict(
     retire_disc=[.005, .03], issue_premium=[.005, .025], utilization=[.65, .85],
     buffer_k=10., max_impact_bp=[25., 100.], decision_days=[5., 20.], surplus_policy="adaptive",
     role="debtor", credit_invest=True, asset_count=1,
+    # Each household is paid on its own fixed day of the 30-day month, counted from the simulation's
+    # day 0: by default a keyed random one, so wages, bills, instalments and working money do not
+    # fall on the same day for a whole cohort. A whole number 0..29 pins it.
+    pay_day=[0., 30.],
     # Share of the K-scaled limit a household with no mortgage keeps drawn and invested while the BUCK
     # is not cheap (0: it borrows only at a premium).
     carry_utilization=0.,
@@ -43,6 +47,17 @@ POPULATION                      = dict(
     k_ref=.75, k_pace=True)
 # Older settings, still accepted when no role is named: a total split between savers and debtors.
 LEGACY_POPULATION               = dict(initial=10, arrival_rate=6., saver_share=.5)
+
+
+def first_payday(arrive_day, pay_day):
+    """The first day strictly after arrival that is the household's day of the 30-day month.
+
+    Months are counted from the shared simulation day 0, not from each arrival, so a household keeps
+    one payday for the whole run and later paydays follow every 30 days. The first comes 1 to 30
+    days after arrival: the household was already earning before it arrived."""
+    if type(arrive_day) is not int or arrive_day < 0 or type(pay_day) is not int or not 0 <= pay_day < 30:
+        raise ValueError("invalid arrival day or pay day")
+    return arrive_day + (pay_day - arrive_day - 1) % 30 + 1
 
 
 def uniform(seed, member, key):
@@ -99,6 +114,9 @@ def profile(seed, member, overrides=None):
     if (not 0 < result["utilization"] <= 1 or not 0 <= result["living_frac"] <= 1
             or not 0 <= result["carry_utilization"] <= 1):
         raise ValueError("invalid household budget fractions")
+    if type(result["pay_day"]) not in (int, float) or not math.isfinite(result["pay_day"]) or not 0 <= result["pay_day"] < 30:
+        raise ValueError("pay_day must be a day of the 30-day month, 0 to 29")
+    result["pay_day"]            = int(result["pay_day"])
     result["decision_days"]      = max(1, int(result["decision_days"]))
     result["phase"]              = int(uniform(seed, member, "phase") * result["decision_days"])
     result["term_months"]        = max(1, int(result["term_months"]))
