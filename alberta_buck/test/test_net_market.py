@@ -33,8 +33,10 @@ def _exec(chain, actor, contract, method, args):
 
 def _household(idx):
     agent = CreditHouseholdAgent(idx)
-    # This isolated market/recovery fixture has no recurring household income.
+    # This isolated market/recovery fixture has no recurring household income,
+    # refinance closing or public history (it never runs the household setup).
     agent.calendar_machine = HouseholdCalendar(agent)
+    agent.refinance_closed = False
     return agent
 
 

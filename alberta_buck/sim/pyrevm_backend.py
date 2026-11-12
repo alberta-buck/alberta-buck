@@ -18,6 +18,9 @@ Fidelity notes (vs anvil):
     via warp_to, so this is deterministic rather than lossy);
   * `eth_call` executes non-static inside a snapshot/revert bracket (matches
     anvil semantics: writes allowed, never persisted);
+  * unlike anvil, an `eth_call` whose `from` has code is refused before it
+    runs (EIP-3607, "not executed: Transaction(RejectCallerWithCode)"); to
+    simulate a proxy-held account, eth_call that proxy's own dispatch;
   * mined block numbers/hashes retain their original timestamps, including
     after a warp; this does not provide historical contract-state snapshots;
   * gas is executed but unmetered economically (gasPrice 0 profile, like the
@@ -211,6 +214,12 @@ class _RpcError(Exception):
         if "output: 0x" in msg:
             out = "0x" + msg.split("output: 0x", 1)[1].split(" ", 1)[0].rstrip("} ")
         reason = _decode_revert(out)
+        if not out and msg.startswith("Transaction("):
+            # revm refused the message before running the callee, e.g.
+            # RejectCallerWithCode (EIP-3607: the sender is a contract; anvil
+            # waives this for eth_call, pyrevm 0.3.7 cannot). Name it so an
+            # unsupported sender is never mistaken for the callee's own guard.
+            reason = "not executed: " + msg[:120]
         return _RpcError({"code": 3,
                           "message": f"execution reverted: {reason}" if reason
                                      else "execution reverted",
