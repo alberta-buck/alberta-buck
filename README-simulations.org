@@ -453,6 +453,16 @@ for a worthwhile issuance before discretionary saving. Credit savers can borrow 
 mortgage borrowers refinance when reduced carrying cost justifies execution and switching costs.
 Working balances, asset sales and arrival behavior are shared across policy comparisons.
 
+"Basket-relative" is literal. A household's fair value for a BUCK is the basket's price in BUCK
+times the dollar pool's own spot, so that pool's price cancels: the discount it acts on is the
+BUCK's purchasing power over the basket, after the pool's carried and trading fees. A sale that
+moves only BUCK/USDC is a route dislocation for arbitrage, not a household discount; a household
+responds once the TOKEN pools and the basket's TWAP carry it. On canonical accounting the saving,
+redemption and discounted-retirement components are implemented and qualified (see
+[[file:README-households.org::*Reserve-safe surplus: saving, redemption and discounted retirement][the household guide]]); the normal decision loop is still gated. What that phase measured about
+shock transmission, repair time, pool sizing and run cost, and what it recommends before the
+campaigns, is in [[file:doc/review/bucknet-economy-implementation.org::*Observations and recommendations for the five-year runs and sandboxes][the plan's observations]].
+
 Bootstrap depositors seed the TOKEN/BUCK pools in proportion to the basket's declared weights,
 while retaining the same total opening seed capital. Day-zero observations follow that day's
 trading; the opening price/mark transient still needs separate study.

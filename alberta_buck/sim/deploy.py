@@ -575,6 +575,14 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             # fixture proxies have unrestricted exec; this is not a wallet.
             proxy = chain.at("SimLP", getattr(owner, "address", owner))
             return chain.send(proxy.functions.exec(target.address, target.encode_abi(method, args=args)), expect=expect)
+        def simulate_owner(owner, target, method, args, block_number=None):
+            # Read-only twin of execute_credit: eth_call the same proxy exec and
+            # discard its writes. A direct call from the proxy's own address is
+            # refused before execution by pyrevm (EIP-3607: sender has code).
+            proxy = chain.at("SimLP", getattr(owner, "address", owner))
+            return proxy.functions.exec(target.address, target.encode_abi(method, args=args)).call(
+                block_identifier="latest" if block_number is None else block_number)
+        d.net_simulate = simulate_owner
         d.net_credit_ops = NetCreditOps(chain, stack, execute_credit)
         dispatch_market = partial(execute_credit, expect=Expect.EITHER)
         d.net_market_ops = NetMarketOps(chain, buck, swap_guard, dispatch_market, router=router, settlement=usdc)

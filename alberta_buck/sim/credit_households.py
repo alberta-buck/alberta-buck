@@ -34,6 +34,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._next_decision     = self.arrive_day + p["phase"]
         self._net_refinance_day = None                  # at most one fresh assessment/resumption per bank day
         self._net_surplus_day   = None
+        self._net_credit_reserve = 0                    # lasting BUCK issuance front; outlives each operation
         self._next_surplus      = self._next_decision
         self._net_dispatching   = False
         self._started           = False
@@ -446,8 +447,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 if assessed["plan"] is None:
                     self.last_action = "surplus-wait"
                     m.decisions += 1
+                    # The same pinned market record a planned operation carries:
+                    # a wait is inspectable against K, the basket and the pool.
                     m._event(d, day, "declined", kind="surplus", phase="assessment", context=assessed["context"],
-                             reason=assessed["context"]["reason"])
+                             reason=assessed["context"]["reason"], market=m._market(d))
                     return True
                 return self.start_net_surplus(d, assessed["plan"], day, ctr, context=assessed["context"])
             except Exception as exc:
@@ -632,6 +635,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._clear_pending_repayment()
         self.last_error         = ""
         self.last_action        = "repay-canceled"
+        self._net_retirement_event(d, "canceled", operation="cancel", token_id=token_id, principal=expected[0],
+                                   transaction_hash=tx_hash, reason="unsettled authorization withdrawn; target retained")
 
     def _clear_pending_repayment(self):
         self._net_pending_token = None
@@ -663,9 +668,12 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         d.net_credit_ops.authorization_from_receipt(self.proxy.address, plan, 0, receipt, expected_hash=tx_hash)
         if tuple(d.buck.functions.reductionAuthorization(token_id).call()) != (0, 0, 0):
             raise ValueError("repayment cancellation changed; reconcile before proceeding")
+        principal               = getattr(self, "_net_pending_principal", 0)
         self._clear_pending_repayment()
         self.last_error         = ""
         self.last_action        = "repay-canceled"
+        self._net_retirement_event(d, "canceled", operation="cancel", token_id=token_id, principal=principal, recovered=True,
+                                   transaction_hash=tx_hash, reason="unsettled authorization withdrawn; target retained")
 
     def reconcile_pending_buy(self, d):
         """Resolve a submitted guarded buy by its exact mined transaction receipt."""
@@ -714,6 +722,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 self._clear_pending_repayment()
                 self.last_error = ""
                 self.last_action = "authorize-reverted"
+                self._net_retirement_event(d, "refused", operation="authorize", token_id=token_id, principal=principal,
+                                           transaction_hash=tx_hash, reason="authorization reverted; nothing was retired")
                 return 0
             plan                = ReductionPlan(token_id, principal, 0, expected[1], 0, "ready")
             d.net_credit_ops.authorization_from_receipt(self.proxy.address, plan, expected[2], receipt,
@@ -723,11 +733,16 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             self._net_authorization_confirmed = True
             self.last_error     = ""
             self.last_action    = "authorize-reconciled"
+            self._net_retirement_event(d, "recovered", operation="authorize", token_id=token_id, principal=principal,
+                                       transaction_hash=tx_hash, reason="authorization confirmed; no principal retired")
             return 0
         if receipt.get("status") == 0:
             self._net_pending_reverted = True
             self.last_error     = ""
             self.last_action    = "repay-reverted"
+            self._net_retirement_event(d, "refused", operation="reduce", token_id=token_id, principal=principal,
+                                       transaction_hash=tx_hash,
+                                       reason="settlement reverted; authorization awaits cancellation")
             return 0
         settled                 = d.net_credit_ops.reduction_from_receipt(
             self.proxy.address, token_id, principal, receipt, expected_hash=tx_hash)
@@ -739,7 +754,41 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._clear_pending_repayment()
         self.last_error         = ""
         self.last_action        = "repay-reconciled"
+        self._net_reduction_event(d, settled, recovered=True)
+        self._net_retirement_done(d)
         return settled.principal
+
+    def _net_retirement_event(self, d, status, **detail):
+        """Selected-facility work on the household's existing public history.
+
+        PRE: any confirmed principal was already applied to the saved target.
+        POST: one append-only record with the retained target/reserve; never a
+        financial transition. Funding a target is not a reduction: only an
+        authenticated FacilityReduced receipt is recorded as "confirmed".
+        """
+        machine                 = getattr(self, "refinance_machine", None)
+        if machine is None:
+            return              # isolated recovery fixtures have no household history
+        calendar                = getattr(self, "calendar_machine", None)
+        day                     = calendar.day if calendar is not None and calendar.bound else self._last_day
+        try:
+            machine._event(d, day, status, kind="retirement", phase="reduction", **detail,
+                           retirement=dict(target=self._net_repayment_target, reserve=self._net_repayment_reserve))
+        except Exception as exc:
+            # An observation never blocks or reverses a settled transition.
+            machine._event(d, day, status, kind="retirement", phase="reduction", unavailable=str(exc)[:200])
+
+    def _net_reduction_event(self, d, settled, *, recovered=False):
+        self._net_retirement_event(d, "confirmed", operation="reduce", recovered=recovered, amounts=dict(
+            token_id=settled.token_id, principal=settled.principal, relief_scaled=settled.relief_scaled,
+            owner_cost_scaled=settled.owner_cost_scaled, premium_refund_nominal=settled.premium_nominal),
+            transaction_hash=_txhex(settled.receipt["transactionHash"]), receipt_block=settled.receipt.get("blockNumber"))
+
+    def _net_retirement_done(self, d, reason="target retired"):
+        """Close the public record once no target, reserve or uncertainty remains."""
+        if (self._net_repayment_target is None and self._net_repayment_reserve is None and
+                getattr(self, "_net_pending_token", None) is None):
+            self._net_retirement_event(d, "complete", reason=reason)
 
     def _record_net_repayment(self, principal):
         """Apply a confirmed principal once to the retained buyback target."""
@@ -771,6 +820,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         if not target:
             self._net_repayment_target = self._net_repayment_reserve = None
             self.last_action    = "pay-down"
+            self._net_retirement_done(d, "no principal remains")
             return True
         self._net_repayment_target = target
         retired                 = self._retire_acquired(d, target, 0)
@@ -824,6 +874,15 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             # Do not let another RPC failure discard earlier successful
             # settlements or the pending transaction's evidence.
             self.last_error     = f"repayment {result.status} at facility {result.blocked_token_id}"
+        # History follows the saved books and evidence; it cannot undo them.
+        for settled in getattr(result, "settlements", ()):
+            self._net_reduction_event(d, settled)
+        if result.status == "authorization-pending":
+            self._net_retirement_event(d, "pending",
+                                       operation="authorize" if result.pending_phase == "authorization" else "reduce",
+                                       token_id=result.blocked_token_id, principal=result.pending_principal,
+                                       transaction_hash=result.pending_transaction_hash, reverted=result.pending_reverted,
+                                       reason=self.last_error)
             return result.retired
         if self._net_repayment_reserve is not None:
             try:
@@ -839,6 +898,14 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             self._net_repayment_interrupted = True
             detail              = f": {result.error}" if result.error else ""
             self.last_error     = f"repayment {result.status} at facility {result.blocked_token_id}{detail}"[:200]
+            # A fund/owner/quote refusal sent nothing. A retained target and
+            # its protected reserve stay saved for a later turn.
+            if self._net_repayment_target is not None:
+                self._net_retirement_event(d, "waiting", operation="reduce", token_id=result.blocked_token_id,
+                                           reason=self.last_error)
+        if self._net_repayment_target is None or self._net_repayment_reserve is None:
+            self._net_retirement_done(d, "target retired" if result.retired >= target else
+                                      "owned cash above the reserve is spent; the remaining target is released")
         return result.retired
 
     def _issue(self, d, state, kind, v, ctr):

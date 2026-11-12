@@ -487,7 +487,8 @@ export function netCreditOps(session, stack, execute = null) {
       throw new Error("settlement receipt missing or ambiguous");
     }
     const { principal, reliefScaled, premiumRefund } = events[0].args;
-    return { principal, reliefScaled, ownerCostScaled: principal * Q - reliefScaled, premiumNominal: premiumRefund, receipt };
+    return { principal, reliefScaled, ownerCostScaled: principal * Q - reliefScaled, premiumNominal: premiumRefund, receipt,
+      tokenId: BigInt(tokenId) };
   };
   // An authorization permits a future reduction; it does not retire debt.
   ops.authorizationFromReceipt = (owner, plan, deadline, receipt, expectedHash = null) => {

@@ -11,6 +11,24 @@
       "retire_disc": 0.01, "paydown_share": 0.01, "paydown_double": 0.005},
     "seed_buck": "20000000", "coverage": "100000000", "spendable": "40000000", "premium": "10000000"
   },
+  "flow": {
+    "about": "one real operation per case; refused = the same send with one bound made unreachable, so the contract itself reverts",
+    "refuse_argument": {"buyExactInput": 2, "deposit": 2, "increasePosition": 4, "redeemShares": 2},
+    "cases": [
+      {"name": "lost purchase reply is applied once", "action": "save", "lost": "buy"},
+      {"name": "unknown purchase stays stopped", "action": "save", "unknown": "buy"},
+      {"name": "refused purchase spends nothing", "action": "save", "refused": "buy"},
+      {"name": "lost deposit reply is booked once", "action": "save", "lost": "deposit"},
+      {"name": "unknown deposit stays stopped", "action": "save", "unknown": "deposit"},
+      {"name": "refused deposit retries only the deposit", "action": "save", "refused": "deposit"},
+      {"name": "unavailable deposit quote retries only the deposit", "action": "save", "view": "deposit"},
+      {"name": "lost redemption reply funds the target once", "action": "retire", "lost": "redeem"},
+      {"name": "unknown redemption stays stopped", "action": "retire", "unknown": "redeem"},
+      {"name": "refused redemption retires nothing", "action": "retire", "refused": "redeem"},
+      {"name": "refused exit preview falls back to a guarded purchase", "action": "retire", "preview": "refused"},
+      {"name": "fund refusal keeps the funded target", "action": "retire", "reduction": "fund-liquidity"}
+    ]
+  },
   "cases": [
     {"name": "adaptive buys actual discounted net cash", "policy": "adaptive", "action": "retire", "spend": "5000000000", "target": "100000000000"},
     {"name": "carried fees erase the nominal discount", "policy": "adaptive", "market": {"net_scaled": "800000000000"}, "action": "save", "spend_between": ["1", "4999999999"]},

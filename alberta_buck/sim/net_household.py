@@ -56,7 +56,7 @@ class SurplusPlan:
 
 
 def _basket_ops(d):
-    return NetBasketOps(d.chain, d.basket, d.buck, d.net_market_ops.execute)
+    return NetBasketOps(d.chain, d.basket, d.buck, d.net_market_ops.execute, getattr(d, "net_simulate", None))
 
 
 def _reserve_for(candidate):
@@ -105,7 +105,9 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
     owner, completed normal keeper/controller work and stable observation
     block. Post: no transaction or ledger change.
     Wallet-only, new issuance and mixed alternatives retain the reserve and
-    cash buffer. A sale's minimum is the principal planned for the bank;
+    cash buffer. The default reserve is the household's lasting credit front
+    (its last refinance plan's floor), whatever cash work ran since.
+    A sale's minimum is the principal planned for the bank;
     switching costs/penalty are funded from old USDC, so never counted twice
     as execution loss. Quote estimates are advisory, and execution rechecks.
     """
@@ -113,9 +115,11 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
             agent.refinance_machine.settlement_due or
             agent.calendar_machine.active):
         raise ValueError("household refinance assessment needs idle canonical accounting")
-    previous = agent.refinance_machine.flow
     if reserve_floor is None:
-        reserve_floor = previous["plan"].reserve_floor if previous else 0
+        # The lasting issuance front, not the last operation's cursor: a
+        # surplus flow temporarily protects ALL prior wallet BUCK, and that
+        # must not freeze owned cash out of a later mortgage conversion.
+        reserve_floor = agent._net_credit_reserve
     if (type(reserve_floor) is not int or not 0 <= reserve_floor < 2**256 or
             type(slippage_bp) is not int or not 0 <= slippage_bp <= 1000):
         raise ValueError("invalid household assessment reserve or slippage")
@@ -417,6 +421,12 @@ def assess_surplus(agent, d, day, *, forecasts=None):
     actual pending intents. New retirement money comes from an authenticated
     net purchase or the real basket exit; existing liabilities/reserves are
     never confused with spendable credit. No new fund/oracle/exit policy.
+
+    Fair value is the basket's price in BUCK times the SAME dollar pool's
+    spot, so that pool's price cancels: the measured discount is basket
+    purchasing power, net of the pool's carried fees and trading fee. One
+    dislocated dollar route is therefore not a retirement signal (route
+    arbitrage owns that repair); BUCK cheaper against the basket itself is.
     """
     m, cal = agent.refinance_machine, agent.calendar_machine
     if (type(day) is not int or day < 0 or getattr(d, "buck_accounting", "") != "net" or m.active or
@@ -440,7 +450,8 @@ def assess_surplus(agent, d, day, *, forecasts=None):
     floor = max(agent.cash_buffer, credit["cash_floor"])
     choice = policy.net_surplus_purchase(q, cash, book.issued, fair_num, fair_den, floor, agent.p)
     context = dict(block=block, cash=cash, protected_buck=held, credit_funding=credit, choice=choice,
-                   fair_num=fair_num, fair_den=fair_den, reason=choice["reason"])
+                   fair_num=fair_num, fair_den=fair_den, fair_basis="basket-in-buck x dollar-pool spot",
+                   reason=choice["reason"])
     plan = None
     if choice["action"] == "retire" and agent._basket_receipts:
         positions = mark_net_basket_positions(d.chain, d.basket, d.buck, agent.address, agent._basket_receipts, block_number=block)
@@ -528,6 +539,29 @@ class HouseholdRefinance:
         return bool(self.flow and self.flow.get("kind") == "surplus" and
                     self.flow["status"] == "refused" and self.flow["phase"] == "deposit")
 
+    def _label(self):
+        return "surplus" if self.flow and self.flow.get("kind") == "surplus" else "refinance"
+
+    def retirement(self):
+        """The selected-facility engine's retained intent; None when idle.
+
+        A funded target is an intention with protected prior cash, not a
+        burn. ``uncertain`` means an outcome must be reconciled before any
+        further send; ``waiting`` is a known refusal to be re-read later.
+        """
+        a = self.agent
+        pending = None
+        if a._net_pending_token is not None:
+            pending = {"token_id": a._net_pending_token, "principal": a._net_pending_principal,
+                       "phase": a._net_pending_phase, "hash": a._net_pending_hash, "reverted": a._net_pending_reverted,
+                       "authorization_confirmed": a._net_authorization_confirmed}
+        uncertain = bool(a._net_trade_uncertain or a._net_cancel_uncertain or pending is not None)
+        if a._net_repayment_target is None and a._net_repayment_reserve is None and not uncertain:
+            return None
+        return {"target": a._net_repayment_target, "reserve": a._net_repayment_reserve, "uncertain": uncertain,
+                "waiting": bool(a._net_repayment_interrupted), "pending": pending,
+                "cancel_hash": a._net_cancel_hash if a._net_cancel_uncertain else None}
+
     def status(self):
         f = self.flow
         return {"schema": 1, "decision": self.decisions, "status": f["status"] if f else "idle",
@@ -536,6 +570,7 @@ class HouseholdRefinance:
                 "kind": f.get("kind", "refinance") if f else None, "surplus_due": self.surplus_due,
                 "last_surplus_day": self.agent._net_surplus_day, "next_surplus_day": self.agent._next_surplus,
                 "last_attempt_day": self.agent._net_refinance_day, "next_decision_day": self.agent._next_decision,
+                "credit_reserve": self.agent._net_credit_reserve, "retirement": self.retirement(),
                 "revision": f.get("revision", 0) if f else 0, "events": len(self.events)}
 
     def _accounts(self, d):
@@ -554,8 +589,12 @@ class HouseholdRefinance:
             issued = sum(f["issued"] for f in facilities)
             premium = sum(f["premium_nominal"] for f in facilities)
             limit = read(d.buck.functions.creditLimit(a.address))
-            buffer = self.flow["plan"].cash_buffer if self.flow else a.cash_buffer
-            reserve = self.flow["plan"].reserve_floor if self.flow else 0
+            surplus = bool(self.flow and self.flow.get("kind") == "surplus")
+            buffer = self.flow["plan"].cash_buffer if self.flow and not surplus else a.cash_buffer
+            reserve = a._net_credit_reserve
+            # One surplus operation's own floors; never the lasting policy.
+            protection = ({"usdc": self.flow["plan"].cash_buffer, "buck": self.flow["plan"].reserve_floor}
+                          if surplus else None)
             monthly_premium = 0 if a._sold else a._face0 * a.premium_rate // 10_000 // 12
             external_premium = external_premium_due(monthly_premium, a._face0, sum(f["activated"] for f in facilities))
             custody = {}
@@ -577,7 +616,7 @@ class HouseholdRefinance:
                           "refinance_closed": a.refinance_closed,
                           "external_premium_monthly": external_premium,
                           "counterfactual_premium_monthly": monthly_premium,
-                          "cash_buffer": buffer, "reserve_floor": reserve,
+                          "cash_buffer": buffer, "reserve_floor": reserve, "surplus_protection": protection,
                           "ratios": {"utilization": issued / limit if limit else None,
                                      "cash_buffer_cover": cash / buffer if buffer else None,
                                      "reserve_cover": bucks / reserve if reserve else None}})
@@ -788,6 +827,9 @@ class HouseholdRefinance:
             raise ValueError("refinance would consume the USDC buffer")
         context = _wire(context or {})
         self.decisions += 1
+        # Policy state outlives this cursor; later saving/retirement neither
+        # replaces it with its own protection nor releases it.
+        self.agent._net_credit_reserve = plan.reserve_floor
         self.flow = {"plan": plan, "origin": plan, "revision": 0,
                      "phase": "fund" if funding else "issue" if c else "export",
                      "status": "running", "hash": None, "issue_candidate": None,
@@ -896,8 +938,8 @@ class HouseholdRefinance:
             if f["phase"] != phase:
                 raise
             f["status"] = "pending"
-            self.agent.last_action = "refinance-pending"
-            self.agent.last_error = f"refinance accounting unavailable: {exc}"[:200]
+            self.agent.last_action = f"{self._label()}-pending"
+            self.agent.last_error = f"{self._label()} accounting unavailable: {exc}"[:200]
             self._event(d, day, "pending", reason=self.agent.last_error, transaction_hash=f["hash"])
             return False
 
@@ -938,7 +980,7 @@ class HouseholdRefinance:
         f, a = self.flow, self.agent
         if f["status"] == "pending":
             if not f["hash"]:
-                a.last_error = "refinance hash unavailable; reconcile before continuing"
+                a.last_error = f"{self._label()} hash unavailable; reconcile before continuing"
                 return True
             try:
                 result = self._recover(d)
@@ -946,7 +988,7 @@ class HouseholdRefinance:
                 self._refuse(d, day, str(exc))
                 return True
             except Exception as exc:
-                a.last_error = f"refinance receipt unavailable: {exc}"[:200]
+                a.last_error = f"{self._label()} receipt unavailable: {exc}"[:200]
                 return True
             if not self._apply_known(d, day, result, ctr):
                 return True
@@ -1025,12 +1067,12 @@ class HouseholdRefinance:
                 if known_revert and f["hash"]:
                     self._refuse(d, day, str(exc))
                 else:
-                    a.last_action = "refinance-pending"
+                    a.last_action = f"{self._label()}-pending"
                     a.last_error = str(exc)[:200]
                     self._event(d, day, "pending", reason=a.last_error, transaction_hash=f["hash"])
                 return True
             except Exception as exc:
-                a.last_action, a.last_error = "refinance-pending", str(exc)[:200]
+                a.last_action, a.last_error = f"{self._label()}-pending", str(exc)[:200]
                 self._event(d, day, "pending", reason=a.last_error, transaction_hash=None)
                 return True
             if not self._apply_known(d, day, result, ctr):
@@ -1039,5 +1081,10 @@ class HouseholdRefinance:
         action = ("save-retained" if f.get("retained") else "save" if f["plan"].action == "save" else "retirement-funded") if f.get("kind") == "surplus" else (
                   "refinance-satisfied" if f.get("satisfied") else "refinance")
         a.funding_pending, a.last_action, a.last_error = False, action, ""
-        self._event(d, day, "complete")
+        if f.get("kind") == "surplus":
+            # Completion of a retire plan funds a target; principal changes
+            # only in the selected-facility engine's own confirmed records.
+            self._event(d, day, "complete", outcome=action, retirement=self.retirement())
+        else:
+            self._event(d, day, "complete")
         return True

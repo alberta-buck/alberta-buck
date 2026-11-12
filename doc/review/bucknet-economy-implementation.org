@@ -72,7 +72,11 @@ and use absolute targets, preventing wheel waits or fractional ticks from
 accumulating calendar drift. Later arrivals share that same date anchor.
 The explicit automatic debtor component now reuses that dispatcher/calendar,
 retaining keyed adoption timing and seeking fresh bounded tranches daily
-after issuance. Full policy/surplus/exit scheduling still gates the normal
+after issuance. Reserve-safe saving, basket redemption and discounted
+retirement now run on that same receipt cursor in both languages, with the
+selected-facility engine's reductions in the public history and the lasting
+credit front kept apart from each operation's own protection. Working
+money, saver credit investment and asset exits still gate the normal
 household loop. Full restoration is deferred, not a prerequisite for uninterrupted
 interactive and five-year acceptance (November 8 priority below).
 Nominal issuance references and net liquidation/buyback units have distinct
@@ -1045,12 +1049,12 @@ never credit an unconfirmed mint or payment as liquid funds.
   Actual Python/JS interruptions across real elapsed days and a payday pass,
   including dated refinance recovery and a known waiting buyback target.
   Overall primary acceptance remains separately tracked in the handoff.
-- [ ] Keep external premiums proportional to actual activated coverage and
+- [X] Keep external premiums proportional to actual activated coverage and
   protect the issuance reserve in subsequent saving/paydown decisions.
   Apply closing costs once to a coherent staged mortgage refinance;
   distinguish actual insurer activation from a closing cost already paid.
-  Proportional recurring premiums are implemented and tested; reserve-safe
-  surplus integration and coherent staged closing-cost decisions remain next.
+  Proportional recurring premiums, staged closing and reserve-safe surplus
+  are implemented and tested; the surplus checkpoint records the last.
 - [X] Separate actual insurance activation from confirmed mortgage closing.
   Only an authenticated issuance-backed bank allocation sets refinance_closed;
   economic quotes retain the fixed fee before that point. Wallet-only
@@ -1250,7 +1254,7 @@ explicit so simplification does not remove an economic source of demand:
 | Working-wallet payday action | Guarded net purchases/sales from surplus after actual bills and buffers; preserve distinct custody | Retain its ordinary money-demand behavior before removing the old monthly caller or an overlapping spending agent. Reading the wallet mark is already supported; the new calendar intentionally does not submit this discretionary trade. |
 | Debtor refinancing versus saver credit investment | Reuse selected issuance, reserve funding, bounded market operations and one owner receipt dispatcher; distinguish bank payment from investment/cash retention | Extend common execution where it is the same operation. A saver has no mortgage, so it must not manufacture a positive bank allocation to pass the refinance plan's debt bounds or duplicate the whole refinance machine. |
 | First closing versus later tranches | Confirmed one-time closing plus current-credit/capital staged admission now implemented | Activation alone does not pay a fee. Allocate it only for economics, pay it fully on the first bank receipt, and recheck every later tranche. Resolve refused export prefixes before automatic scheduling. |
-| Surplus saving and discounted retirement | Protect required issuance cash/reserve, quote full net acquired BUCK including pool-carried fees, then authenticate actual deposit or selected settlement | A nominal pool discount alone is insufficient. Preserve targets through actual uncertainty, but let known waiting intentions coexist with normal income and bills. |
+| Surplus saving and discounted retirement | Protect required issuance cash/reserve, quote full net acquired BUCK including pool-carried fees, then authenticate actual deposit or selected settlement | *Done as components* (surplus checkpoint). A nominal pool discount alone is insufficient, and neither is one dislocated dollar route. Targets survive actual uncertainty; known waiting intentions coexist with normal income and bills. |
 | Asset exits | Explicit unused-facility close, guarded principal retirement and receipt redemption | Keep burn(0) invalid and K/fund limits intact. Preserve distinct exit checks as household integration proceeds. |
 | Saved-world state (later) | Dated books/queues/hashes/cursors and exact fund/insurer graph | Keep imports gated until restart coverage demonstrates the replacement; save/resume does not gate uninterrupted economy runs. |
 
@@ -1843,11 +1847,12 @@ implementation and validation milestones remain in the journal above.
   complete economies and actual five-year JSON/PDF campaigns. Save/resume
   remains later, as do Notes/proof restoration and release acceptance.
 
-** Current milestone: reserve-safe surplus saving and retirement
+** Surplus milestone: reserve-safe saving and retirement (complete)
 
-Continue in the same worktree/branch from =8ef4ebbd=. Preserve the qualified
-automatic debtor component and its cash-only resumption. Normal act remains
-gated while this milestone is completed; no corrected five-year run is claimed.
+Continued in the same worktree/branch from =8ef4ebbd= through the work-in-progress
+checkpoint =7eb6cbd9=. The qualified automatic debtor component and its
+cash-only resumption are preserved. Normal act remains gated; no corrected
+five-year run is claimed.
 
 - [X] Expose the cash needed to front a worthwhile current refinance even
   when that amount is not yet affordable. Reuse the same quoted menu and
@@ -1855,165 +1860,268 @@ gated while this milestone is completed; no corrected five-year run is claimed.
   wages or an unfunded target as current financing. Surplus must preserve
   this target so always-invest cannot spend away the issuance front.
   Implemented in both assessors as context.funding, with funded plans still
-  selected only from affordable observations. Python actual funding target
-  and the earlier nine-case refinance subset pass; actual JS acceptance for
-  this addition remains open.
+  selected only from affordable observations. Qualified in both languages:
+  the funding-target case and the refinance/save/refinance interleave.
 - [X] Use full net purchase costs, including the pool's carried fees and
   trading impact, for adaptive/discount retirement. Retain heterogeneous
   discount thresholds and the always-invest/retirement-only comparisons.
   Exact integer execution bounds must enforce the chosen discount.
-  Shared eleven-case vectors pass in both policy implementations. The actual
-  retirement signal/route-consistency qualification remains open below.
-- [ ] Add shared ordinary-owner BUCK basket operations to the existing
+  Shared eleven-case vectors pass in both policy implementations. The
+  retirement signal is qualified against real pools in both languages
+  (isolated route: no signal; coherent sell-off: retire).
+- [X] Add shared ordinary-owner BUCK basket operations to the existing
   SDK basket modules: bounded deposit, in-place top-up, partial redemption
   and receipt authentication. Reuse the current contract APIs; no new
-  monetary contract, quote oracle or transaction journal.
-- [ ] Extend the existing household receipt machine for saving cash flows,
+  monetary contract, quote oracle or transaction journal. The exit preview
+  takes an optional read-only owner dispatch for contract-held accounts.
+- [X] Extend the existing household receipt machine for saving cash flows,
   then hand authenticated retirement proceeds to the existing selected-NFT
   repayment/recovery engine. Keep unknown outcomes stopped and calendar
-  work moving through known waiting intentions.
+  work moving through known waiting intentions. The engine's confirmed
+  reductions, refusals and recoveries are now in the same public history.
 - [X] Keep canonical basket positions in the household's Ordinary account,
   with explicit protected cash. Reuse a BUCK receipt for repeated saving;
   preserve multiple-position/custody readers and focused coverage.
-  Implemented. The lifecycle fixture completes two actual saving/top-up
-  operations and verifies one receipt, real basis/shares, cash/reserve
-  preservation and unchanged supply before reaching its failing retirement
-  decision. No full lifecycle acceptance is implied.
-- [ ] Exercise actual Python/JS saving/top-ups, discounted paydown and
+- [X] Exercise actual Python/JS saving/top-ups, discounted paydown and
   partial basket redemption, including refusal and lost/hashless evidence;
   retain full actual principal, cash, basis/mark/ROI and decision histories.
-  Qualify through existing Make/Nix/venv targets, update guides and check in
-  implementation and acceptance checkpoints.
+  Qualified through the existing Make/Nix/venv targets; guides updated.
 
-Then port the working wallet, saver credit investment and asset exits before
-opening the normal household act loop, short complete worlds and five-year
+Next: port the working wallet, saver credit investment and asset exits, then
+open the normal household act loop, short complete worlds and five-year
 JSON/PDF campaigns. Full save/resume and Notes/proofs remain later tasks.
 
-*** Compaction handoff: implementation present; surplus acceptance is open
+*** Surplus saving and retirement checkpoint
 
 - *Worktree/branch*: =.claude/worktrees/buck-compound= on
-  =feature/household-minimal-ecosystem=. The previous fully qualified source
-  is =8ef4ebbd=. This checkpoint is deliberately work in progress: normal
-  household act is still gated and no five-year campaign has been started.
-  No Solidity, demurrage kernel, K rule or Jubilee allowance changed.
-- *Refinance capital protection*: =assess_refinance= / =assessRefinance=
-  retain economically worthwhile but cash-limited observations separately.
-  The executable list remains affordable only, including whole-programme
-  bounds. =context.funding= exposes =cash_floor=, =basis=, =unfunded= and
-  =refinance_ready=. A target is a saving requirement, not current financing.
-  =test_refinance_funding_target_is_saved_capital_not_an_unfunded_loan=
-  proves that accumulating actual USDC can make a previously unfunded target
-  executable without any issuance during either read-only assessment.
-- *Portable policy*: =household_policy.net_surplus_purchase= and JS
-  =netSurplusPurchase= use the existing integer market estimators, exact
-  fair-value ratios and raw budgets. The adaptive threshold now uses each
-  household's retire_disc against full net delivery, not nominal output.
-  A strict integer minimum enforces the discount after fees/impact. The
-  existing paydown/saving urgency functions and five size fractions remain.
-  Retirement-only may accept a premium as an explicit comparison; an
-  unleveraged household never manufactures a retirement target. A zero
-  purchase budget may still permit a funded basket redemption.
-- *SDK basket operations*: =core/python/buck_core/basket.py= adds
-  =NetBasketOps=, deposit/redemption plan/result dataclasses and public
-  exports. =core/js/src/basket.js= mirrors these with =netBasketOps=.
-  They prepare Ordinary BUCK deposits, increasePosition top-ups and
-  redeemShares exits; authenticate owner/asset/amount/hash, NetValueTransfer
-  evidence and dated holding changes before returning. Post-read failure
-  preserves a submitted hash. They do not grant permissions or keep another
-  transaction journal. =preview_redemption= / =previewRedemption= currently
-  attempts the actual redemption through eth_call to discard all writes;
-  this preview is NOT yet qualified (failure below).
-- *Shared household execution*: =SurplusPlan= / its JS record shares the
-  existing HouseholdRefinance.flow with =kind=surplus=. New phases are
-  buy/deposit/redeem; receipt recovery/apply/refusal still uses the same
-  cursor. Saving protects every pre-existing wallet BUCK and the current
-  credit cash target. It buys guarded net BUCK, leaves an owned sizing
-  cushion, and creates/tops up a receipt in the main Ordinary account.
-  Retained cash is real money; no auxiliary savings proxy is created.
-  Authenticated retirement proceeds set the existing selected-NFT engine's
-  target/reserve; no purchase/redemption is itself a principal reduction.
-  Actual ordinary basket allowance is prepared during canonical setup.
-- *Agent APIs*: assess/start/resume/advance_net_surplus and the JS
-  assess/start/resume/advanceNetSurplus are present. They reuse owner
-  serialization, calendar/recovery and keyed decision cadence. A proved
-  refused saving deposit exposes surplus_due and retries that deposit only.
-  Unknown/hashless outcomes remain stopped. A known pre-submission view
-  failure refuses the attempt so it cannot prevent later recurring income.
-  Machine status exposes kind and last/next surplus dates. Full automatic
-  act, saver credit issuance, working money and asset exits remain gated.
-- *Passing evidence*: =make nix-core-equilibrium-policy-test= passes *78*
-  with no skips: =/private/tmp/buck-household-surplus-policy-make-js.log=.
-  The direct JS household-policy set passes *58*, including the shared new
-  vectors; the focused Python new policy case passes (*eleven vector arms*).
-  Logs: =/private/tmp/buck-household-surplus-policy-js.log= and
-  =/private/tmp/buck-household-surplus-policy-py.log=.
-  The initial changed refinance subset passed *nine* in
-  =/private/tmp/buck-household-surplus-funding-py.log=. The earlier new
-  primary SDK case passed actual deposit/top-up, known revert, lost replies
-  and aged fractional net payout in
-  =/private/tmp/buck-household-surplus-sdk-py.log=. That was BEFORE the new
-  preview assertion was added. The current browser bundle builds:
-  =/private/tmp/buck-household-surplus-build-js.log=. JS source syntax checks
-  pass. These do not qualify actual JS surplus execution.
-- *Current failures, keep visible*: the final lifecycle subset is *two
-  passed, two failed* in
-  =/private/tmp/buck-household-surplus-handoff-py.log=. The funding and SDK
-  cases passed there; the cash retirement arm selects save instead of
-  retire, and the basket arm has no plan after its two successful saves.
-  A fixture calendar-preparation omission was fixed before that run.
-  Both failures remain at the retirement opportunity check, before any
-  retirement attempt. After adding the actual exit preview assertion, the
-  latest SDK/funding subset is *one passed, one failed* in
-  =/private/tmp/buck-household-surplus-sdk-final-py.log=: the funding target
-  passes, but direct contract-owner eth_call for redeemShares reverts with
-  empty data. Do not report the expanded SDK case or surplus lifecycle green.
-- *Continue here, in order*:
-  1. Diagnose preview dispatch using the existing SimLP execution path.
-     Determine whether the direct contract-owner RPC call is refused by
-     the backend or by the real exit. If needed, supply a read-only proxy
-     dispatch adapter to the SDK; reuse SimLP.exec and decode its returned
-     bytes. No new contract or weakened K/exit check is justified. Prove
-     simulation changes neither holdings nor chain height before relying on it.
-  2. Diagnose the retirement signal with complete choice/market context:
-     actual funded shock amount, pool reserves, net/gross ratio, BVIB,
-     fair numerator/denominator and target. The fixture shocks only the
-     BUCK/USDC pool and does not run normal wheel route repair. Current fair
-     value is the existing BVIB times BUCK/USD spot, so an isolated route
-     dislocation need not establish a basket-relative purchasing-power
-     discount. Test a coherent real shock/arb/TWAP sequence, and review the
-     fair reference rather than forcing a policy result or inventing BVIB.
-  3. Separate the lasting credit-front policy reserve from a surplus
-     operation's temporary protection of every pre-existing wallet BUCK.
-     assess_refinance currently defaults to the previous flow's reserve_floor;
-     after a surplus flow that means all prior cash, not necessarily the
-     original credit front. Do not let saving/retirement silently freeze
-     wallet cash out of later mortgage conversion or discard the required
-     issuance front. Retain the proper policy reserve independently of the
-     one-operation cursor and add a refinance/save/refinance interleave test.
-  4. Finish actual cash and partial-basket retirement in Python. Verify
-     actual principal/supply reduction, protected prior cash, remaining
-     basis/shares and fund/K refusals. Preserve the two new failing cases.
-  5. Extend the existing public history to the selected-facility engine's
-     confirmed reductions/recovery, with exact receipt hashes. Funding a
-     target must not appear as a completed burn. Expose its retained target,
-     reserve and uncertainty in status; currently only the old internal
-     fields/counters carry these. Clean up refinance-named generic pending
-     messages for surplus flows while retaining recovery behavior.
-  6. Add shared refused/lost/hashless purchase/deposit/redemption cases and
-     run actual JS surplus execution through the existing primary builder
-     (two TOKENs suffice for these cash cases; route arb has separate checks).
-     No actual JS surplus fixture has been written/run in this checkpoint.
-     Include the fixture in the existing Make target, not another runner.
-  7. Run the broader supported Python household/policy/report set and current
-     actual JS component acceptance, rebuild the browser, then update this
-     checklist and guides before opening any normal act path. The preceding
-     *190 Python* acceptance belongs to =8ef4ebbd=; it was not rerun against
-     these additions and must not be claimed as this checkpoint's result.
-- *Commands for focused continuation*:
+  =feature/household-minimal-ecosystem=. No Solidity, demurrage kernel, K
+  rule or Jubilee allowance changed. Normal household act is still gated and
+  no five-year campaign has been started.
+- *Handoff failure 1, the exit preview* (resolved). The direct contract-owner
+  =eth_call= was refused by the *backend*, not by the exit: pyrevm 0.3.7
+  rejects any message whose sender has code before running it (EIP-3607,
+  =Transaction(RejectCallerWithCode)=) and cannot waive that for calls as
+  anvil does. The backend had reported it as an empty revert; it now says
+  =not executed: Transaction(...)=. The same =redeemShares= called through
+  the household proxy's own =SimLP.exec= returns the real values and changes
+  neither holdings, cash, K nor chain height. =NetBasketOps= / =netBasketOps=
+  take an optional =simulate= (read-only twin of =execute=); both sim worlds
+  supply it (=d.net_simulate=, =world.netMarket.simulate=). The default
+  remains a direct call from the owner. No contract or guard changed, and the
+  executed redemption pays exactly the previewed amount in the same state.
+- *Handoff failure 2, the retirement signal* (resolved; the policy was right,
+  the fixture was incoherent). Fair value is the basket's BUCK price times
+  the /same/ dollar pool's spot, so that pool's price cancels:
+  =cost/fair = (pool nominal/net) / ((1 - fee) * BVIB)=. The fixture sold
+  100,000 BUCK into BUCK/USDC only: spot fell 1.0000 -> 0.8265 while BVIB
+  stayed 0.999924, so the ratio stayed 1.0007 and adaptive correctly kept
+  saving. This is the long-standing household parity reference (legacy
+  =_basket_usd=), not a new choice; it is now stated in the assessor and
+  guide, and =fair_basis= is recorded with each choice. The fixtures keep the
+  isolated sale as a /negative/ assertion and then complete a coherent
+  sell-off (the same share of every TOKEN pool), which the basket's TWAP
+  carries into fair value.
+- *Handoff item 3, two reserves* (resolved). The refinance assessor's default
+  reserve was the previous flow's cursor, so after a surplus flow it was
+  /all prior wallet BUCK/. A household-level =_net_credit_reserve= /
+  =netCreditReserve= now holds the lasting issuance front (set by each
+  started refinance plan); a surplus plan's floors are reported separately as
+  =surplus_protection= and end with that operation. The interleave fixture
+  shows the old default would have frozen all but the save's 0.1% sizing
+  cushion (about 5 BUCK of 500) out of a later wallet prepayment.
+- *Retirement in the public history*. A retire plan's completion is
+  =outcome=retirement-funded= with principal unchanged. The selected-facility
+  engine appends =kind=retirement= records: one =confirmed= per authenticated
+  =FacilityReduced= receipt (exact hash, facility, principal, relief, premium
+  refund), plus =pending=, =waiting=, =refused=, =recovered=, =canceled= and
+  =complete=. =status()= exposes the retained =retirement= target, reserve
+  and uncertainty and the lasting =credit_reserve=. A settled reduction now
+  names its facility in both SDKs. Recording is non-fatal and follows the
+  saved books and pending evidence. Surplus flows no longer report
+  refinance-named pending messages.
+- *Shared outcomes* (=test/fixtures/household-surplus.json=, =flow=): twelve
+  cases over purchase, deposit and redemption. A lost reply is authenticated
+  from its saved hash and applied once; an unknown outcome books and re-sends
+  nothing and also holds the next payday; a proved refusal of a purchase or
+  redemption changes nothing; a refused or unquotable deposit keeps the
+  purchased cash and retries only the deposit; a refused exit preview falls
+  back to a guarded purchase; a fund refusal keeps the funded target. A
+  refusal is the same send with one bound made unreachable, so the contract
+  itself reverts.
+- *A regression found outside the focused subsets*: =test_net_market.py=
+  (part of =make nix-venv-net-demurrage-smoke=) had failed since =acffbc25=
+  because its bare household never defined =refinance_closed=. The fixture is
+  corrected; the lesson is in the recommendations below.
+- *Evidence at this checkpoint* (final sources; counts, not log paths):
+  - Python, =make nix-venv-test-python= over the sixteen supported files
+    (the economy-accounting list, the net-demurrage-smoke list and
+    =test_net_economy_bootstrap.py=): *258 passed*, no skips, 82 s. That
+    includes seventeen surplus cases: both lifecycle arms, the twelve shared
+    flow cases, the interleave, the funding target and the SDK basket
+    operations.
+  - Fast JavaScript, =make nix-core-equilibrium-policy-test=: *78 passed*.
+  - Actual JavaScript surplus fixture
+    (=test/net-household-surplus.tevm.test.js=, one Tevm world): *33 Node
+    checks passed* (32 children and the parent), no skips, about nineteen
+    minutes. The children are the interleave, the twelve flow cases as an
+    attempt and a next day, the in-place top-up, the isolated-route check,
+    both lifecycle arms, the SDK basket operations and the payday hold.
+  - JavaScript repayment-target and market-record units: *6 passed*.
+  - The browser equilibrium bundle rebuilds (=make nix-core-demo-eqworld=).
+  - Full actual JavaScript equilibrium acceptance
+    (=make nix-core-equilibrium-bootstrap-test=, all five files run
+    together): *88 passed*, no skips, about thirty minutes. The earlier arb,
+    bootstrap, programme and resume fixtures are unchanged and still pass on
+    the shared household machine.
+  - =make nix-venv-net-demurrage-smoke= (the repayment engine's Python and
+    JavaScript fixtures): *35 Python and 20 JavaScript passed*, no skips.
+  The fixture is in the existing Make target's default file list. The
+  preceding checkpoints' counts (190 Python and so on) belong to their own
+  revisions and are not restated here.
+- *Commands*:
   #+begin_src sh
   make nix-core-equilibrium-policy-test
-  make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py PYTEST_ARGS='-k "surplus_saves or funding_target or primary_basket_ops" --basetemp=build/test/household-surplus-handoff -q'
-  make nix-core-demo-eqworld
+  make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py PYTEST_ARGS='-k "surplus or saving_between or funding_target or primary_basket_ops" -q'
+  make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-surplus.tevm.test.js
   #+end_src
   Temporary logs are diagnostic, not durable acceptance artifacts; commands,
-  vectors, tests and this status are committed for the next session.
+  vectors, tests and this status are committed.
+
+*** Observations and recommendations for the five-year runs and sandboxes
+
+Recorded at the end of the surplus phase. /Measured/ items name their
+fixture; none is a five-year result. /Recommendations/ are for the remaining
+milestones (working wallet, saver credit investment, asset exits, the normal
+act loop, short worlds, the five-year campaigns, the savings sandbox and the
+JavaScript equilibrium demo).
+
+**** Measured in this phase
+
+Fixture A is the Python =household_world= (pyrevm, two TOKENs, a 1M/1M dollar
+pool, 100k-BUCK TOKEN pools, an un-bootstrapped basket). Fixture B adds two
+bootstrap seeders and wheel turns (basket lien 499,961 BUCK; 350k-BUCK TOKEN
+pools). Fixture C is the actual JavaScript builder under Tevm (1M dollar pool,
+a bootstrapped leveraged basket, two TOKENs).
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 1 | A | A 10% BUCK sale into the dollar pool alone: spot 1.0000 -> 0.8265, BVIB unchanged at 0.999924, cost/fair 1.0007. No household retirement signal, by construction. |
+| 2 | A | The same 10% in every BUCK pool: BVIB 1.2093 once the TWAP passes, cost/fair 0.8275, full retirement chosen. K fell 0.7500 -> 0.7262 at the first compute, then about 0.0034 a day (0.7222, 0.7189, 0.7155, 0.7121) while nothing repaired the pools. |
+| 3 | A | Wheel turns deploying about 5.5k BUCK of household savings into the 100k TOKEN pools raised BVIB about 0.5% a turn (0.9999 -> 1.0234 in six) and lowered K to 0.7476. Deployment of savings is itself a basket-price move at that depth. |
+| 4 | B, C | A 5% coherent sell-off in B: BVIB 1.1021, K 0.7500 -> 0.7384 -> 0.7369. The household's exit preview was /not/ refused: the leveraged basket's collateral still covered its principal. The same 5% in C also left every redemption open. |
+| 5 | B | The machine's response then sold about 7.2k BUCK-worth a day and BVIB decayed 1.1021 -> 1.0746 -> 1.0532 -> 1.0323 -> 1.0118 in four days; K recovered to 0.7436. The household's cost/fair went 0.908, 0.931, 0.950, 0.969, 0.989: on the fourth day its adaptive target was a sixth of the first day's, on the fifth there was no plan. |
+| 6 | A | Retiring 50 BUCK of principal with a 10-BUCK returnable premium deposit took two reductions: 49.87 from the proceeds, then 0.13 from the returned deposit. A purchase-funded retirement of the same target took one. |
+| 7 | A, C | Python: the seventeen surplus cases run in 13 s, the 258-test supported set in 82 s. JavaScript under Tevm: the surplus fixture takes about nineteen minutes; one debtor's refinance, save and wallet prepayment alone take 299 s, a saving case 8 to 20 s and a retirement 24 to 48 s. |
+| 8 | A, C | pyrevm refuses an =eth_call= whose sender is a contract (EIP-3607); Tevm accepts one (probed directly with a contract sender). Every simulated household is a proxy contract. |
+
+**** Recommendations
+
+1. /Compose one owner dispatcher for the act loop./ Refinancing and surplus
+   share one receipt cursor, so a household runs at most one flow at a time.
+   Keep the legacy loop's order and recover once: calendar; a known refused
+   settlement (=settlement_due=); a known refused deposit (=surplus_due=);
+   a due asset exit, which preempts the rest every day until it clears; on
+   a decision day a fresh refinance tranche, saver issuance or investor
+   choice; then surplus; then working money. Today
+   =HouseholdRefinance.start= does not test =surplus_due=, so a refinance
+   started first would replace the cursor and silently drop a deposit retry
+   (the purchased cash stays owned, but the intention and its =acquired=
+   amount are lost). Put the retry before new credit, as cash-only
+   resumption already is, and add that interleave to the shared vectors.
+2. /Let known progress finish the same day./ A funded retirement needs one
+   to three dispatcher turns (the returned premium funds the last
+   reduction), and every recovery consumes a turn. With one call a day a
+   retirement straddles days while its protected reserve keeps the household
+   out of other decisions. Give the act loop a small bounded number of turns
+   a day for /known/ states only; unknown outcomes must still stop.
+3. /Step through every payday./ A calendar refuses to skip one. Any driver
+   that jumps days (the savings sandbox step control, population arrivals, a
+   resumed world) must visit each household at least once a pay period.
+4. /Use the read-only owner dispatch for every preview./ Asset exits and
+   saver credit investment will want to simulate as the owner. On pyrevm that
+   must be =d.net_simulate=; a direct call fails before the contract runs.
+   Tevm would accept the direct call, but the JavaScript world passes the
+   same proxy twin so both simulators run one path. Promote the adapter
+   into the credit and market SDK objects when the first of those needs it,
+   rather than adding a second mechanism. The browser wallet sandbox uses
+   EOAs and keeps the direct default, which no test here exercises yet.
+5. /Expect household discounted retirement to be brief and second-order./
+   Observation 5: the machine repaired a 10% basket-relative discount in
+   about five days, and the household signal decays with it. Default
+   households decide every 5 to 20 days (keyed), with thresholds of 0.5% to
+   3%. Most will not be looking during the window. In the five-year metrics
+   report the /opportunity/ (household-days beyond each threshold) beside
+   the response (=hhPaidDown=, funded and confirmed retirement), and run one
+   comparison with a daily surplus cadence before concluding anything about
+   this channel from a small paydown total.
+6. /A dollar-pool shock is not a household discount./ The savings sandbox's
+   shock actor leans on BUCK/USDC only. Households respond after arbitrage
+   carries the dislocation into the TOKEN pools and the TWAP passes
+   (observations 1 and 2). Keep wheel arbitrage on for shock
+   comparisons, measure route consistency and basket-relative value
+   separately as already planned, and add a broad sell-off (the same share
+   of every BUCK pool) to the shock set so the household channel can be
+   tested directly. In the sandbox show the dollar price and the
+   cost/fair ratio side by side; otherwise a stress button that moves only
+   one of them looks like a bug.
+7. /Size the pools to the population's flows./ Each saving is capped at
+   0.5% (at =max_impact_bp= 100) of the dollar pool's reserve, about a 1%
+   price move per purchase by constant-product arithmetic; households decide
+   independently, so their purchases add. Observation 3 is the TOKEN-pool
+   analogue. Before the campaigns, compare expected daily always-invest
+   dollars and wheel deployment against =deploy.target_buck_lp_m= /
+   =target_buck_m= and against a day of arbitrage and response capacity, and
+   report the dollar-route premium and BVIB separately. A world whose pools
+   are thin against its savers will show a persistent route premium that is
+   an artifact of sizing.
+8. /Watch new credit, not only shortfall, when K falls./ Observation 2: K
+   moves at once and keeps moving while a discount stands. Activated
+   capacity is K times coverage, so staged refinance programmes stall
+   before any facility is short. Chart issuance room and declined
+   =insufficient-capacity= assessments through each shock. Do not change the
+   controller's sign or gains on this evidence; it is one small fixture.
+9. /Find where the exit door closes before the shock campaigns./ In
+   observation 4 redemptions stayed open at K 0.737. The K (or excursion) at
+   which the leveraged basket's own shortfall makes =_exitSnapshot= refuse
+   was /not/ measured, and no fixture here produced a real K refusal of an
+   exit; only an injected one. A household with a closed door and no spare
+   dollars can neither retire nor leave. Add one directed contract-level
+   case (lower K until =CreditShortfallIncreased=, then let the wheel's
+   bounded retirement reopen it) and the matching household wait.
+10. /Decide receipt-first versus cash-first by measurement./ A retire plan
+    redeems a receipt before spending dollars. Redemption draws the basket's
+    cash (or makes it unwind liquidity) and puts no bid in the dollar pool;
+    buying does. Both reduce supply. Make the order a profile setting and
+    include it in the policy grid.
+11. /Unknown outcomes are a sandbox matter./ In-process runs lose no
+    replies, so five-year pyrevm campaigns will not exercise them. The
+    savings server and browser will. Surface =status().retirement= and the
+    pending hash, and give the operator a reconcile-from-journal action;
+    otherwise one lost reply freezes a household, its wages included, for
+    the rest of the session.
+12. /Assess once a day./ A debtor's surplus assessment runs the whole
+    refinance assessor for its funding floor (78 options and 75 issuance
+    quotes in the interleave fixture), and the refinancing component then
+    runs it again. That is negligible on pyrevm and dominant under Tevm
+    (observation 7). Share one same-block assessment between the two
+    components, and pin and batch its reads, before a JavaScript population
+    world is attempted. The Python campaign remains the five-year vehicle.
+13. /Carry the new state into saved worlds when they arrive./ The lasting
+    =_net_credit_reserve=, the surplus cursor (=kind=, =acquired=, quoted
+    terms, =preserved=) and the surplus cadence days are not yet in any
+    import format. Uninterrupted runs do not need them.
+14. /Reconcile the reports with the new records./ The report's
+    surplus-policy chart reads household totals. The history's distinction
+    between a funded target and confirmed reductions, and
+    =surplus_protection=, is in the JSON but not charted. The fixtures hold
+    =unwound= equal to the sum of confirmed principal; assert the same over
+    the first short complete world, and chart funded against confirmed
+    there rather than after a five-year run.
+15. /Run whole targets at each checkpoint./ A focused subset hid a failing
+    supported test for five checkpoints. Before a campaign run
+    =make nix-venv-economy-accounting-test=, =make nix-venv-net-demurrage-smoke=
+    and =make nix-test= at the exact revision and record the counts.
+16. /The sandbox actors are unverified on canonical money./ =ShockAgent=
+    still draws with the numeric =mint= overload and swaps through its own
+    callback. Both remain in canonical Buck, but neither was exercised here.
+    Qualify it with the first savings-sandbox world.

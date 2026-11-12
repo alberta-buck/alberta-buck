@@ -173,41 +173,114 @@ This debtor component stops at a due asset exit. It does not run saver
 investment or discretionary saving; those paths still gate the normal
 =act= loop and complete five-year economies.
 
-* Surplus migration (in progress)
+* Reserve-safe surplus: saving, redemption and discounted retirement
 
-The surplus migration is *in progress*. Its implementation and exact
-qualification boundary are recorded in the [[file:doc/review/bucknet-economy-implementation.org::*Current milestone: reserve-safe surplus saving and retirement][current surplus milestone]].
 =assess_net_surplus= / =assessNetSurplus= and the explicit start/resume/advance
-counterparts now reuse the existing household receipt machine. Saving keeps
-pre-existing wallet BUCK protected, buys full net cash, and deposits or tops
-up one BUCK basket receipt owned by the household's own Ordinary account.
-Confirmed retirement proceeds go to the existing selected-facility engine.
-Normal =act= remains gated; this prototype is not five-year acceptance.
+counterparts reuse the existing household receipt machine (=kind=surplus=).
+Saving keeps every pre-existing wallet BUCK protected, buys full net cash, and
+deposits or tops up one BUCK basket receipt owned by the household's own
+Ordinary account. A retire plan redeems part of that receipt (or, without one,
+buys guarded net BUCK) and hands the authenticated proceeds to the existing
+selected-facility engine as a /target/. Normal =act= remains gated; these are
+components, not five-year acceptance. Progress and evidence are recorded in the
+[[file:doc/review/bucknet-economy-implementation.org::*Surplus saving and retirement checkpoint][surplus checkpoint]].
 
-The refinance context now includes =funding.cash_floor=, =basis=, =unfunded=
-and =refinance_ready=. A worthwhile opportunity can define a cash saving
-target without producing an executable loan. This keeps always-invest from
-spending its next issuance front or closing cost. All original K, current
-capital, liquidity and staged-programme admission checks still apply.
+** Two reserves, kept apart
 
-The new raw-unit surplus policy compares full net delivery, including
-pool-carried fees, trading fees and impact. Adaptive/discount retirement
+The refinance context includes =funding.cash_floor=, =basis=, =unfunded= and
+=refinance_ready=. A worthwhile opportunity can define a dollar saving target
+without producing an executable loan, so always-invest cannot spend the next
+issuance front or closing cost. All original K, current capital, liquidity and
+staged-programme admission checks still apply.
+
+The BUCK side has two different floors:
+
+| Floor | Lifetime | Meaning |
+|-------+----------+---------|
+| =credit_reserve= (status), =reserve_floor= (accounts) | Lasting; set by each started refinance plan | The issuance front the household keeps between tranches. The refinance assessor's default reserve. |
+| =surplus_protection= (accounts, surplus flows only) | One operation | Every wallet BUCK and the dollar floor held when the saving/retirement was assessed. |
+
+A surplus operation never replaces or releases the lasting front, and its own
+protection ends with the operation: other owned BUCK remains convertible to the
+bank by a later wallet prepayment. (Before this split the assessor defaulted to
+the last operation's floor, so a save froze all prior wallet cash.)
+
+** What counts as a discount
+
+The raw-unit surplus policy compares full net delivery, including pool-carried
+fees, trading fee and impact, against fair value. Adaptive/discount retirement
 uses the household's random =retire_disc= and an exact integer net-output
-minimum. Always-invest and retirement-only remain explicit comparisons.
-Their shared vectors include a nominal discount erased by carried fees and
-a marginal discount erased by impact.
+minimum; always-invest and retirement-only remain explicit comparisons.
+
+Fair value is the basket's price in BUCK times the /same/ dollar pool's spot,
+so that pool's price cancels:
+
+#+begin_example
+cost / fair = (pool nominal / pool net) / ((1 - fee) * basket-value-in-BUCK)
+#+end_example
+
+The measured discount is therefore basket purchasing power. One dislocated
+BUCK/USDC route is *not* a retirement signal (route arbitrage owns that
+repair); BUCK cheaper against the basket itself, carried into the basket's TWAP,
+is. The lifecycle fixtures assert both: a real 17% dollar-pool sale leaves the
+choice at =save= with the ratio at parity, and the same sale across every
+TOKEN pool produces =retire=. Each assessment's context records =fair_num=,
+=fair_den=, =fair_basis= and the choice's =marginal_ratio_wad=; planned and
+declined events carry the pinned market record (K, basket value, spot, active
+reserves, pool nominal/net).
+
+** Basket operations and the exit preview
 
 The SDK's =NetBasketOps= / =netBasketOps= prepares bounded BUCK deposits,
-in-place top-ups and partial redemptions, retaining quoted prior holdings
-for dated receipt authentication. Its exit preview uses =eth_call= on the
-existing redemption API and discards all EVM writes. An unavailable preview
-cannot relax the real K/exit guard. Lost replies retain their hashes; a
-deposit or redemption is distinct from a confirmed NFT principal reduction.
-Earlier Python checks demonstrated authenticated top-ups and aged Carrying
-payouts. The newly added direct redemption preview currently reverts, and
-the lifecycle's isolated BUCK/USDC shock has not established the required
-basket-relative discount. Full Python retirement and actual JS surplus
-qualification remain unfinished; see the plan before enabling the components.
+in-place top-ups and partial redemptions, retaining quoted prior holdings for
+dated receipt authentication. Lost replies retain their hashes; a deposit or
+redemption is distinct from a confirmed NFT principal reduction.
+
+=preview_redemption= / =previewRedemption= executes the real =redeemShares=
+through =eth_call= and discards every write, so K, treasury and exit charges
+need no duplicate formula. It checks that neither the holding nor the chain
+height changed. A refused preview is an unavailable exit, recorded in
+=context.basket_exits=; it never relaxes the guard, and the household may fund
+the same target by a guarded purchase instead.
+
+The preview is made /as the owner/. The default is a direct =eth_call= from the
+owner's address. Simulation households are contract proxies, and the in-process
+pyrevm backend refuses any call whose sender has code before it runs (EIP-3607;
+reported as =not executed: Transaction(RejectCallerWithCode)=). Tevm accepts
+such a call. Both sim worlds nevertheless pass a read-only twin of their proxy
+dispatch (=simulate=), so they run one path: the same =SimLP.exec=, called
+rather than sent. It runs the unmodified basket and grants no authority.
+
+** Outcomes and the public history
+
+| Outcome | Behaviour |
+|---------+-----------|
+| Lost reply, hash known | The receipt is authenticated and applied exactly once; nothing is re-sent. |
+| Unknown outcome, no hash | Nothing is booked or re-sent; later sends, including the next payday's income, wait for reconciliation. |
+| Proved refusal of a purchase or redemption | Nothing changed; the next decision day assesses afresh. |
+| Proved refusal or unavailable quote of a deposit | =surplus_due=: the purchased cash stays owned and only the deposit is re-quoted, once a day. Nothing is bought again. |
+| Fund/owner/quote refusal of a reduction | The funded target and its protected reserve wait; a later turn re-reads and completes. |
+
+Funding a target is not a burn. A retire plan ends with a =complete= record
+whose =outcome= is =retirement-funded= and whose accounts still show the full
+principal. Principal changes only in the selected-facility engine's own records
+(=kind=retirement=, =phase=reduction=): one =confirmed= entry per authenticated
+=FacilityReduced= receipt with its exact hash, facility, principal, relief and
+premium refund, then =complete=. Uncertain authorizations/settlements appear as
+=pending=, known refusals as =waiting=/=refused=, withdrawn authorizations as
+=canceled=. Machine =status()= exposes =retirement= (=target=, =reserve=,
+=uncertain=, =waiting=, =pending=) while any of it is retained, and
+=credit_reserve= always. Recording history is an observation: it can neither
+block nor reverse a settled transition.
+
+#+begin_src sh
+make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_net_household_setup.py PYTEST_ARGS='-k "surplus or saving_between or funding_target or primary_basket_ops" -q'
+make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-surplus.tevm.test.js
+#+end_src
+
+The shared vectors are in =test/fixtures/household-surplus.json= (=cases= for
+the policy, =lifecycle= and =flow= for actual execution). Working-wallet money,
+saver credit investment and asset exits still gate the normal =act= loop.
 
 * Market estimates for reserve funding
 

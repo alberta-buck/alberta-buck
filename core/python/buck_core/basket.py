@@ -66,9 +66,20 @@ class NetBasketOps:
     is changed here. A lost reply or required post-read failure retains its
     hash, permitting recovery without another deposit/redemption. Marks are
     advisory; minShares/minBuck and the basket's K/price guards govern sends.
+
+    ``simulate(owner, contract, method, args, block_number)`` returns the raw
+    return data of that call made AS the owner, with every write discarded.
+    The default is a direct eth_call from the owner. A contract-held account
+    needs its own read-only dispatch where the node refuses a sender with code
+    (EIP-3607); it must run the unmodified target and add no authority.
     """
-    def __init__(self, chain, basket, buck, execute):
+    def __init__(self, chain, basket, buck, execute, simulate=None):
         self.chain, self.basket, self.buck, self.execute = chain, basket, buck, execute
+        self.simulate = simulate or self._call
+
+    def _call(self, owner, contract, method, args, block_number):
+        return self.chain.w3.eth.call({"from": owner, "to": contract.address,
+                                       "data": contract.encode_abi(method, args=args)}, block_identifier=block_number)
 
     def _snapshot(self, owner, token_id):
         owner = getattr(owner, "address", owner)
@@ -117,14 +128,18 @@ class NetBasketOps:
         This includes actual K, treasury/exit charges and current cash/in-kind
         behavior without a duplicate valuation formula or Solidity quote API.
         A revert is an unavailable exit, never permission to weaken its guard.
+        POST: neither the holding nor the chain height has changed.
         """
         if any(type(v) is not int or not 0 < v <= MAX_UINT256 for v in (token_id, shares)):
             raise ValueError("positive basket receipt/shares required")
-        block, address, prior, _ = self._snapshot(owner, token_id)
+        block, address, prior, basis = self._snapshot(owner, token_id)
         if shares > prior:
             raise ValueError("basket redemption exceeds owned shares")
-        result = self.basket.functions.redeemShares(token_id, shares, 0).call({"from": address}, block_identifier=block)
-        if block != self.chain.w3.eth.block_number:
+        raw = self.simulate(address, self.basket, "redeemShares", [token_id, shares, 0], block)
+        outputs = self.basket.get_function_by_name("redeemShares").abi["outputs"]
+        result = self.chain.w3.codec.decode([o["type"] for o in outputs], bytes(raw))
+        if (block != self.chain.w3.eth.block_number or
+                self.basket.functions.holdings(token_id).call(block_identifier=block) != [prior, basis]):
             raise ValueError("basket observation changed")
         return dict(block_number=block, position_id=result[0], paid=result[1],
                     shares_retired=result[2], shares_remaining=result[3])

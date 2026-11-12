@@ -472,8 +472,13 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       session.send(session.contractAt(artifacts("SimLP").abi, owner.address ?? owner), "exec",
         [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })],
         { gas: 5_000_000n, ...opts });
+    // Read-only twin of execute: eth_call the same holder proxy and discard
+    // its writes. Backends differ on a direct call whose sender has code.
+    const simulate = (owner, contract, name, args, { blockNumber } = {}) => session.client.readContract({
+      address: owner.address ?? owner, abi: artifacts("SimLP").abi, functionName: "exec",
+      args: [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })], blockNumber });
     world.netCreditOps = netCreditOps(session, world.net, execute);
-    world.netMarket = { usdc, v3f, pool: poolUB, router, permit2, guard: swapGuard, fee: FEES.ub, execute };
+    world.netMarket = { usdc, v3f, pool: poolUB, router, permit2, guard: swapGuard, fee: FEES.ub, execute, simulate };
     world.netSettlementOps = settlementOps(session, usdc, { execute });
   }
 

@@ -44,6 +44,7 @@ export class CreditHouseholdAgent {
     this.nextDecision = arrive_day + p.phase;
     this.netRefinanceDay = null; // At most one fresh assessment/resumption per bank day.
     this.netSurplusDay = null; this.nextSurplus = this.nextDecision;
+    this.netCreditReserve = 0n; // lasting BUCK issuance front; outlives each operation
     this.netDispatching = false;
     this.started = false;
     this.joined = false;
@@ -304,7 +305,9 @@ export class CreditHouseholdAgent {
         const assessed = await this.assessNetSurplus(world, day, options);
         if (!assessed.plan) {
           this.lastAction = "surplus-wait"; m.decisions++;
-          await m.event(world, day, "declined", { kind: "surplus", phase: "assessment", context: assessed.context, reason: assessed.context.reason });
+          // The same pinned market record a planned operation carries.
+          await m.event(world, day, "declined", { kind: "surplus", phase: "assessment", context: assessed.context,
+            reason: assessed.context.reason, market: await m.market(world) });
           return true;
         }
         return await this.startNetSurplus(world, assessed.plan, day, ctr, { context: assessed.context });
@@ -453,15 +456,19 @@ export class CreditHouseholdAgent {
     const expected = [this.netPendingPrincipal, this.netPendingMinimum, this.netPendingDeadline];
     await world.households.validateCancellation(this.account, this.netPendingToken, expected);
     this.netCancelUncertain = true; this.netCancelHash = null;
-    try { await world.households.cancel(this.account, this.netPendingToken, expected); }
+    let receipt;
+    try { receipt = await world.households.cancel(this.account, this.netPendingToken, expected); }
     catch (err) {
       if (err instanceof TransactionReverted && err.transactionHash && err.receipt.status === "reverted") {
         this.netCancelUncertain = false;
       } else if (err instanceof TransactionReceiptPending) this.netCancelHash = err.transactionHash ?? null;
       throw err;
     }
+    const [id, principal] = [this.netPendingToken, expected[0]];
     this.clearPendingRepayment();
     this.lastError = ""; this.lastAction = "repay-canceled";
+    await this.netRetirementEvent(world, "canceled", { operation: "cancel", token_id: id, principal,
+      transaction_hash: receipt?.transactionHash ?? null, reason: "unsettled authorization withdrawn; target retained" });
   }
 
   clearPendingRepayment() {
@@ -483,8 +490,11 @@ export class CreditHouseholdAgent {
       this.lastError = ""; this.lastAction = "cancel-reverted";
       return;
     }
+    const [id, principal, hash] = [this.netPendingToken, this.netPendingPrincipal, this.netCancelHash];
     this.clearPendingRepayment();
     this.lastError = ""; this.lastAction = "repay-canceled";
+    await this.netRetirementEvent(world, "canceled", { operation: "cancel", token_id: id, principal, recovered: true,
+      transaction_hash: hash, reason: "unsettled authorization withdrawn; target retained" });
   }
 
   async reconcilePendingBuy(world) {
@@ -513,12 +523,17 @@ export class CreditHouseholdAgent {
       if (typeof world.households.reconcileAuthorization !== "function") throw new Error("authorization reconciliation unavailable");
       const r = await world.households.reconcileAuthorization(this.account, this.netPendingToken,
         this.netPendingPrincipal, this.netPendingMinimum, this.netPendingDeadline, this.netPendingHash);
+      const [id, principal, hash] = [this.netPendingToken, this.netPendingPrincipal, this.netPendingHash];
       if (r.reverted) {
         this.clearPendingRepayment();
         this.lastError = ""; this.lastAction = "authorize-reverted";
+        await this.netRetirementEvent(world, "refused", { operation: "authorize", token_id: id, principal,
+          transaction_hash: hash, reason: "authorization reverted; nothing was retired" });
       } else {
         this.netAuthorizationConfirmed = true;
         this.lastError = ""; this.lastAction = "authorize-reconciled";
+        await this.netRetirementEvent(world, "recovered", { operation: "authorize", token_id: id, principal,
+          transaction_hash: hash, reason: "authorization confirmed; no principal retired" });
       }
       return 0n;
     }
@@ -528,13 +543,49 @@ export class CreditHouseholdAgent {
     if (r.reverted) {
       this.netPendingReverted = true;
       this.lastError = ""; this.lastAction = "repay-reverted";
+      await this.netRetirementEvent(world, "refused", { operation: "reduce", token_id: this.netPendingToken,
+        principal: this.netPendingPrincipal, transaction_hash: this.netPendingHash,
+        reason: "settlement reverted; authorization awaits cancellation" });
       return 0n;
     }
     this.recordNetRepayment(r.principal);
     this.unwound += r.principal;
     this.clearPendingRepayment();
     this.lastError = ""; this.lastAction = "repay-reconciled";
+    await this.netReductionEvent(world, r, true);
+    await this.netRetirementDone(world);
     return r.principal;
+  }
+
+  // Selected-facility work on the household's existing public history.
+  // PRE: any confirmed principal was already applied to the saved target.
+  // POST: one append-only record with the retained target/reserve; never a
+  // financial transition. Funding a target is not a reduction: only an
+  // authenticated FacilityReduced receipt is recorded as "confirmed".
+  async netRetirementEvent(world, status, detail = {}) {
+    const m = this.refinanceMachine;
+    if (!m) return; // isolated recovery fixtures have no household history
+    const day = this.calendarMachine?.bound ? this.calendarMachine.day : this.lastDay;
+    try {
+      await m.event(world, day, status, { kind: "retirement", phase: "reduction", ...detail,
+        retirement: { target: this.netRepaymentTarget, reserve: this.netRepaymentReserve } });
+    } catch (err) {
+      // An observation never blocks or reverses a settled transition.
+      m.events.push({ schema: 1, seq: m.events.length + 1, member: this.member, decision: m.decisions, day, block: null,
+        phase: "reduction", status, kind: "retirement", accounts: { unavailable: String(err).slice(0, 200) } });
+    }
+  }
+  netReductionEvent(world, settled, recovered = false) {
+    return this.netRetirementEvent(world, "confirmed", { operation: "reduce", recovered, amounts: {
+      token_id: settled.tokenId ?? null, principal: settled.principal, relief_scaled: settled.reliefScaled,
+      owner_cost_scaled: settled.ownerCostScaled, premium_refund_nominal: settled.premiumNominal },
+      transaction_hash: settled.receipt.transactionHash, receipt_block: settled.receipt.blockNumber ?? null });
+  }
+  // Close the public record once no target, reserve or uncertainty remains.
+  async netRetirementDone(world, reason = "target retired") {
+    if (this.netRepaymentTarget === null && this.netRepaymentReserve === null && this.netPendingToken === null) {
+      await this.netRetirementEvent(world, "complete", { reason });
+    }
   }
 
   recordNetRepayment(principal) {
@@ -557,6 +608,7 @@ export class CreditHouseholdAgent {
     this.netRepaymentTarget = min(this.netRepaymentTarget, issued);
     if (!this.netRepaymentTarget) {
       this.netRepaymentTarget = null; this.netRepaymentReserve = null; this.lastAction = "pay-down";
+      await this.netRetirementDone(world, "no principal remains");
       return true;
     }
     const retired = await this.retireAcquired(world, this.netRepaymentTarget, 0n);
@@ -595,12 +647,27 @@ export class CreditHouseholdAgent {
       this.netPendingPhase = r.pendingPhase;
       this.netAuthorizationConfirmed = false;
     }
+    for (const settled of r.settlements ?? []) await this.netReductionEvent(world, settled);
     if (!["complete", "partial"].includes(r.status)) {
       if (r.status !== "authorization-pending") this.netRepaymentInterrupted = true;
       this.lastError = `repayment ${r.status} at facility ${r.blockedTokenId}${r.error ? `: ${r.error}` : ""}`.slice(0, 200);
+      // A fund/owner/quote refusal sent nothing; a retained target and its
+      // protected reserve stay saved. An uncertain send keeps its exact evidence.
+      if (r.status === "authorization-pending") {
+        await this.netRetirementEvent(world, "pending", { operation: r.pendingPhase === "authorization" ? "authorize" : "reduce",
+          token_id: r.blockedTokenId, principal: r.pendingPrincipal ?? null, transaction_hash: r.pendingTransactionHash ?? null,
+          reverted: Boolean(r.pendingReverted), reason: this.lastError });
+      } else if (this.netRepaymentTarget !== null) {
+        await this.netRetirementEvent(world, "waiting", { operation: "reduce", token_id: r.blockedTokenId ?? null, reason: this.lastError });
+      }
     } else if (r.balanceError) {
       this.netRepaymentInterrupted = true;
       this.lastError = `repayment balance unavailable: ${r.balanceError}`.slice(0, 200);
+    }
+    if (r.status !== "authorization-pending" && !r.balanceError
+        && (this.netRepaymentTarget === null || this.netRepaymentReserve === null)) {
+      await this.netRetirementDone(world, r.retired >= target ? "target retired"
+        : "owned cash above the reserve is spent; the remaining target is released");
     }
     return r.retired;
   }

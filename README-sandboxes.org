@@ -103,6 +103,15 @@ is not yet restored. =make nix-venv-economy-accounting-test= checks the
 available role setup, portfolio, market and short reporting components;
 =make nix-wallet-sandbox-test= checks the runnable browser-only wallet.
 
+Saving, basket redemption and discounted retirement now run on canonical
+accounting as tested components; working money, saver credit investment and
+asset exits still hold the gate. Three things to expect when it opens, from
+[[file:doc/review/bucknet-economy-implementation.org::*Observations and recommendations for the five-year runs and sandboxes][the plan's observations]]: the stress buttons lean on BUCK/USDC only, so
+households answer after arbitrage carries the move into the basket's price,
+not at once; the page should show the dollar price beside the basket-relative
+cost/fair ratio; and a lost reply stops that household, wages included, until
+its transaction is reconciled, so the page needs that status and action.
+
 The household-position selector shows each arrived household's remaining open basket basis,
 its current BUCK share mark and marked ROI. The return is the mark divided by remaining basis
 less one, before exit costs; it excludes closed receipts. The aggregate chart shows the same

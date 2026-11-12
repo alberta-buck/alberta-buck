@@ -25,7 +25,8 @@ const bankTerms = (p) => {
 // Existing 0.1% owned trade cushion; not another demurrage calculation.
 // The actual wallet balance and unchanged reserve guard govern execution.
 const exportable = (held, reserve) => max(0n, held - reserve - (held + 999n) / 1000n);
-const basketOps = (world) => netBasketOps(world.session, world.basket, world.buck, { execute: world.netMarket.execute });
+const basketOps = (world) => netBasketOps(world.session, world.basket, world.buck,
+  { execute: world.netMarket.execute, simulate: world.netMarket.simulate });
 const snake = (key) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 const wire = (value) => {
   if (typeof value === "bigint") return String(value);
@@ -55,7 +56,10 @@ export async function observeRefinanceForecasts(world) {
 export async function assessRefinance(a, world, day, { expected_relief_rate, expected_refund_growth,
   expected_wallet_growth, reserve_floor = null, slippage_bp = 50 } = {}) {
   if (world.accounting !== "net" || a.refinanceMachine.active || a.refinanceMachine.settlementDue || a.calendarMachine.active) throw new Error("household refinance assessment needs idle canonical accounting");
-  reserve_floor ??= a.refinanceMachine.flow?.plan.reserve_floor ?? 0n;
+  // The lasting issuance front, not the last operation's cursor: a surplus
+  // flow temporarily protects ALL prior wallet BUCK, and that must not freeze
+  // owned cash out of a later mortgage conversion.
+  reserve_floor ??= a.netCreditReserve;
   if (typeof reserve_floor !== "bigint" || reserve_floor < 0n || reserve_floor > MAX
       || !Number.isInteger(slippage_bp) || slippage_bp < 0 || slippage_bp > 1000) throw new Error("invalid household assessment reserve or slippage");
   const s = world.session, owner = world.holderAddress(a.account), ids = world._credits.get(a.account.address) ?? [];
@@ -311,8 +315,11 @@ export async function assessSurplus(a, world, day, { forecasts = {} } = {}) {
   const credit = a.mortgage ? (await a.assessNetRefinance(world, day, forecasts)).context.funding
     : { cash_floor: a.buffer, basis: "no-external-mortgage", unfunded: false, refinance_ready: false };
   const floor = max(a.buffer, credit.cash_floor), choice = netSurplusPurchase(q, cash, book.issued, fairNum, fairDen, floor, a.p);
+  // Fair value is the basket's BUCK price times the SAME dollar pool's spot,
+  // so that pool's price cancels: the discount is basket purchasing power net
+  // of carried and trading fees. One dislocated dollar route is not a signal.
   const context = { block: blockNumber, cash, protected_buck: held, credit_funding: credit, choice,
-    fair_num: fairNum, fair_den: fairDen, reason: choice.reason };
+    fair_num: fairNum, fair_den: fairDen, fair_basis: "basket-in-buck x dollar-pool spot", reason: choice.reason };
   let plan = null;
   if (choice.action === "retire" && a.receipts.length) {
     const positions = await markNetBasketPositions(s, world.basket, world.buck, owner, a.receipts, { blockNumber });
@@ -354,6 +361,21 @@ export class HouseholdRefinance {
   get settlementDue() { return this.flow !== null && this.flow.status === "refused" && ["export", "mortgage"].includes(this.flow.phase); }
   get paymentDue() { return this.settlementDue && this.flow.phase === "mortgage"; }
   get surplusDue() { return Boolean(this.flow?.kind === "surplus" && this.flow.status === "refused" && this.flow.phase === "deposit"); }
+  label() { return this.flow?.kind === "surplus" ? "surplus" : "refinance"; }
+  /** The selected-facility engine's retained intent; null when idle. A funded
+   * target is an intention with protected prior cash, not a burn. `uncertain`
+   * must be reconciled before any further send; `waiting` is a known refusal
+   * to be re-read later. */
+  retirement() {
+    const a = this.agent;
+    const pending = a.netPendingToken === null ? null : { token_id: a.netPendingToken, principal: a.netPendingPrincipal,
+      phase: a.netPendingPhase, hash: a.netPendingHash, reverted: a.netPendingReverted,
+      authorization_confirmed: a.netAuthorizationConfirmed };
+    const uncertain = Boolean(a.netTradeUncertain || a.netCancelUncertain || pending);
+    if (a.netRepaymentTarget === null && a.netRepaymentReserve === null && !uncertain) return null;
+    return { target: a.netRepaymentTarget, reserve: a.netRepaymentReserve, uncertain, waiting: Boolean(a.netRepaymentInterrupted),
+      pending, cancel_hash: a.netCancelUncertain ? a.netCancelHash : null };
+  }
   status() {
     const f = this.flow;
     return { schema: 1, decision: this.decisions, status: f?.status ?? "idle", phase: f?.phase ?? null,
@@ -361,6 +383,7 @@ export class HouseholdRefinance {
       kind: f?.kind ?? (f ? "refinance" : null), surplus_due: this.surplusDue,
       last_surplus_day: this.agent.netSurplusDay, next_surplus_day: this.agent.nextSurplus,
       last_attempt_day: this.agent.netRefinanceDay, next_decision_day: this.agent.nextDecision,
+      credit_reserve: this.agent.netCreditReserve, retirement: this.retirement(),
       revision: f?.revision ?? 0, events: this.events.length };
   }
   async accounts(world) {
@@ -381,7 +404,10 @@ export class HouseholdRefinance {
       const limit = await at(world.buck, "creditLimit", [owner]);
       const monthlyPremium = a.sold ? 0n : a.face * BigInt(a.p.premium_bp) / 10000n / 12n;
       const externalPremium = externalPremiumDue(monthlyPremium, a.face, facilities.reduce((sum, f) => sum + f.activated, 0n));
-      const buffer = this.flow?.plan.cash_buffer ?? a.buffer, reserve = this.flow?.plan.reserve_floor ?? 0n, custody = {};
+      // One surplus operation's own floors are never the lasting policy.
+      const surplus = this.flow?.kind === "surplus", buffer = surplus ? a.buffer : this.flow?.plan.cash_buffer ?? a.buffer;
+      const reserve = a.netCreditReserve, custody = {};
+      const protection = surplus ? { usdc: this.flow.plan.cash_buffer, buck: this.flow.plan.reserve_floor } : null;
       for (const [name, proxy] of [["savings", a.savings], ["wallet", a.wallet]]) if (proxy) {
         custody[name] = { usdc: await at(world.usdc, "balanceOf", [proxy.address]),
           buck_scaled: await at(world.buck, "netBalanceScaled", [proxy.address]) };
@@ -394,7 +420,8 @@ export class HouseholdRefinance {
         counterfactual_interest: a.hypoInterest, counterfactual_paid: a.hypoPaid, calendar: a.calendarMachine.status(),
         premium_paid: a.premiumPaid, switch_paid: a.switchPaid, penalty_paid: a.penaltyPaid, refinance_closed: a.refinanceClosed,
         external_premium_monthly: externalPremium, counterfactual_premium_monthly: monthlyPremium,
-        cash_buffer: buffer, reserve_floor: reserve, ratios: { utilization: limit ? Number(issued) / Number(limit) : null,
+        cash_buffer: buffer, reserve_floor: reserve, surplus_protection: protection,
+        ratios: { utilization: limit ? Number(issued) / Number(limit) : null,
           cash_buffer_cover: buffer ? Number(cash) / Number(buffer) : null, reserve_cover: reserve ? Number(bucks) / Number(reserve) : null } });
     } catch (err) { return { unavailable: String(err).slice(0, 200) }; }
   }
@@ -562,6 +589,9 @@ export class HouseholdRefinance {
     context = wire(context);
     this.decisions++;
     this.counters = ctr;
+    // Policy state outlives this cursor; later saving/retirement neither
+    // replaces it with its own protection nor releases it.
+    a.netCreditReserve = p.reserve_floor;
     this.flow = { plan: { ...p, candidate: c ? { ...c, reasons: [...c.reasons] } : null },
       phase: funding ? "fund" : c ? "issue" : "export", status: "running", hash: null, issue_candidate: null,
       initial_closed: a.refinanceClosed, terms: null, revision: 0 };
@@ -652,8 +682,8 @@ export class HouseholdRefinance {
     try { await this.apply(world, day, result, ctr); return true; }
     catch (err) {
       if (f.phase !== phase) throw err;
-      f.status = "pending"; this.agent.lastAction = "refinance-pending";
-      this.agent.lastError = `refinance accounting unavailable: ${err}`.slice(0, 200);
+      f.status = "pending"; this.agent.lastAction = `${this.label()}-pending`;
+      this.agent.lastError = `${this.label()} accounting unavailable: ${err}`.slice(0, 200);
       await this.event(world, day, "pending", { reason: this.agent.lastError, transaction_hash: f.hash }); return false;
     }
   }
@@ -677,12 +707,12 @@ export class HouseholdRefinance {
     if (!this.active) return false;
     const f = this.flow, a = this.agent, s = world.session, owner = world.holderAddress(a.account);
     if (f.status === "pending") {
-      if (!f.hash) { a.lastError = "refinance hash unavailable; reconcile before continuing"; return true; }
+      if (!f.hash) { a.lastError = `${this.label()} hash unavailable; reconcile before continuing`; return true; }
       let result;
       try { result = await this.recover(world); }
       catch (err) {
         if (err instanceof TransactionReverted) await this.refuse(world, day, String(err));
-        else a.lastError = `refinance receipt unavailable: ${err}`.slice(0, 200);
+        else a.lastError = `${this.label()} receipt unavailable: ${err}`.slice(0, 200);
         return true;
       }
       if (!await this.applyKnown(world, day, result, ctr)) return true;
@@ -747,7 +777,7 @@ export class HouseholdRefinance {
           || err instanceof TransactionReverted && err.receipt?.status === "reverted";
         if (reverted && f.hash) await this.refuse(world, day, String(err));
         else {
-          a.lastAction = "refinance-pending"; a.lastError = String(err).slice(0, 200);
+          a.lastAction = `${this.label()}-pending`; a.lastError = String(err).slice(0, 200);
           await this.event(world, day, "pending", { reason: a.lastError, transaction_hash: f.hash });
         }
         return true;
@@ -758,7 +788,9 @@ export class HouseholdRefinance {
     a.lastAction = f.kind === "surplus" ? f.retained ? "save-retained" : f.plan.action === "save" ? "save" : "retirement-funded"
       : f.satisfied ? "refinance-satisfied" : "refinance";
     a.lastError = "";
-    await this.event(world, day, "complete");
+    // Completion of a retire plan funds a target; principal changes only in
+    // the selected-facility engine's own confirmed records.
+    await this.event(world, day, "complete", f.kind === "surplus" ? { outcome: a.lastAction, retirement: this.retirement() } : {});
     return true;
   }
 }

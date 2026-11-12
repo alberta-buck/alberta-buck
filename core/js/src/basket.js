@@ -1,5 +1,5 @@
 // One owner's canonical Buck basket receipt marks at a single block.
-import { isAddress, maxUint256, zeroAddress, parseEventLogs } from "viem";
+import { isAddress, maxUint256, zeroAddress, parseEventLogs, encodeFunctionData, decodeFunctionResult } from "viem";
 import { TransactionReceiptPending, TransactionReverted } from "./session.js";
 
 const receiptAbi = [{ type: "function", name: "ownerOf", stateMutability: "view",
@@ -15,9 +15,17 @@ const positive = (...values) => values.every((v) => typeof v === "bigint" && v >
  * before returning. No household ledger changes here. A missing reply or
  * required post-read keeps its hash for recovery without another send.
  * Quotes are advisory; existing minShares/minBuck and K/price guards govern.
+ *
+ * `simulate(owner, contract, functionName, args, { blockNumber })` returns the
+ * raw return data of that call made AS the owner, with every write discarded.
+ * The default is a direct eth_call from the owner. A contract-held account
+ * needs its own read-only dispatch where the node refuses a sender with code
+ * (EIP-3607); it must run the unmodified target and add no authority.
  */
-export function netBasketOps(session, basket, buck, { execute } = {}) {
+export function netBasketOps(session, basket, buck, { execute, simulate = null } = {}) {
   if (typeof execute !== "function") throw new Error("basket owner dispatch required");
+  simulate ??= async (owner, c, functionName, args, { blockNumber }) => (await session.client.call({ account: owner,
+    to: c.address, data: encodeFunctionData({ abi: c.abi, functionName, args }), blockNumber })).data;
   const read = (c, functionName, args, blockNumber) => session.client.readContract({
     address: c.address, abi: c.abi, functionName, args, blockNumber });
   const snapshot = async (given, tokenId) => {
@@ -118,12 +126,16 @@ export function netBasketOps(session, basket, buck, { execute } = {}) {
     previewRedemption: async (owner, tokenId, shares) => {
       // eth_call executes the real exit/K/fee logic and discards its writes.
       // A refused quote cannot justify bypassing that same on-chain guard.
+      // POST: neither the holding nor the chain height has changed.
       if (!positive(tokenId, shares)) throw new Error("positive basket receipt/shares required");
       const p = await snapshot(owner, tokenId);
       if (shares > p.priorShares) throw new Error("basket redemption exceeds owned shares");
-      const r = await session.client.readContract({ address: basket.address, abi: basket.abi, functionName: "redeemShares",
-        args: [tokenId, shares, 0n], account: p.owner, blockNumber: p.blockNumber });
-      if ((await session.client.getBlock()).number !== p.blockNumber) throw new Error("basket observation changed");
+      const data = await simulate(p.owner, basket, "redeemShares", [tokenId, shares, 0n], { blockNumber: p.blockNumber });
+      const r = decodeFunctionResult({ abi: basket.abi, functionName: "redeemShares", data });
+      const [nowShares, nowBasis] = await read(basket, "holdings", [tokenId], p.blockNumber);
+      if ((await session.client.getBlock()).number !== p.blockNumber || nowShares !== p.priorShares || nowBasis !== p.priorBasis) {
+        throw new Error("basket observation changed");
+      }
       return { blockNumber: p.blockNumber, positionId: r[0], paid: r[1], sharesRetired: r[2], sharesRemaining: r[3] };
     },
     depositFromReceipt, redemptionFromReceipt,

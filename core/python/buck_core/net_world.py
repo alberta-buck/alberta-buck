@@ -265,6 +265,7 @@ class NetReduction:
     relief_scaled: int
     premium_nominal: int
     receipt: Any
+    token_id: int | None = None
 
     @property
     def owner_cost_scaled(self) -> int:
@@ -1077,7 +1078,7 @@ class NetCreditOps:
         if len(events) != 1 or events[0]["args"]["principal"] != principal:
             raise ValueError("settlement receipt missing or ambiguous")
         event = events[0]["args"]
-        return NetReduction(event["principal"], event["reliefScaled"], event["premiumRefund"], receipt)
+        return NetReduction(event["principal"], event["reliefScaled"], event["premiumRefund"], receipt, token_id)
 
     def retire_household(self, owner, token_ids, requested: int, deadline: int, *, buffer: int = 1,
                          relief_slippage_bp: int = 100) -> HouseholdRetirement:
