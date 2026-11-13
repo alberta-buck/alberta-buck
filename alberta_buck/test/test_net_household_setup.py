@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from web3.logs import DISCARD
-from buck_core import TransactionReceiptPending, TransactionReverted, observe_net_market, NetBasketOps
+from buck_core import ReleasePending, TransactionReceiptPending, TransactionReverted, observe_net_market, NetBasketOps
 from buck_core.session import _txhex
 
 from alberta_buck.sim import experiment as expmod, household_policy as policy, identity as idmod
@@ -117,6 +117,71 @@ def test_primary_household_setup_and_per_facility_credit_marks(household_world):
     debtor.act(d, scenario, 0, 0, {})
     assert debtor.last_action == "repay-pending" and not debtor._started
     d.net_credit_ops.cancel_reduction(debtor.address, first)
+    assert not chain.mismatches
+
+
+def test_release_frees_coverage_no_principal_needs_and_refunds_its_deposit_share(household_world, monkeypatch):
+    """burn(0) through the SDK: quote as the owner, release, authenticate; principal never moves."""
+    d, scenario, make = household_world
+    chain = d.chain
+    saver, other = make(0, CreditSaverAgent, assets=2), make(1, CreditSaverAgent)
+    first, second = saver._token_ids
+    ops = d.net_credit_ops
+    chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi("transfer", args=[saver.address, 20 * RAW])))
+    ops.issue(saver.address, first, 100 * RAW, 40 * RAW, 10 * RAW, d.pool_acct)
+    ops.issue(saver.address, second, 30 * RAW, 0, 3 * RAW, d.pool_acct)        # only its deposit is drawn
+    k = d.kctrl.functions.currentBuckK().call()
+    before = ops.household(saver.address, saver._token_ids)
+    assert before.issued == 53 * RAW and before.premium_nominal == 13 * RAW
+    held, pool, supply = (d.buck.functions.balanceOf(saver.address).call(), d.buck.functions.balanceOf(d.pool_acct).call(),
+                          d.buck.functions.totalIssued().call())
+    seconds = d.buck.functions.claimSeconds().call()
+
+    with pytest.raises(ValueError, match="duplicate"):
+        ops.quote_release(saver.address, [first, first])
+    with pytest.raises(ValueError, match="foreign"):
+        ops.release(other.address, [first])
+    quote = ops.quote_release(saver.address, [second, first])
+    keep = lambda principal: -(-principal * 10**18 // k)                       # ceil(principal / K): assets marked at face
+    assert quote.coverage == (30 * RAW - keep(3 * RAW)) + (100 * RAW - keep(50 * RAW)) > 0
+    assert d.w3.eth.block_number == quote.block_number                          # a quote sends nothing
+
+    # A lost reply is an uncertain outcome with its hash; the receipt authenticates the same release.
+    real, lost = ops.execute, {}
+    def lose(owner, target, method, args):
+        lost["receipt"] = real(owner, target, method, args)
+        raise TransactionReceiptPending(_txhex(lost["receipt"]["transactionHash"]))
+    monkeypatch.setattr(ops, "execute", lose)
+    with pytest.raises(ReleasePending) as pending:
+        ops.release(saver.address, [second, first])
+    monkeypatch.setattr(ops, "execute", real)
+    assert pending.value.transaction_hash and not pending.value.reverted
+    with pytest.raises(ValueError, match="selection"):
+        ops.release_from_receipt(saver.address, [first], lost["receipt"], expected_hash=pending.value.transaction_hash)
+    with pytest.raises(ValueError, match="hash"):
+        ops.release_from_receipt(saver.address, [second, first], lost["receipt"], expected_hash="0x" + "11" * 32)
+    done = ops.release_from_receipt(saver.address, [second, first], lost["receipt"],
+                                    expected_hash=pending.value.transaction_hash)
+    assert [r[0] for r in done.released] == [second, first] and d.kctrl.functions.currentBuckK().call() == k
+    assert (done.coverage, done.refund) == (quote.coverage, quote.refund)
+    assert done.refund == sum(premium * coverage // active for (_, coverage, _), premium, active in
+                              zip(done.released, (3 * RAW, 10 * RAW), (30 * RAW, 100 * RAW)))
+
+    after = ops.household(saver.address, saver._token_ids)
+    assert after.issued == before.issued and d.buck.functions.totalIssued().call() == supply
+    assert d.buck.functions.claimSeconds().call() == seconds
+    assert after.premium_nominal == before.premium_nominal - done.refund
+    assert d.buck.functions.balanceOf(saver.address).call() == held + done.refund
+    assert d.buck.functions.balanceOf(d.pool_acct).call() == pool - done.refund
+    for token_id, coverage, _ in done.released:
+        face, active, _ = d.credit.functions.creditInfo(token_id).call()
+        principal = d.credit.functions.issuanceOf(token_id).call()[0]
+        assert active == (30 * RAW if token_id == second else 100 * RAW) - coverage <= face
+        assert d.credit.functions.currentValue(token_id).call() * k // 10**18 >= principal   # still fully backed
+    # Nothing is left to release: a second call succeeds and releases nothing.
+    again = ops.release(saver.address, saver._token_ids)
+    assert again.released == () and again.coverage == again.refund == 0
+    assert ops.quote_release(saver.address, saver._token_ids).coverage == 0
     assert not chain.mismatches
 
 

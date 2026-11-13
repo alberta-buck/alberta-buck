@@ -26,12 +26,19 @@ spendable and premium are zero, only backing is activated: cash, supply,
 principal and issuance age are unchanged, and even an under-K facility may
 improve its backing without creating currency. Both arguments zero revert.
 This does not change numeric =mint(0)= or introduce a =burn(0)= close sentinel.
-(/Superseded for =burn(0)= on 2026-11-12:/ the owner decided that =burn(0)= is to
-release whatever coverage it can, unused or in excess of what the remaining
-principal needs, refunding the premium deposit in proportion. Not yet
-implemented; see the Start here section of
-[[file:bucknet-economy-implementation.org][the implementation plan]], step 1. Until then =burn(0)= succeeds and does
-nothing.)
+(/Superseded for =burn(0)= on 2026-11-12, and implemented:/ =burn(0)= and
+=burn(0, ids)= release each selected facility's coverage that no principal
+needs at the freshly computed K (all of it when the facility has no
+principal; otherwise the excess above the least activated face whose present
+value times K still covers the principal) and refund the premium deposit as
+=premium * released / active=, rounded down, from the facility's original
+pool. Invariants: principal, supply, claim age and relief are untouched; a
+facility at or beyond its limit releases nothing, so no K shortfall is
+created or worsened; coverage is never released without its deposit, so a
+facility whose pool cannot pay now is skipped whole; the caller's balance does
+not fall; the fund's valuation is neither read nor refreshed. The event is
+=FacilityReleased=; =quoteBurn(0, ids)= returns the plan at the last computed
+K. See [[file:bucknet-economy-implementation.org][the implementation plan]], release milestone.)
 The basket uses this distinction to activate free backing independently of
 cash draws. Its solvency checks use =min(face,mark)*active/face=, followed by
 K, rather than treating the entire face as already active.

@@ -273,6 +273,35 @@ class NetReduction:
 
 
 @dataclass(frozen=True)
+class ReleaseQuote:
+    """burn(0)'s advisory plan: coverage no principal needs, and its deposit refund."""
+    token_ids: tuple[int, ...]
+    coverage: int
+    refund: int
+    block_number: int
+
+
+@dataclass(frozen=True)
+class NetRelease:
+    """One authenticated burn(0): what each facility released, in the order submitted."""
+    token_ids: tuple[int, ...]
+    released: tuple[tuple[int, int, int], ...]   # (token id, face coverage released, nominal premium refund)
+    coverage: int
+    refund: int
+    receipt: Any
+
+
+class ReleasePending(RuntimeError):
+    """A submitted release whose outcome is not yet authenticated. Reconcile; a release is idempotent."""
+
+    def __init__(self, token_ids, transaction_hash: str | None = None, reverted: bool = False):
+        super().__init__("coverage release outcome requires reconciliation")
+        self.token_ids = tuple(token_ids)
+        self.transaction_hash = transaction_hash
+        self.reverted = reverted
+
+
+@dataclass(frozen=True)
 class HouseholdRetirement:
     requested: int
     retired: int
@@ -563,13 +592,22 @@ class NetCreditOps:
     fails the prior authorization remains and the caller must retry or cancel.
     """
 
-    def __init__(self, chain, stack: NetStack, execute: Callable | None = None):
+    def __init__(self, chain, stack: NetStack, execute: Callable | None = None, simulate: Callable | None = None):
         self.chain = chain
         self.stack = stack
         self.execute = execute or self._send
+        # ``simulate(owner, contract, method, args, block_number)`` returns the
+        # raw return data of that call made AS the owner. A contract-held
+        # account needs its own read-only dispatch where the node refuses a
+        # sender with code (EIP-3607), exactly as NetBasketOps.
+        self.simulate = simulate or self._call
 
     def _send(self, owner, contract, method, args):
         return self.chain.send(getattr(contract.functions, method)(*args), sender=owner)
+
+    def _call(self, owner, contract, method, args, block_number):
+        return self.chain.w3.eth.call({"from": owner, "to": contract.address,
+                                       "data": contract.encode_abi(method, args=args)}, block_identifier=block_number)
 
     def facility(self, token_id: int) -> FacilityState:
         return self._facility(token_id)
@@ -1079,6 +1117,68 @@ class NetCreditOps:
             raise ValueError("settlement receipt missing or ambiguous")
         event = events[0]["args"]
         return NetReduction(event["principal"], event["reliefScaled"], event["premiumRefund"], receipt, token_id)
+
+    def quote_release(self, owner, token_ids, *, block_number: int | None = None) -> ReleaseQuote:
+        """Read burn(0)'s plan for an ordered selection at the last computed K.
+
+        Advisory: execution computes K afresh and replans. Zero coverage means
+        nothing is excess, the facilities are short, or no pool can refund now.
+        """
+        address = getattr(owner, "address", owner)
+        ids = tuple(token_ids)
+        block = self.chain.w3.eth.block_number if block_number is None else block_number
+        self.household(owner, ids, block_number=block)  # reject duplicates and foreign NFTs
+        raw = self.simulate(address, self.stack.token, "quoteBurn", [0, list(ids)], block)
+        coverage, refund = self.chain.w3.codec.decode(["uint256", "uint256"], bytes(raw))
+        return ReleaseQuote(ids, coverage, refund, block)
+
+    def release_from_receipt(self, owner, token_ids, receipt, *, expected_hash: str) -> NetRelease:
+        """Authenticate one burn(0): every release event names this owner and a selected NFT once."""
+        if not receipt or receipt.get("status") != 1:
+            raise ValueError("release receipt is not successful")
+        if (not isinstance(expected_hash, str) or not expected_hash or
+                _txhex(receipt.get("transactionHash")).lower() != expected_hash.lower()):
+            raise ValueError("release transaction hash mismatch")
+        address = getattr(owner, "address", owner)
+        ids = tuple(token_ids)
+        events = self.stack.token.events.FacilityReleased().process_receipt(receipt, errors=DISCARD)
+        events = [e["args"] for e in events if e["address"].lower() == self.stack.token.address.lower()]
+        seen = [e["tokenId"] for e in events]
+        if (any(e["owner"].lower() != address.lower() or e["tokenId"] not in ids or not e["coverage"] for e in events) or
+                len(seen) != len(set(seen)) or seen != [t for t in ids if t in seen]):
+            raise ValueError("release receipt does not match the selection")
+        released = tuple((e["tokenId"], e["coverage"], e["premiumRefund"]) for e in events)
+        return NetRelease(ids, released, sum(r[1] for r in released), sum(r[2] for r in released), receipt)
+
+    def release(self, owner, token_ids) -> NetRelease:
+        """Submit burn(0, ids): release coverage no principal needs, refunding its deposit share.
+
+        Principal, supply and claim age do not change, and no shortfall is
+        created. Releasing unused room lowers activated capacity, so an owner
+        who means to draw again should not call this. A result with nothing
+        released is a success. An uncertain outcome raises ReleasePending;
+        repeating a release is harmless, but reconcile the receipt first.
+        """
+        ids = tuple(token_ids)
+        self.household(owner, ids)  # reject duplicates and foreign NFTs before any transaction
+        receipt = None
+        try:
+            receipt = self.execute(owner, self.stack.token, "burn", [0, list(ids)])
+            tx_hash = _txhex(receipt.get("transactionHash")) if receipt else ""
+            if not receipt or receipt.get("status") != 1 or not tx_hash:
+                raise ReleasePending(ids, tx_hash or None, bool(tx_hash and receipt and receipt.get("status") == 0))
+            return self.release_from_receipt(owner, ids, receipt, expected_hash=tx_hash)
+        except ReleasePending:
+            raise
+        except Exception as exc:
+            tx_hash = getattr(exc, "transaction_hash", None)
+            if not tx_hash:
+                try:
+                    tx_hash = _txhex(receipt.get("transactionHash")) or None
+                except Exception:
+                    pass
+            raise ReleasePending(ids, tx_hash, isinstance(exc, TransactionReverted) and
+                                 exc.receipt.get("status") == 0 and bool(exc.transaction_hash)) from exc
 
     def retire_household(self, owner, token_ids, requested: int, deadline: int, *, buffer: int = 1,
                          relief_slippage_bp: int = 100) -> HouseholdRetirement:

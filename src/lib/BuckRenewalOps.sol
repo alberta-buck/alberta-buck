@@ -7,12 +7,15 @@ import {BuckTransfer} from "./BuckTransfer.sol";
 import {BuckFacilities, IBuckFund} from "./BuckFacilities.sol";
 import {BuckRenewal, BuckRenewalConsent} from "../BuckRenewalConsent.sol";
 
-/// @notice Atomic same-insurer renewal using Buck's corrected cash accounting.
+/// @notice Atomic same-insurer renewal using Buck's corrected cash accounting,
+///         and the owner's release of coverage that no principal needs.
 /// @dev The host authenticates Jubilee and holds its global lock. Owner and
 ///      insurer consent bind the exact old terms/principal. Relief consumes
 ///      the same block budget as reductions and deferred burns. Old premium
 ///      refund, new terms, additional issuance and full-value new premium are
 ///      one operation; no interim K shortfall is externally actionable.
+///      Release lives here only because BuckFacilities is at the deployed
+///      code-size limit; it retires no principal and consumes no relief.
 library BuckRenewalOps {
     using BuckCash for BuckCash.Book;
     uint256 private constant Q = 1e36;
@@ -21,9 +24,145 @@ library BuckRenewalOps {
     error SenderNotVerified(); error CarryingIssuerNotApproved(); error NotCarryingPool();
     error FacilityMatured(); error BadAuthorization(); error CreditExceeded();
     error PremiumRateTooHigh(); error InsufficientMintFunding(); error NoInsurerPool(); error InsurerPoolChanged();
+    error BadAmount();
     event Transfer(address indexed from, address indexed to, uint256 amount);
     event FacilityRenewed(address indexed owner, uint256 indexed tokenId, uint256 relief,
                           uint256 additionalIssuance, uint256 principal, uint256 nominalFundSpentScaled);
+    event FacilityReleased(address indexed owner, uint256 indexed tokenId, uint256 coverage, uint256 premiumRefund);
+
+    struct Release { uint256 tokenId; uint256 coverage; uint256 refund; }
+    struct ReleasePlan { Release[] releases; uint256 used; uint256 coverage; uint256 refund; }
+
+    /// @notice Plan burn(0): for each selected facility in order, the largest
+    ///         coverage whose release leaves its principal fully backed at k,
+    ///         and the premium deposit refunded in the same proportion.
+    /// @dev A facility with no principal releases all of its coverage. One
+    ///      with principal keeps the least activated face whose present value
+    ///      times k still covers that principal, so a facility at or beyond
+    ///      its limit releases nothing and no shortfall is created or made
+    ///      worse. The refund is premium * released / active, rounded down:
+    ///      the deposit keeps its ratio to the coverage that remains, which
+    ///      keeps a later reduction's proportional refund consistent. A
+    ///      facility whose refund its original pool cannot pay now (identity,
+    ///      allowance, nominal balance, or the owner's sponsor for the pool's
+    ///      carried fee) is skipped whole: coverage is never released without
+    ///      its deposit. Shared pools, the sponsor and a Carrying owner's own
+    ///      pool are carried virtually through the batch, as in planBurn.
+    ///      Principal, supply, claim age and relief are untouched.
+    function planRelease(BuckCash.Book storage cash, BuckFacilities.State storage state,
+                         mapping(address => mapping(address => uint256)) storage allowances,
+                         BuckFacilities.Dependencies memory d, address owner, uint256[] memory ids, uint256 k)
+        public view returns (ReleasePlan memory p)
+    {
+        _releaser(d, owner);
+        BuckFacilities.checkSelection(d.credit, owner, ids);
+        (uint256 ownerGross, uint256 ownerNet) = cash.grossAndNetOf(owner);
+        address sponsor = cash.sponsor[owner];
+        uint256 sponsorFunds;
+        if (sponsor != address(0)) {
+            uint256 available = cash.netOf(sponsor);
+            if (available < ownerGross - ownerNet) {
+                revert BuckCash.DemurrageSponsorUnderfunded(owner, sponsor, ownerGross - ownerNet, available);
+            }
+            sponsorFunds = available - (ownerGross - ownerNet);
+        }
+        p.releases = new Release[](ids.length);
+        BuckFacilities.Pool[] memory pools = new BuckFacilities.Pool[](ids.length);
+        uint256 poolCount;
+        for (uint256 i; i < ids.length; ++i) {
+            (uint256 coverage, uint256 refund) = _releasable(state, d, ids[i], k);
+            if (coverage == 0) continue;
+            if (refund != 0) {
+                address account = state.facilityPool[ids[i]];
+                if (account == address(0) || !d.identity.isVerified(account) || !d.identity.isCarrying(account)) continue;
+                uint256 j;
+                while (j < poolCount && pools[j].account != account) ++j;
+                if (j == poolCount) {
+                    (uint256 gross, uint256 net) = cash.grossAndNetOf(account);
+                    pools[poolCount++] = BuckFacilities.Pool(account, gross, net, allowances[account][address(this)]);
+                }
+                BuckFacilities.Pool memory v = pools[j];
+                bool own = account == owner;
+                if (refund > v.allowance || refund > (own ? ownerGross : v.gross) / Q) continue;
+                if (!own) {
+                    uint256 delivered = Math.mulDiv(v.net, refund * Q, v.gross);
+                    if (sponsor != address(0)) {
+                        if (refund * Q - delivered > sponsorFunds) continue;
+                        sponsorFunds -= refund * Q - delivered;
+                    }
+                    v.gross -= refund * Q;
+                    v.net -= delivered;
+                    ownerGross += refund * Q;
+                }
+                if (v.allowance != type(uint256).max) v.allowance -= refund;
+            }
+            p.releases[p.used++] = Release(ids[i], coverage, refund);
+            p.coverage += coverage;
+            p.refund += refund;
+        }
+    }
+
+    /// @notice Execute burn(0) for the caller: release what planRelease finds
+    ///         at a freshly computed K, or revert everything.
+    /// @dev Preconditions: the host holds its guard and its bindings are
+    ///      complete. Postconditions: each released facility's principal is
+    ///      still within its K-scaled present value; the caller's balance has
+    ///      not fallen (it rises by any refund received); supply, principal
+    ///      and claim age are unchanged; K did not move during the call. The
+    ///      fund's valuation wheel is neither read nor refreshed, so release
+    ///      does not depend on it.
+    function release(BuckCash.Book storage cash, BuckFacilities.State storage state,
+                     mapping(address => mapping(address => uint256)) storage allowances,
+                     mapping(address => mapping(address => bytes32)) storage fragments,
+                     BuckFacilities.Dependencies memory d, uint256[] memory ids) public
+    {
+        _releaser(d, msg.sender);
+        cash.settle(msg.sender);
+        uint256 beforeBalance = cash.balanceOf(msg.sender);
+        uint256 k = d.controller.compute();
+        ReleasePlan memory p = planRelease(cash, state, allowances, d, msg.sender, ids, k);
+        for (uint256 i; i < p.used; ++i) {
+            Release memory r = p.releases[i];
+            if (r.refund != 0) {
+                BuckFacilities.refundPremium(cash, state, allowances, fragments, d.identity, msg.sender,
+                                             r.tokenId, r.refund);
+                state.premium[r.tokenId] -= r.refund;
+            }
+            d.credit.deactivateFromBuck(r.tokenId, msg.sender, r.coverage);
+            (uint256 principal,) = d.credit.issuanceOf(r.tokenId);
+            if (principal == 0) delete state.facilityPool[r.tokenId];
+            else if (principal > Math.mulDiv(d.credit.currentValue(r.tokenId), k, K_SCALE)) revert CreditExceeded();
+            emit FacilityReleased(msg.sender, r.tokenId, r.coverage, r.refund);
+        }
+        if (cash.balanceOf(msg.sender) < beforeBalance) revert BadAmount();
+        if (d.controller.currentBuckK() != k) revert CreditExceeded();
+    }
+
+    function _releaser(BuckFacilities.Dependencies memory d, address owner) private view {
+        if (!d.identity.isVerified(owner)) revert SenderNotVerified();
+        if (!d.identity.isVerified(d.jubilee) || !d.identity.isCarrying(d.jubilee)) revert NotCarryingPool();
+        if (owner == d.jubilee) revert BadAmount();
+    }
+
+    function _releasable(BuckFacilities.State storage state, BuckFacilities.Dependencies memory d,
+                         uint256 id, uint256 k) private view returns (uint256 coverage, uint256 refund)
+    {
+        (uint256 face, uint256 active,) = d.credit.creditInfo(id);
+        if (active == 0) return (0, 0);
+        (uint256 principal,) = d.credit.issuanceOf(id);
+        uint256 keep;
+        if (principal != 0) {
+            uint256 mark = d.credit.depreciatedFaceValue(id);
+            // At or beyond its limit nothing is excess. Below it, k and mark
+            // are nonzero and the two ceilings cannot exceed the active face.
+            if (principal >= Math.mulDiv(Math.mulDiv(mark, active, face), k, K_SCALE)) return (0, 0);
+            keep = Math.mulDiv(Math.mulDiv(principal, K_SCALE, k, Math.Rounding.Ceil), face, mark,
+                               Math.Rounding.Ceil);
+            if (keep >= active) return (0, 0);
+        }
+        coverage = active - keep;
+        refund = Math.mulDiv(state.premium[id], coverage, active);
+    }
 
     function renew(BuckCash.Book storage cash, BuckFacilities.State storage state,
                    mapping(address => mapping(address => uint256)) storage allowances,

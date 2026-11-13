@@ -4,7 +4,7 @@
 // configured; premium-bearing facilities also need their insurer's own pool.
 import { linkArtifact } from "./artifacts.js";
 import { TransactionReverted } from "./session.js";
-import { isAddress, parseEventLogs } from "viem";
+import { decodeFunctionResult, encodeFunctionData, isAddress, parseEventLogs } from "viem";
 
 const Q = 10n ** 36n;
 const WAD = 10n ** 18n;
@@ -76,6 +76,18 @@ export class IssuancePending extends Error {
   }
 }
 
+/** A submitted burn(0) whose outcome is not yet authenticated. Reconcile it;
+ *  repeating a release is harmless, but never infer that a lost one failed. */
+export class ReleasePending extends Error {
+  constructor(tokenIds, cause, { transactionHash = null, reverted = false } = {}) {
+    super("coverage release outcome requires reconciliation", { cause });
+    this.name = "ReleasePending";
+    this.tokenIds = [...tokenIds];
+    this.transactionHash = transactionHash;
+    this.reverted = reverted;
+  }
+}
+
 /** Sum authenticated BuckNet delivery events for one transfer direction.
  *  netScaled uses 1e36 fractional units per raw BUCK; a zero net value is
  *  valid, so callers must check count rather than treating zero as missing. */
@@ -136,9 +148,14 @@ export async function deployNetBasket(session, artifacts, stack, { factory, gove
  *  Issue requires an explicit BigInt maximum premium and expected pool. Quotes are advisory.
  *  Authorization and reduction are separate transactions;
  *  a failed reduction leaves its prior authorization to retry or cancel. */
-export function netCreditOps(session, stack, execute = null) {
+export function netCreditOps(session, stack, execute = null, { simulate = null } = {}) {
   const { credit, token, fund, quoter } = stack;
   const send = execute ?? ((owner, target, name, args) => session.send(target, name, args, { account: owner }));
+  // simulate(owner, contract, functionName, args, { blockNumber }) returns the
+  // raw return data of that call made AS the owner; a contract-held account
+  // supplies its own read-only dispatch, exactly as netBasketOps.
+  simulate ??= async (owner, c, functionName, args, { blockNumber }) => (await session.client.call({ account: owner,
+    to: c.address, data: encodeFunctionData({ abi: c.abi, functionName, args }), blockNumber })).data;
   const readFacility = async (tokenId, knownSpendable, read = (c, name, args) => session.call(c, name, args)) => {
     const owner = await read(credit, "ownerOf", [tokenId]);
     const [[face, activated, premiumRate], [issued, claimSeconds], premiumNominal, insurerPool, spendable] =
@@ -530,6 +547,58 @@ export function netCreditOps(session, stack, execute = null) {
     try {
       return ops.reductionFromReceipt(owner, plan.tokenId, plan.principal, receipt);
     } catch (err) { throw new ReductionPending(plan, err, { transactionHash: receipt.transactionHash ?? null }); }
+  };
+  // burn(0): release coverage no principal needs, with its deposit share.
+  // The quote is advisory (last computed K); execution replans at a fresh K.
+  ops.quoteRelease = async (owner, tokenIds, { blockNumber = null } = {}) => {
+    const address = owner.address ?? owner;
+    const ids = tokenIds.map(BigInt);
+    const block = blockNumber ?? (await session.client.getBlock()).number;
+    await ops.household(owner, ids, { blockNumber: block }); // reject duplicates and foreign NFTs
+    const data = await simulate(address, token, "quoteBurn", [0n, ids], { blockNumber: block });
+    const [coverage, refund] = decodeFunctionResult({ abi: token.abi, functionName: "quoteBurn", data });
+    return { tokenIds: ids, coverage, refund, blockNumber: block };
+  };
+  // Every release event must name this owner and one selected NFT, once, in
+  // the submitted order. Nothing released is a valid, successful outcome.
+  ops.releaseFromReceipt = (owner, tokenIds, receipt, expectedHash) => {
+    if (receipt?.status !== "success") throw new Error("release receipt is not successful");
+    if (typeof expectedHash !== "string" || !expectedHash || !receipt.transactionHash
+        || receipt.transactionHash.toLowerCase() !== expectedHash.toLowerCase()) {
+      throw new Error("release transaction hash mismatch");
+    }
+    const address = (owner.address ?? owner).toLowerCase();
+    const ids = tokenIds.map(BigInt);
+    const events = parseEventLogs({ abi: token.abi, logs: receipt.logs, eventName: "FacilityReleased" })
+      .filter((e) => e.address.toLowerCase() === token.address.toLowerCase()).map((e) => e.args);
+    const seen = events.map((e) => e.tokenId);
+    const ordered = ids.filter((id) => seen.includes(id));
+    if (events.some((e) => e.owner.toLowerCase() !== address || !ids.includes(e.tokenId) || !e.coverage)
+        || new Set(seen).size !== seen.length || seen.some((id, i) => id !== ordered[i])) {
+      throw new Error("release receipt does not match the selection");
+    }
+    const released = events.map((e) => ({ tokenId: e.tokenId, coverage: e.coverage, refund: e.premiumRefund }));
+    return { tokenIds: ids, released, coverage: released.reduce((sum, r) => sum + r.coverage, 0n),
+      refund: released.reduce((sum, r) => sum + r.refund, 0n), receipt };
+  };
+  // Principal, supply and claim age do not change and no shortfall is made.
+  // Releasing unused room lowers activated capacity: an owner who means to
+  // draw again should not call this.
+  ops.release = async (owner, tokenIds) => {
+    const ids = tokenIds.map(BigInt);
+    await ops.household(owner, ids); // reject duplicates and foreign NFTs before sending anything
+    let receipt;
+    try {
+      receipt = await send(owner, token, "burn", [0n, ids]);
+      if (receipt?.status !== "success" || !receipt.transactionHash) throw new ReleasePending(ids, null,
+        { transactionHash: receipt?.transactionHash ?? null,
+          reverted: receipt?.status === "reverted" && Boolean(receipt?.transactionHash) });
+      return ops.releaseFromReceipt(owner, ids, receipt, receipt.transactionHash);
+    } catch (err) {
+      if (err instanceof ReleasePending) throw err;
+      throw new ReleasePending(ids, err, { transactionHash: err?.transactionHash ?? receipt?.transactionHash ?? null,
+        reverted: err instanceof TransactionReverted && err.receipt.status === "reverted" && Boolean(err.transactionHash) });
+    }
   };
   // Each NFT is a separate transaction. Report completed events even if a
   // later authorization remains pending; a purchase is never a repayment.

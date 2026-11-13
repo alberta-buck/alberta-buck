@@ -107,6 +107,7 @@ contract Buck is IERC20Metadata, IBuckJubilee {
                               uint256 minimumReliefScaled, uint64 deadline);
     event FacilityRenewed(address indexed owner, uint256 indexed tokenId, uint256 relief,
                           uint256 additionalIssuance, uint256 principal, uint256 nominalFundSpentScaled);
+    event FacilityReleased(address indexed owner, uint256 indexed tokenId, uint256 coverage, uint256 premiumRefund);
     event MaturedFacilityReleased(address indexed owner, uint256 indexed tokenId, uint256 deferredPrincipal);
     event MaturedPremiumRefunded(address indexed owner, uint256 indexed tokenId, address indexed pool, uint256 nominal);
     event DeferredJubileeBurned(uint256 principal, uint256 nominalFundSpentScaled);
@@ -344,12 +345,18 @@ contract Buck is IERC20Metadata, IBuckJubilee {
     /// @notice Reduce actual balanceOf by at least amount after relief and
     ///         nominal refunds, or revert everything. Amount is net for ordinary
     ///         holders and nominal for Carrying services. No max sentinel.
+    ///         Zero retires nothing: it releases every selected facility's
+    ///         coverage that no principal needs at the current K and refunds
+    ///         the premium deposit in the same proportion. Principal, supply
+    ///         and claim age are unchanged; the balance may rise by the refund.
     function burn(uint256 amount) external nonReentrant {
-        _ready(); BuckFacilities.burn(_cash, _facilities, _allowances, _receiptFragments, _deps(), amount,
-                                    BuckFacilities.select(buckCredit, msg.sender, false));
+        _burn(amount, BuckFacilities.select(buckCredit, msg.sender, false));
     }
-    function burn(uint256 amount, uint256[] calldata ids) external nonReentrant {
-        _ready(); BuckFacilities.burn(_cash, _facilities, _allowances, _receiptFragments, _deps(), amount, ids);
+    function burn(uint256 amount, uint256[] calldata ids) external nonReentrant { _burn(amount, ids); }
+    function _burn(uint256 amount, uint256[] memory ids) private {
+        _ready();
+        if (amount == 0) BuckRenewalOps.release(_cash, _facilities, _allowances, _receiptFragments, _deps(), ids);
+        else BuckFacilities.burn(_cash, _facilities, _allowances, _receiptFragments, _deps(), amount, ids);
     }
     function quoteMint(uint256 amount, uint256[] calldata ids)
         external view returns (uint256 totalCoverage, uint256 poolPrincipal)
@@ -364,6 +371,11 @@ contract Buck is IERC20Metadata, IBuckJubilee {
     function quoteBurn(uint256 amount, uint256[] calldata ids)
         external view returns (uint256 totalUnwind, uint256 poolRefund)
     {
+        if (amount == 0) {
+            BuckRenewalOps.ReleasePlan memory r = BuckRenewalOps.planRelease(_cash, _facilities, _allowances,
+                _deps(), msg.sender, ids, buckK.currentBuckK());
+            return (r.coverage, r.refund);
+        }
         BuckFacilities.BurnPlan memory p = BuckFacilities.planBurn(_cash, _facilities, _allowances, _deps(),
             amount, ids, buckK.currentBuckK(), IBuckFund(jubilee).reliefPositionMark());
         return (p.coverage, p.refund);

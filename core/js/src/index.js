@@ -7,7 +7,7 @@ export { CALL_GAS, DEPLOY_GAS, Session, TransactionReceiptPending, TransactionRe
 export { linkArtifact } from "./artifacts.js";
 export { markNetBasketPositions, netBasketOps } from "./basket.js";
 export { createNetMath } from "./net-math.js";
-export { boundActivatedCapacity, deployNetStack, deployNetBasket, issueCoverageCandidates, netCreditOps, netTransferValue, IssuancePending, ReductionPending } from "./net-world.js";
+export { boundActivatedCapacity, deployNetStack, deployNetBasket, issueCoverageCandidates, netCreditOps, netTransferValue, IssuancePending, ReductionPending, ReleasePending } from "./net-world.js";
 export { settlementOps, settlementPaymentFromReceipt } from "./settlement.js";
 export { observeNetMarket, netSaleExpected, netSaleInput, netPurchaseExpected, netPurchaseCost } from "./net-market-quote.js";
 export { buildBuckWorld, worldRecord, attachBuckWorld, attachNetBuckWorld } from "./buckworld.js";

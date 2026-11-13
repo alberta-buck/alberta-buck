@@ -6,7 +6,7 @@ import { encodeFunctionData } from "viem";
 import { readFileSync } from "node:fs";
 import { tevmSession } from "../src/backends.js";
 import { loadArtifact } from "../src/nodefs.js";
-import { boundActivatedCapacity, deployNetBasket, deployNetStack, issueCoverageCandidates, IssuancePending, netCreditOps, ReductionPending } from "../src/index.js";
+import { boundActivatedCapacity, deployNetBasket, deployNetStack, issueCoverageCandidates, IssuancePending, netCreditOps, ReductionPending, ReleasePending } from "../src/index.js";
 import { TransactionReceiptPending } from "../src/session.js";
 import { advanceTime } from "../src/buckworld.js";
 import { bestQuotedRefinance, refinance, refinanceQuoted } from "../src/agents/household-policy.js";
@@ -546,5 +546,93 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
   assert.ok(resultIssue.premium <= chosen.premium);
   const fresh = await trackedOps.assessIssueCandidate(debtor.address, depreciatingId, 0n, requested, 0n);
   assert.equal(fresh.priorPrincipal, updated.issued); // cache does not survive a later operation
+  assert.deepEqual(s.mismatches, []);
+});
+
+test("burn(0) releases coverage no principal needs and refunds its deposit share", { skip }, async () => {
+  // Static K, one insurer pool and a contract-held owner: the SDK quotes as
+  // the owner, releases, and authenticates each facility's event.
+  const s = await tevmSession();
+  const gov = s.account.address;
+  const deploy = (name, args = []) => s.deploy(loadArtifact(name), args, { name });
+  const registry = await deploy("IdentityRegistryHarness", [gov]);
+  const credit = await deploy("BuckCredit");
+  const controller = await deploy("BuckKControllerStatic", [5n * 10n ** 17n, gov]);
+  const stack = await deployNetStack(s, loadArtifact, { registry, credit, controller, governance: gov });
+  const { fund, token: buck } = stack;
+  const factory = await deploy("UniswapV3Factory");
+  const { basket } = await deployNetBasket(s, loadArtifact, stack, { factory, governance: gov });
+  const insurer = await deploy("SimLP"), owner = await deploy("SimLP"), other = await deploy("SimLP");
+  const pool = await deploy("SimLP");
+  const g = { X: 1n, Y: 2n }, E = { R: g, C: g };
+  for (const [target, carrying] of [[fund.address, true], [basket.address, false], [insurer.address, false],
+    [owner.address, false], [other.address, false]]) {
+    await s.send(registry, "bindContract", [target, g, E, true, carrying]);
+  }
+  const exec = (actor, target, functionName, args) => s.send(actor, "exec", [target.address,
+    encodeFunctionData({ abi: target.abi, functionName, args })]);
+  await exec(insurer, registry, "bindContract", [pool.address, g, E, true, true]);
+  await exec(insurer, buck, "setInsurerPool", [pool.address]);
+  await exec(pool, buck, "approve", [buck.address, (1n << 256n) - 1n]);
+  await s.send(basket, "enableNetAccounting");
+  await s.send(fund, "configure", [buck.address, basket.address]);
+  const actors = new Map([owner, other].map((actor) => [actor.address.toLowerCase(), actor]));
+  const send = (who, target, method, args) => exec(actors.get(who.toLowerCase()), target, method, args);
+  const simulate = (who, target, functionName, args, { blockNumber } = {}) => s.client.readContract({
+    address: who, abi: owner.abi, functionName: "exec",
+    args: [target.address, encodeFunctionData({ abi: target.abi, functionName, args })], blockNumber });
+  const ops = netCreditOps(s, stack, send, { simulate });
+  for (const actor of [owner, other]) await exec(actor, credit, "setCreditIssuer", [insurer.address, true]);
+  const face = 1000n * RAW;
+  // 10% deposit (rate 100): at K = 0.5, 400 spendable + 100 premium is exactly the limit.
+  await exec(insurer, credit, "createCredit", [owner.address, 0, face, face, 0, 0, 0, 100]);
+  await exec(insurer, credit, "createCredit", [owner.address, 0, 50n * RAW, 50n * RAW, 0, 0, 0, 0]);
+  await exec(insurer, credit, "createCredit", [other.address, 0, face, face, 0, 0, 0, 0]);
+  const [drawn, unused] = await Promise.all([0n, 1n].map((i) => s.call(credit, "tokenOfOwnerByIndex", [owner.address, i])));
+  const foreign = await s.call(credit, "tokenOfOwnerByIndex", [other.address, 0n]);
+  await ops.issue(owner.address, drawn, face, 400n * RAW, 100n * RAW, pool.address);
+  await ops.issue(owner.address, unused, 50n * RAW, 0n, 0n, ZERO);
+  assert.equal((await ops.quoteRelease(owner.address, [drawn])).coverage, 0n); // exactly at its limit
+
+  await s.send(controller, "setBuckK", [8n * 10n ** 17n]);
+  await assert.rejects(ops.quoteRelease(owner.address, [drawn, drawn]), /duplicate/);
+  await assert.rejects(ops.release(owner.address, [foreign]), /foreign/);
+  const before = await ops.household(owner.address, [drawn, unused]);
+  const supply = await s.call(buck, "totalIssued"), seconds = await s.call(buck, "claimSeconds");
+  const held = await s.call(buck, "balanceOf", [owner.address]);
+  const quote = await ops.quoteRelease(owner.address, [unused, drawn]);
+  assert.deepEqual([quote.coverage, quote.refund], [50n * RAW + 375n * RAW, 37_500_000n]); // 500 / 0.8 = 625 kept
+
+  // A lost reply keeps its hash; the receipt authenticates the same release once.
+  let mined;
+  const lostOps = netCreditOps(s, stack, async (...args) => {
+    mined = await send(...args);
+    throw new TransactionReceiptPending(mined.transactionHash);
+  }, { simulate });
+  let pending;
+  await assert.rejects(lostOps.release(owner.address, [unused, drawn]), (err) => {
+    pending = err;
+    return err instanceof ReleasePending && err.transactionHash === mined.transactionHash && !err.reverted;
+  });
+  assert.throws(() => ops.releaseFromReceipt(owner.address, [drawn], mined, pending.transactionHash), /selection/);
+  assert.throws(() => ops.releaseFromReceipt(owner.address, [unused, drawn], mined, "0x" + "11".repeat(32)), /hash/);
+  const done = ops.releaseFromReceipt(owner.address, [unused, drawn], mined, pending.transactionHash);
+  assert.deepEqual(done.released, [{ tokenId: unused, coverage: 50n * RAW, refund: 0n },
+    { tokenId: drawn, coverage: 375n * RAW, refund: 37_500_000n }]);
+  assert.deepEqual([done.coverage, done.refund], [quote.coverage, quote.refund]);
+
+  const after = await ops.household(owner.address, [drawn, unused]);
+  assert.equal(after.issued, before.issued);
+  assert.equal(after.premiumNominal, before.premiumNominal - done.refund);
+  assert.equal(await s.call(buck, "totalIssued"), supply);
+  // Tevm's clock moves with each transaction: the unchanged principal simply
+  // kept aging by whole seconds (pyrevm's constant clock checks equality).
+  const aged = await s.call(buck, "claimSeconds");
+  assert.ok(aged >= seconds && aged % before.issued === 0n);
+  assert.ok((await s.call(buck, "balanceOf", [owner.address])) >= held + done.refund - 1n);
+  assert.equal((await ops.facility(drawn)).activated, 625n * RAW);
+  assert.equal((await ops.facility(unused)).activated, 0n);
+  const again = await ops.release(owner.address, [drawn, unused]);
+  assert.deepEqual([again.released, again.coverage, again.refund], [[], 0n, 0n]);
   assert.deepEqual(s.mismatches, []);
 });

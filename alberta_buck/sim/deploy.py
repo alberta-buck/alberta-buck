@@ -583,7 +583,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             return proxy.functions.exec(target.address, target.encode_abi(method, args=args)).call(
                 block_identifier="latest" if block_number is None else block_number)
         d.net_simulate = simulate_owner
-        d.net_credit_ops = NetCreditOps(chain, stack, execute_credit)
+        d.net_credit_ops = NetCreditOps(chain, stack, execute_credit, simulate_owner)
         dispatch_market = partial(execute_credit, expect=Expect.EITHER)
         d.net_market_ops = NetMarketOps(chain, buck, swap_guard, dispatch_market, router=router, settlement=usdc)
         d.net_settlement_ops = SettlementOps(chain, usdc, dispatch_market)

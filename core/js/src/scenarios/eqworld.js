@@ -477,7 +477,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     const simulate = (owner, contract, name, args, { blockNumber } = {}) => session.client.readContract({
       address: owner.address ?? owner, abi: artifacts("SimLP").abi, functionName: "exec",
       args: [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })], blockNumber });
-    world.netCreditOps = netCreditOps(session, world.net, execute);
+    world.netCreditOps = netCreditOps(session, world.net, execute, { simulate });
     world.netMarket = { usdc, v3f, pool: poolUB, router, permit2, guard: swapGuard, fee: FEES.ub, execute, simulate };
     world.netSettlementOps = settlementOps(session, usdc, { execute });
   }
