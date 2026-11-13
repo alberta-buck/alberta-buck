@@ -501,6 +501,86 @@ console.log(JSON.stringify({
     jv = js["quotedSelection"]["verdict"]
     assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
     assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)
+INVEST                          = json.loads((ROOT / "test/fixtures/household-invest.json").read_text())
+
+
+def invest_terms(**changes):
+    """A mortgage-free household's investment terms at K = 0.75: no interest saved, no penalty."""
+    state = dict(accounting="net", mortgage=0., face=1_000_000., joined=False, closing_paid=False, k=.75, spendable=0.,
+                 drawn=0., unactivated=1_000_000., activated_capacity=0., issuance_limit=600_000., at_renewal=False,
+                 ru=1_000_000., rb=1_000_000., fee=.003, basket_usd=1., premium_refund_fraction=1.,
+                 **INVEST["forecasts"]) | changes
+    p = hp.profile(FIXTURE["seed"], "0", INVEST["settings"])
+    return state, p, hp.terms(state, p, investment=True)
+
+
+def test_staged_investment_allocates_the_closing_cost_across_the_whole_line():
+    spec = INVEST["programme"]
+    _, p, t = invest_terms()
+    assert t.fixed_cost == spec["fixed_cost"] == p["switch_k"] * 1000 and t.rate == t.penalty_months == 0
+    alone, whole = carry.investment_quoted(t, **spec["tranche"]), carry.investment_quoted(t, **spec["whole"])
+    assert not alone.go and alone.carry > 0 and whole.go, "one bite cannot repay the closing fee; the line can"
+    marginal, programme = carry.staged_investment(t, spec["tranche"], spec["whole"])
+    assert programme == whole and marginal.go
+    allocated = spec["fixed_cost"] * spec["tranche"]["usd"] / spec["whole"]["usd"]
+    assert marginal.parts["fixed"] == pytest.approx(-allocated) and marginal.carry == pytest.approx(alone.carry)
+    assert marginal.value == pytest.approx(alone.value + spec["fixed_cost"] - allocated)
+    # Nothing to allocate once the closing is paid; a bite larger than its line or an unworthy line is refused.
+    assert carry.staged_investment(replace(t, fixed_cost=0.), spec["tranche"], spec["whole"])[0] is carry.NO
+    assert carry.staged_investment(t, spec["whole"], spec["tranche"])[0] is carry.NO
+    costly = replace(t, fixed_cost=100_000.)
+    assert carry.staged_investment(costly, spec["tranche"], spec["whole"]) == (carry.NO, carry.investment_quoted(costly, **spec["whole"]))
+    with pytest.raises(ValueError, match="investment"):
+        carry.staged_investment(quoted_terms(), spec["tranche"], spec["whole"])  # refinance terms are not an investment
+
+
+def test_investment_programme_is_the_whole_carry_line_and_only_the_bite_at_a_premium():
+    state, p, t = invest_terms()
+    bite, why = hp.investment_want(state, p)
+    line = state["face"] * state["k"] * p["carry_utilization"]
+    assert why == "carry" and bite == pytest.approx(state["rb"] * p["max_impact_bp"] / 20_000 * .999)
+    whole = hp.investment_programme(state, p)
+    assert whole == pytest.approx(min(t.capacity, line) * .999) and whole > 40 * bite
+    drawn = state | {"drawn": line - 1_000.}
+    assert hp.investment_want(drawn, p) == (pytest.approx(999.), "carry")
+    assert hp.investment_programme(drawn, p) == hp.investment_want(drawn, p)[0], "the last bite is the whole line"
+    dear = state | {"basket_usd": .9}
+    assert hp.investment_want(dear, p)[1] == "premium"
+    assert hp.investment_programme(dear, p) == hp.investment_want(dear, p)[0], "a premium is a passing state"
+    off = dict(p) | {"carry_utilization": 0.}
+    assert hp.investment_want(state, off) == (0., "hold") and hp.investment_programme(state, off) == 0.
+
+
+@pytest.mark.xfail(strict=True, raises=subprocess.CalledProcessError,
+                   reason="household-policy.js has no investmentProgramme / stagedInvestment yet (plan, Start here, step A)")
+def test_javascript_investment_programme_and_staged_score_match_python():
+    state, p, t = invest_terms()
+    drawn = state | {"drawn": state["face"] * state["k"] * p["carry_utilization"] - 1_000.}
+    dear = state | {"basket_usd": .9}
+    script = """
+import fs from 'node:fs';
+import * as hp from './core/js/src/agents/household-policy.js';
+const [state, p, spec] = JSON.parse(fs.readFileSync(0, 'utf8'));
+const t = hp.terms(state, p, true);
+console.log(JSON.stringify({
+ programmes: [state, {...state, drawn: state.face * state.k * p.carry_utilization - 1000}, {...state, basket_usd: .9}]
+   .map(s => [hp.investmentProgramme(s, p), ...hp.investmentWant(s, p)]),
+ staged: hp.stagedInvestment(t, spec.tranche, spec.whole),
+ paid: hp.stagedInvestment({...t, fixed_cost: 0}, spec.tranche, spec.whole).verdict.go,
+}));
+"""
+    js = json.loads(subprocess.run(["node", "--input-type=module", "-e", script], cwd=ROOT, check=True, text=True,
+                                   capture_output=True, input=json.dumps([state, p, INVEST["programme"]])).stdout)
+    for s, (programme, bite, why) in zip((state, drawn, dear), js["programmes"]):
+        assert (programme, bite) == pytest.approx((hp.investment_programme(s, p), hp.investment_want(s, p)[0]), rel=1e-12)
+        assert why == hp.investment_want(s, p)[1]
+    marginal, whole = carry.staged_investment(t, INVEST["programme"]["tranche"], INVEST["programme"]["whole"])
+    for jv, pv in ((js["staged"]["verdict"], asdict(marginal)), (js["staged"]["programme"], asdict(whole))):
+        assert jv.pop("parts") == pytest.approx(pv.pop("parts"), rel=1e-12, abs=1e-8)
+        assert jv == pytest.approx(pv, rel=1e-12, abs=1e-8)
+    assert js["paid"] is False
+
+
 def test_net_surplus_guards_actual_purchase_cost_and_credit_capital():
     import json
     from pathlib import Path

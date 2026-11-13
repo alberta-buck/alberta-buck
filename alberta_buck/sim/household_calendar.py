@@ -228,6 +228,45 @@ class HouseholdCalendar:
         a._next_pay = self.next_pay
         self._sync()
 
+    def schedule_sale(self, d, day):
+        """Queue the insured asset's sale at its insured value on this prepared day.
+
+        The proceeds are a receipt-backed dollar credit like income; arrears
+        and then the WHOLE external mortgage are paid from actual dollars in
+        the same period. The counterfactual sells the same asset on the same
+        day and pays its mortgage. Nothing is sent here.
+        """
+        a = self.agent
+        if (not self.bound or self.day != day or a._sold or a.investor or
+                any(period["kind"] == "sale" for period in self.queue)):
+            raise ValueError("asset sale needs a prepared calendar and an unsold insured asset")
+        _money(a._face0)
+        self.queue.append(dict(kind="sale", day=day, income=a._face0))
+        self.income_due += a._face0
+        a.hypo_cash += a._face0
+        paid = min(a.hypo_cash, self.shadow.state.balance)
+        if paid:
+            self.shadow.record_payment(f"shadow-sale:{day}", day, paid)
+            a.hypo_cash -= paid
+        self._sync()
+
+    def schedule_settlement(self, d, day):
+        """Queue payment of arrears and the whole remaining mortgage from dollars now held."""
+        a = self.agent
+        if not self.bound or self.day != day or not a._sold:
+            raise ValueError("settlement needs a prepared calendar after the asset sale")
+        if any(period["kind"] in ("sale", "settle") for period in self.queue):
+            return False
+        if not (self.actual.state.balance or a.living_arrears or a.premium_arrears):
+            return False
+        self.queue.append(dict(kind="settle", day=day, income=0))
+        return True
+
+    def _after(self, kind, phase):
+        if kind == "opening" or phase == "mortgage":
+            return "complete"
+        return self.PHASES[self.PHASES.index(phase) + 1]
+
     def record_mortgage(self, d, receipt, amount):
         """Apply actual debt reduction on the receipt's effective model day."""
         stamp = d.w3.eth.get_block(receipt["blockNumber"])["timestamp"]
@@ -274,6 +313,8 @@ class HouseholdCalendar:
             self.income_due -= amount
             if f["period"]["kind"] == "opening":
                 a._started = a._growth_arrived = True
+            elif f["period"]["kind"] == "sale":
+                a._sold = True  # proceeds, not wages: the asset and its external premium are gone
             else:
                 a.income_total += amount
         elif phase == "living":
@@ -282,8 +323,7 @@ class HouseholdCalendar:
         else:
             a.premium_arrears -= amount
             a.ext_premium += amount
-        f["phase"] = ("complete" if f["period"]["kind"] == "opening" or phase == "mortgage"
-                      else self.PHASES[self.PHASES.index(phase) + 1])
+        f["phase"] = self._after(f["period"]["kind"], phase)
         f["hash"], f["status"] = None, "running"
         self._emit(d, day, "confirmed", operation=phase, amounts={"usdc": amount}, effective_day=effective,
                    transaction_hash=_txhex(receipt["transactionHash"]), receipt_block=receipt.get("blockNumber"))
@@ -316,7 +356,8 @@ class HouseholdCalendar:
         while self.queue:
             if self.flow is None:
                 a.refinance_machine.decisions += 1
-                self.flow = dict(period=self.queue[0], phase="income", status="running", hash=None, amount=0)
+                self.flow = dict(period=self.queue[0], status="running", hash=None, amount=0,
+                                 phase="living" if self.queue[0]["kind"] == "settle" else "income")
                 self._emit(d, day, "planned", calendar=self.status())
             f = self.flow
             if f["status"] == "pending":
@@ -337,15 +378,16 @@ class HouseholdCalendar:
             while f["phase"] != "complete":
                 phase = f["phase"]
                 cash = d.usdc.functions.balanceOf(a.address).call()
+                closing = f["period"]["kind"] in ("sale", "settle")  # an exit pays the whole balance
                 amount = (f["period"]["income"] if phase == "income" else
                           min(cash, a.living_arrears if phase == "living" else a.premium_arrears
-                              if phase == "insurance" else min(a.payment, self.actual.state.balance)))
+                              if phase == "insurance" else self.actual.state.balance if closing
+                              else min(a.payment, self.actual.state.balance)))
                 f["amount"] = amount
                 if not amount:
                     if phase == "income" and f["period"]["kind"] == "opening":
                         a._started = a._growth_arrived = True
-                    f["phase"] = ("complete" if f["period"]["kind"] == "opening" or phase == "mortgage"
-                                  else self.PHASES[self.PHASES.index(phase) + 1])
+                    f["phase"] = self._after(f["period"]["kind"], phase)
                     self._emit(d, day, "skipped", operation=phase)
                     continue
                 f["status"], f["hash"] = "pending", None

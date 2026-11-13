@@ -14,30 +14,46 @@ record; consult them, do not re-derive them.
 Worktree =.claude/worktrees/buck-compound=, branch
 =feature/household-minimal-ecosystem=, nothing pushed. Canonical =src/Buck.sol=
 (unsigned compounded cash, per-NFT issuance, external Jubilee) is the
-foundation; nothing below changed Solidity.
+foundation. One Solidity change has been made since it was qualified:
+=burn(0)= releases coverage (the release milestone).
 
 | Commit | What it completed |
 |--------+-------------------|
 | =ac79d59d= | pyrevm names a refused contract sender; the bare market fixture is repaired. |
 | =44ea3f6c= | Surplus: reserve-safe saving, in-place top-up, basket redemption, discounted retirement; the repayment engine in the public history. |
 | =9e5c86c3= | Working money: the household wallet in its own custody, tended after each payday. |
-| =2846ff3a= | A quoted credit-investment score and the shared want rule (pure functions only; nothing executes them yet). |
-| the payday commit | Paydays: each household's own keyed day of the 30-day month; the handoff section and the =burn(0)= decisions. |
+| =2846ff3a= | A quoted credit-investment score and the shared want rule (pure functions). |
+| =9f344702= | Paydays: each household's own keyed day of the 30-day month. |
+| =cf08b12f= | =burn(0)= releases unused and excess coverage with a proportional deposit refund: Solidity, both SDKs, tests. Fully qualified. |
+| the =wip:= checkpoint after it | /Work in progress, Python only:/ credit investment, asset exits, the investor's decision and the unified act dispatcher (written, not wired). No JavaScript mirror yet. |
 
 The household is built from /components/ on one owner dispatcher and one
-receipt cursor (=HouseholdRefinance=, flow kinds =refinance=, =surplus=,
-=wallet=): the dated calendar (wages, bills, mortgage), automatic debtor
-refinancing with cash-only resumption, surplus, and the wallet. Each is
-implemented twice, in Python and JavaScript, and qualified against real
-contracts in both.
+receipt cursor (=HouseholdRefinance=). Where each stands:
 
-The normal decision loop is still *gated*. =CreditHouseholdAgent.act= raises
-=canonical household decisions await issuance and exit migration= on canonical
-accounting (=alberta_buck/sim/credit_households.py=, and the same in
-=core/js/src/agents/credit-household.js=). Until it opens, no population world
-runs: not the five-year runner, not the savings sandbox, not the JavaScript
-equilibrium demo. The browser-only wallet sandbox is unaffected and works.
-*No five-year run exists on the corrected accounting.*
+| Component | Flow kind | Python | JavaScript |
+|-----------+-----------+--------+------------|
+| Dated calendar (wages, bills, mortgage) | calendar | qualified | qualified |
+| Debtor refinancing, cash-only resumption | refinance | qualified | qualified |
+| Surplus: save, top up, redeem, discounted retirement | surplus | qualified | qualified |
+| Working balance (wallet) | wallet | qualified | qualified |
+| =burn(0)= release, SDK =release= | (SDK) | qualified | qualified |
+| Credit investment | invest | done, 16 real-contract tests | *not written* (step A) |
+| Asset exit and investor withdrawal | exit, plus calendar =sale= / =settle= | done, 11 real-contract tests | *not written* (step A) |
+| Investor decision: hold BUCK, convert when dear | surplus (=hold=, =convert=) | done, exercised by the exit tests | *not written* (step A) |
+| Unified daily dispatcher =_act_net= | all | written, *not wired* (step B) | *not written* (step B) |
+
+The normal decision loop is therefore still *gated*:
+=CreditHouseholdAgent.act= raises =canonical household decisions await issuance
+and exit migration= on canonical accounting, in both languages. Until it
+opens no population world runs: not the five-year runner, not the savings
+sandbox, not the JavaScript equilibrium demo. The browser-only wallet sandbox
+is unaffected. *No five-year run exists on the corrected accounting.*
+
+At this checkpoint Python and JavaScript differ only by /additions/ on the
+Python side, with one behavioural exception: a household whose exit day has
+come makes the Python =advance_net_refinancing= / =advance_net_surplus= /
+=advance_net_investment= return False (its exit dispatcher owns the work),
+where the JavaScript twins still throw =asset exits are not yet integrated=.
 
 ** How to work here
 
@@ -60,7 +76,7 @@ equilibrium demo. The browser-only wallet sandbox is unaffected and works.
 
   | Command | What | Time |
   |---------+------+------|
-  | =make nix-venv-test-python PYTEST_FILES="<the sixteen files below>" PYTEST_ARGS='--basetemp=build/test/NAME -q'= | Supported Python set | 1.5 to 2 min |
+  | =make nix-venv-test-python PYTEST_FILES="<the eighteen files below>" PYTEST_ARGS='--basetemp=build/test/NAME -q'= | Supported Python set | 2 min |
   | =make nix-core-equilibrium-policy-test= | Fast JavaScript policy, quote and calendar units | 1 min |
   | =make nix-core-equilibrium-bootstrap-test= | Actual JavaScript, six Tevm fixture files together | 30 min |
   | =... CORE_EQUILIBRIUM_TEST_FILES=test/net-household-wallet.tevm.test.js= | One file (wallet 4 min, resume 11, programme 16, surplus 19, bootstrap 36) | |
@@ -68,12 +84,16 @@ equilibrium demo. The browser-only wallet sandbox is unaffected and works.
   | =make nix-core-demo-eqworld= | Browser bundle rebuilds | 1 min |
   | =make nix-test= | All Solidity (needed again once a contract changes) | long |
 
-  The sixteen Python files: =core/python/tests/= =test_net_market_quote=,
+  The eighteen Python files: =core/python/tests/= =test_net_market_quote=,
   =test_artifacts=, =test_router=, =test_session=, =test_net_purchase_outcome=;
   =alberta_buck/test/= =test_household_policy=, =test_household_calendar=,
-  =test_net_basket_mark=, =test_net_household_setup=, =test_net_economy_report=,
-  =test_sim_report=, =test_settlement=, =test_net_repayment_target=,
-  =test_net_demurrage_smoke=, =test_net_market=, =test_net_economy_bootstrap=.
+  =test_net_basket_mark=, =test_net_household_setup=,
+  =test_net_household_invest=, =test_net_household_exit=,
+  =test_net_economy_report=, =test_sim_report=, =test_settlement=,
+  =test_net_repayment_target=, =test_net_demurrage_smoke=, =test_net_market=,
+  =test_net_economy_bootstrap=. (294 pass at this checkpoint, with one more,
+  =test_javascript_investment_programme_and_staged_score_match_python=,
+  a strict expected failure until its JavaScript twins exist; see step A.)
 - /Traps that cost time./
   - pyrevm refuses any =eth_call= whose sender is a contract, and every
     simulated household is a proxy. Simulate "as the owner" through
@@ -100,195 +120,133 @@ equilibrium demo. The browser-only wallet sandbox is unaffected and works.
     loop opens (step 5); do not mistake them for regressions.
 - /Diagnosing./ Write a scratch pytest that imports =household_world= and the
   helpers from =alberta_buck/test/test_net_household_setup.py= and prints what
-  you need; run it with the same Make target. To see a scenario, wrap
-  =HouseholdRefinance._event= and print each record as it is appended.
+  you need (end it with =assert 0= and pass =-s=); run it with the same Make
+  target, its path in =PYTEST_FILES=. Printing each record of
+  =agent.refinance_machine.events= (=seq=, =kind=, =phase=, =status=,
+  =operation=, =reason=, =amounts=) shows a whole scenario.
+- /Long runs and editing./ The six-file JavaScript acceptance takes 30 to 40
+  minutes and reads only JavaScript, fixtures and artifacts. Start it alone
+  and work on Python meanwhile; never edit JavaScript, a fixture it reads or
+  rebuild contracts until it reports. A new fixture file is safe.
+- /After a contract change./ =make nix-build=, the focused
+  =make nix-match-<Contract>Test=, =make nix-test=,
+  =make nix-contracts-dist-check=, =make nix-sim-build=, then every target in
+  the table: the simulations deploy the rebuilt artifacts.
 
 ** Remaining work, in order
 
-Each step is a phase in the sense above. Steps 1 to 4 are components; step 5
-is the integration the runs are waiting for.
+Steps 0 and 1 are done. Credit investment, asset exits and the investor's
+decision are implemented and tested *in Python only*. Step A mirrors them in
+JavaScript; step B opens the act loop; then the worlds, the campaigns and the
+sandboxes. Each step is a phase: implement in both languages, qualify, write
+the observations here, then commit.
 
 *** 0. Paydays (done)
 
 Each household is paid on its own keyed day of the 30-day month (=pay_day=,
-=first_payday= / =firstPayday=). Implemented and qualified in both languages;
-see the payday milestone at the end of this file. Nothing remains.
+=first_payday= / =firstPayday=). See the payday milestone at the end.
 
-*** 1. =burn(0)= releases what it can (contract change; owner decision)
+*** 1. =burn(0)= releases what it can (done; contract change)
 
-The owner's decisions of 2026-11-12, which supersede every earlier line in
-this file that says to keep =burn(0)= invalid or forbids it as a close:
-- unless =burn(0)= has another meaning (it has none, below), it maximally
-  releases whatever it is able to;
-- that includes /excess/ coverage on a facility that still has principal,
-  not only facilities with none;
-- the premium deposit is refunded in proportion to the coverage released.
+=burn(0)= and =burn(0, ids)= release every selected facility's coverage that
+no principal needs at the freshly computed K and refund the premium deposit
+in the same proportion. =src/lib/BuckRenewalOps.sol= holds =planRelease= and
+=release= (=BuckFacilities= has 633 bytes left under the code limit);
+=quoteBurn(0, ids)= returns the plan; event =FacilityReleased=. SDK, both
+languages: =quote_release= / =release= / =release_from_receipt= (JavaScript
+=quoteRelease= / =release= / =releaseFromReceipt=) and =ReleasePending=. The
+asset exit is its only caller. See the release milestone.
 
-Not yet implemented. No Solidity has changed.
+*** A. Mirror credit investment, exits and the investor in JavaScript
 
-What it does today (read from the source, not yet changed): for a verified
-caller =burn(0)= and =burn(0, ids)= /succeed and do nothing/ beyond the common
-entry work: they refresh K, refresh the fund's guarded mark and checkpoint
-issuance, then plan zero slices. They are not invalid, and nothing documented
-relies on that no-op. =test/BuckNetBurnCompatibility.t.sol= only asserts that
-an unverified sender reverts and that a Carrying account's =burn(0)= does not.
+Python is the specification; port it line for line, keeping names in the
+usual camel case. What to port, by file:
 
-What is missing: a facility can hold activated coverage that no principal
-needs (a zero-premium activation with nothing drawn; unused activated room
-above what the principal requires at the current K; a facility whose principal
-relief paid off at renewal). A reduction releases coverage and refunds the
-premium deposit only in proportion to principal retired
-(=BuckFacilities.settle=: =coverage = active * principal / prior=, the same
-for the refund), so with no principal to retire there is no way to release
-that lien or recover its deposit. =BuckCredit.deactivateFromBuck= exists and
-is what a reduction already calls.
+| Python | JavaScript | Port |
+|--------+------------+------|
+| =household_policy.py= | =household-policy.js= | =investment_programme=, =net_investor_action= |
+| =carry.py= | =household-policy.js= (where =stagedRefinance= lives) | =staged_investment= |
+| =net_household.py= | =net-household.js= | =InvestPlan= and =ExitPlan= (plain objects), =assess_investment=, =assess_investor=; on =HouseholdRefinance=: =start_investment=, =_prepare_issue= (the refinance issue check, now shared), =_prepare_deposit=, =_book_deposit=, =_prepare_invest=, =_apply_invest=, =start_exit=, =_prepare_exit=, =_apply_exit=, =abandon=; =surplus_due= covering =invest=; =_label= with =invest= and =exit=; the surplus plan's =hold= and =convert= actions and =deposit_buck=; the recover and dispatch branches; completion outcomes (=invest=, =invest-retained=, =exit-<step>=, =buy=, =convert=, =...-retained=); =ReleasePending= treated like =IssuancePending= |
+| =household_calendar.py= | =household-calendar.js= | =schedule_sale=, =schedule_settlement=, =_after=; the =sale= period (proceeds credited from an authenticated mint, =_sold= set, not counted as income) and =settle= period (starts at =living=); for both, the mortgage phase pays the whole balance |
+| =credit_households.py= | =credit-household.js= | fields =_net_invest_day=, =_exit_wait_day=, =_exit_trade_day=, =released_coverage=, =released_refund=, =_trading_ready=; =assess_net_investment=, =start_net_investment=, =advance_net_investment=, =assess_net_investor=, =advance_net_investor=, =exit_due=, =advance_net_exit=, =_exit_step=, =_exit_sent=; in =advance_net_surplus=, =advance_net_refinancing= and =advance_net_investment= a due exit returns false instead of throwing; =_ensure_trading=, =_net_uncertain= and =_act_net= belong to step B |
 
-The semantics to implement, as decided:
-1. For each facility in the caller's selection (default order for =burn(0)=,
-   the given list for =burn(0, ids)=), release the largest coverage that
-   leaves the remaining principal fully backed at the freshly computed K.
-   With no principal that is all of it; with principal it is the excess
-   above what that principal needs. A facility already short releases
-   nothing: release must never create or worsen a K shortfall.
-2. Refund the premium deposit in proportion to the coverage released
-   (=refund = premium * released / active=, so the deposit keeps its ratio to
-   the coverage that remains and a later reduction's proportional refund
-   stays consistent), from that facility's original insurer pool, with the
-   same pool-allowance and fee-basis rules as =refundPremium=. Principal,
-   supply and claim age do not change; no relief is consumed. When the last
-   coverage of a facility with no principal is released, clear its recorded
-   pool as a full reduction does.
-3. =burn(N)= for =N > 0= is unchanged. The postcondition "balance falls by at
-   least N" becomes, for zero, "principal and supply unchanged"; the caller's
-   balance may /rise/ by the refund, which today's check
-   (=afterBalance > beforeBalance= reverts =BadAmount=) forbids.
-4. =quoteBurn(0, ids)= reports the coverage released and the refund. Emit an
-   event naming owner, facility, coverage and refund, and give both SDKs a
-   =release= helper that authenticates it.
+Tests: write =core/js/test/net-household-invest.tevm.test.js= and
+=net-household-exit.tevm.test.js= from the Python files of the same names,
+reading =test/fixtures/household-invest.json= and =household-exit.json=, and
+add both to =CORE_EQUILIBRIUM_TEST_FILES= in the Makefile. Add
+=investmentProgramme= / =stagedInvestment= / =netInvestorAction= to the fast
+policy tests. When those functions exist,
+=test_javascript_investment_programme_and_staged_score_match_python= in
+=alberta_buck/test/test_household_policy.py= XPASSes and so fails (it is
+=xfail(strict=True)=): remove the marker then.
 
-Details the implementer must settle and state, since the decisions do not
-fix them: the rounding of the released coverage and of the refund (round the
-release down so backing is never short by a unit; round the refund down so
-the pool is never overdrawn); what "fully backed" uses for a depreciating
-asset (the same =currentValue * K= capacity =settle= already tests); and
-that releasing unused room lowers the household's activated capacity, so a
-household that means to draw again should not call it. In the household
-economy only an asset exit (step 3) calls it.
+Traps: Tevm's clock moves with every transaction (compare balances and claim
+age with a tolerance); the JavaScript world bootstraps a leveraged basket with
+1M-deep TOKEN pools, so the premium fixture's TOKEN purchase must mint TOKEN
+to the seeding helper first and its BVIB threshold may need its own value;
+develop each file alone (=CORE_EQUILIBRIUM_TEST_FILES=test/<file>=), several
+minutes each, then the whole six-plus-two set (about 45 minutes).
 
-How: the logic belongs in =src/lib/BuckFacilities.sol= beside =burn= and
-=settle=; Buck delegates to linked libraries, so watch deployed code size
-(=make nix-contracts-dist-check= validates the built artifacts' sizes). Add
-Foundry cases next to =test/BuckNetBurnCompatibility.t.sol=: nothing drawn;
-excess room; a shortfall that must not move; duplicate and foreign
-selections; a Carrying owner; the refund's pool allowance; unchanged
-principal, supply and claim seconds; the quote equal to execution. Run the
-focused contract with =make nix-match-BuckNetBurnCompatibilityTest=, then
-=make nix-test= and =make nix-contracts-dist-check=, rebuild the simulation
-artifacts (=make nix-sim-build=) and rerun every target in the table. The
-older statements in this file and in
-=doc/review/net-demurrage-invariants.org= are already marked superseded;
-replace those marks with the implemented behaviour when it lands.
+*** B. Open the act loop
 
-*** 2. Saver credit investment
+=CreditHouseholdAgent._act_net= (Python) is the dispatcher that replaces the
+gate. It is written but not called: =act= still raises on canonical
+accounting, in both languages. Order: prepare the calendar (binds on the
+arrival day, accrues, schedules a payday's bills); a due exit preempts the
+rest (=advance_net_exit=, a few turns); otherwise a known refused deposit
+before new credit, then the day's credit decision (a debtor's refinancing; a
+mortgage-free household's credit investment; an investor's own choice), the
+working balance and surplus; then a bounded number of turns of /known/
+progress (=ACT_TURNS = 6=); an unknown outcome stops at once. A day with
+nothing due returns after one clock read. Unexpected faults are recorded as
+=kind=act= events and counted in =ctr["household_faults"]=; a
+=NotImplementedError= stays fatal.
 
-A household with no mortgage (a saver, or a debtor who has finished) issues
-against its insured asset and /keeps/ the BUCK, depositing them in the basket.
-The rule already exists and is now shared: =investment_want= /
-=investmentWant= returns the amount and why: =premium= (room that could be sold
-while the BUCK keeps a net premium of =issue_premium= over basket value) or
-=carry= (the share =carry_utilization= of its K-scaled limit kept drawn while
-the BUCK is at no discount; default zero, so off). The score exists too:
-=investment_quoted= / =investmentQuoted=. Do /not/ use =refinance_quoted=: it
-bounds dollars by external debt, and a saver has none.
+When it was wired in this session, ten existing Python tests failed, all
+fixture assumptions, none a money error:
+- Eight call =act= on a later day for a household whose calendar was never
+  bound. =_act_net= prepares the calendar, which binds only on the arrival
+  day (=calendar must bind an idle canonical household on arrival=); the old
+  path reached =_recover_pending_operations= first, which prepares only a
+  bound calendar. Fix the fixtures (act from the arrival day, or bind with
+  =advance_net_calendar(d, arrive_day)=); do not loosen the bind rule.
+- The interactive-driver stub test
+  (=test_readable_books_do_not_allow_unimplemented_interactive_economy_to_finish=)
+  failed inside =_ensure_trading=: =AttributeError: 'SimDriver' object has no
+  attribute 'proxy'= at =self.proxy.bump()=. Not diagnosed; start at the
+  send-attribution hooks (=alberta_buck/sim/acts.py=, =Chain.send=, the
+  =d.chain.actor= the stub sets or leaves).
+- One calendar test expected a balance of opening + income - living -
+  premium - instalment; the opened loop also bought working BUCK on that
+  payday. Pin =money_months=0= in such fixtures or count the wallet.
 
-To build, mirroring =assess_refinance= and the existing flows:
-- =assess_investment= / =assessInvestment=: at one block, take the wanted
-  amount, quote the same bounded =issue_coverage_menu= per facility at the
-  five size fractions, keep the lasting credit reserve
-  (=agent._net_credit_reserve=), fund a reserve shortfall by a guarded
-  purchase exactly as refinancing does, and score each candidate with
-  =investment_quoted=, where its dollars are =market.sell_expected(new)=.
-  Build the terms with =spendable = 0= so wallet money is not counted as
-  capacity, and =policy.terms(..., investment=True)=.
-- A flow =kind=invest= on the same cursor, phases =closing= (the one-time
-  switching fee, paid to the bank /first/ so that a later refusal leaves no
-  dangling obligation; skipped once =refinance_closed=), =fund=, =issue=,
-  =deposit=. Give the plan the field names =candidate=, =reserve_floor=,
-  =cash_buffer=, =reserve_buy_net=, =reserve_buy_max_usdc=, =position_id=,
-  =slippage_bp= so the machine's existing =fund=, =issue= and =deposit= code
-  serves it unchanged; make phase progression depend on the kind; extend
-  =surplus_due= (a refused deposit retried alone) to this kind.
-- =advance_net_investment= / =advanceNetInvestment= on the keyed decision
-  cadence, like =advance_net_refinancing=.
-- Tests: the carry line (set =carry_utilization=) needs no market move and
-  suits the lifecycle and fault cases; the premium needs the BUCK dear against
-  the basket, so /buy/ the same share of every BUCK pool (mint dollars and
-  TOKENs to the seeding helper first), the mirror of the sell-off the surplus
-  fixtures use. Assert principal, premium deposit, the basket receipt, the
-  untouched reserve and the paid fee; reuse the lost, unknown and refused
-  pattern and the shared fixture style.
+Then: write =_actNet= in =credit-household.js=, change both =act= methods to
+call it, rewrite the two gate tests (=test_primary_household_setup...= and the
+driver test) to assert the opened behaviour (a draft that did so is in this
+session's history: one driver tick binds the calendar, credits the opening
+dollars and prepares trading; later ticks of the day send nothing), and
+migrate or retire the legacy JavaScript household tests
+(=credit-household.tevm.test.js=, =eqsim.tevm.test.js=; they already fail with
+=no artifact for Permit2=). Hazards still to respect: the flows share one
+cursor (=HouseholdRefinance.start= does not test =surplus_due=, which is why the
+dispatcher retries a deposit first); a debtor's refinance assessment is the
+expensive read (=credit_cash_floor= shares it within one block; keying it by
+day instead was tried and is safe, but needs the JavaScript twin too).
 
-*** 3. Asset exits, and the investor's withdrawal
-
-Legacy =_divest= (Python) / =divest= (JavaScript) is the specification: on its
-keyed day a household sells its insured asset; the price pays any mortgage;
-the wallet and every basket receipt are collected; the remaining principal is
-bought back a capped bite a day; the coverage is released and its deposit
-refunded; the BUCK left are sold; the household leaves. The canonical pieces
-exist: a full redemption is the surplus =redeem= phase with all shares;
-retirement is the selected-facility engine with the whole principal as its
-target; the wallet sells from its own custody; retiring all principal already
-releases all coverage and refunds the whole deposit. Step 1's release is
-needed only for coverage that no principal backs: a facility with none, or
-excess room on one that still has some. Build it as a
-staged, resumable component (the legacy =exit_stage= names are a good cursor),
-one stage's transaction per turn, and replace the three =not yet integrated=
-gates. The investor's exit at =hold_years= (=_withdraw=) is the same
-redemption and sale without credit.
-
-Before relying on redemption in an exit, measure where the exit door closes
-(recommendation 9 below): lower K until the leveraged basket's own shortfall
-makes =_exitSnapshot= revert, and decide what a household with a closed door
-and no dollars does. No fixture has yet produced a real K refusal of an exit.
-
-*** 4. The investor's decision
-
-=_investor_decision= / =investorDecision=: a cash investor buys BUCK and
-deposits them while they are not dear (=investor_action= returns =buy=), and
-otherwise takes the legacy =convert= branch; read that branch before porting
-it. The =buy= side is the surplus =save= flow for a household with no credit.
-Its exit is step 3.
-
-*** 5. Open the act loop
-
-Replace the gate in =act= with one dispatcher, in the legacy loop's order and
-recovering once: calendar; a known refused settlement; a known refused deposit;
-a due asset exit, which preempts the rest; on a payday the wallet; on a
-decision day refinancing, credit investment or the investor's choice; then
-surplus. Known hazards, all recorded in the recommendations below:
-- The flows share one cursor. =HouseholdRefinance.start= does not test
-  =surplus_due=, so a refinance started first silently drops a pending
-  deposit retry. Retry before new credit.
-- Give /known/ progress a small bounded number of turns a day (a retirement
-  takes one to three); an unknown outcome must still stop everything.
-- A debtor's refinance assessment is expensive; =credit_cash_floor= already
-  shares it with same-block surplus and wallet choices. Keep it to once a day.
-- Then the population agent and the runners call =act= unchanged. Migrate or
-  retire the legacy JavaScript household tests here.
-
-*** 6. Short complete worlds
+*** C. Short complete worlds
 
 =make nix-venv-economy-smoke ECONOMY_SMOKE_DAYS=30= runs the working tree and
 writes =build/sim/economy-smoke.{json,pdf}=; lengthen it by stages. Check, in
 this order: every household's books reconcile (=unwound= equals the sum of
 confirmed reductions; wallet, receipts and principal against chain); supply
-equals open principal plus deferred Jubilee principal; the report charts the
-new records; then the measurements the recommendations ask for (payday and
-always-invest demand against pool depth, shock transmission, K and issuance
-room through a sell-off, wallet unwinding). Add the broad sell-off (the same
-share of every BUCK pool) to the shock set.
+equals open principal plus deferred Jubilee principal; =household_faults= is
+zero; the report charts the new records (investment bites, exits, releases);
+then the measurements the recommendations ask for. Add the broad sell-off and
+the broad purchase (the same share of every BUCK pool) to the shock set.
+=ShockAgent= still uses the numeric =mint= overload and its own swap callback:
+verify it on canonical money or replace it with an intervention (step F).
 
-*** 7. The five-year campaigns
+*** D. The five-year campaigns
 
 Commit first: campaigns freeze their sources. Then, per
 =README-simulations.org=: =make nix-venv-economy-plan CELLS=centre=,
@@ -300,40 +258,96 @@ campaign. Python on pyrevm is the five-year vehicle; a JavaScript population
 world is far slower (one debtor's refinance, save and prepayment took 300 s
 under Tevm).
 
-*** 8. The savings sandbox and the JavaScript equilibrium demo
+*** E. The savings sandbox and the JavaScript equilibrium demo
 
 The savings sandbox is the Python economy behind a page:
 =make nix-venv-sim-savings SIM_SAVINGS_PORT=<an unused port>=, acceptance
 =make nix-venv-sandbox-savings-test SAVINGS_TEST_PORT=<an unused port>=
-(=README-sandboxes.org=). It needs step 5 and nothing else structural, then:
+(=README-sandboxes.org=). It needs step B and nothing else structural, then:
 its stress buttons lean on BUCK/USDC only, so households respond after
 arbitrage carries the move into the basket's price, and the page should show
 the dollar price beside the cost/fair ratio; a lost reply stops a household,
-wages included, so the page needs that status and a reconcile action;
-=ShockAgent= still uses the numeric =mint= overload and its own swap callback
-and is unverified on canonical money. Never start, stop or probe the tunnel
-origin ports 8000, 8797 or 8798. The JavaScript demo
-(=make nix-core-demo-eqworld-serve=, =make nix-core-eqsim=) needs step 5 in
-JavaScript and the once-a-day assessment before a population is practical.
+wages included, so the page needs that status and a reconcile action. Never
+start, stop or probe the tunnel origin ports 8000, 8797 or 8798. The
+JavaScript demo (=make nix-core-demo-eqworld-serve=, =make nix-core-eqsim=)
+needs step B in JavaScript before a population is practical.
 
-*** 9. Later
+*** F. Consolidate the simulations, shocks and sandboxes
 
-Full save and resume (the new state to carry is listed in recommendation 13),
-Notes accounting fixtures and the generated A1/A2/B1 proof suites against the
-canonical artifact, and the release and provenance gates. None of these gates
-an uninterrupted five-year run.
+The owner's direction of 2026-11-12: fewer simulations, each able to apply a
+range of shocks to a population whose response is configurable, inspectable
+afterwards (JSON, PDF, web) or live (the sandbox). An inventory of the
+worktree (read-only, 2026-11-12) found:
+
+| Tool | Entry | Agents | Shocks | Accounting today |
+|------+-------+--------+--------+------------------|
+| Household economy campaigns | =economy-plan/run/report/smoke=; =alberta_buck/sim/economy.py= over =experiments/economy.toml= | =HouseholdPopulationAgent= and its households; whales, arbs, keepers, wheel | =STRESSES= in =economy.py=: demand and supply (=arm_shock=, =ShockAgent=), commodity (=price_shock=), mortgage rate, recession, adoption stop/surge, investor exit (=set_population=) | canonical; gated by =act= |
+| Single scenarios | =sim-run=, =sim-rebalancing*=, =sim-monetary-ops=, =sim-basket-ops=, =sim-equilibrium= ... | =DirectMint*=, =FatCreditBorrower=, =SaverAgent=, =BuckCreditDebtor=, arbs, keepers | none (env knobs) | mixed; =prorata= / =ops= baskets are legacy; the rest run legacy agents on canonical money, unverified |
+| Experiment harness and sweeps | =sim-experiment*=, =sim-rebalancing-eq*=, =sim-sweep*=, =sim-metrics=; =experiment.py=, =sweep.py=, =eqmetrics.py=, about 60 TOML files | as above plus excursion arbs, =WhaleRaidAgent=, =UndertakingAgent= | =[[interventions]]=: =price_shock=, =uptake_shock=, =arm_shock=, =set_population=, =add/remove_agents=, gains, rails, knobs | as above |
+| Excursion catalogue | =sim-catalogue*=; =catalogue.py=, 16 arms | =WhaleRaidAgent= (dump, squeeze, grind, periodic), =PusherAgent=, =LpExitAgent=, =BookLoaderAgent= | raids, guard trips, LP exit, book loading, cohort steps | unverified |
+| Live server, savings sandbox | =sim-server=, =sim-savings*=; =server.py= + =core/js/sandbox= | economy cast | WebSocket =shock= (=ShockAgent=), population, knobs, pace | canonical; gated |
+| Control lab | =control-lab-*=; =alberta_buck/sim/control_lab/= | none (drives feed, arb, desk itself) | perturbations: triangle, ramp, sine, step, noise | canonical |
+| JavaScript CLI and demos | =core-eqsim=, =core-demo-eqworld=; =eqworld.js= | =CreditHouseholdAgent=, =BasketSaver=, whale, arb, keepers | none | canonical; gated |
+| Wallet sandbox | =sandbox=, =wallet-sandbox-test= | none | none | canonical; works |
+| TUI, kdesign, star | =sim-tui=; =kdesign.py=; =star.py= | legacy | gains steps | legacy (=prorata= / =ops=) |
+
+Duplication: two timeline engines (=loop.run=, =driver.SimDriver=); four grid
+runners that each spawn the CLI (=economy.py=, =catalogue.py=, =star.py=,
+=sweep.py=, plus the Makefile matrix); two judges (=economy.judge=,
+=eqmetrics=); seven shock injectors (=ShockAgent=, =WhaleRaidAgent=,
+=PusherAgent= / =LpExitAgent=, =BookLoaderAgent=, =price_shock= /
+=set_population=, control-lab perturbations, =monetary_ops.Attacker=); three
+household lineages (=CreditHouseholdAgent=, =BuckCreditDebtorAgent= /
+=ExternalDebtRetireeAgent= / =FatCreditBorrowerAgent=, =SaverAgent= /
+=BasketSaver=).
+
+Plan, after step D's first centre run (do not refactor what no run uses):
+1. /One world./ The household economy (=economy.toml=) is the world. Agent
+   response levels are its existing settings (=surplus_policy=, =theta=,
+   =carry_utilization=, =issue_premium=, =retire_disc=, =paydown_*=,
+   =money_*=, =divest_rate=, population rates) plus arb and whale counts;
+   cells name presets of them.
+2. /One shock vocabulary./ Make every injector an intervention kind in
+   =experiment.py= applied to that world: =raid= (dump, squeeze, grind,
+   periodic), =lpexit=, =bookload=, =broad_selloff= / =broad_purchase= (the
+   same share of every BUCK pool, the only move that changes fair value),
+   the control-lab paths as =price_path= (step, ramp, sine, noise), and the
+   existing ones. =economy.py= =STRESSES=, the catalogue arms and the
+   server's =shock= op then all compile to it.
+3. /One runner, one judge, one renderer./ =economy.py= (freeze, fan out,
+   resume) runs every cell set, including the catalogue's; =eqmetrics= plus
+   =report.py= judge and render; the HTML index stays.
+4. /One engine./ Fold =SimDriver= into =loop.run= with the server's
+   callbacks; the TUI and the sandbox both step it.
+5. /Retire/ the legacy-basket paths (=sim-tui-prorata=, kdesign, the
+   =prorata= / =ops= arms) once their stress coverage exists as cells, and
+   the older household and saver agents once nothing casts them.
+6. /JavaScript/: one CLI and one demo over =eqworld.js= with a cast option.
+The control lab stays a separate diagnostic (no agents, by design).
+
+*** G. Later
+
+Full save and resume (the new state to carry is listed in recommendation 13,
+plus the new fields of step A), Notes accounting fixtures and the generated
+A1/A2/B1 proof suites against the canonical artifact, and the release and
+provenance gates. None of these gates an uninterrupted five-year run.
 
 ** Decisions in this session, and what is still open
 
 | Date | Decision or question | Status |
 |------+----------------------+--------|
 | 2026-11-12 | Paydays fall on each household's own fixed, keyed-random day of the month. | Done; payday milestone. |
-| 2026-11-12 | =burn(0)= should release whatever it can, unless it means something else. It means nothing else: today it is a no-op. | Decided; step 1, not yet implemented. |
-| 2026-11-12 | =burn(0)= releases excess coverage on a facility that still has principal, not only unused facilities. | Decided; step 1. |
-| 2026-11-12 | =burn(0)= refunds the premium deposit in proportion to the coverage released. | Decided; step 1. |
+| 2026-11-12 | =burn(0)= should release whatever it can, unless it means something else. It meant nothing else: it was a no-op. | Done; release milestone. |
+| 2026-11-12 | =burn(0)= releases excess coverage on a facility that still has principal, not only unused facilities. | Done; release milestone. |
+| 2026-11-12 | =burn(0)= refunds the premium deposit in proportion to the coverage released. | Done; release milestone. |
 | 2026-11-12 | Write each phase's observations and recommendations for the five-year runs and sandboxes into this file before its commit. | Standing. |
 | (in the plan) | A retire plan redeems a receipt before spending dollars. | Unreviewed policy choice; recommendation 10 asks for it to be a setting. |
-| (in the plan) | The saver's switching fee is paid before the issue rather than after the deposit. | Proposed in step 2; confirm. |
+| (in the plan) | The saver's switching fee is paid before the issue rather than after the deposit. | Implemented so (credit-investment milestone, recommendation 37); say if it should be otherwise. |
+| 2026-11-12 | Consolidate simulations, shocks and sandboxes into fewer, configurable, inspectable ones (owner's direction). | Inventory and plan in step F; to start after the first centre run. |
+| (proposed) | A leaving household with a closed exit door, or no dollars for its lien, waits and is retried daily; no forced liquidation. Its wages continue until it has left. | Implemented so (exit milestone, recommendations 40 and 41); confirm. |
+| (proposed) | The insured asset sells at its insured face value on the exit day; actual and counterfactual alike. | Implemented so; there is no house-price model. Confirm or supply one. |
+| (proposed) | A known refused remainder (settlement or deposit) is abandoned when the household starts leaving; its cash is simply owned. | Implemented so (=HouseholdRefinance.abandon=); confirm. |
+| (proposed) | An investor holds the BUCK it buys as money and deposits them only when they are dear by more than its premium. | Implemented so, as the legacy =investor_action= intended; confirm. |
 
 * Direction, source and current state
 
@@ -1201,8 +1215,8 @@ implementation sequence, before changing the primary economy builder.
   principal. Guarded market buys must deliver net BUCK; bank retirement is a
   separate confirmed USDC payment. Complete unused-facility release as well
   as principal retirement; burn(0) remains an invalid closure shortcut
-  (/superseded 2026-11-12/: burn(0) is to release what it can; see Start
-  here, step 1).
+  (/superseded and implemented 2026-11-12/: burn(0) releases what it can;
+  see the release milestone at the end of this file).
   Complete normal keeper/control work before quoting after each time
   advance; currentBuckK is a cached read and issuance can refresh it.
   Cover actual elapsed time across pending phases, not merely a changed
@@ -1591,7 +1605,7 @@ explicit so simplification does not remove an economic source of demand:
 | Debtor refinancing versus saver credit investment | Reuse selected issuance, reserve funding, bounded market operations and one owner receipt dispatcher; distinguish bank payment from investment/cash retention | Extend common execution where it is the same operation. A saver has no mortgage, so it must not manufacture a positive bank allocation to pass the refinance plan's debt bounds or duplicate the whole refinance machine. |
 | First closing versus later tranches | Confirmed one-time closing plus current-credit/capital staged admission now implemented | Activation alone does not pay a fee. Allocate it only for economics, pay it fully on the first bank receipt, and recheck every later tranche. Resolve refused export prefixes before automatic scheduling. |
 | Surplus saving and discounted retirement | Protect required issuance cash/reserve, quote full net acquired BUCK including pool-carried fees, then authenticate actual deposit or selected settlement | *Done as components* (surplus checkpoint). A nominal pool discount alone is insufficient, and neither is one dislocated dollar route. Targets survive actual uncertainty; known waiting intentions coexist with normal income and bills. |
-| Asset exits | Explicit unused-facility close, guarded principal retirement and receipt redemption | Keep K/fund limits intact. The unused-facility close is =burn(0)= (owner decision 2026-11-12, superseding "keep burn(0) invalid"; Start here, step 1). Preserve distinct exit checks as household integration proceeds. |
+| Asset exits | Explicit unused-facility close, guarded principal retirement and receipt redemption | Keep K/fund limits intact. The unused-facility close is =burn(0)= (owner decision 2026-11-12, superseding "keep burn(0) invalid"; implemented, release milestone). Preserve distinct exit checks as household integration proceeds. |
 | Saved-world state (later) | Dated books/queues/hashes/cursors and exact fund/insurer graph | Keep imports gated until restart coverage demonstrates the replacement; save/resume does not gate uninterrupted economy runs. |
 
 *** Economy acceptance sequence
@@ -1653,7 +1667,8 @@ inventing or extinguishing principal.
 documented rather than a hidden sentinel: it releases all unused coverage,
 and excess coverage on a facility that still has principal, refunding the
 premium deposit in proportion. It still neither invents nor extinguishes
-principal, and it does not close the NFT. See Start here, step 1.
+principal, and it does not close the NFT. Implemented 2026-11-12; see the
+release milestone at the end of this file.
 
 * Reference map and verification commands
 
@@ -1923,7 +1938,7 @@ the canonical Buck evidence recorded below.
   guarded exits, full persistence (including epoch/books/queues/hashes),
   short household worlds, actual five-year campaigns/adjacent PDFs, arb
   qualification and Notes/proof restoration. Keep burn(0) invalid
-  (/superseded 2026-11-12/; see Start here, step 1).
+  (/superseded and implemented 2026-11-12/; see the release milestone).
 - The normal act gate stays intentional. Passing component acceptance and
   five-year *clock/debt vectors* is not an enabled savings sandbox or a
   completed five-year *household economy*. No corrected-accounting campaign
@@ -2638,3 +2653,291 @@ household's payday on a fixed random day of the month.
 25. /Pin paydays in every new fixture./ A fixture that leaves =pay_day=
     unset gets a keyed day and will not be paid on day 30. Pin it, in the
     shared JSON when the household arrives on day 0, in code otherwise.
+
+** Release milestone: =burn(0)= releases coverage no principal needs (complete)
+
+The owner's decisions of 2026-11-12 (Start here, decisions table). This is the
+only Solidity change since the canonical foundation was qualified.
+
+- [X] =BuckRenewalOps.planRelease(cash, state, allowances, d, owner, ids, k)=
+  (view): for each selected facility in order, the largest coverage whose
+  release leaves its principal fully backed at =k=. No principal: all of it.
+  With principal: =active - keep=, where =keep= is the least activated face
+  with =floor(floor(mark * keep / face) * k / 1e18) >= principal=, computed as
+  two ceilings (=ceil(principal * 1e18 / k)=, then =ceil(value * face /
+  mark)=); a facility at or beyond its limit releases nothing. The refund is
+  =floor(premium * released / active)=. A facility whose refund its original
+  pool cannot pay now is skipped whole (pool unbound or not a verified
+  Carrying account; allowance to the token; nominal balance; for a sponsored
+  owner, the sponsor's funds for the pool's carried fee). Shared pools, the
+  sponsor and a Carrying owner's own pool are carried virtually through the
+  batch, as =planBurn= does.
+- [X] =BuckRenewalOps.release(...)=: verify the caller, settle its cash,
+  compute K afresh, plan, then per facility refund through the existing
+  =refundPremium=, reduce the recorded deposit, =deactivateFromBuck=, clear
+  the recorded pool when no principal remains, re-check backing, emit
+  =FacilityReleased=. Final checks: the caller's balance did not fall and K
+  did not move. It does not touch the fund: no valuation refresh, no reserve
+  checkpoint, no relief budget.
+- [X] =Buck.burn(0)= / =burn(0, ids)= dispatch to =release=; =burn(N > 0)= is
+  byte-for-byte the old path. =quoteBurn(0, ids)= returns the plan's totals at
+  the last computed K. =FacilityReleased(owner, tokenId, coverage,
+  premiumRefund)= is declared on =Buck= for its ABI.
+- [X] SDK, both languages: =quote_release= / =quoteRelease= (as the owner,
+  through the same read-only owner dispatch the basket preview uses),
+  =release= (submit and authenticate), =release_from_receipt= /
+  =releaseFromReceipt= (every event names this owner and one selected NFT,
+  once, in the submitted order; nothing released is a valid success), and
+  =ReleasePending= carrying the hash of an unauthenticated outcome.
+  =NetCreditOps= / =netCreditOps= take the optional =simulate= adapter.
+- [X] Tests: =test/BuckRelease.t.sol= (11: nothing drawn; deposit-only draw
+  and the later burn; excess after K rises; a shortfall that must not move;
+  explicit selection, duplicate and foreign; a pool that cannot refund by
+  balance and by allowance, with the rest released; one pool shared across
+  the batch in order; unverified and Carrying owners; independence from the
+  fund valuation; a sponsored owner refunded in full or skipped; and a fuzz
+  over face, depreciation, both K values and the draw that checks the kept
+  coverage is the least that backs the principal). One Python and one
+  JavaScript SDK test against real contracts, including a lost reply
+  recovered from its receipt.
+
+*** Release checkpoint
+
+- *Evidence*: =test/BuckRelease.t.sol= 11 passed (the fuzz case 256
+  runs); =make nix-test= 1,547 passed, 1 skipped, 0 failed; =make
+  nix-contracts-dist-check= passes; =make nix-sim-build= rebuilds. The
+  supported Python set 265 passed (sixteen files, with the SDK release
+  test); the repayment-engine smoke 35 Python and 21 JavaScript (with the
+  JavaScript SDK release test); fast JavaScript 80; the actual JavaScript
+  equilibrium acceptance 100 passed across six Tevm files, no skips, 31
+  min; the browser bundle rebuilds.
+
+*** Observations and recommendations for the five-year runs and sandboxes (release)
+
+**** Measured in this phase
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 16 | build | Deployed sizes after the change: =Buck= 21,795 bytes (was 21,160), =BuckRenewalOps= 11,811 (was 6,432), =BuckFacilities= 23,943, unchanged and 633 bytes under the 24,576 limit. Nothing more fits in =BuckFacilities=. |
+| 17 | Foundry | After a release, burning the owner's whole balance leaves one raw unit of principal (and up to two of coverage, one of deposit): a numeric burn settles the /least/ principal that lowers the balance by its amount, and the proportional refund rounds down. Deposit 100, release, then =burn(90)= retires 99.999999. |
+| 18 | Foundry | A released facility sits exactly at its K limit: a second release finds nothing, and any fall in K afterwards is a shortfall (which blocks new issuance but is never penalized). Issued at K = 0.5 to its limit, then K = 0.8: 375 of 1,000 coverage and 37.5 of the 100 deposit come back; 625 stays. |
+| 19 | Foundry, SDK | With one pool holding enough for one refund only, the first facility in the submitted order is released and the second is skipped; the transaction succeeds. The quote reported the same. |
+| 20 | JavaScript SDK | Under Tevm the claim-age total keeps growing by whole seconds on the unchanged principal while the test runs; under pyrevm it is exactly equal before and after. Release itself adds or removes none. |
+
+**** Recommendations
+
+26. /An exit closes with the selected-facility engine, not a numeric burn./
+    Retiring a named facility's whole principal releases all its coverage and
+    refunds all its deposit in the same transaction. A numeric
+    =burn(balance)= leaves raw-unit dust (observation 17), which would keep an
+    exiting household's NFT open forever. Use =burn(0)= only afterwards, for
+    coverage that no principal backs.
+27. /Release only when leaving./ A household that keeps its asset pays the
+    external insurer for every unactivated share
+    (=external_premium_due=), and loses its activated room, so releasing
+    excess coverage mid-life raises its bills and its next issue's premium.
+    The economy's only caller should be the asset exit. If a later policy
+    wants a mid-life release (for example to recover a deposit when K has
+    risen far), score it against that external premium first.
+28. /A release that releases nothing is a success: read back./ A pool that
+    cannot refund, or a sponsor that cannot cover the pool's carried fee,
+    skips the facility silently (observation 19). The exit stage must check
+    the facilities' activated coverage afterwards, report
+    =release-waiting= with the pool's state, and try again on a later day; it
+    must not treat the successful transaction as a completed release.
+29. /The quote is at the last computed K./ Execution computes K afresh, and
+    the PID controller can move K when time has passed, so a quote and its
+    execution can differ. Authenticate the events (the SDK does) and book
+    those amounts; never book the quote.
+30. /Report it./ Add released coverage and refunded deposit to the household
+    exit records and to the campaign's supply reconciliation: a refund moves
+    BUCK from an insurer pool to a household without changing supply or
+    principal, so "pool balance equals the sum of recorded deposits" must be
+    checked after releases as well as after reductions.
+31. /No room left beside =burn=./ Any further facility logic belongs in
+    =BuckRenewalOps= or a new linked library (which then must be added to the
+    Makefile's artifact list, =buck_core/net_world.py=, =core/js/src/net-world.js=
+    and =scripts/contracts-dist.py=).
+
+** Credit-investment milestone: a mortgage-free household issues, keeps and deposits (Python complete; JavaScript pending, step A)
+
+Step 2 of Start here. A saver, or a debtor whose mortgage is paid, issues
+against its insured asset and keeps the BUCK, depositing them in the basket
+under its own account.
+
+- [X] =assess_investment= / =assessInvestment=: one block; the amount wanted
+  is =investment_want= (the =premium= or =carry= basis); each facility's
+  bounded =issue_coverage_menu= at the five size fractions; the lasting credit
+  reserve kept; a reserve shortfall funded by a guarded purchase; the closing
+  fee fronted in dollars above the buffer; each candidate scored by
+  =investment_quoted= with the dollars its new BUCK would fetch at that
+  block's dollar pool. Terms are built with =spendable = 0=, so wallet money
+  is never counted as capacity.
+- [X] /A bite of a line./ One decision's amount is bounded by the dollar
+  pool (half of =max_impact_bp= of its BUCK reserve), so a first bite can never
+  repay the one-time closing fee alone. As refinancing does, the assessor then
+  quotes the whole line now (=investment_programme=: the remaining carry line
+  at today's K; for a premium only the bite itself, because a premium is a
+  passing market state), requires that programme to pass with the full fee and
+  to be affordable from present dollars, and scores the bite with the fee
+  allocated by dollars (=staged_investment= / =stagedInvestment=). The real
+  payment is still the whole fee, once.
+- [X] Flow =kind=invest= on the same cursor: =closing= (the fee, paid to the
+  bank first; skipped once =refinance_closed=), =fund= (reserve purchase),
+  =issue=, =deposit= (at most the newly issued spendable, above the reserve).
+  A refused deposit keeps the issued BUCK owned and is =surplus_due=: it is
+  retried alone before any new credit. The plan's reserve becomes the
+  household's lasting credit front, as in refinancing.
+- [X] =advance_net_investment= / =advanceNetInvestment=: the owner dispatcher,
+  on the keyed decision cadence, at most one assessment a day; it does
+  nothing while a mortgage remains (refinancing owns a debtor's decisions).
+- [X] Shared fixture =test/fixtures/household-invest.json=: the lifecycle
+  (closing once, then issue and deposit each day, the same receipt topped up),
+  the premium trigger (buying the same share of every TOKEN pool makes the
+  BUCK dear against the basket once its TWAP passes), fourteen fault cases
+  (lost, unknown and refused for each of the four phases, and an unavailable
+  read before the issue and before the deposit), and pure vectors for the
+  programme score.
+
+*** Credit-investment checkpoint
+
+- *Evidence*: =alberta_buck/test/test_net_household_invest.py= 16
+  passed on pyrevm (lifecycle, premium trigger, fourteen fault cases); the
+  pure programme and staged-score tests pass in Python; the whole supported
+  Python set 294 passed with one strict expected failure (the JavaScript
+  conformance). No JavaScript, so not qualified.
+
+*** Observations and recommendations for the five-year runs and sandboxes (credit investment)
+
+**** Measured in this phase
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 21 | Python lifecycle | The first bite of a 224,775 BUCK carry line (30% of a 1M home's K = 0.75 limit) is 4,995 BUCK: 0.5% of the 1M dollar pool, although nothing is sold there. The line is 45 bites. Scored alone the bite is worth -1,698 dollars against its 2,000 closing fee (carry about 100 a year, three-year horizon); scored as a bite of the line it carries 44.44 of the fee and is worth +227. |
+| 22 | Python lifecycle | One bite: 2,000 USDC closing; 178.83 USDC buys the 178.71 BUCK funding reserve (half of the premium at parity); issue 5,351.79 principal = 4,995 spendable + 356.79 premium deposit (5% of 7,135.71 coverage); deposit 4,989.83 (the 0.1% sizing cushion stays). Later bites send only the issue and the deposit and top up the same receipt. |
+| 23 | Python | One investment assessment reads 75 actual candidates in 0.29 s on pyrevm, 90 in 0.43 s when the programme is quoted too. A household with nothing wanted returns =hold= before quoting. |
+| 24 | Python premium | With no carry line a saver holds at BVIB = 1.00. After the seeding helper buys BUCK with a twentieth of every TOKEN pool's TOKEN and a day passes, BVIB is more than 5% lower, the basis is =premium=, and the score's execution term is positive: kept, the new BUCK are valued at the basket; sold they would fetch more. |
+
+**** Recommendations
+
+32. /Pool depth decides whether savers ever join on a premium./ A premium's
+    programme is the bite itself, so the bite alone must repay the closing
+    fee: roughly =bite * (premium + theta * net carry rate) > fee=. In the
+    1M-BUCK fixture pool a 5,000 bite never can; a household needs a pool
+    about twenty times its bite for a 1 to 2% premium to pay a 2,000 fee.
+    Size the dollar pool to the population (the economy file already does)
+    and report, per run, how many savers joined and on which basis. If none
+    join on a premium, the dear-BUCK supply response is coming from debtors
+    alone.
+33. /A carry line is 45 decisions long./ At one bite per decision and a
+    keyed cadence of 5 to 20 days, filling a line takes 225 to 900 days.
+    A five-year run sees it fill; a 30-day smoke sees two or three bites.
+    When comparing short and long runs, compare bites issued, not lines
+    filled.
+34. /Credit investment is supply and reserve demand together./ Each bite
+    raises supply by its principal (the spendable and the premium deposit)
+    and sends the spendable to the basket, which repays its own lien or
+    deploys; the first bite also buys its funding reserve in the dollar pool.
+    Add issued-to-invest principal, premium deposits and reserve purchases to
+    the campaign's supply reconciliation, beside the wallet and the basket.
+35. /The small remainder accumulates./ About 0.1% of each bite stays in the
+    main account above the reserve (5 BUCK a bite here) and pays demurrage.
+    It is swept by a later deposit only when it exceeds a deposit's grain.
+    Report main-account idle BUCK for savers; if it grows, let the deposit
+    take all owned BUCK above the reserve rather than only the new issue.
+36. /A refused deposit is retried before new credit./ The dispatcher resumes
+    it on the next day. In the unified loop (step 5) keep that order: a
+    household must never issue again while earlier issued BUCK wait undeposited.
+37. /The saver's fee is paid first, and that is now what the code does./ The
+    open question in the decisions table is settled in the implementation:
+    =closing= precedes =fund= and =issue=. A refusal after it leaves the fee
+    paid and =refinance_closed= set, so the next plan carries no fee.
+
+** Exit, investor and dispatcher milestone (Python only; JavaScript pending, step A)
+
+Steps 3 to 5 of the earlier list, in Python. All three are owner-dispatcher
+components on the same receipt cursor; nothing here changes Solidity.
+
+- [X] /Asset sale on the calendar./ =schedule_sale= queues a =sale= period on
+  the exit day: the insured face value is credited from an authenticated
+  dollar mint (like wages, but not counted as income, and it sets =_sold=,
+  ending the external premium), then arrears and the /whole/ mortgage are
+  paid in the same period. =schedule_settlement= queues a =settle= period
+  (from =living=) when dollars arrive later. The counterfactual sells the same
+  asset the same day and pays its mortgage.
+- [X] /=advance_net_exit=, one step a turn./ After recovery it chooses from
+  what the chain and books show now, in order: sell the asset; settle; sell
+  the working balance (a capped bite); redeem each basket receipt (whole, or
+  a half, quarter or eighth the basket can pay in BUCK, previewed as the
+  owner); retire the whole lien with owned BUCK through the selected-facility
+  engine (reserve one raw unit); buy the rest back (a surplus =retire= plan, a
+  capped bite); =burn(0)= any coverage still activated (=ExitPlan("release")=);
+  sell owned BUCK a capped bite at a time; sell TOKEN an in-kind exit paid;
+  then mark the household =exited=. One /market/ bite a day (=pace=, not a
+  retry); a step that cannot run today (closed exit door, proved refusal, no
+  dollars) =wait=s, is recorded once and counted in =exit_retries=; no
+  dollars for the lien sets =exit_short= (=hhDivestShort=) and waits for
+  wages. A known refused remainder is =abandon=ed at the start, and the
+  household protects no dollar buffer while leaving. Other dispatchers
+  return False once the exit day has come.
+- [X] /Investor./ =advance_net_investor= on the keyed cadence:
+  =net_investor_action= (integer: the BUCK is dear when (1 - fee) > BVIB x
+  (1 + premium), the dollar pool's price cancelling as for every household)
+  buys BUCK with spare dollars and /holds/ them (=SurplusPlan("hold")=), or
+  deposits what is held (=SurplusPlan("convert")=, deposit only). Its
+  withdrawal at =hold_years= is the same exit without asset or lien.
+- [X] /Dispatcher./ =_act_net= written (see step B); not wired.
+- [X] Shared fixture =test/fixtures/household-exit.json=; Python tests
+  =alberta_buck/test/test_net_household_exit.py= (11): a saver with a carry
+  line, wallet and receipt; a debtor after one refinance tranche; an investor
+  that buys, converts when dear, and withdraws; a backing-only facility that
+  only =burn(0)= can release; and seven fault cases (lost, unknown and refused
+  redemption, a closed exit door, lost and unknown sale, and a cash shortfall
+  that resumes when dollars and the receipt return).
+
+*** Exit checkpoint
+
+- *Evidence*: =test_net_household_exit.py= 11 passed and
+  =test_net_household_invest.py= 16 passed on pyrevm; the whole supported
+  Python set (eighteen files) 294 passed with one strict expected failure (the
+  JavaScript conformance of step A). No JavaScript, so not qualified.
+
+*** Observations and recommendations for the five-year runs and sandboxes (exits)
+
+**** Measured in this phase
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 25 | Python saver exit | After two carry bites (lien 15,973.75 BUCK, receipt basis 29,728.68): exit day, the 1,000,000 USDC sale; the receipt redeemed whole for 29,647.39 BUCK, paid in BUCK; one reduction retired the whole 15,973.75 and refunded the whole 1,064.91 deposit, so =burn(0)= had nothing left; the owned BUCK sold in four daily bites (4,925, 4,950, 4,974, 91) for 15,160 USDC. Four days in all. |
+| 26 | Python | Before the one-bite-a-day rule the same exit sold three bites within one day, each into a pool the previous bite had moved. |
+| 27 | Python release | A facility activated with no premium and nothing drawn (backing only) leaves the coverage behind after the sale; =burn(0)= releases all 250,000 of it and refunds nothing. This is the only exit that needs the release. |
+| 28 | Python investor | It buys about 0.5% of the dollar pool's depth per decision and holds it; after the seeding helper buys BUCK with a twentieth of every TOKEN pool, the next decision deposits all of it; at the horizon it redeems and sells. Supply never changes: an investor has no lien. |
+
+**** Recommendations
+
+38. /Exit selling is BUCK supply into the dollar pool./ Each exit sells a
+    household's owned BUCK (its redeemed savings above the lien, its wallet)
+    a capped bite a day. At =divest_rate = .1= a 200-household population
+    starts an exit about every 18 days; a recession cell that raises it would
+    put many sellers in one pool. Chart exit sales per day against the pool's
+    depth and against BUCK/USDC.
+39. /Full retirement releases its own coverage./ Retiring a facility's whole
+    principal returns all its coverage and deposit in the same transaction,
+    so =burn(0)= at exit is needed only for backing-only facilities or
+    coverage left after a partial retirement. Count both in the report; a
+    nonzero release on an ordinary facility means a retirement stopped short.
+40. /A closed exit door waits, it does not force./ When the basket's own K
+    gate refuses the redemption preview, the household waits, counted once a
+    day. Report households waiting and their days, per cell. Measure where
+    the door closes (lower K until =_exitSnapshot= reverts): no fixture has
+    produced a real refusal yet.
+41. /Insolvency is visible, not completed./ =exit_short= households keep
+    their lien and wait for wages, which continue until they leave. Report
+    them separately; never count them as exited.
+42. /The sale price is the insured face value./ There is no house-price
+    model; a recession cell that should cut house prices needs one, applied
+    to actual and counterfactual alike.
+43. /Exit events are the reconciliation record./ The final =complete= event
+    carries =withdrawn_usdc=, =released_coverage=, =premium_refund_nominal= and
+    =retired_principal=; the campaign's books check should sum them over the
+    exited households against supply and pool balances.

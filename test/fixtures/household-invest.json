@@ -1,0 +1,69 @@
+{
+ "schema": 1,
+ "money": "raw integer strings, six decimals; settings in the household profile's own units",
+ "about": "A mortgage-free household issues against its insured asset and keeps the BUCK, depositing them in the basket. The carry line needs no market move; the premium needs the BUCK dear against the basket (the same share of every TOKEN pool bought, and the basket's TWAP). Read by the Python and JavaScript suites.",
+ "settings": {
+  "pay_day": 0,
+  "home_k": 1000,
+  "premium_bp": 50,
+  "apr": 0.06,
+  "cash_k": 40,
+  "buffer_k": 10,
+  "decision_days": 1,
+  "theta": 3,
+  "risk": 0,
+  "switch_k": 2,
+  "max_impact_bp": 100,
+  "utilization": 0.8,
+  "divest_rate": 0,
+  "carry_utilization": 0.3,
+  "issue_premium": 0.01,
+  "surplus_policy": "basket",
+  "money_months": 0
+ },
+ "forecasts": {
+  "expected_relief_rate": 0.02,
+  "expected_refund_growth": -0.02,
+  "expected_wallet_growth": -0.02
+ },
+ "lifecycle": {
+  "days": 3,
+  "switch_usdc": "2000000000",
+  "confirmed_first": ["closing", "fund", "issue", "deposit"],
+  "confirmed_later": ["issue", "deposit"]
+ },
+ "premium": {
+  "about": "no carry line and no closing fee: the household holds until the BUCK is dear by more than issue_premium after the fee",
+  "settings": {"carry_utilization": 0, "switch_k": 0},
+  "token_pool_share": 20,
+  "bvib_below_percent": 95
+ },
+ "programme": {
+  "about": "pure vectors: one bite of a line against the whole line; the closing cost is allocated by dollars",
+  "fixed_cost": 2000,
+  "tranche": {"usd": 4967.7, "new_spendable": 4995, "present_coverage": 7135.7, "premium": 356.8,
+              "external_premium_saving": 35.7, "reserve_cost": 1.03, "reserve_carry": 14.3},
+  "whole": {"usd": 223545.4, "new_spendable": 224775, "present_coverage": 321107.1, "premium": 16055.4,
+            "external_premium_saving": 1605.5, "reserve_cost": 109.5, "reserve_carry": 639.8}
+ },
+ "flow": {
+  "about": "one real investment per case; refused = the same send with one bound made unreachable, so the contract itself reverts",
+  "refuse_argument": {"transfer": 1, "buyExactOutput": 1, "issue": 2, "deposit": 2, "increasePosition": 4},
+  "cases": [
+   {"name": "lost closing reply is applied once", "lost": "closing"},
+   {"name": "unknown closing stays stopped", "unknown": "closing"},
+   {"name": "refused closing spends nothing", "refused": "closing"},
+   {"name": "lost reserve purchase is applied once", "lost": "fund"},
+   {"name": "unknown reserve purchase stays stopped", "unknown": "fund"},
+   {"name": "refused reserve purchase keeps the closing paid once", "refused": "fund"},
+   {"name": "lost issuance reply is applied once", "lost": "issue"},
+   {"name": "unknown issuance stays stopped", "unknown": "issue"},
+   {"name": "refused issuance keeps the reserve and reissues later", "refused": "issue"},
+   {"name": "unavailable issuance quote waits and sends nothing twice", "view": "issue"},
+   {"name": "lost deposit reply is booked once", "lost": "deposit"},
+   {"name": "unknown deposit stays stopped", "unknown": "deposit"},
+   {"name": "refused deposit retries only the deposit", "refused": "deposit"},
+   {"name": "unavailable deposit quote retries only the deposit", "view": "deposit"}
+  ]
+ }
+}

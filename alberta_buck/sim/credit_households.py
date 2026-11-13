@@ -8,10 +8,11 @@ from alberta_buck.sim.agents import Agent, _register
 from alberta_buck.sim.equilibrium_agents import _HouseholdAccounts, PARITY, _impact_cap, mint_amount, mint_capacity
 from alberta_buck.sim.experiment import spec
 from alberta_buck.sim.gauge import active_reserves, buck_usd6
-from alberta_buck.sim.net_household import (HouseholdRefinance, assess_refinance, assess_remainder, assess_surplus, assess_wallet,
-                                            observe_refinance_forecasts)
+from alberta_buck.sim.net_household import (ExitPlan, HouseholdRefinance, SurplusPlan, WalletPlan, _basket_ops, _exportable,
+                                            assess_investment, assess_investor, assess_refinance, assess_remainder,
+                                            assess_surplus, assess_wallet, observe_refinance_forecasts)
 from alberta_buck.sim.household_calendar import HouseholdCalendar
-from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted
+from buck_core import ReductionPlan, TransactionReceiptPending, TransactionReverted, observe_net_market
 from buck_core.session import _txhex, custom_error_name
 
 # The basket's price guard, by name or (as a bare revert reports it) by selector: keccak("Slippage()").
@@ -36,8 +37,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self._next_decision     = self.arrive_day + p["phase"]
         self._net_refinance_day = None                  # at most one fresh assessment/resumption per bank day
         self._net_surplus_day   = None
+        self._net_invest_day    = None                  # at most one credit-investment assessment per day
         self._net_credit_reserve = 0                    # lasting BUCK issuance front; outlives each operation
         self._net_funding       = None                  # (block, day, forecasts) -> the credit dollar front read there
+        self._trading_ready     = False                 # the main account's market approvals, made on first act
         self._next_wallet       = self._next_pay        # working money is tended once after each payday
         self._wallet_ready      = False
         self.wallet_sold        = 0
@@ -91,6 +94,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self.exit_retries       = 0
         self.exit_short         = False
         self.exited             = False
+        self._exit_wait_day     = None                  # the day a refused or empty exit step last waited
+        self._exit_trade_day    = None                  # the day of the last capped market bite: one a day
+        self.released_coverage  = 0                     # face coverage burn(0) released at exit
+        self.released_refund    = 0                     # and the premium deposit it refunded
         self.withdrawn_usd      = 0
         self.refusals           = 0
         self._receipt_book      = {}                    # receipt -> (principal, shares), taken off at exit
@@ -509,8 +516,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 self.calendar_machine.prepare(d, day)
             if self._recover_pending_operations(d, ctr, day, continue_after_calendar=True):
                 return True
-            if self._divest_day is not None and day >= self._divest_day or self.investor and day >= self._exit_day:
-                raise NotImplementedError("canonical household asset exits are not yet integrated")
+            if self.exit_due(day):
+                return False                            # a leaving household's work belongs to advance_net_exit
             m = self.refinance_machine
             if m.settlement_due:
                 self.last_action = "settlement-due"
@@ -544,6 +551,350 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         finally:
             self._net_dispatching = False
 
+    def assess_net_investor(self, d, day):
+        return assess_investor(self, d, day)
+
+    def advance_net_investor(self, d, day, ctr):
+        """Existing owner dispatcher: a cash investor's decision on its keyed cadence.
+
+        PRE: normal keeper/control work, current integer day and prepared
+        trading. POST: recover earlier evidence and recurring income first; a
+        known refused deposit is retried alone; then at most one decision a
+        day: buy BUCK with spare dollars and hold them, or, when they are
+        dear, deposit what is held in the basket. Its withdrawal at the
+        horizon belongs to advance_net_exit.
+        """
+        if type(day) is not int or not 0 <= day < 2**53 or getattr(d, "buck_accounting", "") != "net":
+            raise ValueError("investor decision needs canonical accounting and an integer day")
+        if not self.investor:
+            raise ValueError("investor decision requires a cash investor")
+        if day < self.arrive_day or self.exited:
+            return False
+        if self._net_dispatching:
+            raise ValueError("household dispatcher is already running")
+        self._net_dispatching = True
+        try:
+            if not self.calendar_machine.bound:
+                self.calendar_machine.prepare(d, day)
+            if self._recover_pending_operations(d, ctr, day, continue_after_calendar=True):
+                return True
+            m = self.refinance_machine
+            if self.exit_due(day):
+                return False
+            if self._net_surplus_day == day or day < self._next_decision and not m.surplus_due:
+                return False
+            self._net_surplus_day = day
+            if day >= self._next_decision:
+                period = self.p["decision_days"]
+                self._next_decision += ((day - self._next_decision) // period + 1) * period
+            self.last_error = ""
+            try:
+                if m.surplus_due:
+                    return self.resume_net_surplus(d, day, ctr)
+                assessed = self.assess_net_investor(d, day)
+                if assessed["plan"] is None:
+                    self.last_action = "investor-wait"
+                    m.decisions += 1
+                    m._event(d, day, "declined", kind="investor", phase="assessment", context=assessed["context"],
+                             reason=assessed["context"]["reason"], market=m._market(d))
+                    return True
+                return self.start_net_surplus(d, assessed["plan"], day, ctr, context=assessed["context"])
+            except Exception as exc:
+                self.last_action, self.last_error = "investor-unavailable", str(exc)[:200]
+                ctr["household_err"] = self.last_error
+                m._event(d, day, "unavailable", kind="investor", phase="assessment", reason=self.last_error)
+                return True
+            finally:
+                self.last_surplus = self.last_action
+        finally:
+            self._net_dispatching = False
+
+    def exit_due(self, day):
+        """Whether this household's keyed leaving day has come: its asset sale, or an investor's horizon."""
+        due = self._exit_day if self.investor else self._divest_day
+        return due is not None and day >= due
+
+    def advance_net_exit(self, d, day, ctr):
+        """Existing owner dispatcher: a leaving household's staged, resumable unwinding.
+
+        PRE: normal keeper/control work, current integer day and prepared
+        trading. POST: recover earlier evidence, calendar and buybacks first;
+        then at most ONE step, chosen from what the chain and books show now:
+        sell the insured asset (its price pays arrears and the whole
+        mortgage), sell the working balance, redeem each basket receipt,
+        retire the whole lien with owned BUCK and then with bought BUCK a
+        capped bite at a time, release coverage no principal needs, sell the
+        BUCK left, and leave. An investor only redeems, sells and leaves.
+        A refused or empty step waits for the next day; an unknown outcome
+        stops everything until reconciled. Returns True while work remains.
+        """
+        if type(day) is not int or not 0 <= day < 2**53 or getattr(d, "buck_accounting", "") != "net":
+            raise ValueError("household exit needs canonical accounting and an integer day")
+        if day < self.arrive_day or self.exited or not self.exit_due(day):
+            return False
+        if self._net_dispatching:
+            raise ValueError("household dispatcher is already running")
+        self._net_dispatching = True
+        try:
+            if not self.calendar_machine.bound:
+                self.calendar_machine.prepare(d, day)
+            if self._recover_pending_operations(d, ctr, day, continue_after_calendar=True):
+                return True
+            self.last_error     = ""
+            try:
+                return self._exit_step(d, day, ctr)
+            except Exception as exc:
+                self.last_action, self.last_error = "exit-unavailable", f"{self.exit_stage}: {exc}"[:200]
+                ctr["household_err"] = self.last_error
+                self._exit_wait_day = day
+                self.refinance_machine._event(d, day, "unavailable", kind="exit", phase=self.exit_stage or "exit",
+                                              reason=self.last_error)
+                return False
+        finally:
+            self._net_dispatching = False
+
+    def _exit_step(self, d, day, ctr):
+        m, cal              = self.refinance_machine, self.calendar_machine
+        if self.exit_started is None:
+            self.exit_started = day
+            self.funding_pending = False
+            self.cash_buffer = 0                        # a leaving household protects no dollar buffer
+            m.decisions    += 1
+            m._event(d, day, "started", kind="exit", phase="exit",
+                     reason="investor horizon" if self.investor else "insured asset sale", market=m._market(d))
+        if m.settlement_due or m.surplus_due:
+            # A known refused remainder's intent ended with the household's stay; its cash is simply owned.
+            m.abandon(d, day, "household is leaving; the unfinished remainder is not resumed")
+        if self._net_repayment_target is not None or self._net_repayment_reserve is not None:
+            return self._resume_net_repayment(d, ctr)
+        waited              = self._exit_wait_day == day
+        traded              = self._exit_trade_day == day  # one capped market bite a day, as any household
+        block               = d.w3.eth.block_number
+        read                = lambda fn: fn.call(block_identifier=block)
+        cash                = read(d.usdc.functions.balanceOf(self.address))
+        market              = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
+        impact              = int(self.max_impact_bp * 50)
+        buck_cap, cash_cap  = market.reserve_buck * impact // 10**6, market.reserve_usdc * impact // 10**6
+        def wait(stage, reason):
+            # A step that cannot run today is not a failure: record it once, try again tomorrow.
+            self.exit_stage, self.last_action = stage, "exit-wait"
+            if not waited:
+                self._exit_wait_day = day
+                self.exit_retries += 1
+                m._event(d, day, "waiting", kind="exit", phase=stage, reason=str(reason)[:200])
+            return False
+        def pace(stage):
+            # Today's market bite is taken; the next is tomorrow's. The normal pace, not a retry.
+            self.exit_stage, self.last_action = stage, "exit-pace"
+            return False
+        if not self.investor:
+            if not self._sold:
+                self.exit_stage = "sell-asset"
+                cal.schedule_sale(d, day)
+                ctr["hhDivestments"] = ctr.get("hhDivestments", 0) + 1
+                cal.advance(d, day, ctr)
+                return True
+            if cash and cal.schedule_settlement(d, day):
+                self.exit_stage = "settle-mortgage"
+                cal.advance(d, day, ctr)
+                return True
+        if self._wallet is not None:
+            held            = read(d.buck.functions.balanceOf(self._wallet.address))
+            bite            = min(_exportable(held, 0), buck_cap)
+            minimum         = market.sell_expected(bite) * 9950 // 10_000
+            if bite >= PARITY and minimum >= PARITY:
+                if waited or traded:
+                    return pace("collect-savings")
+                self.exit_stage = "collect-savings"
+                self._ensure_wallet(d)
+                m.start_wallet(d, WalletPlan("sell", self._wallet.address, 0, 0, held, sell_buck=bite, minimum_usdc=minimum),
+                               day, ctr, context=dict(reason="exit"))
+                return self._exit_sent(day, market=True)
+        if self._basket_receipts:
+            self.exit_stage = "collect-savings"
+            if waited:
+                return pace("collect-savings")
+            rid             = self._basket_receipts[0]
+            shares          = self._receipt_book[rid][1]
+            found, why      = None, "no BUCK-paying exit"
+            for part in (1, 2, 4, 8):                   # the whole receipt, else a smaller bite the basket can pay
+                amount      = shares // part
+                if not amount:
+                    break
+                try:
+                    quote   = _basket_ops(d).preview_redemption(self.address, rid, amount)
+                except Exception as exc:
+                    why     = exc
+                    continue
+                if quote["paid"] >= PARITY:
+                    found   = ExitPlan("redeem", position_id=rid, shares=amount, minimum_buck=quote["paid"] * 9950 // 10_000)
+                    break
+            if found is None:
+                return wait("collect-savings", f"basket exit unavailable: {why}")
+            m.start_exit(d, found, day, ctr, context=dict(reason="exit"))
+            return self._exit_sent(day)
+        book                = d.net_credit_ops.household(self.address, self._token_ids, block_number=block) if self._token_ids else None
+        held                = read(d.buck.functions.balanceOf(self.address))
+        if book is not None and book.issued:
+            self.exit_stage = "repay-lien"
+            if held > 1:
+                if waited:
+                    return pace("repay-lien")
+                # Every owned BUCK above one raw unit goes to the lien; the engine keeps its own evidence.
+                self._net_repayment_reserve, self._net_repayment_target = 1, book.issued
+                before      = self.unwound
+                self._resume_net_repayment(d, ctr)
+                if self.unwound == before and not self._pending_repayment(d):
+                    self._net_repayment_reserve = self._net_repayment_target = None
+                    self._net_repayment_interrupted = False
+                    return wait("repay-lien", self.last_error or "nothing could be retired today")
+                return True
+            cost            = market.buy_cost(book.issued)
+            spend           = min(cash, cash_cap, cash_cap if cost is None else (cost * 10_050 + 9_999) // 10_000)
+            minimum         = market.buy_expected(spend) * 9950 // 10_000 if spend else 0
+            if spend < PARITY or minimum < PARITY:
+                if not self.exit_short:
+                    ctr["hhDivestShort"] = ctr.get("hhDivestShort", 0) + 1
+                self.exit_short = True                  # insolvency is not a completed exit
+                return wait("cash-shortfall", "no dollars left to buy back the remaining lien")
+            if waited or traded:
+                return pace("repay-lien")
+            self.start_net_surplus(d, SurplusPlan("retire", 0, held, spend, minimum, book.issued), day, ctr,
+                                   context=dict(reason="exit"))
+            return self._exit_sent(day, market=True)
+        if book is not None and not self._released:
+            self.exit_stage = "release-coverage"
+            covered         = tuple(f.token_id for f in book.facilities if f.activated)
+            if not covered:
+                self._released = True
+            elif waited:
+                return pace("release-coverage")
+            else:
+                m.start_exit(d, ExitPlan("release", token_ids=covered), day, ctr, context=dict(reason="exit"))
+                if not m.active and m.flow["status"] == "complete":
+                    left    = d.net_credit_ops.household(self.address, self._token_ids)
+                    self._released = not any(f.activated for f in left.facilities)
+                    if not self._released:
+                        return wait("release-coverage", "a facility's pool cannot refund its deposit yet")
+                return self._exit_sent(day)
+        bite                = min(_exportable(held, 0), buck_cap)
+        minimum             = market.sell_expected(bite) * 9950 // 10_000
+        if bite >= PARITY and minimum >= PARITY:
+            self.exit_stage = "sell-owned-buck"
+            if waited or traded:
+                return pace("sell-owned-buck")
+            m.start_exit(d, ExitPlan("sell", sell_buck=bite, minimum_usdc=minimum), day, ctr, context=dict(reason="exit"))
+            return self._exit_sent(day, market=True)
+        for i, token in enumerate(d.tokens):            # TOKEN an in-kind basket exit paid: a capped bite a day
+            amount          = d.chain.balance_of(token, self.address)
+            if amount:
+                ru, rt      = active_reserves(d.chain, d.pool_usdc[i], d.usdc, token)
+                if amount * ru // rt <= PARITY:
+                    continue                            # at most one dollar's dust per constituent
+                self.exit_stage = "sell-tokens"
+                if waited or traded:
+                    return pace("sell-tokens")
+                self._swap_via_simlp(d, d.pool_usdc[i], token, min(amount, max(1, _impact_cap(rt, self.max_impact_bp))),
+                                     self.address)
+                self.withdrawn_usd += d.chain.balance_of(d.usdc, self.address) - cash
+                return self._exit_sent(day, market=True)
+        self.exited, self.exit_stage, self.last_action = True, "complete", "exit"
+        key                 = "invExits" if self.investor else "hhDivested"
+        ctr[key]            = ctr.get(key, 0) + 1
+        m._event(d, day, "complete", kind="exit", phase="complete", outcome="exited",
+                 amounts=dict(withdrawn_usdc=self.withdrawn_usd, released_coverage=self.released_coverage,
+                              premium_refund_nominal=self.released_refund, retired_principal=self.unwound))
+        return True
+
+    def _exit_sent(self, day, *, market=False):
+        """After one exit transaction: a market bite is the day's only one; a proved refusal waits too."""
+        m                   = self.refinance_machine
+        if market:
+            self._exit_trade_day = day
+        if not m.active and m.flow is not None and m.flow["status"] == "refused":
+            self._exit_wait_day = day                   # retried tomorrow, never today
+            self.exit_retries += 1
+        return True
+
+    def assess_net_investment(self, d, day, **forecasts):
+        """Read one mortgage-free household's quoted credit investment; observed forecasts by default."""
+        keys = ("expected_relief_rate", "expected_refund_growth", "expected_wallet_growth")
+        explicit = any(key in forecasts for key in keys)
+        if explicit and not all(key in forecasts for key in keys):
+            raise ValueError("explicit household forecasts must include all three annual rates")
+        observed = None if explicit else observe_refinance_forecasts(d)
+        result = assess_investment(self, d, day, **((observed["values"] if observed else {}) | forecasts))
+        if observed:
+            if result["context"]["block"] != observed["observation"]["block_number"]:
+                raise ValueError("household forecast block changed")
+            result["context"]["forecasts"].update(source=observed["observation"], basis=observed["basis"])
+        return result
+
+    def start_net_investment(self, d, plan, day, ctr, *, context=None):
+        self._prepare_net_refinance(d, day)
+        return self.refinance_machine.start_investment(d, plan, day, ctr, context=context)
+
+    def advance_net_investment(self, d, day, ctr, *, forecasts=None):
+        """Existing owner dispatcher: a mortgage-free household's credit investment.
+
+        PRE: normal keeper/control work, current integer day and prepared
+        trading. POST: recover earlier evidence, calendar and buybacks first;
+        a known refused deposit is retried alone before any new credit; then
+        at most one fresh assessment on the household's keyed decision cadence.
+        A debtor is served by refinancing until its mortgage is paid. A
+        declined or refused attempt waits for the next decision day.
+        """
+        if type(day) is not int or not 0 <= day < 2**53 or getattr(d, "buck_accounting", "") != "net":
+            raise ValueError("household investment needs canonical accounting and an integer day")
+        if self.investor:
+            raise ValueError("credit investment requires an insured household")
+        if day < self.arrive_day or self.exited:
+            return False
+        if self._net_dispatching:
+            raise ValueError("household dispatcher is already running")
+        self._net_dispatching = True
+        try:
+            if not self.calendar_machine.bound:
+                self.calendar_machine.prepare(d, day)
+            if self._recover_pending_operations(d, ctr, day, continue_after_calendar=True):
+                return True
+            if self.exit_due(day):
+                return False                            # a leaving household's work belongs to advance_net_exit
+            m = self.refinance_machine
+            if self.mortgage or m.settlement_due:
+                return False
+            if self._net_invest_day == day or day < self._next_decision and not m.surplus_due:
+                return False
+            self._net_invest_day = day
+            due = day >= self._next_decision
+            if due:
+                period = self.p["decision_days"]
+                self._next_decision += ((day - self._next_decision) // period + 1) * period
+            self.last_error = ""
+            try:
+                if m.surplus_due:
+                    # The issued or saved BUCK is deposited before any new credit is drawn.
+                    self._prepare_net_refinance(d, day)
+                    return m.resume_surplus(d, day, ctr)
+                assessed = self.assess_net_investment(d, day, **(forecasts or {}))
+                self._last_verdict = assessed["context"].get("selected")
+                if assessed["plan"] is None:
+                    self.last_action = "invest-hold"
+                    m.decisions += 1
+                    m._event(d, day, "declined", kind="invest", phase="assessment", context=assessed["context"],
+                             reason=assessed["context"]["reason"], market=m._market(d))
+                    return True
+                return self.start_net_investment(d, assessed["plan"], day, ctr, context=assessed["context"])
+            except Exception as exc:
+                self.last_action, self.last_error = "invest-unavailable", str(exc)[:200]
+                ctr["household_err"] = self.last_error
+                m._event(d, day, "unavailable", kind="invest", phase="assessment", reason=self.last_error)
+                return True
+            finally:
+                self.last_issue = self.last_action
+        finally:
+            self._net_dispatching = False
+
     def advance_net_refinancing(self, d, day, ctr, *, forecasts=None):
         """Automatic debtor component; normal saving/exits remain gated.
 
@@ -570,8 +921,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 self.calendar_machine.prepare(d, day)
             if self._recover_pending_operations(d, ctr, day, continue_after_calendar=True):
                 return True
-            if self._divest_day is not None and day >= self._divest_day:
-                raise NotImplementedError("canonical household asset exits are not yet integrated")
+            if self.exit_due(day):
+                return False                            # a leaving household's work belongs to advance_net_exit
             machine = self.refinance_machine
             if self._net_refinance_day == day:
                 return False
@@ -1491,12 +1842,90 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             self._deposit_bucks(d, ctr, proxy=self._savings_proxy, prefix="bcd")
         self.last_action        = "save"
 
+    ACT_TURNS                   = 6                     # known progress a day; an unknown outcome stops at once
+
+    def _ensure_trading(self, d):
+        """The main account's one-time approvals for guarded purchases and routed sales."""
+        if self._trading_ready:
+            return
+        for contract, method, args in ((d.usdc, "approve", [d.swap_guard.address, 2**256 - 1]),
+                                       (d.buck, "approve", [d.permit2.address, 2**256 - 1]),
+                                       (d.permit2, "approve", [d.buck.address, d.router.address, 2**160 - 1, 2**48 - 1])):
+            self._proxy_exec(d, contract.address, contract.encode_abi(method, args=args))
+        self._trading_ready     = True
+
+    def _net_uncertain(self):
+        """An outcome that must be reconciled before this household sends anything more."""
+        m, cal                  = self.refinance_machine, self.calendar_machine
+        return bool(self._net_trade_uncertain or self._net_cancel_uncertain or self._net_pending_token is not None or
+                    m.flow is not None and m.flow["status"] == "pending" or
+                    cal.flow is not None and cal.flow["status"] == "pending")
+
+    def _act_net(self, d, day, ctr):
+        """One day of a canonical household, on the one owner dispatcher and receipt cursor.
+
+        Order: the calendar's bills; then a leaving household's exit, which
+        preempts the rest; otherwise a known refused deposit before any new
+        credit, the day's credit decision (a debtor's refinancing, a
+        mortgage-free household's credit investment, or the investor's own
+        choice), the working balance after a payday, and surplus. Each
+        dispatcher recovers earlier evidence first and makes at most one fresh
+        decision a day. Known multi-step progress then gets a small bounded
+        number of turns; an unknown outcome stops everything at once. A day
+        with nothing due costs one clock read.
+        """
+        m, cal                  = self.refinance_machine, self.calendar_machine
+        cal.prepare(d, day)                             # bind on arrival; accrue; schedule a payday's bills
+        if (not cal.active and not m.active and not m.settlement_due and not m.surplus_due and
+                self._net_repayment_target is None and self._net_repayment_reserve is None and
+                not self._net_trade_uncertain and not self._net_cancel_uncertain and self._net_pending_token is None and
+                not self._net_repayment_interrupted and not self.exit_due(day) and
+                day < min(self._next_decision, self._next_surplus, self._next_wallet)):
+            return
+        try:
+            self._ensure_trading(d)
+            if self.exit_due(day):
+                for _ in range(self.ACT_TURNS):
+                    if not self.advance_net_exit(d, day, ctr) or self._net_uncertain():
+                        break
+                return
+            if self.investor:
+                steps           = [self.advance_net_investor]
+            else:
+                credit          = (self.advance_net_refinancing if self.p["role"] == "debtor" and
+                                   (self.mortgage or m.settlement_due) else self.advance_net_investment)
+                # Issued or saved BUCK still waiting for a refused deposit goes in before any new credit.
+                steps           = ([self.advance_net_surplus] if m.surplus_due else []) + [
+                                   credit, self.advance_net_wallet, self.advance_net_surplus]
+            for step in steps:
+                step(d, day, ctr)
+                if self._net_uncertain():
+                    return
+            for _ in range(self.ACT_TURNS):
+                if not (m.active or cal.active or self._net_repayment_target is not None) or self._net_uncertain():
+                    break
+                if not self._recover_pending_operations(d, ctr, day, continue_after_calendar=True):
+                    break
+        except NotImplementedError:
+            raise                                       # a migration gate is fatal to the run
+        except Exception as exc:
+            # Each component saved its own evidence before sending; an unexpected fault here is recorded
+            # and counted (a campaign fails on any), and this household tries again tomorrow.
+            self._net_dispatching = False
+            self.last_action, self.last_error = "act-unavailable", f"{type(exc).__name__}: {exc}"[:200]
+            ctr["household_err"] = self.last_error
+            ctr["household_faults"] = ctr.get("household_faults", 0) + 1
+            m._event(d, day, "unavailable", kind="act", phase="dispatch", reason=self.last_error)
+
     def act(self, d, scenario, day, tick, ctr):
         if tick or day < self.arrive_day or self.exited:
             return
         if self._recover_pending_operations(d, ctr, day):
             return
         if getattr(d, "buck_accounting", "") == "net":
+            # _act_net above is the dispatcher that replaces this gate. It is not wired yet: the
+            # JavaScript mirror of credit investment, exits and the investor is unwritten, and ten
+            # existing tests still drive recovery through act (the plan's Start here, steps A and B).
             raise NotImplementedError("canonical household decisions await issuance and exit migration")
         if not self._started:
             cash                = int(self.p["invest_cash_k" if self.investor else "cash_k"] * 1000 * PARITY)

@@ -1936,8 +1936,9 @@ def test_automatic_debtor_prioritizes_calendar_and_remainders_before_fresh_credi
     assert step(b, 21, explicit=True) and b.refis == 1 and b._next_decision == 22, b.last_error
     at(22)
     b._divest_day = 22
-    with pytest.raises(NotImplementedError, match="asset exits"):
-        step(b, 22)
+    owed = principal(b)
+    assert not step(b, 22) and principal(b) == owed, "a leaving household's work belongs to its exit dispatcher"
+    b._divest_day = None
 
     at(30)
     issued = principal(a)

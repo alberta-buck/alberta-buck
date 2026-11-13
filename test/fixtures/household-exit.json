@@ -1,0 +1,59 @@
+{
+ "schema": 1,
+ "money": "raw integer strings, six decimals; settings in the household profile's own units",
+ "about": "A leaving household: its insured asset is sold (the price pays arrears and the whole mortgage), its working balance and basket receipts come home, its whole lien is retired with owned and then bought BUCK, coverage no principal needs is released, the BUCK left are sold a capped bite a day, and it leaves. An investor only redeems, sells and leaves. Read by the Python and JavaScript suites.",
+ "forecasts": {
+  "expected_relief_rate": 0.02,
+  "expected_refund_growth": -0.02,
+  "expected_wallet_growth": -0.02
+ },
+ "saver": {
+  "about": "a carry line invested for two days, a working balance bought on the first payday, then the sale on day three",
+  "settings": {
+   "pay_day": 1, "home_k": 1000, "premium_bp": 50, "apr": 0.06, "cash_k": 40, "buffer_k": 10, "decision_days": 1,
+   "theta": 3, "risk": 0, "switch_k": 2, "max_impact_bp": 100, "utilization": 0.8, "divest_rate": 0,
+   "carry_utilization": 0.3, "issue_premium": 0.01, "surplus_policy": "basket",
+   "income_frac": 0.12, "living_frac": 0.5, "money_months": 1, "adopt_start": 0.5, "adopt_years": 1
+  },
+  "exit_day": 3,
+  "last_day": 14,
+  "stages": ["sell-asset", "collect-savings", "repay-lien", "sell-owned-buck", "complete"]
+ },
+ "debtor": {
+  "about": "one refinance tranche, then the sale: the price pays the whole mortgage; the lien is bought back a bite a day",
+  "settings": {
+   "pay_day": 0, "home_k": 1000, "premium_bp": 50, "apr": 0.06, "ltv": 0.4, "theta": 3, "risk": 0, "switch_k": 2,
+   "max_impact_bp": 100, "utilization": 0.8, "renew_frac": 0, "divest_rate": 0, "cash_k": 40, "decision_days": 1,
+   "money_months": 0, "surplus_policy": "discount"
+  },
+  "exit_day": 2,
+  "last_day": 14
+ },
+ "investor": {
+  "about": "dollars become BUCK held as money; once the BUCK is dear they are converted to basket shares; all is withdrawn at the horizon",
+  "settings": {"pay_day": 0, "invest_cash_k": 30, "invest_income_k": 12, "hold_years": 10, "max_impact_bp": 100,
+               "decision_days": 1, "issue_premium": 0.01, "money_months": 0},
+  "token_pool_share": 20,
+  "exit_day": 2,
+  "last_day": 16
+ },
+ "release": {
+  "about": "coverage activated with no premium and nothing drawn: only burn(0) can release it",
+  "settings": {"pay_day": 0, "home_k": 1000, "premium_bp": 0, "cash_k": 40, "buffer_k": 10, "decision_days": 1,
+               "divest_rate": 0, "credit_invest": false, "money_months": 0, "surplus_policy": "discount"},
+  "coverage": "250000000000"
+ },
+ "flow": {
+  "about": "one real exit per case, as the saver above; refused = the same send with one bound made unreachable",
+  "refuse_argument": {"redeemShares": 2, "burn": 0},
+  "cases": [
+   {"name": "lost redemption reply is booked once", "lost": "redeem"},
+   {"name": "unknown redemption stays stopped", "unknown": "redeem"},
+   {"name": "refused redemption waits for tomorrow", "refused": "redeem"},
+   {"name": "closed exit door waits and is counted once a day", "preview": "refused"},
+   {"name": "lost sale reply is applied once", "lost": "sell"},
+   {"name": "unknown sale stays stopped", "unknown": "sell"},
+   {"name": "no dollars left is a shortfall, not an exit", "shortfall": true}
+  ]
+ }
+}

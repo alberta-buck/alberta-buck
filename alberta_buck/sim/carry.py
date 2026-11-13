@@ -417,6 +417,25 @@ def staged_refinance(t: RefiTerms, tranche, programme):
     return refinance_quoted(replace(t, fixed_cost=allocated), **tranche), whole
 
 
+def staged_investment(t: RefiTerms, tranche, programme):
+    """Admit one bounded bite of a credit-investment line against the whole line, quoted now.
+
+    Both mappings use investment_quoted inputs. The programme must cover this
+    bite and pass with the full closing cost; that cost is then allocated by
+    dollars for the bite's score only. The actual closing payment remains the
+    full fixed cost. No future credit, price or relief improvement is added.
+    Returns the marginal bite verdict and the whole-programme verdict.
+    """
+    whole = investment_quoted(t, **programme)
+    first = investment_quoted(t, **tranche)  # Validate all quoted inputs before allocation.
+    dimensions = ("usd", "new_spendable", "present_coverage", "premium")
+    if (not whole.go or t.fixed_cost <= 0 or any(tranche[key] > programme[key] for key in dimensions) or
+            tranche.get("external_premium_saving", 0) > programme.get("external_premium_saving", 0)):
+        return NO, whole
+    allocated = t.fixed_cost * first.usd / whole.usd
+    return investment_quoted(replace(t, fixed_cost=allocated), **tranche), whole
+
+
 # Sizes tried, as fractions of the most the household can retire.  The
 # value is concave in size (carry is linear, slippage convex, fixed costs
 # fixed), so a coarse grid finds the best size without a solver.

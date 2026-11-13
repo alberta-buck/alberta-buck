@@ -405,6 +405,17 @@ def investor_action(spot, basket_usd, fee, premium):
     return "convert" if spot * (1 - fee) > basket_usd * (1 + premium) else "buy"
 
 
+def net_investor_action(bvib_wad, fee_ppm, premium):
+    """investor_action on canonical money, in integers: fair value is the basket's BUCK price times the
+    SAME dollar pool's spot, so that pool's price cancels and the BUCK is dear when
+    (1 - fee) > BVIB x (1 + premium). The premium is taken in parts per billion."""
+    if (type(bvib_wad) is not int or type(fee_ppm) is not int or bvib_wad < 0 or not 0 <= fee_ppm < 10**6 or
+            type(premium) not in (int, float) or not math.isfinite(premium) or not 0 <= premium < 10):
+        raise ValueError("invalid investor market inputs")
+    dear                        = (10**6 - fee_ppm) * 10**18 * 10**9 > bvib_wad * 10**6 * (10**9 + int(premium * 10**9))
+    return "convert" if dear else "buy"
+
+
 def surplus_action(policy, spot, basket_usd, fee, discount, premium):
     if policy == "adaptive":
         return "retire" if spot / (1 - fee) < basket_usd else "invest"
@@ -470,6 +481,19 @@ def investment_want(state, p):
     if keep > 0 and discount(ru / rb, state["basket_usd"], fee) <= 0:
         return max(0., min(t.capacity, keep, rb * p["max_impact_bp"] / 20_000) * .999), "carry"
     return 0., "hold"
+
+
+def investment_programme(state, p):
+    """The whole line a mortgage-free household means to keep invested, in whole units.
+
+    investment_want is one decision's bounded bite of it. On the carry line the programme is all the
+    remaining room up to carry_utilization at today's K; a premium is a passing market state, so its
+    programme is only the bite itself. Used to allocate the one-time closing cost across the bites."""
+    buck, why                   = investment_want(state, p)
+    if why != "carry":
+        return buck
+    keep                        = state["face"] * state["k"] * p["carry_utilization"] - state["drawn"]
+    return max(buck, min(terms(state, p, investment=True).capacity, keep) * .999)
 
 
 def issuance(state, p):
