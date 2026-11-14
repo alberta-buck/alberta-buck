@@ -3903,18 +3903,29 @@ cause, and whether anyone else has an EVM that runs entirely in a browser.
 |---+---------+-------------|
 | 69 | the sandbox on webevm (the controller gate and the page in Chromium) | The whole sandbox story runs in 7 s in Node and the page test in 11 s, and the page carries 1 MB less JavaScript. The in-browser world is no longer the thing that limits what a visitor can do. |
 | 70 | five years of the JS world (=build/test/eqsim-5y.svg=) | K holds at 0.75 for about 200 days, then falls in a straight line to 0 by about day 1600, while BVIB stays 0 to 2% above 1 throughout: the controller's integral keeps lowering K and the basket observable never comes back to 1. When K reaches 0, BVIB jumps to 1.16 and BUCK/USD falls to 0.93 and stays there. The debtor ends ahead of its counterfactual. The same wind-down the Python household economy shows in a year (K 0.75 to 0.45, observation 68), in a world with one debtor. |
+| 72 | five years of the JS world, each actor removed in turn (=eqsim.mjs --without=; =build/test/k5y-*.log=) | K reaches 0 within five years whether the debtor, the saver, both, or the arbitrageur is removed: with no households at all, K goes 0.75, 0.64, 0.45, 0.21, 0 at years 1 to 4 and 5. The wind-down is the machine's own (basket, wheel, PID and the commodity price walk), not the households'. |
+| 73 | the same, without the commodity price walk (=--step 0=, or no whales to impose it) | BVIB hovers about 1 (0.994 to 1.010) and K ends the fifth year at 0.58 instead of 0: the walk drives most of the wind-down. What remains still accelerates (K falls 0.01, 0.02, 0.05 and 0.09 a year), so there is a second, slower cause. |
 | 71 | the wheel's ticks over the five years | Per-slot gas is flat for four years (peaks 10.2M), then from day 1443, as K nears 0.15, ticks need up to 13.9M: the keeper's 12M limit is crossed only in the collapse regime. |
 
 **** Recommendations
 
-76. /K's wind-down is the five-year question./ Both worlds, Python with 150
-    households and JS with one debtor, lower K steadily while BVIB stays a
-    little above 1, and the JS world reaches K = 0 in about four and a half
-    years. Recommendation 68 (does K bound the basket's held BUCK?) and 69
-    (decompose who holds BVIB above 1) are the questions to settle before a
-    five-year campaign is a measurement of the design rather than of this
-    drift; a small JS world now runs five years in about three minutes, so
-    candidate answers can be tried quickly before the Python campaign.
+76. /K's wind-down is the five-year question; it is the controller and the
+    walk./ Observations 72 and 73 locate it: with no households at all, a
+    commodity walk keeps BVIB 0.5 to 2% above 1 and the integral lowers K
+    about 0.2 a year until it reaches 0. BVIB is the basket's quantities at
+    each TOKEN/BUCK pool's TWAP, and arbitrage closes a gap only to the pools'
+    fees, so a trend can hold BUCK at one edge of that band; nothing in the
+    machine-only world responds to K, so the integral has no lever. The
+    owner's choices are in the controller and the observable (a dead band as
+    wide as the arbitrage band, a bounded or leaking integral, measuring BVIB
+    where a trend cannot bias it) or in giving K a lever (recommendation 68).
+    The slower residual without the walk (observation 73) is a separate
+    question for after that. The Python household economy winds down the
+    same way (K 0.75 to 0.45 in a year), so until this is settled a
+    five-year campaign measures this drift rather than the design. A small JS
+    world runs five years in about three minutes (=eqsim.mjs --days 1825
+    --tick-gas 29000000 --without debtor,saver=), so a candidate controller
+    can be tried in minutes before the Python campaign.
 77. /Give the keeper the block, not 12M./ A wheel tick near K = 0 needs 13.9M
     gas; a keeper on a real chain would estimate and pay up to the block limit.
     Raise the simulated keeper's default (or estimate per tick) once 76 is
