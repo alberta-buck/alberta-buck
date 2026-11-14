@@ -3686,8 +3686,8 @@ decisions on exits, relief and the reserve"), implemented tests first.
   =doc/BASKET-MACHINE-TASKS.org= (the in-kind question answered),
   =alberta-buck-ethereum-wheel.org=.
 - [X] /Qualified in the simulations./ =make nix-sim-build= and the JS bundle;
-  the twenty-file Python set (313 passed); the JS policy units and the Tevm
-  files (85 of 85); a 30-day economy world, identical to the pre-change one;
+  the twenty-file Python set (313 passed); the JS policy units (85 of 85)
+  and the Tevm files (132 of 132); a 30-day economy world, identical to the pre-change one;
   a 45-day world with half the investors leaving on day 20.
 - [X] /The one-year world./ =build/sim/exits-365.json= (run record
   =build/runs/exits-365=) against =economy-smoke-365=: observation 68.
@@ -3701,8 +3701,8 @@ decisions on exits, relief and the reserve"), implemented tests first.
   (=build/test/c7-nixtest.log=); =make nix-contracts-dist-check= passes (its
   lint warnings are the existing style set; the library's new casts carry
   their safety notes). Then, on the same revision: the Python set 313 passed
-  (=build/test/q11-python.log=), the JS policy units and Tevm files 85 of 85
-  (=q11-policy.log=, =q11-actual.log=); the 30-day economy world identical to
+  (=build/test/q11-python.log=), the JS policy units 85 of 85 and the Tevm
+  files 132 of 132 (=q11-policy.log=, =q11-actual.log=); the 30-day economy world identical to
   the one before the change (no household exits in 30 days); a 45-day
   withdrawal world (=economy.toml= plus =set_population exit_now=0.5= on day
   20, =build/test/economy-exit-check.toml=): 15 exits completed, 14
@@ -3884,7 +3884,8 @@ cause, and whether anyone else has an EVM that runs entirely in a browser.
   the real page in Chromium included (certify, register, introduce, trade,
   pay, reload); screenshots of all four tabs on webevm; the eq demo's shipped
   bundle passes headless on webevm. The qualified Tevm set
-  (=make nix-core-equilibrium-bootstrap-test=) 85 of 85 on this tree, so the
+  (=make nix-core-equilibrium-bootstrap-test=): the policy units 85 of 85 and
+  the Tevm files 132 of 132 on this tree (66 minutes, sharing the machine), so the
   dependency bump and the dev-keys move changed nothing there. Failing before
   and after, unchanged: the buckworld demo controller and its bundle
   (an ABI argument-count mismatch: the old demo predates the current
