@@ -47,7 +47,8 @@ const { values: a } = parseArgs({ options: {
   journal: { type: "string", default: "" },
   profile: { type: "string", default: "" },       // write a per-method / per-function timing table here
   prune:   { type: "boolean", default: false },
-  "tick-gas": { type: "string", default: "" },    // the wheel keeper's gas per tick (default 12M)    // drop Tevm's old state roots and trim the system rings daily
+  "tick-gas": { type: "string", default: "" },    // the wheel keeper's gas per tick (default 12M)
+  without: { type: "string", default: "" },      // drop cast members: debtor,saver,arb,whales,wheel,pid    // drop Tevm's old state roots and trim the system rings daily
 } });
 const days = Number(a.days);
 
@@ -79,17 +80,20 @@ const debtor = new CreditHouseholdAgent({ account: debtorAcct, seed: Number(a.se
 } });
 
 const arb = new ParityArb();
+// --without drops members of the cast, to see which of them a result depends on.
+const without = new Set(a.without.split(",").map((x) => x.trim()).filter(Boolean));
+for (const w of without) if (!["debtor", "saver", "arb", "whales", "wheel", "pid"].includes(w)) throw new Error(`--without ${w}?`);
 const agents = [
   new DayClock(),
-  ...world.tokens.map((t, i) => new PinWhale({
+  ...(without.has("whales") ? [] : world.tokens.map((t, i) => new PinWhale({
     simlp: world.simlp, pool: t.poolUsdc, token: t.erc20.address,
     tokenDec: t.dec, quote: world.usdc.address,
-    refPrice: (d) => world.feeds[i][d % world.feeds[i].length] })),
-  arb,
-  new WheelKeeper({ arb }),        // turns the basket machine's wheel; the arb follows it
-  new PidKeeper(),
-  saver,
-  debtor,
+    refPrice: (d) => world.feeds[i][d % world.feeds[i].length] }))),
+  ...(without.has("arb") ? [] : [arb]),
+  ...(without.has("wheel") ? [] : [new WheelKeeper({ arb: without.has("arb") ? null : arb })]),   // turns the wheel; the arb follows it
+  ...(without.has("pid") ? [] : [new PidKeeper()]),
+  ...(without.has("saver") ? [] : [saver]),
+  ...(without.has("debtor") ? [] : [debtor]),
 ];
 
 // Profile (doc/reports/tevm-memory.org, "CPU"): time every request by method and function, and
@@ -111,6 +115,10 @@ console.log(JSON.stringify({
   days, ms, mismatches: session.mismatches.length,
   K: Number(last.K) / 1e18, bvib: Number(last.bvib) / 1e18,
   buckUsd: f6(last.spotUB),
+  // K, BVIB and BUCK/USD at the start of each simulated year and at the end.
+  yearly: S.filter((r, i) => r.day % 365 === 0 || i === S.length - 1).map((r) => ({
+    day: r.day, K: +(Number(r.K) / 1e18).toFixed(4), bvib: +(Number(r.bvib) / 1e18).toFixed(4),
+    buckUsd: +f6(r.spotUB).toFixed(4) })),
   saver: { events: saver.ledger.filter((r) => r.event !== "mark").length,
            profitUsd: f6(saver.profitUsd),
            roiAnnualPct: saver.dollarDays > 0n

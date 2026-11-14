@@ -77,6 +77,26 @@ def test_recorder_writes_a_growing_run_that_reads_like_a_finished_one(tmp_path):
     assert retry.dir.name == "cell" and (tmp_path / "cell-earlier-1" / "manifest.json").exists()
 
 
+def test_an_events_accounts_are_written_only_when_they_change(tmp_path):
+    """Recommendation 57: an event repeats its household's account snapshot most of the time; the
+    record writes it once and a reader carries it forward."""
+    rec = runrecord.RunRecorder(tmp_path, run_id="accounts").open()
+    a = dict(buck="10", issued="5")
+    b = dict(buck="12", issued="5")
+    ev = lambda seq, member, accounts: dict(agent="H#1", member=member, seq=seq, kind="act", accounts=accounts)
+    rec.frame(dict(day=0, household_events=[ev(1, "0/debtor/0", a), ev(2, "0/debtor/0", a), ev(1, "0/saver/0", a)]))
+    rec.frame(dict(day=1, household_events=[ev(3, "0/debtor/0", a), ev(4, "0/debtor/0", b), ev(2, "0/saver/0", b)]))
+    rec.close()
+    events, _ = runrecord.read_lines(rec.dir / "events.jsonl")
+    assert [e.get("accounts") for e in events] == [a, None, a, None, b, b], "per household, only on change"
+    assert all({"agent", "member", "seq", "kind", "day"} <= set(e) for e in events)
+    carried, last = [], {}
+    for e in events:                                   # what a reader reconstructs
+        last[e["member"]] = e.get("accounts", last.get(e["member"]))
+        carried.append(last[e["member"]])
+    assert carried == [a, a, a, a, b, b]
+
+
 def test_import_vector_replaces_only_its_own_view(tmp_path):
     vector = tmp_path / "eq-world.json"
     vector.write_text(json.dumps(dict(tokens=FIXTURE["tokens"], frames=FIXTURE["flat"], meta=dict(

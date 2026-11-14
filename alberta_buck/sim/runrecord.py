@@ -10,7 +10,9 @@ holds:
   manifest.json       what ran: schema, id, name, kind, engine, status, revision, scenario, tokens,
                       contracts, cast, units, files, capabilities, outputs; rewritten atomically
   frames.jsonl        one line per recorded day, grouped by ecosystem component (frame_record)
-  events.jsonl        every household state-machine step (seq, member, kind, phase, status, reason...)
+  events.jsonl        every household state-machine step (seq, member, kind, phase, status, reason...);
+                      an event's =accounts= snapshot is written only when it differs from that household's
+                      previous one (a reader carries the last one forward)
   agents.jsonl        one compact line per household per day (books, holdings, action, error)
   interventions.jsonl every shock or setting change applied, with its day and outcome
 
@@ -193,6 +195,7 @@ class RunRecorder:
         self.manifest: dict     = {}
         self._applied           = 0
         self._handles: dict     = {}
+        self._accounts: dict    = {}        # each household's last written =accounts= snapshot
         self.days               = 0
 
     # --- writing ------------------------------------------------------------------------------- #
@@ -269,7 +272,7 @@ class RunRecorder:
         """Record one captured day: its frame, its events and marks, and interventions applied since."""
         self._append("frames", [frame_record(flat, self.manifest.get("tokens") or [])])
         day = flat["day"]
-        self._append("events", [_jsonable({"day": day, **e}) for e in flat.get("household_events") or []])
+        self._append("events", [self._event(day, e) for e in flat.get("household_events") or []])
         self._append("agents", agent_records(flat))
         new = list(applied)[self._applied:]
         self._applied += len(new)
@@ -278,6 +281,20 @@ class RunRecorder:
         self.days += 1
         if self.days % MANIFEST_EVERY == 0:
             self._write_manifest()
+
+    def _event(self, day, e: dict) -> dict:
+        """One event line. Its =accounts= snapshot (63% of an event log's bytes, most of them repeating
+        the household's previous event) is dropped when it equals the last one written for the same
+        household, so a reader carries the last one forward."""
+        row = _jsonable({"day": day, **e})
+        accounts = row.get("accounts")
+        if accounts is not None:
+            key = (row.get("agent"), row.get("member"))
+            if self._accounts.get(key) == accounts:
+                del row["accounts"]
+            else:
+                self._accounts[key] = accounts
+        return row
 
     def intervene(self, day, kind, args=None, *, source="operator", ok=True, note="", replay=True):
         """An action made outside the scenario's engine (a person steering a live session: pause,
