@@ -47,7 +47,7 @@ export async function webevmSession({ accountIndex = 0, journal = null, engine =
     DEV_KEYS.map((k) => [privateKeyToAccount(k).address, DEV_BALANCE]));
   const node = await createNode({ chainId: WEBEVM_CHAIN_ID, miningConfig: { type: "auto" }, initialBalances,
                                   ...(eng ? { engine: eng } : {}), ...nodeOptions });
-  await node.request({ method: "evm_setBlockTimestampInterval", params: [1] });
+  await node.request({ method: "anvil_setBlockTimestampInterval", params: [1] });
   const client = createWalletClient({ transport: custom(node) }).extend(publicActions);
   const session = new Session(client, { account: devAccount(accountIndex), journal });
   session.webevm = node;

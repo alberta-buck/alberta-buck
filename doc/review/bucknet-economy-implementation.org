@@ -3849,6 +3849,17 @@ cause, and whether anyone else has an EVM that runs entirely in a browser.
 
 - [X] /The fork pushed./ =pjkundert/webevm=, branch =feature/block-clock-cheats=
   (3869c21), ready for a pull request upstream.
+- [X] /Upstream./ The branch reworked to the reference nodes' API before
+  offering it: anvil's names and wire shapes (=evm_setNextBlockTimestamp= ->
+  null, =evm_increaseTime= -> the total offset as a number, =evm_mine= with
+  anvil's and ganache's forms -> "0x0", =anvil_mine= / =hardhat_mine=,
+  =anvil_setBlockTimestampInterval= / =anvil_removeBlockTimestampInterval=),
+  checked with viem's own =createTestClient= in anvil, hardhat and ganache
+  modes; squashed to one commit (07507d2) and offered as
+  https://github.com/wighawag/webevm/pull/23. Re-vendored as
+  =webevm-0.9.1-clock-07507d2.tgz=; =src/webevm.js= sets its one-second
+  interval with =anvil_setBlockTimestampInterval=; the sandbox gates 15 of 15
+  and the 30-day eqsim world unchanged.
 - [X] /The dependency./ =core/js/vendor/webevm-0.9.1-clock-3869c21.tgz= (329 kB,
   =npm pack= of the fork's build), pinned by =core/js/package.json= as a
   =file:= dependency; =core/js/vendor/README.md= says how to refresh it. It
