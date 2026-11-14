@@ -721,3 +721,25 @@ def test_net_wallet_takes_one_capped_bite_toward_its_money_target():
         assert policy.net_wallet_target(ratio, c["days"], float(t["annual_spending"]), t["settings"]) == int(c["target"]), c["name"]
     with pytest.raises(ValueError, match="ratio"):
         policy.net_wallet_target(1.0, 30, 60000., t["settings"])
+
+
+def test_the_lifecycle_works_retires_and_draws_down():
+    """age 40 at arrival day 100: works until 65, draws down over 25 years, a month of what is left
+    each payday, all of it in the last month; outside the lifecycle (age 0) nothing changes."""
+    p = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"age": 40.})
+    assert (p["retire_age"], p["drawdown_years"], p["usd_fund_share"], p["usd_fund_return"]) == (65., 25., 0., .08)
+    year = hp.YEAR_DAYS
+    assert hp.age_on(p, 100, 100) == 40 and hp.age_on(p, 100, 100 + int(10 * year)) == pytest.approx(50, abs=.01)
+    assert hp.stage(p, 100, 100) == "working" and hp.drawdown_share(p, 100, 100) == 0
+    retired = 100 + int(25 * year) + 1
+    assert hp.stage(p, 100, retired) == "retired"
+    assert hp.drawdown_share(p, 100, retired) == pytest.approx(30 / (25 * year), rel=1e-3)
+    assert hp.drawdown_share(p, 100, 100 + int(50 * year) - 10) == 1
+    assert hp.stage(p, 100, 100 + int(50 * year) + 1) == "done"
+    off = hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"])
+    assert hp.age_on(off, 0, 1000) is None and hp.stage(off, 0, 1000) is None and hp.drawdown_share(off, 0, 1000) == 0
+    assert hp.fund_growth(.08, hp.YEAR_DAYS) == pytest.approx(1.08) and hp.fund_growth(.08, 0) == 1
+    for bad in ({"retire_age": 0.}, {"drawdown_years": 0.}, {"usd_fund_share": 1.5}, {"usd_fund_return": -1.},
+                {"age": -1.}):
+        with pytest.raises(ValueError):
+            hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | bad)

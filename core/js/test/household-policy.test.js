@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { profile, issuance, terms, refinance, refinanceQuoted, bestQuotedRefinance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
+import { ageOn, stage, drawdownShare, fundGrowth, YEAR_DAYS, profile, issuance, terms, refinance, refinanceQuoted, bestQuotedRefinance, surplusAction, investorAction, population, arrivalState, arrivalsStep, premium, saving,
   externalPremiumDue, stagedRefinance, ROLES } from "../src/agents/household-policy.js";
 import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 import { observeRefinanceForecasts } from "../src/agents/net-household.js";
@@ -336,4 +336,26 @@ test("a fixed premium cost makes small loans proportionally dearer (as in Python
   assert.equal(profile(f.seed, "0", f.settings).premium_bp,
     profile(f.seed, "0", { ...f.settings, premium_fixed_usd: 0 }).premium_bp);
   assert.throws(() => profile(f.seed, "0", { ...f.settings, premium_fixed_usd: -1 }), /premium_fixed_usd/);
+});
+
+test("the lifecycle works, retires and draws down (as in Python)", () => {
+  const p = profile(f.seed, "0", { ...f.settings, age: 40 });
+  assert.deepEqual([p.retire_age, p.drawdown_years, p.usd_fund_share, p.usd_fund_return], [65, 25, 0, .08]);
+  assert.equal(ageOn(p, 100, 100), 40);
+  assert.ok(Math.abs(ageOn(p, 100, 100 + Math.trunc(10 * YEAR_DAYS)) - 50) < .01);
+  assert.equal(stage(p, 100, 100), "working");
+  assert.equal(drawdownShare(p, 100, 100), 0);
+  const retired = 100 + Math.trunc(25 * YEAR_DAYS) + 1;
+  assert.equal(stage(p, 100, retired), "retired");
+  assert.ok(Math.abs(drawdownShare(p, 100, retired) / (30 / (25 * YEAR_DAYS)) - 1) < 1e-3);
+  assert.equal(drawdownShare(p, 100, 100 + Math.trunc(50 * YEAR_DAYS) - 10), 1);
+  assert.equal(stage(p, 100, 100 + Math.trunc(50 * YEAR_DAYS) + 1), "done");
+  const off = profile(f.seed, "0", f.settings);
+  assert.equal(ageOn(off, 0, 1000), null);
+  assert.equal(stage(off, 0, 1000), null);
+  assert.equal(drawdownShare(off, 0, 1000), 0);
+  assert.ok(Math.abs(fundGrowth(.08, YEAR_DAYS) - 1.08) < 1e-12);
+  for (const bad of [{ retire_age: 0 }, { drawdown_years: 0 }, { usd_fund_share: 1.5 }, { usd_fund_return: -1 }, { age: -1 }]) {
+    assert.throws(() => profile(f.seed, "0", { ...f.settings, ...bad }));
+  }
 });

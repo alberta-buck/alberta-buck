@@ -43,7 +43,12 @@ DEFAULTS                        = dict(
     # spending in a wallet apart from its lien, topped up each payday. s ramps from adopt_start to 1
     # over adopt_years from its arrival. While the BUCK is cheap it holds more, by
     # 1 + money_gain x discount (at most money_cap); above its target it sells the excess.
-    money_months=1., adopt_start=.1, adopt_years=1., money_gain=200., money_cap=8.)
+    money_months=1., adopt_start=.1, adopt_years=1., money_gain=200., money_cap=8.,
+    # The lifecycle (the owner's direction, 2026-11-14): a household of this age (years, at arrival) works
+    # and saves until retire_age, then draws its savings down as income over drawdown_years, then leaves.
+    # 0 (the default) keeps the household outside the lifecycle, as before. A share usd_fund_share of
+    # what it saves goes to an external USD fund returning usd_fund_return a year, the rest to the basket.
+    age=0., retire_age=65., drawdown_years=25., usd_fund_share=0., usd_fund_return=.08)
 POLICIES                        = ("adaptive", "basket", "retire", "discount")
 ROLES                           = ("debtor", "saver", "investor")
 SUPPLY                          = ("debtor", "saver")   # drawn while the BUCK is dear; investors while it is cheap
@@ -117,13 +122,18 @@ def profile(seed, member, overrides=None):
     for key in ("home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
                 "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
                 "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double",
-                "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap", "premium_fixed_usd"):
+                "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap", "premium_fixed_usd",
+                "age", "retire_age", "drawdown_years", "usd_fund_share"):
         if not math.isfinite(result[key]) or result[key] < 0:
             raise ValueError(f"invalid household parameter: {key}")
     if result["home_k"] <= 0 or result["max_impact_bp"] > 10000 or result["renew_frac"] > 1:
         raise ValueError("invalid household size, impact or renewal fraction")
     if result["hold_years"] <= 0:
         raise ValueError("an investor's hold_years must be positive")
+    if result["retire_age"] <= 0 or result["drawdown_years"] <= 0 or result["usd_fund_share"] > 1:
+        raise ValueError("invalid lifecycle: retire_age and drawdown_years positive, usd_fund_share at most 1")
+    if not math.isfinite(result["usd_fund_return"]) or result["usd_fund_return"] <= -1:
+        raise ValueError("invalid lifecycle: usd_fund_return must exceed -1")
     if result["paydown_double"] <= 0:
         raise ValueError("paydown_double must be positive")
     if result["adopt_start"] > 1 or result["adopt_years"] <= 0 or result["money_cap"] < 1:
@@ -425,6 +435,46 @@ def divest_day(seed, member, arrive_day, rate):
     if rate <= 0:
         return None
     return arrive_day + int(-math.log(1 - uniform(seed, member, "divest")) * 365.25 / rate)
+
+
+YEAR_DAYS                       = 365.25
+MONTH_DAYS                      = 30
+
+
+def age_on(p, arrive_day, day):
+    """A lifecycle household's age in years on a simulated day; None outside the lifecycle (age 0)."""
+    if p["age"] <= 0:
+        return None
+    return p["age"] + (day - arrive_day) / YEAR_DAYS
+
+
+def stage(p, arrive_day, day):
+    """"working" before retire_age, "retired" while drawing down, "done" after drawdown_years; None
+    outside the lifecycle."""
+    a                           = age_on(p, arrive_day, day)
+    if a is None:
+        return None
+    if a < p["retire_age"]:
+        return "working"
+    return "retired" if a < p["retire_age"] + p["drawdown_years"] else "done"
+
+
+def drawdown_share(p, arrive_day, day):
+    """The share of its remaining savings a retired household draws on a payday: one month of the time
+    it has left (a level income in real terms of its savings), all of it in its last month; 0 while it
+    works or outside the lifecycle."""
+    a                           = age_on(p, arrive_day, day)
+    if a is None or a < p["retire_age"]:
+        return 0.
+    days_left                   = (p["retire_age"] + p["drawdown_years"] - a) * YEAR_DAYS
+    return 1. if days_left <= MONTH_DAYS else MONTH_DAYS / days_left
+
+
+def fund_growth(rate, days):
+    """What a dollar in the external USD fund is worth after `days` at `rate` a year, compounded."""
+    if not math.isfinite(rate) or rate <= -1 or days < 0:
+        raise ValueError("invalid fund growth")
+    return (1 + rate) ** (days / YEAR_DAYS)
 
 
 def investor_action(spot, basket_usd, fee, premium):

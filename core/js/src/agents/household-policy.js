@@ -6,6 +6,10 @@ export const DEFAULTS = {
   // A fixed yearly cost per insured asset, in dollars, on top of the premium rate: premium_bp +
   // premium_fixed_usd / value, so a small loan's premium is proportionally higher. 0: the rate alone.
   premium_fixed_usd: 0,
+  // The lifecycle: a household of this age (years, at arrival) works and saves until retire_age, then
+  // draws its savings down over drawdown_years, then leaves; 0 keeps it outside the lifecycle. A share
+  // usd_fund_share of its saving goes to an external USD fund returning usd_fund_return a year.
+  age: 0, retire_age: 65, drawdown_years: 25, usd_fund_share: 0, usd_fund_return: .08,
   risk: [0, .01], switch_k: [1, 3], penalty_months: 3, term_months: 60, renew_frac: [0, 1],
   retire_disc: [.005, .03], issue_premium: [.005, .025], utilization: [.65, .85],
   buffer_k: 10, max_impact_bp: [25, 100], decision_days: [5, 20], surplus_policy: "adaptive",
@@ -186,7 +190,8 @@ export function profile(seed, member, overrides = {}) {
   for (const key of ["home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
     "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
     "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double",
-    "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap", "premium_fixed_usd"]) {
+    "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap", "premium_fixed_usd",
+    "age", "retire_age", "drawdown_years", "usd_fund_share"]) {
     if (!Number.isFinite(p[key]) || p[key] < 0) throw new Error(`invalid household parameter: ${key}`);
   }
   if (p.home_k <= 0 || p.max_impact_bp > 10000 || p.renew_frac > 1) throw new Error("invalid household size, impact or renewal fraction");
@@ -214,6 +219,12 @@ export function profile(seed, member, overrides = {}) {
   p.phase = Math.trunc(uniform(seed, member, "phase") * p.decision_days);
   p.term_months = Math.max(1, Math.trunc(p.term_months));
   p.renew_in = Math.trunc(p.renew_frac * p.term_months);
+  if (!(p.retire_age > 0) || !(p.drawdown_years > 0) || p.usd_fund_share > 1) {
+    throw new Error("invalid lifecycle: retire_age and drawdown_years positive, usd_fund_share at most 1");
+  }
+  if (!Number.isFinite(p.usd_fund_return) || p.usd_fund_return <= -1) {
+    throw new Error("invalid lifecycle: usd_fund_return must exceed -1");
+  }
   p.premium_bp = Math.trunc(p.premium_bp + p.premium_fixed_usd * 10000 / (p.home_k * 1000));
   return p;
 }
@@ -345,6 +356,36 @@ export const divestDay = (seed, member, arriveDay, rate) => rate <= 0 ? null
 // An investor holds BUCKs as its money: it buys them, unless they are dear by more than its premium
 // after the fee; then it converts what it holds into basket shares (household_policy.investor_action).
 export const investorAction = (spot, basket, fee, premium) => spot * (1 - fee) > basket * (1 + premium) ? "convert" : "buy";
+
+export const YEAR_DAYS = 365.25, MONTH_DAYS = 30;
+
+/** A lifecycle household's age in years on a simulated day; null outside the lifecycle (age 0). */
+export function ageOn(p, arriveDay, day) {
+  return p.age > 0 ? p.age + (day - arriveDay) / YEAR_DAYS : null;
+}
+
+/** "working" before retire_age, "retired" while drawing down, "done" after; null outside the lifecycle. */
+export function stage(p, arriveDay, day) {
+  const a = ageOn(p, arriveDay, day);
+  if (a === null) return null;
+  if (a < p.retire_age) return "working";
+  return a < p.retire_age + p.drawdown_years ? "retired" : "done";
+}
+
+/** The share of its remaining savings a retired household draws on a payday: one month of the time it
+ *  has left, all of it in its last month; 0 while it works or outside the lifecycle. */
+export function drawdownShare(p, arriveDay, day) {
+  const a = ageOn(p, arriveDay, day);
+  if (a === null || a < p.retire_age) return 0;
+  const daysLeft = (p.retire_age + p.drawdown_years - a) * YEAR_DAYS;
+  return daysLeft <= MONTH_DAYS ? 1 : MONTH_DAYS / daysLeft;
+}
+
+/** What a dollar in the external USD fund is worth after `days` at `rate` a year, compounded. */
+export function fundGrowth(rate, days) {
+  if (!Number.isFinite(rate) || rate <= -1 || days < 0) throw new Error("invalid fund growth");
+  return (1 + rate) ** (days / YEAR_DAYS);
+}
 
 /** A cash investor's choice on canonical money (household_policy.net_investor_action): "invest" its
  * BUCK in the basket while BVIB (1e18 = 1) is at most 1 + tolerance; otherwise "wait", holding BUCK
