@@ -3689,10 +3689,10 @@ decisions on exits, relief and the reserve"), implemented tests first.
   the twenty-file Python set (313 passed); the JS policy units and the Tevm
   files (85 of 85); a 30-day economy world, identical to the pre-change one;
   a 45-day world with half the investors leaving on day 20.
-- [ ] /Still to do./ The one-year economy world compared with
-  =economy-smoke-365= (running: =build/sim/exits-365.json=); SDK wrappers for
-  =redeemInKind= (Python =basket.py=, JS =basket.js=) if any agent wants
-  them; then the contracts release.
+- [X] /The one-year world./ =build/sim/exits-365.json= (run record
+  =build/runs/exits-365=) against =economy-smoke-365=: observation 68.
+- [ ] /Still to do./ SDK wrappers for =redeemInKind= (Python =basket.py=, JS
+  =basket.js=) if any agent wants them; then the contracts release.
 
 *** Checkpoint
 
@@ -3717,6 +3717,7 @@ decisions on exits, relief and the reserve"), implemented tests first.
 | 61 | the centre year with the basket's retirement job on (=deploy.basket_retirement_cap_m=0.1=, =build/runs/economy-365-retire=) | Identical to the default year (K 0.4451, the same supply and holders): the job never ran. It retires only from cash above the liquidity target, and the wheel deploys every spare BUCK before any accumulates. |
 | 62 | the exit tests | Retiring principal through BUCK's settlement deactivates coverage in proportion, so the first implementation's retirement left the shortfall larger than before; re-activating the free backing in =retireCredit= fixed it, and the fuzz now pins the exact retirement: max(0, lien - K x (equity after paying) - before). |
 | 63 | the 45-day withdrawal world | Half the investors leaving at once completed every exit in BUCK (447k over 14 redemptions); none needed the in-kind path and none reverted. Their sales of TOKEN through the pools moved BUCK/USD down to 0.953 before the wheel and arbitrage pulled it back: the leavers' slippage is the remaining holders' gain, as the owner expected, but it is a visible price event. |
+| 68 | the one-year economy world on the new exits (=exits-365=) against =economy-smoke-365= | The two runs are the same event for event until day 33, when debtor 0 makes the year's first partial redemption: the old rules paid it 450 BUCK and four constituents in kind, the new 6,954 BUCK, so it paid principal down at once (28 repayment events in the year against 90) and the debtors' "repayment owner-funds" errors fell from 30 to 2 (all errors 101 to 78, faults 0 in both). The rest follows from that, through the arrivals the price gap draws: 140 households against 150 (125 investors against 135), supply +7.12M against +7.91M BUCK (basket lien +5.23M against +5.69M), K 0.4638 against 0.4451 at the end, BUCK/USD 1.107 against 1.109, BVIB above 1 on 97% of days in both. Debtors' net worth against their counterfactual ranges -18.8k to +4.5k dollars against -25.5k to +4.9k; savers' -0.4k to +7.8k against -0.7k to +8.4k. No household exited in either year, so the full-exit path itself is exercised only by the 45-day withdrawal world (observation 63). |
 
 **** Recommendations
 
