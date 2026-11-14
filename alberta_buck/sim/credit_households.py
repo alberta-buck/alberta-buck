@@ -2058,6 +2058,39 @@ class HouseholdInvestorAgent(CreditHouseholdAgent):
         super().setup(d, scenario, rng)
 
 
+# The decision settings an operator may change on a present household (the household_settings
+# intervention): each is read when the household decides, or mirrored on the agent below. Bounds:
+# (lo, hi) inclusive. Home, mortgage, income, role and payday are fixed at arrival.
+LIVE_SETTINGS                   = dict(utilization=(0., 1.), carry_utilization=(0., 1.), theta=(0., 50.),
+                                       risk=(0., .2), issue_premium=(0., .2), retire_disc=(0., .5),
+                                       bvib_tolerance=(0., .2), decision_days=(1., 365.),
+                                       money_months=(0., 24.), max_impact_bp=(0., 10000.))
+LIVE_MIRRORS                    = dict(theta="theta", max_impact_bp="max_impact_bp", surplus_policy="surplus_policy")
+
+
+def apply_live_settings(agent, settings: dict) -> str:
+    """Change a present household's decision settings, all or none. Returns what changed."""
+    checked                     = {}
+    for key, value in settings.items():
+        if key == "surplus_policy":
+            if value not in policy.POLICIES:
+                raise ValueError(f"surplus_policy must be one of {policy.POLICIES}")
+            checked[key]        = value
+            continue
+        if key not in LIVE_SETTINGS:
+            raise ValueError(f"{key} is not a live setting; live: {sorted([*LIVE_SETTINGS, 'surplus_policy'])}")
+        lo, hi                  = LIVE_SETTINGS[key]
+        v                       = float(value)
+        if not (math.isfinite(v) and lo <= v <= hi):
+            raise ValueError(f"{key} must be within [{lo:g}, {hi:g}]")
+        checked[key]            = v
+    for key, v in checked.items():
+        agent.p[key]            = v
+        if key in LIVE_MIRRORS:
+            setattr(agent, LIVE_MIRRORS[key], v)
+    return ", ".join(f"{k} {v:g}" if isinstance(v, float) else f"{k} {v}" for k, v in checked.items()) or "no change"
+
+
 ROLE_CLASSES                    = {"debtor": CreditHouseholdAgent, "saver": CreditSaverAgent,
                                    "investor": HouseholdInvestorAgent}
 
@@ -2157,6 +2190,28 @@ class HouseholdPopulationAgent(Agent):
         agents.append(agent)
         arbs.append(agent)
         self.members.append(agent)
+
+    def add_member(self, d, scenario, rng, agents, arbs, role, day, overrides=None):
+        """One household arrives now, by an operator's hand (the add_household intervention): the
+        population's settings with =overrides= over them, named <population>/<role>/op<k> so its keyed
+        draws never meet an arrival's. Returns its member name."""
+        if role not in policy.ROLES:
+            raise ValueError(f"role must be one of {policy.ROLES}")
+        unknown                 = set(overrides or {}) - set(policy.DEFAULTS) - {"role"}
+        if unknown:
+            raise ValueError(f"unknown household settings: {sorted(unknown)}")
+        if len(self.members) >= self.pop["max_members"]:
+            raise ValueError("household arrivals exceed max_members; raise the bound or lower the rates")
+        k                       = sum(1 for a in self.members if a.member.startswith(f"{self.population}/{role}/op"))
+        agent                   = ROLE_CLASSES[role](max(a.idx for a in agents) + 1)
+        agent.settings          = self.settings | dict(overrides or {}) | {"role": role}
+        agent.member            = f"{self.population}/{role}/op{k}"
+        agent.arrive_day        = day
+        agent.setup(d, scenario, rng)                   # draws and validates its settings; may refuse
+        agents.append(agent)
+        arbs.append(agent)
+        self.members.append(agent)
+        return agent.member
 
     def summary(self):
         s                       = self.state

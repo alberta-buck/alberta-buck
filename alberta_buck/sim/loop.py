@@ -165,6 +165,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
         if not isinstance(scenario.prices, PriceOverlay):
             scenario.prices = PriceOverlay(scenario.prices)
         iv = Interventions(exp, d, scenario, agents, arbs, ctr, rng)
+    d.interventions = iv            # a live session's operator applies its actions through it
 
     snap = Snapshotter(d, scenario)
     snap.meta["run"]             = {"completed": False, "days": scenario.days,
@@ -228,6 +229,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
             hook = getattr(a, "day_start", None)
             if hook is not None:
                 hook(d, scenario, day, ctr, agents, arbs, rng)
+        if iv is not None:
+            iv.apply_due(day, operator=True)    # a live session's exported actions, where it took them
         if on_day_start is not None:
             on_day_start(day, d, agents, ctr)
         # Current day + reference USD prices, for the agents' realized-return

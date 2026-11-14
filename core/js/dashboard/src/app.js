@@ -2,6 +2,8 @@
 // polled for the days it has added. Tabs other than the Overview are named but not yet built.
 
 import { HoverBus } from "./chart.js";
+import { ControlPanel, newSessionForm } from "./controls.js";
+import { LiveControl } from "./live.js";
 import { OverviewTab } from "./overview.js";
 import { runStatus } from "./series.js";
 import { HttpRunSource, listRuns } from "./sources.js";
@@ -15,6 +17,7 @@ const TABS = [
 const STATUS = {
   running: ["Running", "good"], complete: ["Complete", "neutral"], failed: ["Failed", "critical"],
   stale: ["Stale: not updated for 2 minutes", "warning"], incomplete: ["Incomplete", "warning"],
+  stopped: ["Stopped", "neutral"], reset: ["Reset: a new record follows", "neutral"], paused: ["Paused", "neutral"],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -23,9 +26,19 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* private window */ } },
 };
 
-const state = { source: null, manifest: null, frames: [], interventions: [], range: "all", timer: null, lastManifest: 0 };
+const state = { source: null, manifest: null, frames: [], interventions: [], range: "all", timer: null, lastManifest: 0,
+  control: null, session: null };
 const bus = new HoverBus();
 let overview = null;
+let panel = null;
+
+// A live session's own state outranks its record's age: a paused world writes nothing for a while.
+function effectiveStatus() {
+  const s = state.session;
+  if (state.control && s && !s.done) return s.paused ? "paused" : "running";
+  return runStatus(state.manifest);
+}
+const following = () => state.control ? !(state.session?.done) : runStatus(state.manifest) === "running";
 
 function theme(next) {
   const mode = next ?? store.get("dashboard-theme") ?? "auto";
@@ -49,7 +62,7 @@ function tabs() {
 }
 
 function showStatus() {
-  const s = runStatus(state.manifest);
+  const s = effectiveStatus();
   const [label, tone] = STATUS[s] ?? [s, "neutral"];
   const pill = $("status");
   pill.className = `status status-${tone}`;
@@ -57,7 +70,7 @@ function showStatus() {
   const dot = document.createElement("span");
   dot.className = "status-icon";
   dot.setAttribute("aria-hidden", "true");
-  dot.textContent = { good: "●", critical: "✖", warning: "⚠", neutral: "✓" }[tone];
+  dot.textContent = s === "paused" ? "‖" : { good: "●", critical: "✖", warning: "⚠", neutral: "✓" }[tone];
   pill.append(dot, document.createTextNode(` ${label}`));
   const m = state.manifest ?? {};
   const rev = m.revision ? `${m.revision.commit}${m.revision.dirty ? " (changed)" : ""}` : "revision not recorded";
@@ -84,28 +97,53 @@ async function poll() {
       showStatus();
     }
     if (src !== state.source) return;           // another run was chosen meanwhile
+    if (state.control) {
+      state.session = await state.control.status();
+      panel.refresh(state.session);
+      showStatus();
+      if (state.session.run && state.session.run !== src.id) {          // reset: a new record
+        await refreshRuns(state.session.run);
+        return open(state.session.run);
+      }
+      if (state.session.done) {
+        state.manifest = await src.manifest();
+        state.interventions = await src.interventions();
+        showStatus();
+      }
+    }
     if (fresh.length) {
       state.frames = state.frames.concat(fresh);
+      state.interventions = await src.interventions();   // a new day may have recorded actions
       render();
+      label();
     }
     $("problem").hidden = true;
   } catch (e) {
     $("problem").hidden = false;
     $("problem").textContent = `Could not read the run: ${e.message}`;
   }
-  if (src === state.source && runStatus(state.manifest) === "running") state.timer = setTimeout(poll, POLL_MS);
+  if (src === state.source && following()) state.timer = setTimeout(poll, POLL_MS);
 }
 
 async function open(id) {
   clearTimeout(state.timer);
   const src = new HttpRunSource(id);
-  Object.assign(state, { source: src, frames: [], interventions: [], lastManifest: Date.now() });
+  Object.assign(state, { source: src, frames: [], interventions: [], lastManifest: Date.now(), control: null, session: null });
+  $("run").value = id;
   const url = new URL(location.href);
   url.searchParams.set("run", id);
   history.replaceState(null, "", url);
   try {
     state.manifest = await src.manifest();
     state.interventions = await src.interventions();
+    const address = src.capabilities.control;
+    if (address) {
+      state.control = new LiveControl(address);
+      state.session = await state.control.status().catch(() => null);
+      if (state.session) panel.attach(state.control, state.manifest);
+      else state.control = null;                // the server that ran it is gone: a record only
+    }
+    if (!state.control) panel.detach();
     showStatus();
     state.frames = await src.frames(-1);
     render();
@@ -115,7 +153,45 @@ async function open(id) {
     $("problem").textContent = `Could not open ${id}: ${e.message}`;
     return;
   }
-  if (runStatus(state.manifest) === "running") state.timer = setTimeout(poll, POLL_MS);
+  if (following()) state.timer = setTimeout(poll, POLL_MS);
+}
+
+// The open run's entry in the picker follows its growth.
+function label() {
+  const o = [...$("run").options].find((x) => x.value === state.source?.id);
+  if (o) o.textContent = `${state.source.id} (${effectiveStatus()}, ${state.frames.length} days)`;
+}
+
+async function refreshRuns(select = null) {
+  const runs = await listRuns().catch(() => []);
+  const pick = $("run");
+  const current = select ?? pick.value;
+  pick.replaceChildren(...runs.map((r) => {
+    const o = document.createElement("option");
+    o.value = r.id;
+    o.textContent = `${r.id} (${runStatus(r)}, ${r.frames ?? 0} days)`;
+    return o;
+  }));
+  if (current && runs.some((r) => r.id === current)) pick.value = current;
+  return runs;
+}
+
+// A new session's record appears once its world is deployed (its first day begins): wait for
+// the session to name it, then open it.
+async function follow(started, tries = 240) {
+  const control = new LiveControl(`/api/sessions/${started.sid}`);
+  for (let i = 0; i < tries; i++) {
+    const s = await control.status().catch(() => null);
+    if (s?.error || s?.done) break;
+    if (s?.run) {
+      await refreshRuns(s.run);
+      return open(s.run);
+    }
+    await new Promise((ok) => setTimeout(ok, 1000));
+  }
+  const s = await control.status().catch(() => null);
+  $("problem").hidden = false;
+  $("problem").textContent = `${started.run} did not start: ${s?.error ?? "no first day within four minutes"}`;
 }
 
 async function main() {
@@ -125,6 +201,8 @@ async function main() {
     theme(order[(order.indexOf(store.get("dashboard-theme") ?? "auto") + 1) % order.length]);
   });
   tabs();
+  panel = new ControlPanel($("live"));
+  newSessionForm($("new-session"), (started) => follow(started));
   for (const b of document.querySelectorAll("#range button")) {
     b.addEventListener("click", () => {
       state.range = b.dataset.range;
@@ -132,18 +210,8 @@ async function main() {
       if (state.frames.length) render();
     });
   }
-  const runs = await listRuns().catch((e) => {
-    $("problem").hidden = false;
-    $("problem").textContent = `Could not list runs: ${e.message}`;
-    return [];
-  });
+  const runs = await refreshRuns();
   const pick = $("run");
-  for (const r of runs) {
-    const o = document.createElement("option");
-    o.value = r.id;
-    o.textContent = `${r.id} (${runStatus(r)}, ${r.frames ?? 0} days)`;
-    pick.append(o);
-  }
   pick.addEventListener("change", () => open(pick.value));
   const wanted = new URL(location.href).searchParams.get("run");
   const first = runs.find((r) => r.id === wanted) ?? runs[0];

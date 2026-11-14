@@ -68,6 +68,21 @@ Intervention actions (the four surfaces):
                    rates from today; external mortgage rates move for arrivals and
                    present debtors; incomes scale (for `days`, else for good); a
                    fraction of present investors withdraw now
+    add_household  {role="debtor"|"saver"|"investor", settings={...}}
+                   one household arrives now with these settings over the population's
+                   (a scalar pins a setting, [lo, hi] or {mean, sd, lo, hi} draws it);
+                   named <population>/<role>/op<k>
+    household_settings {member, settings={...}}
+                   change one present household's decision settings
+                   (credit_households.LIVE_SETTINGS); its home, mortgage, income and
+                   role are fixed at arrival
+    set_count      {cls, count}   the first `count` agents of a class are present
+                   from today, the rest leave (the session server's population op)
+    set_chain      {name="l1"|"l2"}   the work wheel's caller gas profile
+
+Operator actions in a live session (alberta_buck.sim.dashboard, server.py) are applied
+through apply_now on the day they are given, recorded with source "operator", and so
+replay from an exported experiment as scheduled interventions on the same day.
 """
 
 from __future__ import annotations
@@ -252,6 +267,47 @@ class Experiment:
             {"source": self.source, **self.cfg}, default=str))
 
 
+def _toml_key(k) -> str:
+    k = str(k)
+    return k if k and all(c.isalnum() or c in "_-" for c in k) else json.dumps(k)
+
+
+def _toml_value(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        if v != v or v in (float("inf"), float("-inf")):
+            raise ValueError("TOML has no finite form for this float")
+        return repr(v)
+    if isinstance(v, str):
+        return json.dumps(v)
+    if isinstance(v, (list, tuple)):
+        return "[" + ", ".join(_toml_value(x) for x in v if x is not None) + "]"
+    if isinstance(v, dict):
+        return "{" + ", ".join(f"{_toml_key(k)} = {_toml_value(x)}" for k, x in v.items() if x is not None) + "}"
+    raise TypeError(f"no TOML form for {type(v).__name__}")
+
+
+def to_toml(cfg: dict, prefix: tuple = ()) -> str:
+    """A resolved experiment as TOML that =load= reads back to the same config (None values,
+    which TOML cannot hold, are left out: =load= restores them from DEFAULTS)."""
+    is_array = lambda v: isinstance(v, list) and v and all(isinstance(x, dict) for x in v)
+    lines = [f"{_toml_key(k)} = {_toml_value(v)}" for k, v in cfg.items()
+             if v is not None and not isinstance(v, dict) and not is_array(v)]
+    for k, v in cfg.items():
+        if isinstance(v, dict):
+            body = to_toml(v, prefix + (k,))
+            lines += ["", "[" + ".".join(_toml_key(x) for x in prefix + (k,)) + "]"] + ([body] if body else [])
+    for k, v in cfg.items():
+        if is_array(v):
+            for item in v:
+                lines += ["", "[[" + ".".join(_toml_key(x) for x in prefix + (k,)) + "]]"]
+                lines += [f"{_toml_key(a)} = {_toml_value(b)}" for a, b in item.items() if b is not None]
+    return "\n".join(lines).strip("\n")
+
+
 def load(path: str | Path | None = None, sets: list[str] | None = None
          ) -> Experiment:
     cfg = {}
@@ -428,20 +484,35 @@ class Interventions:
 
     # -- application ------------------------------------------------------ #
 
-    def apply_due(self, day: int) -> None:
-        while self.pending and int(self.pending[0].get("day", 0)) <= day:
-            iv = self.pending.pop(0)
-            try:
-                note = self._apply(iv, day)
-                ok = True
-            except Exception as e:
-                note = f"FAILED: {e!r}"[:300]
-                ok = False
-            self.applied.append({**iv, "applied_day": day, "ok": ok,
-                                 "note": note})
-            self.ctr["ivEvents"] = self.ctr.get("ivEvents", 0) + 1
-            self.ctr["ivNote"] = note
-            print(f"[iv] day {day}: {iv.get('action')} -> {note}", flush=True)
+    def apply_due(self, day: int, operator: bool = False) -> None:
+        """Fire what is due by =day=, in file order. The loop calls this twice a day: first for the
+        scenario's interventions (before the morning's arrivals), then with operator=True for those
+        exported from a live session (source "operator"), at the point of the day where the live
+        operator acted (after the arrivals, before any agent trades), so a replay matches it."""
+        due = [iv for iv in self.pending if int(iv.get("day", 0)) <= day
+               and (iv.get("source") == "operator") == operator]
+        for iv in due:
+            self.pending.remove(iv)
+            self._run(iv, day)
+
+    def apply_now(self, iv: dict, day: int, source: str = "operator") -> dict:
+        """Apply one intervention at once (a live session's operator, between days) and record it
+        like a scheduled one, with its source and today's day, so an export replays it."""
+        return self._run({**iv, "day": day, "source": source}, day)
+
+    def _run(self, iv: dict, day: int) -> dict:
+        try:
+            note = self._apply(iv, day)
+            ok = True
+        except Exception as e:
+            note = f"FAILED: {e!r}"[:300]
+            ok = False
+        row = {**iv, "applied_day": day, "ok": ok, "note": note}
+        self.applied.append(row)
+        self.ctr["ivEvents"] = self.ctr.get("ivEvents", 0) + 1
+        self.ctr["ivNote"] = note
+        print(f"[iv] day {day}: {iv.get('action')} -> {note}", flush=True)
+        return row
 
     def _apply(self, iv: dict, day: int) -> str:
         act = iv["action"]
@@ -552,6 +623,36 @@ class Interventions:
             if not pops:
                 raise ValueError("set_population needs a HouseholdPopulationAgent in the cast")
             return "; ".join(p.disturb(iv, day) for p in pops)
+        if act == "add_household":
+            pops = self._of_class("HouseholdPopulationAgent")
+            if not pops:
+                raise ValueError("add_household needs a HouseholdPopulationAgent in the cast")
+            member = pops[0].add_member(d, self.scenario, self.rng, self.agents, self.arbs,
+                                        str(iv.get("role", "debtor")), day, dict(iv.get("settings") or {}))
+            return f"{member} arrived"
+        if act == "household_settings":
+            from alberta_buck.sim.credit_households import apply_live_settings
+            member = str(iv["member"])
+            found = [a for a in self.agents if getattr(a, "member", None) == member]
+            if not found:
+                raise ValueError(f"no household {member!r}")
+            return f"{member}: " + apply_live_settings(found[0], dict(iv.get("settings") or {}))
+        if act == "set_count":
+            pool = self._of_class(iv["cls"])
+            want = int(iv["count"])
+            for i, a in enumerate(pool):
+                if i < want:
+                    if not getattr(a, "_growth_arrived", False):
+                        a.arrive_day = day
+                    a.depart_day = None
+                else:
+                    a.depart_day = day
+            return f"{iv['cls']}: {min(want, len(pool))} of {len(pool)} present"
+        if act == "set_chain":
+            hit = [a for a in self.agents if hasattr(a, "set_chain")]
+            for a in hit:
+                a.set_chain(str(iv.get("name", "l2")))
+            return f"chain {iv.get('name', 'l2')} on {len(hit)} agents"
         if act == "remove_agents":
             sel = self._select(iv)
             mode = iv.get("mode", "wind_down")

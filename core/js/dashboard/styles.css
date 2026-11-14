@@ -164,3 +164,34 @@ button[aria-pressed="true"] { border-color: var(--text-secondary); font-weight: 
   .top { align-items: flex-start; }
   .tile-value { font-size: 18px; }
 }
+
+/* Live sessions: the new-session form, the control row and the action forms. */
+input, textarea {
+  font: inherit; color: var(--text-primary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; min-width: 0;
+}
+input:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+a.button {
+  display: inline-block; color: var(--text-primary); text-decoration: none; border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 10px;
+}
+a.button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.new-session-wrap { margin-bottom: 8px; }
+.new-session > summary, .live-actions summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; padding: 4px 0; }
+.new-session[open] > summary { color: var(--text-primary); font-weight: 600; }
+.new-session .live-form { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+
+.live { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.live-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.live-state { color: var(--text-secondary); font-size: 13px; margin-right: 4px; font-variant-numeric: tabular-nums; }
+.live-actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 4px 16px; margin-top: 8px; }
+.live-actions details[open] { grid-column: 1 / -1; }
+.live-result { margin: 8px 0 0; font-size: 13px; color: var(--text-secondary); min-height: 1.4em; }
+
+.live-form .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr)); gap: 8px 12px; margin: 6px 0 10px; align-items: end; }
+.field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-secondary); }
+.field small { color: var(--text-muted); }
+.field.check { flex-direction: row; align-items: center; gap: 6px; }
+.live-form button[type="submit"] { font-weight: 600; }

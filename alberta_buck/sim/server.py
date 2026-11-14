@@ -174,8 +174,17 @@ def _jsonable(o):
 class Session:
     """One world: its own pyrevm EVM, sim thread, controls, and fanout."""
 
-    def __init__(self, sid, exp_path, sets, basket_impl, loop, pace=0.0):
+    def __init__(self, sid, exp_path, sets, basket_impl, loop, pace=0.0, record_root=None, keep=False,
+                 control=None):
+        """record_root: write each world's run record there (runrecord); keep: never reap it for
+        want of watchers (a dashboard session, stopped by its operator); control: the control
+        address written into the record's capabilities."""
         self.sid = sid
+        self.record_root = record_root
+        self.keep = keep
+        self.control_url = control
+        self.recorder = None
+        self.records: list[str] = []            # this session's run records, oldest first
         self.controls: Queue = Queue()
         self.subscribers: set[asyncio.Queue] = set()
         self.chain_lock = threading.Lock()
@@ -201,7 +210,7 @@ class Session:
         self._rpc_ts = 0.0                      # the last frame or answer
         self._sv = None
         self.scenario = None
-        exp = expmod.load(exp_path, sets=sets)
+        exp = self.experiment = expmod.load(exp_path, sets=sets)
         self.scenario_factory = lambda: expmod.build(exp)
         self.basket_impl = basket_impl or exp.scenario.get("basket", "equity-machine")
         self.thread = threading.Thread(target=self._run, daemon=True,
@@ -215,12 +224,17 @@ class Session:
             while True:
                 try:
                     self._build_and_run()
+                    self._close_record("complete")
                     break
                 except ResetSession:
+                    self._close_record("reset")
                     self._restarting()
-        except StopSession:
-            print(f"[sim.server] session '{self.sid}' reaped (idle)")
+        except StopSession as e:
+            self._close_record("stopped", error=str(e) or None)
+            print(f"[sim.server] session '{self.sid}' {e or 'reaped (idle)'}")
         except Exception as e:
+            self.error = repr(e)[:500]
+            self._close_record("failed", error=repr(e))
             print(f"[sim.server] session '{self.sid}' died: {e!r}")
             self._fanout_threadsafe(json.dumps({"error": str(e)}))
         finally:
@@ -236,10 +250,17 @@ class Session:
             anvil = PyrevmAnvil()
             anvil.start()
             self.provider = anvil.w3.provider
+        if self.record_root is not None:
+            from alberta_buck.sim.runrecord import RunRecorder
+            n = len(self.records)
+            self.recorder = RunRecorder(self.record_root, f"live session {self.sid}",
+                                        run_id=f"live-{self.sid}" + (f"-r{n}" if n else ""),
+                                        kind="session", engine="pyrevm", live=self.control_url)
         try:
             summary = run(scenario, anvil, out_path=None, verbose=False,
                           basket_impl=self.basket_impl,
-                          on_day_start=self._on_day_start, on_frame=self._on_frame)
+                          on_day_start=self._on_day_start, on_frame=self._on_frame,
+                          recorder=self.recorder)
             if summary["pdf"]:
                 print(f"[sim.server] session '{self.sid}' wrote {summary['json']} and {summary['pdf']}")
         finally:
@@ -275,7 +296,9 @@ class Session:
 
     def _on_day_start(self, day, d, agents, ctr):
         self.day, self.d, self.agents = day, d, agents
-        if self.subscribers:
+        if self.recorder is not None and self.recorder.manifest and self.recorder.id not in self.records:
+            self.records.append(self.recorder.id)
+        if self.subscribers or self.keep:
             self._idle_since = time.monotonic()
         elif time.monotonic() - self._idle_since > IDLE_REAP_S:
             raise StopSession()
@@ -312,7 +335,7 @@ class Session:
         step begun here starts with THIS day: its first day is counted now,
         or "+1 day" would run two."""
         while self.paused:
-            if self.subscribers:
+            if self.subscribers or self.keep:
                 self._idle_since = time.monotonic()
             elif time.monotonic() - self._idle_since > IDLE_REAP_S:
                 raise StopSession()
@@ -338,27 +361,47 @@ class Session:
                 break
             self._apply(op, day, agents)
 
+    # Operator ops that change the world are interventions (experiment.Interventions), applied on
+    # the day given and recorded with source "operator", so an exported experiment replays them.
+    # The rest steer the session only (pace, pause, step) and are recorded as not replayed.
+    @staticmethod
+    def intervention(op) -> dict | None:
+        kind = op.get("op")
+        if kind == "population":
+            return {"action": "set_count", "cls": op.get("cls", ""), "count": int(op.get("count", 0))}
+        if kind == "knob":
+            return {"action": "set_knob", "cls": op.get("cls", ""), "knob": op.get("name", ""), "value": op["value"]}
+        if kind == "shock":
+            return {"action": "arm_shock", "side": op.get("side", "sell"), "usd": float(op.get("usd", 0)),
+                    "days": int(op.get("days", 1))}
+        if kind == "chain":
+            return {"action": "set_chain", "name": str(op.get("name", "l2"))}
+        if kind == "intervene":                 # any intervention action, as written in an experiment
+            iv = dict(op.get("intervention") or {})
+            if not iv.get("action"):
+                raise ValueError("an intervene op needs intervention.action")
+            return iv
+        return None
+
     def _apply(self, op, day, agents):
         kind = op.get("op")
+        self.ops_applied = getattr(self, "ops_applied", 0) + 1
+        iv = self.intervention(op)
+        if iv is not None:
+            engine = getattr(self.d, "interventions", None)
+            if engine is None:
+                raise ValueError("this world has no intervention engine")
+            row = engine.apply_now(iv, day)
+            self.last_result = {"op": kind, "ok": row["ok"], "note": row["note"], "day": day}
+            return
         if kind == "pace":
             self.pace = float(op.get("days_per_second", 0))
-        elif kind == "population":
-            cls, want = op.get("cls", ""), int(op.get("count", 0))
-            pool = [a for a in agents if type(a).__name__ == cls]
-            for i, a in enumerate(pool):
-                if i < want:
-                    if not getattr(a, "_growth_arrived", False):
-                        a.arrive_day = day
-                    a.depart_day = None
-                else:
-                    a.depart_day = day
-        elif kind == "knob":
-            cls, name = op.get("cls", ""), op.get("name", "")
-            for a in agents:
-                if type(a).__name__ == cls and hasattr(a, name):
-                    setattr(a, name, type(getattr(a, name))(op["value"]))
         elif kind == "reset":
+            self._steer(day, op)
             raise ResetSession()
+        elif kind == "stop":
+            self._steer(day, op)
+            raise StopSession("stopped by its operator")
         elif kind == "pause":
             self.paused = True
         elif kind == "resume":
@@ -366,16 +409,42 @@ class Session:
         elif kind == "step":
             self.step_left = max(1, int(op.get("days", 1)))
             self.paused = False
-        elif kind == "shock":
-            for a in agents:
-                if type(a).__name__ == "ShockAgent":
-                    a.arm(op.get("side", "sell"), float(op.get("usd", 0)),
-                          int(op.get("days", 1)))
-                    break
-        elif kind == "chain":
-            for a in agents:
-                if hasattr(a, "set_chain"):
-                    a.set_chain(str(op.get("name", "l2")))
+        else:
+            self.last_result = {"op": kind, "ok": False, "note": f"unknown op {kind!r}", "day": day}
+            return
+        self._steer(day, op)
+        self.last_result = {"op": kind, "ok": True, "note": "", "day": day}
+
+    def _steer(self, day, op):
+        if self.recorder is not None and self.recorder.manifest:
+            args = {k: v for k, v in op.items() if k != "op"}
+            self.recorder.intervene(day, op.get("op"), args, source="operator", replay=False)
+
+    def _close_record(self, status, error=None):
+        if self.recorder is not None and self.recorder.manifest and self.recorder.manifest.get("finished") is None:
+            self.recorder.close(status, error=error)
+
+    def experiment_toml(self) -> str:
+        """This world's experiment with the operator's successful actions added as interventions on
+        the days they were applied: =python -m alberta_buck.sim --experiment <it>= replays them."""
+        cfg = json.loads(json.dumps(self.experiment.cfg, default=str))
+        engine = getattr(self.d, "interventions", None)
+        done = [{k: v for k, v in row.items() if k not in ("applied_day", "ok", "note")}
+                for row in (engine.applied if engine is not None else []) if row.get("source") == "operator" and row["ok"]]
+        cfg["interventions"] = list(cfg.get("interventions") or []) + done
+        head = (f"# Exported from live session {self.sid} at day {self.day} "
+                f"({len(done)} operator actions as interventions).\n"
+                f"# Replay: python -m alberta_buck.sim --experiment <this file> --backend pyrevm --days <n>\n")
+        return head + expmod.to_toml(cfg) + "\n"
+
+    def members(self) -> list[dict]:
+        """The households present, with their live settings (credit_households.LIVE_SETTINGS)."""
+        from alberta_buck.sim.credit_households import LIVE_SETTINGS
+        keys = (*LIVE_SETTINGS, "surplus_policy")
+        return [{"member": a.member, "role": a.p.get("role"), "arrive_day": getattr(a, "arrive_day", None),
+                 "exited": bool(getattr(a, "exited", False)),
+                 "settings": {k: a.p[k] for k in keys if k in a.p}}
+                for a in list(self.agents or []) if getattr(a, "member", None) and hasattr(a, "p")]
 
     # The per-agent telemetry a browser client does not need.
     HEAVY = ("ag", "octl", "arb2", "lp", "mx")
@@ -568,7 +637,10 @@ class Session:
         chain = next((a.profile.name for a in (self.agents or [])
                       if hasattr(a, "set_chain") and getattr(a, "profile", None)), None)
         return {"day": self.day, "paused": self.paused, "pace": self.pace,
-                "step_left": self.step_left, "done": self.done, "chain": chain}
+                "step_left": self.step_left, "done": self.done, "chain": chain,
+                "run": self.records[-1] if self.records else None,
+                "last": getattr(self, "last_result", None), "error": getattr(self, "error", None),
+                "ops": getattr(self, "ops_applied", 0), "queued": self.controls.qsize()}
 
     def rpc(self, req):
         """Answer a JSON-RPC envelope (or batch) from the world's provider,

@@ -166,13 +166,14 @@ class RunRecorder:
     at the end. A failed run is closed with status "failed" and its error; a process killed mid-run
     leaves status "running" with an old =updated= time, which readers show as stale."""
 
-    def __init__(self, root=None, name="run", *, run_id=None, kind="simulation", engine="pyrevm"):
+    def __init__(self, root=None, name="run", *, run_id=None, kind="simulation", engine="pyrevm", live=None):
         stamp                   = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         self.root               = Path(root or default_root())
         self.chosen             = run_id is not None
         self.id                 = run_id or f"{_slug(name)}-{stamp}"
         self.dir                = self.root / self.id
         self.name, self.kind, self.engine = name, kind, engine
+        self.live               = live          # a live session's control address, if it takes commands
         self.manifest: dict     = {}
         self._applied           = 0
         self._handles: dict     = {}
@@ -197,7 +198,8 @@ class RunRecorder:
 
     def open(self, *, scenario=None, meta=None, tokens=(), live=None, source=None, settings=None):
         """Create the directory and the first manifest. =meta= is the snapshot's meta (contracts,
-        experiment); =live= the control URL of a session that accepts commands, if any. A generated
+        experiment); =live= the control address of a session that accepts commands, if any (else the
+        one given at construction). A generated
         id that is taken (cells of one grid starting in the same second) gets a counter; a chosen
         id that is taken is an error."""
         self.root.mkdir(parents=True, exist_ok=True)
@@ -225,6 +227,7 @@ class RunRecorder:
                 self.id = f"{base}-{n}"
                 self.dir = self.root / self.id
         meta = meta or {}
+        live = live or self.live
         run = meta.get("run") or {}
         contract = meta.get("buck_contract") or {}
         self.manifest = dict(
@@ -260,10 +263,11 @@ class RunRecorder:
         if self.days % MANIFEST_EVERY == 0:
             self._write_manifest()
 
-    def intervene(self, day, kind, args=None, *, source="operator", ok=True, note=""):
-        """An intervention made outside the scenario (a person at a live session)."""
+    def intervene(self, day, kind, args=None, *, source="operator", ok=True, note="", replay=True):
+        """An action made outside the scenario's engine (a person steering a live session: pause,
+        step, pace, reset, stop). replay=False marks one that changes no economics and is not exported."""
         self._append("interventions", [_jsonable(dict(day=day, action=kind, args=args or {}, source=source,
-                                                      ok=ok, note=note))])
+                                                      ok=ok, note=note, replay=replay))])
 
     def close(self, status="complete", *, outputs=None, error=None):
         for h in self._handles.values():

@@ -27,7 +27,8 @@ foundation. One Solidity change has been made since it was qualified:
 | =cf08b12f= | =burn(0)= releases unused and excess coverage with a proportional deposit refund: Solidity, both SDKs, tests. Fully qualified. |
 | =f6ed2734= | /Work in progress, Python only:/ credit investment, asset exits, the investor's decision and the unified act dispatcher (written, not wired). |
 | =c8c6c278= | The investor's BVIB tolerance (owner, 2026-11-13); keyed normal draws; the JavaScript port of investment, exits and the investor; the act loop opened in both languages; the first complete 30-day world; deposit minimums and the daily mark fixed from what it showed. |
-| /the run-record milestone/ | One run record (=build/runs=, schema =buck-run/1=) written by every Python run and importable from earlier vectors; the local dashboard with its Overview tab, live or finished; the plan for one format, location and interface (step F). |
+| =90b20d7a= | One run record (=build/runs=, schema =buck-run/1=) written by every Python run and importable from earlier vectors; the local dashboard with its Overview tab, live or finished; the plan for one format, location and interface (step F). |
+| /the live-control milestone/ | Live sessions run by the dashboard and steered from its page; operator actions as recorded interventions; exported experiments that replay a session exactly. |
 
 The household is built from /components/ on one owner dispatcher and one
 receipt cursor (=HouseholdRefinance=). Where each stands:
@@ -71,7 +72,7 @@ short world, step D runs the campaigns.
 
   | Command | What | Time |
   |---------+------+------|
-  | =make nix-venv-test-python PYTEST_FILES="<the nineteen files below>" PYTEST_ARGS='--basetemp=build/test/NAME -q'= | Supported Python set | 2 min |
+  | =make nix-venv-test-python PYTEST_FILES="<the twenty files below>" PYTEST_ARGS='--basetemp=build/test/NAME -q'= | Supported Python set | 2 min |
   | =make nix-core-equilibrium-policy-test= | Fast JavaScript policy, quote, calendar and dashboard units (83) | 1 min |
   | =make nix-core-equilibrium-bootstrap-test= | Actual JavaScript, eight Tevm fixture files together (132 tests) | 50 min |
   | =... CORE_EQUILIBRIUM_TEST_FILES=test/net-household-wallet.tevm.test.js= | One file (exit 2 min, wallet 4, resume 11, programme 21, surplus 19, invest 40, bootstrap 36) | |
@@ -79,15 +80,15 @@ short world, step D runs the campaigns.
   | =make nix-core-demo-eqworld= | Browser bundle rebuilds | 1 min |
   | =make nix-test= | All Solidity (needed again once a contract changes) | long |
 
-  The nineteen Python files: =core/python/tests/= =test_net_market_quote=,
+  The twenty Python files: =core/python/tests/= =test_net_market_quote=,
   =test_artifacts=, =test_router=, =test_session=, =test_net_purchase_outcome=;
   =alberta_buck/test/= =test_household_policy=, =test_household_calendar=,
   =test_net_basket_mark=, =test_net_household_setup=,
   =test_net_household_invest=, =test_net_household_exit=,
   =test_net_economy_report=, =test_sim_report=, =test_settlement=,
   =test_net_repayment_target=, =test_net_demurrage_smoke=, =test_net_market=,
-  =test_net_economy_bootstrap=, =test_runrecord=. (309 pass at the
-  run-record checkpoint, none expected to fail. =test_economy.py= is not in
+  =test_net_economy_bootstrap=, =test_runrecord=, =test_dashboard_live=
+  (313 pass at the live-control checkpoint, none expected to fail. =test_economy.py= is not in
   the set: its short-world test still expects legacy accounting.)
 - /Traps that cost time./
   - pyrevm refuses any =eth_call= whose sender is a contract, and every
@@ -147,8 +148,9 @@ short world, step D runs the campaigns.
 Steps 0, 1, A and B are done; C has run its one-year worlds and waits on the
 owner's answer to recommendation 53. The owner's direction of 2026-11-14 put
 step F (one run record, one dashboard, fewer tools) ahead of the campaigns:
-its first phase, R1, is done; R2 (live control) and R3 (the component tabs)
-come next, and they are how the campaigns will be watched. Each step is a
+R1 (the run record and the Overview) and R2 (live control) are done; R3 (the
+component tabs) comes next, and these are how the campaigns will be watched
+and steered. Each step is a
 phase: implement in both languages, qualify, write the observations here,
 then commit.
 
@@ -242,7 +244,7 @@ start, stop or probe the tunnel origin ports 8000, 8797 or 8798. The
 JavaScript demo (=make nix-core-demo-eqworld-serve=, =make nix-core-eqsim=)
 needs step B in JavaScript before a population is practical.
 
-*** F. One run record, one dashboard, fewer tools (started: R1 done)
+*** F. One run record, one dashboard, fewer tools (started: R1 and R2 done)
 
 The owner's direction of 2026-11-12: fewer simulations, each able to apply a
 range of shocks to a population whose response is configurable, inspectable
@@ -294,13 +296,15 @@ Phases, each qualified and recorded here before its commit:
   Overview tab and a capability-declaring source interface
   (=src/sources.js=). Shape pinned for both languages by
   =test/fixtures/run-record.json=.
-- *R2. Live control.* The session server (=server.py=) writes a run record per
-  session (=capabilities.control= = its control URL); the dashboard gains a
-  control bar for what the server already accepts (pause, step, pace, shock,
-  population, knob, reset) and, new, adding a household with chosen settings
-  and changing one agent's settings. Every operator action lands in
-  =interventions.jsonl=, so a session can be exported as an experiment and
-  replayed. Local only; the public server keeps refusing unsigned sends.
+- *R2. Live control (done; see the live-control milestone).* The dashboard
+  runs sessions itself (=server.Session=, recording as =live-<sid>=); its
+  page starts them and steers them (pause, step, pace, reset, stop, export)
+  and changes the world through the experiment engine's interventions
+  (price and BUCK shocks, population and economy, a new household with
+  chosen settings, one household's decision settings). Operator actions are
+  recorded with =source= =operator=; an exported experiment replays a
+  session exactly. Local only; the public server keeps refusing unsigned
+  sends.
 - *R3. The component tabs.* BuckBasket (equity, lien, gross, share price,
   weights against targets, the wheel's operations, deposits and redemptions,
   guard trips), Market (every pool, the triangle gaps, arbitrage), Jubilee
@@ -3230,3 +3234,104 @@ scalable public path. This is phase R1.
     records (R2), the public savings tab and the dashboard can read the same
     frames; the public server stays read- and sign-only, and operator control
     stays on localhost.
+
+** Live-control milestone: steer a running world from the dashboard (R2 complete)
+
+Step F, phase R2. The session server's port (8797) is one of the tunnel's, so
+local sessions run inside the dashboard's own server instead of beside it.
+
+- [X] /Sessions in the dashboard./ =dashboard.LiveSessions= starts a
+  =server.Session= (its own thread and pyrevm EVM) from an experiment file
+  with days, seed, price path and =--set= lines, optionally paused at day 0;
+  kept until its operator stops it (=keep=: no reaping for want of
+  watchers); at most =--max-sessions= (2) at once; only when the dashboard
+  binds a loopback address. API: =/api/experiments=, =/api/sessions=
+  (list, start), =/api/sessions/<sid>= (state: day, paused, pace, run, ops
+  applied, queued, last result, error), =.../control=, =.../members=,
+  =.../experiment=. A POST must be =application/json= from the page's own
+  origin (a cross-origin page cannot send one without a preflight the
+  server never answers).
+- [X] /Sessions record themselves./ =server.Session= takes =record_root=:
+  each world writes =live-<sid>= (a reset closes it =reset= and the rebuilt
+  world writes =live-<sid>-r1=, ...); =stopped=, =failed= and =complete=
+  close it otherwise. The manifest's =capabilities.control= is the
+  session's address.
+- [X] /Operator actions are interventions./ Ops that change the world go
+  through =experiment.Interventions.apply_now= on the day given and are
+  recorded with =source= =operator= (the run record's =interventions.jsonl=,
+  the vector's =interventions_applied=); a refused one is recorded with its
+  note and reported to the page, not raised. The server's =population=,
+  =knob=, =shock= and =chain= ops map to =set_count=, =set_knob=,
+  =arm_shock= and =set_chain=; =intervene= carries any action. New actions:
+  =add_household= (=HouseholdPopulationAgent.add_member=: the population's
+  settings with overrides, named =<population>/<role>/op<k>=, drawn and
+  validated by its own setup), =household_settings=
+  (=credit_households.apply_live_settings=, all or none, over
+  =LIVE_SETTINGS=: utilization, carry utilization, theta, risk, issue
+  premium, retire discount, BVIB tolerance, decision days, money months,
+  impact cap, and the surplus policy), =set_count=, =set_chain=. Steering
+  (pause, resume, step, pace, reset, stop) is recorded with =replay= false.
+- [X] /Export and exact replay./ =experiment.to_toml= writes a resolved
+  experiment that =load= reads back unchanged; =Session.experiment_toml=
+  adds the operator's applied actions on their days. The loop now fires due
+  interventions twice a day: the scenario's before the morning's arrivals,
+  the exported operator actions after them (=apply_due(day,
+  operator=True)=), where the live operator acted.
+- [X] /The page./ "New live session" (experiment, days, seed, prices, start
+  paused, extra settings); a control row (state, pause or resume, +1, +7,
+  +30 days, pace, export, reset and stop, each of the last two a two-click
+  button with no browser dialog); forms for a commodity price shock, a BUCK
+  shock (refused when the cast has no =ShockAgent=, and the form says so),
+  population and economy, adding a household, and changing a household's
+  settings (current values as placeholders); the last result. Operator
+  actions are marked on the charts; steering is not. The page follows a
+  reset to the new record and a session's own state (paused, running)
+  outranks its record's age. =src/live.js= is the control object the page
+  talks to; a world in the browser tab can supply one with fewer actions.
+- [X] /Checks./ =alberta_buck/test/test_dashboard_live.py= (live settings,
+  the TOML round trip, a 4-day economy session steered, recorded, exported,
+  reset and stopped through the API; loopback only);
+  =core/js/dashboard/bin/live-check.mjs= (=make
+  nix-dashboard-live-check=) drives the page itself.
+
+*** Checkpoint
+
+- *Evidence*: the supported Python set with =test_dashboard_live.py= (twenty
+  files), 313 passed (=build/test/q7-python.log=); JavaScript policy and
+  dashboard units 83 of 83; =make nix-dashboard-live-check= against a running
+  dashboard: started, household added, a week run, price shock applied,
+  stopped, two markers, no console error; the public savings sandbox's
+  acceptance (=make nix-venv-sandbox-savings-test=, which shares
+  =server.Session=) 1 of 1; the exact-replay comparison of observation 51.
+  No contract or JavaScript world code changed, so the Tevm files were not
+  re-run (132 of 132 at =c8c6c278=).
+
+*** Observations and recommendations (live control)
+
+**** Measured
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 51 | an 8-day economy session: a debtor added at day 0 (home $600k, LTV 0.5); at day 3 one debtor's utilization 0.6 and decision days 2, and investor arrivals 90 a year; exported, then replayed by =python -m alberta_buck.sim= | *The replay is exact*: all 8 frames equal in every group, all 344 household-day lines and all 480 state-machine events equal, the three actions applied on the same days. The first design applied exported actions before the morning's arrivals; the second pass after them was needed for the order of agents to match the live session. |
+| 52 | the page, a 30-day economy session started paused (=live-check.mjs=) | Started, a saver added at day 0 (home $400k), seven days run, LABR's reference cut to 0.7 at day 7, one more day: BVIB fell from about 1.025 to 0.979 and BUCK/USD to 0.951 that day, four households were refused, and K rose the same day (0.748 -> 0.754). Both operator actions are marked on every chart; no console error. |
+| 53 | the API test | A paused session applies an action within a poll (the paused loop drains its queue every 50 ms); an economy world builds in about 5 s; the whole 4-day test, including a reset and its rebuild, takes about 20 s. |
+| 54 | =economy.toml= | The centre casts no =ShockAgent=, so a BUCK shock is refused (recorded, reported, not raised); the savings server adds one with =--set scenario.agents.ShockAgent=1=, and so can the new-session form's extra settings. |
+
+**** Recommendations
+
+60. /Try recommendation 53's choices live before any campaign./ Start the
+    centre paused, run a quarter, change one thing (investor arrivals, a
+    household's =carry_utilization=, a commodity shock), run on, export;
+    each export is a cell that replays exactly, so the exploratory sessions
+    become the campaign's first cells.
+61. /Give the Agents tab (R3) a path to the control forms./ Choosing a
+    household there should open "Change a household's settings" for it, and
+    its event timeline should show operator actions beside its own steps.
+62. /Keep operator actions to the engine's vocabulary./ An action that is
+    not an intervention cannot be exported or replayed. New disturbances
+    (the broad sell-off and purchase, raids, LP exits) belong in
+    =experiment.py= first (R5), then on the page.
+63. /The public savings server./ Its shock and chain ops now go through the
+    same engine (same day, same effect, now listed in the vector's
+    =interventions_applied=); it still writes no run record. Recording there
+    needs a disk budget per visitor and a retention rule first.

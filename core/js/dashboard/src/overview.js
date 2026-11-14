@@ -34,9 +34,10 @@ export class OverviewTab {
       if (t.detail) tile.append(html("div", { class: "tile-detail" }, t.detail));
       return tile;
     }));
-    const markers = (interventions ?? []).map((iv) => ({
+    // Steering a session (pause, step, pace) changes nothing in the world: not marked.
+    const markers = (interventions ?? []).filter((iv) => iv.replay !== false).map((iv) => ({
       day: iv.day ?? iv.applied_day,
-      label: `${iv.action ?? "intervention"}${iv.ok === false ? " (failed)" : ""}`,
+      label: `${iv.source === "operator" ? "operator: " : ""}${iv.action ?? "intervention"}${iv.ok === false ? " (refused)" : ""}`,
     }));
     for (const chart of this.charts) chart.update(shown, markers);
   }

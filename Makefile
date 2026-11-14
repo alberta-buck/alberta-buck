@@ -870,15 +870,20 @@ economy-smoke: sim-build core-build-py
 #   make nix-venv-dashboard [DASHBOARD_PORT=8890]
 #   make nix-venv-run-import VECTORS="build/sim/economy-smoke-365.json ..."   # earlier vectors
 #   make nix-venv-dashboard-test
+#   make nix-dashboard-live-check          # the page's live controls, against a running dashboard
+# Live sessions (New live session on the page) run inside the dashboard, one EVM each.
 DASHBOARD_PORT ?= 8890
-.PHONY: dashboard run-import dashboard-test
+.PHONY: dashboard run-import dashboard-test dashboard-live-check
 dashboard:
 	python -m alberta_buck.sim.dashboard --port $(DASHBOARD_PORT)
 run-import:
 	python -m alberta_buck.sim.runrecord import $(VECTORS)
 dashboard-test:
-	python -m pytest alberta_buck/test/test_runrecord.py -q
+	python -m pytest alberta_buck/test/test_runrecord.py alberta_buck/test/test_dashboard_live.py -q
 	cd core/js && node --test test/dashboard-series.test.js
+dashboard-live-check:
+	mkdir -p build/test
+	cd core/js && node dashboard/bin/live-check.mjs http://127.0.0.1:$(DASHBOARD_PORT)/ ../../build/test/dashboard-live.png
 # Full household lifecycle gate, including currently unported canonical
 # action cases. Use economy-accounting-test for completed migration blocks;
 # its passing component checks do not imply this full lifecycle is enabled.
@@ -1782,7 +1787,7 @@ economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 #   make nix-venv-economy-accounting-test
 economy-accounting-test: economy-bootstrap-test
 	mkdir -p build/test
-	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_household_calendar.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_household_invest.py alberta_buck/test/test_net_household_exit.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py alberta_buck/test/test_runrecord.py --basetemp=build/test/economy-accounting -q
+	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_household_calendar.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_household_invest.py alberta_buck/test/test_net_household_exit.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py alberta_buck/test/test_runrecord.py alberta_buck/test/test_dashboard_live.py --basetemp=build/test/economy-accounting -q
 	cd core/js && node --test test/net-basket-mark.tevm.test.js
 
 # Each published crate carries its OWN copy of the vectors it replays:
