@@ -21,6 +21,11 @@ DEFAULTS                        = dict(
     carry_utilization=0.,
     # The investor: opening savings and yearly saving ($k), and the years before it withdraws.
     invest_cash_k=[10., 100.], invest_income_k=[2., 20.], hold_years=[3., 15.],
+    # How far the basket's price in BUCK may stand above 1 (BVIB above equilibrium) while an investor
+    # still puts its BUCK into the basket. Above it, K is expected to fall and the BUCK to regain value,
+    # so it holds BUCK instead -- but holding forgoes the basket's return, so it will bear some.
+    # Normal about 1%, bounded to 0..2%.
+    bvib_tolerance=dict(mean=.01, sd=.005, lo=0., hi=.02),
     # A debtor or saver sells its insured asset at this hazard a year, buying back its whole lien
     # first (0: never).
     divest_rate=.1,
@@ -73,11 +78,30 @@ def uniform(seed, member, key):
     return (h + .5) / 4294967296
 
 
+def normal(seed, member, key, mean, sd, lo, hi):
+    """A keyed draw, normal about mean with standard deviation sd, held within lo..hi.
+
+    The sum of twelve keyed uniforms less six (Irwin-Hall): unit variance, bounded at six sd, and
+    pure addition, so Python and JavaScript produce the same double. Values beyond the bounds are
+    held at them (at the default two sd, about 2.3% of members sit at each bound)."""
+    if (not all(type(v) in (int, float) and math.isfinite(v) for v in (mean, sd, lo, hi)) or
+            sd < 0 or hi < lo):
+        raise ValueError(f"invalid household normal: {key}")
+    z                           = 0.
+    for i in range(12):
+        z                      += uniform(seed, member, f"{key}#{i}")
+    return min(hi, max(lo, mean + sd * (z - 6.)))
+
+
 def profile(seed, member, overrides=None):
     settings                    = DEFAULTS | (overrides or {})
     result                      = {}
     for key, value in settings.items():
-        if isinstance(value, (tuple, list)):
+        if isinstance(value, dict):
+            if set(value) != {"mean", "sd", "lo", "hi"}:
+                raise ValueError(f"invalid household normal: {key}")
+            value               = normal(seed, member, key, value["mean"], value["sd"], value["lo"], value["hi"])
+        elif isinstance(value, (tuple, list)):
             if len(value) != 2 or not all(math.isfinite(v) for v in value) or value[1] < value[0]:
                 raise ValueError(f"invalid household range: {key}")
             lo, hi              = value
@@ -109,7 +133,8 @@ def profile(seed, member, overrides=None):
             or not 0 <= count <= 32 or result["role"] != "investor" and count == 0):
         raise ValueError("asset_count must be a whole number from 1 to 32 for insured households")
     result["asset_count"] = 0 if result["role"] == "investor" else int(count)
-    if not 0 <= result["retire_disc"] < 1 or result["issue_premium"] < 0:
+    if (not 0 <= result["retire_disc"] < 1 or result["issue_premium"] < 0 or
+            type(result["bvib_tolerance"]) not in (int, float) or not 0 <= result["bvib_tolerance"] < 1):
         raise ValueError("invalid household price thresholds")
     if (not 0 < result["utilization"] <= 1 or not 0 <= result["living_frac"] <= 1
             or not 0 <= result["carry_utilization"] <= 1):
@@ -405,15 +430,15 @@ def investor_action(spot, basket_usd, fee, premium):
     return "convert" if spot * (1 - fee) > basket_usd * (1 + premium) else "buy"
 
 
-def net_investor_action(bvib_wad, fee_ppm, premium):
-    """investor_action on canonical money, in integers: fair value is the basket's BUCK price times the
-    SAME dollar pool's spot, so that pool's price cancels and the BUCK is dear when
-    (1 - fee) > BVIB x (1 + premium). The premium is taken in parts per billion."""
-    if (type(bvib_wad) is not int or type(fee_ppm) is not int or bvib_wad < 0 or not 0 <= fee_ppm < 10**6 or
-            type(premium) not in (int, float) or not math.isfinite(premium) or not 0 <= premium < 10):
+def net_investor_action(bvib_wad, tolerance):
+    """A cash investor's choice on canonical money, in integers: "invest" its BUCK in the basket while
+    the basket's price in BUCK (BVIB, 1e18 = 1) is at most 1 + tolerance; otherwise "wait", holding
+    BUCK, because K is then expected to fall and the BUCK to regain value. The tolerance is the basket
+    return it forgoes while waiting, taken in parts per billion."""
+    if (type(bvib_wad) is not int or bvib_wad < 0 or type(tolerance) not in (int, float) or
+            not math.isfinite(tolerance) or not 0 <= tolerance < 1):
         raise ValueError("invalid investor market inputs")
-    dear                        = (10**6 - fee_ppm) * 10**18 * 10**9 > bvib_wad * 10**6 * (10**9 + int(premium * 10**9))
-    return "convert" if dear else "buy"
+    return "invest" if bvib_wad * 10**9 <= (10**9 + int(tolerance * 10**9)) * 10**18 else "wait"
 
 
 def surplus_action(policy, spot, basket_usd, fee, discount, premium):

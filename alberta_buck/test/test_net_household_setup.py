@@ -72,9 +72,7 @@ def test_primary_household_setup_and_per_facility_credit_marks(household_world):
         book = d.net_credit_ops.mark_household(a.address, a._token_ids)
         assert book.state.issued == book.state.spendable == book.premium_net_scaled == book.relief_scaled == 0
         assert book.credit_limit == 0
-        with pytest.raises(NotImplementedError, match="decisions await"):
-            a.act(d, scenario, 0, 0, {})
-        assert not a._started and a.hypo_cash == 0
+        assert not a._started and a.hypo_cash == 0      # nothing happens before its first act
 
     debtor, saver, investor = agents
     chain.send(d.simlp.functions.exec(d.buck.address, d.buck.encode_abi(
@@ -936,15 +934,20 @@ def test_personal_portfolio_marks_use_actual_cash_debt_receipts_and_all_custody(
     transfer(d.simlp, debtor.address, 2**60 + 17)
     assert check(debtor)["held_buck"] > 2**53
 
-    # A report cannot silently replace a missing guarded claim mark with zero.
+    # A report cannot silently replace a missing guarded claim mark with zero: the day's mark
+    # records the relief as unavailable, with the fund's reason, and leaves it out of net worth.
     fund = d.net_stack.fund
     nominal = buck.functions.fundNominalForNet(10 * RAW).call()
     chain.send(fund.functions.invest(10 * RAW, nominal, 1, 1), sender=d.gov)
     with pytest.raises(Exception, match="MarkUnavailable|0x417c0238"):
-        debtor.octl_state(d)
+        d.net_credit_ops.mark_household(debtor.address, debtor._token_ids)   # the SDK still refuses by default
+    blind = debtor.octl_state(d)
+    assert blind["jub"] is None and blind["relief_scaled"] is None
+    assert "0x417c0238" in blind["relief_unavailable"] or "MarkUnavailable" in blind["relief_unavailable"]
     from alberta_buck.sim.basket_machine import publish_jubilee_valuation
     assert publish_jubilee_valuation(d)["status"] == 1
-    check(debtor)
+    seen = check(debtor)
+    assert seen["relief_unavailable"] is None and seen["jub"] is not None
 
     # The existing snapshot must retain the exact mark, including an investor
     # whose receipts belong to its main account rather than a savings proxy.
@@ -962,7 +965,7 @@ def test_personal_portfolio_marks_use_actual_cash_debt_receipts_and_all_custody(
     assert not chain.mismatches
 
 
-def test_readable_books_do_not_allow_unimplemented_interactive_economy_to_finish(household_world):
+def test_readable_books_and_the_interactive_driver_run_the_opened_household_loop(household_world):
     from alberta_buck.sim.driver import SimDriver
     d, scenario, make = household_world
     agent = make(0, CreditHouseholdAgent)
@@ -977,10 +980,21 @@ def test_readable_books_do_not_allow_unimplemented_interactive_economy_to_finish
     driver._whale_tick, driver.whales, driver.arbs = -1, [], [agent]
     driver._prng = random.Random(1)
     driver.snap = SimpleNamespace(meta={"run": {"completed": False}})
-    with pytest.raises(NotImplementedError, match="decisions await"):
+    driver.proxy = SimpleNamespace(bump=lambda: None)   # the display cache a real driver builds
+    # The household's normal loop is open on canonical accounting: the first tick of its arrival day
+    # binds its calendar, credits its opening dollars from an authenticated receipt and prepares trading.
+    assert driver.step_tick() and driver.tick == 1 and not driver.done
+    assert not getattr(driver, "last_error", ""), driver.last_error
+    assert agent._started and agent._trading_ready and agent.calendar_machine.bound and agent.last_error == ""
+    assert agent.hypo_cash == int(agent.p["cash_k"] * 1000 * RAW) and agent.income_total == 0
+    opening = [e for e in agent.refinance_machine.events if e.get("kind") == "calendar" and e["status"] == "confirmed"]
+    assert [(e["phase"], e["operation"]) for e in opening] == [("opening-complete", "income")]
+    # Later ticks of the same day make no household decision; a migration gate stays fatal to the driver.
+    seen = len(agent.refinance_machine.events)
+    assert driver.step_tick() and len(agent.refinance_machine.events) == seen
+    agent.act = lambda *args: (_ for _ in ()).throw(NotImplementedError("a migration gate"))
+    with pytest.raises(NotImplementedError, match="migration gate"):
         driver.step_tick()
-    assert driver.snap.meta["run"]["completed"] is False and not driver.done and driver.tick == 0
-    assert not agent._started and agent.income_total == agent.external_paid == 0
 
 
 @pytest.mark.parametrize("case", CALENDAR["cases"], ids=lambda c: c["name"])

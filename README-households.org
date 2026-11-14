@@ -28,11 +28,12 @@ bounded net BUCK reserve when needed, then execute
 through =start_net_refinance= / =startNetRefinance= with a checkpoint after
 each authenticated receipt. The explicit calendar component now schedules
 arrival capital, wages, bills and mortgage payments with receipt recovery.
-The automatic debtor refinancing component is implemented below. Normal
-household decisions remain gated while saving/paydown, saver investment,
-working money and exits are ported. Save/resume is deferred; it is not a
-prerequisite for uninterrupted household or five-year runs. An isolated funded-plan test is not a
-completed household economy or five-year stability result.
+The automatic debtor refinancing component is implemented below, as are
+reserve-safe saving and paydown, the working wallet, a mortgage-free
+household's credit investment, asset exits and the cash investor's decision.
+=act= now runs them all through one daily dispatcher (=_act_net= /
+=actNet=), described below. Save/resume is deferred; it is not a
+prerequisite for uninterrupted household or five-year runs.
 
 Insurance activation (=joined=) and a completed mortgage closing are separate.
 =refinance_closed= / =refinanceClosed= becomes true only when a confirmed bank
@@ -341,6 +342,57 @@ make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-ho
 
 Shared vectors: =test/fixtures/household-wallet.json=. Saver credit investment
 and asset exits still gate the normal =act= loop.
+
+* Credit investment: a mortgage-free household keeps what it borrows
+
+A saver, or a debtor whose mortgage is paid, issues against its insured asset
+and /keeps/ the BUCK, depositing them in the basket under its own account.
+=investment_want= / =investmentWant= says how much and why: =premium= (room it
+could sell while the BUCK keeps a net premium of =issue_premium= over the
+basket) or =carry= (the share =carry_utilization= of its K-scaled limit kept
+drawn while the BUCK is at no discount; zero by default). Each decision takes
+one bite bounded by the dollar pool's depth; the one-time closing fee (the
+facility's appraisal, legal and lien registration, =switch_k=) is paid once,
+first, from savings above the buffer, and a first bite is scored against the
+whole line it begins (=staged_investment= / =stagedInvestment=). The flow is
+=kind=invest=: =closing=, =fund= (a guarded reserve purchase), =issue=,
+=deposit=. A refused deposit keeps the issued BUCK owned and is retried alone
+before any new credit. Shared vectors: =test/fixtures/household-invest.json=.
+
+* Leaving: asset sale, savings home, lien retired, coverage released
+
+On its keyed exit day (=divest_rate=, or an investor's =hold_years=) a
+household unwinds one step a turn (=advance_net_exit= / =advanceNetExit=): the
+calendar sells the asset at its insured value and pays arrears and the whole
+mortgage; the wallet sells; each basket receipt is redeemed (previewed as the
+owner; smaller bites if the basket cannot pay the whole); the whole lien is
+retired with owned BUCK, then bought back a capped bite a day; =burn(0)=
+releases any coverage no principal backs; owned BUCK and any TOKEN paid in
+kind are sold a capped bite a day; then it has left. A step that cannot run
+(a closed exit door, a refusal, no dollars) waits for tomorrow and is counted
+in =exit_retries=; no dollars for the lien sets =exit_short=. Shared vectors:
+=test/fixtures/household-exit.json=.
+
+* The cash investor
+
+An investor's dollars are meant for the basket. While the basket's price in
+BUCK is within its own tolerance of 1 (=bvib_tolerance=, normal about 1%,
+held to 0..2%) it deposits the BUCK it holds, or buys BUCK and deposits them.
+Above it, K is expected to fall and the BUCK to regain value, so it buys BUCK
+and holds them for later: waiting costs it the basket's return, which is why
+it bears some excess. At its horizon it redeems and sells.
+
+* The daily dispatcher
+
+=act= on canonical accounting calls =_act_net= / =actNet=: recover earlier
+evidence first (a recovered or uncertain outcome consumes the day); prepare
+the calendar (it binds on the arrival day; a payday queues wages and bills);
+a due exit preempts the rest; otherwise a known refused deposit, then the
+day's credit decision (a debtor's refinancing, a mortgage-free household's
+credit investment, an investor's choice), the wallet and surplus; then a few
+turns of known progress. Each component makes at most one fresh decision a
+day. An unexpected fault is recorded as a =kind=act= event and counted in
+=household_faults=; a migration gate (=NotImplementedError=) stays fatal.
 
 * Market estimates for reserve funding
 

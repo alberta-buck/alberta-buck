@@ -138,7 +138,9 @@ test("automatic debtors stage closing, resume cash and serialize calendar/receip
     accounts: b.refinanceMachine.events.at(-1)?.accounts }, (_, v) => typeof v === "bigint" ? String(v) : v));
   assert.equal(b.nextDecision, 22);
   await at(22); b.divestDay = 22;
-  await assert.rejects(step(b, 22), /asset exits/);
+  const owed = await principal(b);
+  assert.equal(await step(b, 22), false, "a leaving household's work belongs to its exit dispatcher");
+  assert.equal(await principal(b), owed); b.divestDay = null;
   t.diagnostic("unavailable marks stop sends; pre-adoption declines retain cadence; issuers assess daily");
 
   await at(30); issued = await principal(a);

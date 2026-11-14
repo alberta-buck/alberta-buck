@@ -439,23 +439,31 @@ export function netCreditOps(session, stack, execute = null, { simulate = null }
   // Same-block NFT/relief and current insurer BUCK-pool marks. An insurer's
   // unobserved strategies and future funding are excluded. A guarded mark
   // failure propagates; a marked claim is not executable cash or retirement.
-  ops.markHousehold = async (owner, tokenIds, { blockNumber = null } = {}) => {
+  // tolerateUnavailableRelief: a refused relief quote (the fund's own price guard, say) leaves
+  // reliefScaled null with the reason, never a zero (net_world.mark_household).
+  ops.markHousehold = async (owner, tokenIds, { blockNumber = null, tolerateUnavailableRelief = false } = {}) => {
     blockNumber ??= (await session.client.getBlock()).number;
     const read = issueBlockReader(blockNumber), address = owner.address ?? owner;
     const state = await ops.household(owner, tokenIds, { blockNumber });
-    let premiumNetScaled = 0n, reliefScaled = 0n;
+    let premiumNetScaled = 0n, reliefScaled = 0n, reliefUnavailable = null;
     for (const f of state.facilities) {
       if (f.premiumNominal) {
         if (f.insurerPool.toLowerCase() === ZERO_ADDRESS) throw new Error("premium has no insurer pool");
         const [gross, net] = await read(token, "accountBalancesScaled", [f.insurerPool]);
         premiumNetScaled += gross ? f.premiumNominal * Q * net / gross : 0n;
       }
-      if (f.issued) reliefScaled += (await read(fund, "previewRelief", [f.tokenId, f.issued]))[0];
+      if (f.issued && reliefScaled !== null) {
+        try { reliefScaled += (await read(fund, "previewRelief", [f.tokenId, f.issued]))[0]; }
+        catch (err) {
+          if (!tolerateUnavailableRelief) throw err;
+          reliefScaled = null; reliefUnavailable = String(err).slice(0, 200);
+        }
+      }
     }
     const creditLimit = await read(token, "creditLimit", [address]);
     const availableReliefScaled = await read(token, "availableReliefScaled");
-    return { blockNumber, state, creditLimit, premiumNetScaled, reliefScaled, availableReliefScaled,
-      exceedsLiquidityLimit: reliefScaled > availableReliefScaled };
+    return { blockNumber, state, creditLimit, premiumNetScaled, reliefScaled, availableReliefScaled, reliefUnavailable,
+      exceedsLiquidityLimit: reliefScaled !== null && reliefScaled > availableReliefScaled };
   };
   // A wallet is money, never signed debt. Size one selected NFT reduction
   // against the minimum accepted relief and actual fund liquidity; do not

@@ -108,6 +108,31 @@ class NetBasketOps:
             raise ValueError("basket observation changed")
         return block, owner, shares, basis
 
+    def quote_deposit_shares(self, amount, *, block_number=None):
+        """Shares a BUCK deposit delivering ``amount`` net would receive now, priced as the basket prices it.
+
+        The basket issues deposit shares against its equity at the HIGH marks
+        (equity at a mark is that mark's gross plus a mark-independent BUCK
+        term, so equity() - gross() + grossAt(HIGH)), after a charge of
+        (1 + K)/2 of the dearest pool fee. Its public sharePrice is the TWAP
+        mark and leaves out the charge, so a minimum sized from it is refused
+        whenever the high mark leads the TWAP. Advisory: the deposit itself
+        enforces minShares, and its deviation guard may still refuse.
+        """
+        if type(amount) is not int or not 0 < amount <= MAX_UINT256:
+            raise ValueError("positive basket deposit required")
+        block = self.chain.w3.eth.block_number if block_number is None else block_number
+        read = lambda fn: fn.call(block_identifier=block)
+        b = self.basket.functions
+        fee = max(read(b.constituents(i))[4] for i in range(read(b.constituentsLength())))
+        charge = fee * 10**12 * (10**18 + read(b.kNow())) // (2 * 10**18)
+        net = amount * (10**18 - charge) // 10**18
+        supply = read(b.totalShares())
+        if not supply:
+            return net
+        high = read(b.equity()) - read(b.gross()) + read(b.grossAt(1))
+        return net * supply // high if high > 0 else 0
+
     def prepare_deposit(self, owner, amount, minimum_shares, *, token_id=0):
         if any(type(v) is not int or not 0 < v <= MAX_UINT256 for v in (amount, minimum_shares)):
             raise ValueError("positive basket deposit/share bound required")

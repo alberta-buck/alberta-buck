@@ -105,8 +105,7 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
       const mark = await world.netCreditOps.markHousehold(owner, ids);
       assert.equal(mark.state.issued + mark.state.spendable + mark.premiumNetScaled + mark.reliefScaled, 0n);
       assert.equal(mark.creditLimit, 0n);
-      await assert.rejects(a.act(world, 0, 0), /decisions await/);
-      assert.equal(a.started, false);
+      assert.equal(a.started, false);    // nothing happens before its first act
       assert.equal(a.hypoCash, 0n);
     }
     const [debtor, saver, investor] = agents;
@@ -837,8 +836,15 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
       "0x0000000000000000000000000000000000000000");
     await transfer(world.simlp, owner, 2n ** 60n + 17n);
     assert.ok((await check(debtor)).held > 2n ** 53n);
+    // A record cannot silently replace a missing guarded claim mark with zero: it records the relief
+    // as unavailable, with the fund's reason, and leaves it out of net worth. The SDK still refuses.
     await s.send(wheel, "setValuationSource", [net.fund.address]);
-    await assert.rejects(debtor.record(world, 371), /MarkUnavailable|0x417c0238/);
+    await assert.rejects(world.netCreditOps.markHousehold(owner, world._credits.get(debtor.account.address) ?? []),
+      /MarkUnavailable|0x417c0238/);
+    await debtor.record(world, 371);
+    const blind = debtor.ledger.at(-1);
+    assert.equal(blind.jub, null); assert.equal(blind.reliefScaled, null);
+    assert.match(blind.reliefUnavailable, /MarkUnavailable|0x417c0238/);
     await s.send(wheel, "refreshValuation");
     await check(debtor);
     const wallet = debtor.wallet;

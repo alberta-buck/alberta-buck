@@ -30,11 +30,11 @@
   "last_day": 14
  },
  "investor": {
-  "about": "dollars become BUCK held as money; once the BUCK is dear they are converted to basket shares; all is withdrawn at the horizon",
+  "about": "at BVIB near 1 dollars go to the basket; after a broad sell-off raises BVIB beyond its 1% tolerance it buys and holds BUCK; when BVIB returns it deposits them; all is withdrawn at the horizon",
   "settings": {"pay_day": 0, "invest_cash_k": 30, "invest_income_k": 12, "hold_years": 10, "max_impact_bp": 100,
-               "decision_days": 1, "issue_premium": 0.01, "money_months": 0},
-  "token_pool_share": 20,
-  "exit_day": 2,
+               "decision_days": 1, "bvib_tolerance": 0.01, "money_months": 0},
+  "token_pool_share": 10,
+  "exit_day": 3,
   "last_day": 16
  },
  "release": {
@@ -44,16 +44,16 @@
   "coverage": "250000000000"
  },
  "flow": {
-  "about": "one real exit per case, as the saver above; refused = the same send with one bound made unreachable",
+  "about": "one real exit per case, as the saver above; refused = the same send with one bound made unreachable. Cases marked js: false run in Python only, to bound the Tevm run.",
   "refuse_argument": {"redeemShares": 2, "burn": 0},
   "cases": [
    {"name": "lost redemption reply is booked once", "lost": "redeem"},
-   {"name": "unknown redemption stays stopped", "unknown": "redeem"},
+   {"name": "unknown redemption stays stopped", "js": false, "unknown": "redeem"},
    {"name": "refused redemption waits for tomorrow", "refused": "redeem"},
    {"name": "closed exit door waits and is counted once a day", "preview": "refused"},
-   {"name": "lost sale reply is applied once", "lost": "sell"},
+   {"name": "lost sale reply is applied once", "js": false, "lost": "sell"},
    {"name": "unknown sale stays stopped", "unknown": "sell"},
-   {"name": "no dollars left is a shortfall, not an exit", "shortfall": true}
+   {"name": "no dollars left is a shortfall, not an exit", "js": false, "shortfall": true}
   ]
  }
 }

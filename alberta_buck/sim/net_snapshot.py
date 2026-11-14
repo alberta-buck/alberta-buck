@@ -145,7 +145,11 @@ def household_mark(d, agent):
     block = d.w3.eth.block_number
     read = lambda fn: fn.call(block_identifier=block)
     owner = agent.address
-    book = d.net_credit_ops.mark_household(owner, agent._token_ids, block_number=block)
+    # A day's mark must not stop the world: a relief quote the fund's own price guard refuses
+    # is recorded as unavailable (and left out of net worth, flagged), never as a zero.
+    book = d.net_credit_ops.mark_household(owner, agent._token_ids, block_number=block,
+                                           tolerate_unavailable_relief=True)
+    relief = book.relief_scaled or 0
     savings, wallet = agent._savings_proxy, agent._wallet
     accounts = [owner] + [p.address for p in (savings, wallet) if p is not None]
     if len(set(a.lower() for a in accounts)) != len(accounts):
@@ -178,7 +182,7 @@ def household_mark(d, agent):
     receipt_owner = savings.address if savings is not None else owner
     position = mark_net_basket_positions(d.chain, d.basket, d.buck, receipt_owner,
                                          agent._basket_receipts, block_number=block)
-    scaled = sum(bucks.values()) + position.mark * Q + book.premium_net_scaled - book.state.issued * Q + book.relief_scaled
+    scaled = sum(bucks.values()) + position.mark * Q + book.premium_net_scaled - book.state.issued * Q + relief
     # Match JS BigInt's signed division (truncate toward zero) once, after
     # combining full-precision BUCK values. A negative book is valid data.
     valued = abs(scaled) * numerator // (Q * denominator)
@@ -191,7 +195,9 @@ def household_mark(d, agent):
             "drawn": book.state.issued, "limit": book.credit_limit,
             "deposit": book.state.premium_nominal, "premium_net": book.premium_net_scaled // Q,
             "insurance_age": book.state.premium_nominal - book.premium_net_scaled // Q,
-            "jub": book.relief_scaled // Q, "relief_scaled": str(book.relief_scaled),
+            "jub": None if book.relief_scaled is None else book.relief_scaled // Q,
+            "relief_scaled": None if book.relief_scaled is None else str(book.relief_scaled),
+            "relief_unavailable": book.relief_unavailable,
             "relief_liquidity_limited": book.exceeds_liquidity_limit,
             "available_relief_scaled": str(book.available_relief_scaled),
             "basket": position.basis, "basket_in": position.basis, "basket_at_risk": position.basis,

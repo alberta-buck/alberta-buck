@@ -551,8 +551,45 @@ def test_investment_programme_is_the_whole_carry_line_and_only_the_bite_at_a_pre
     assert hp.investment_want(state, off) == (0., "hold") and hp.investment_programme(state, off) == 0.
 
 
-@pytest.mark.xfail(strict=True, raises=subprocess.CalledProcessError,
-                   reason="household-policy.js has no investmentProgramme / stagedInvestment yet (plan, Start here, step A)")
+def test_investor_tolerance_is_a_keyed_bounded_normal_identical_in_both_languages():
+    members = [f"0/investor/{i}" for i in range(400)]
+    draws = [hp.profile(FIXTURE["seed"], m, {"role": "investor"})["bvib_tolerance"] for m in members]
+    assert all(0. <= x <= .02 for x in draws)
+    mean = sum(draws) / len(draws)
+    sd = (sum((x - mean) ** 2 for x in draws) / len(draws)) ** .5
+    assert abs(mean - .01) < .0006 and .004 < sd < .0055, (mean, sd)
+    assert 0 < sum(x in (0., .02) for x in draws) < 30, "about 2.3% of members sit at each bound"
+    # Keyed by member and name alone: another setting's override does not move it; a scalar pins it.
+    assert hp.profile(FIXTURE["seed"], members[0], {"cash_k": 1.})["bvib_tolerance"] == draws[0]
+    assert hp.profile(FIXTURE["seed"], members[0], {"bvib_tolerance": .015})["bvib_tolerance"] == .015
+    assert hp.normal(1, "m", "k", .5, 0., 0., 1.) == .5
+    for bad in ({"mean": .01, "sd": -1., "lo": 0., "hi": .02}, {"mean": .01, "sd": .005, "lo": 0.}, -.01, 1.):
+        with pytest.raises(ValueError):
+            hp.profile(FIXTURE["seed"], members[0], {"bvib_tolerance": bad})
+    script = """
+import * as hp from './core/js/src/agents/household-policy.js';
+const [seed, members] = [%d, %s];
+console.log(JSON.stringify(members.map(m => hp.profile(seed, m, {role: 'investor'}).bvib_tolerance)));
+""" % (FIXTURE["seed"], json.dumps(members))
+    js = json.loads(subprocess.run(["node", "--input-type=module", "-e", script], cwd=ROOT, check=True, text=True,
+                                   capture_output=True).stdout)
+    assert js == draws, "the same doubles, not merely close"
+
+
+@pytest.mark.parametrize("bvib,tolerance,action", [
+    (10**18, 0., "invest"), (10**18 + 1, 0., "wait"), (101 * 10**16, .01, "invest"), (101 * 10**16 + 1, .01, "wait"),
+    (98 * 10**16, 0., "invest"), (12 * 10**17, .02, "wait"), (0, .01, "invest")])
+def test_investor_invests_within_its_bvib_tolerance_and_waits_above_it(bvib, tolerance, action):
+    assert hp.net_investor_action(bvib, tolerance) == action
+    script = "import * as hp from './core/js/src/agents/household-policy.js';" \
+             f"console.log(hp.netInvestorAction({bvib}n, {tolerance!r}));"
+    assert subprocess.run(["node", "--input-type=module", "-e", script], cwd=ROOT, check=True, text=True,
+                          capture_output=True).stdout.strip() == action
+    for bad in ((-1, .01), (10**18, -.01), (10**18, 1.), (1.0, .01)):
+        with pytest.raises(ValueError):
+            hp.net_investor_action(*bad)
+
+
 def test_javascript_investment_programme_and_staged_score_match_python():
     state, p, t = invest_terms()
     drawn = state | {"drawn": state["face"] * state["k"] * p["carry_utilization"] - 1_000.}

@@ -47,21 +47,21 @@
             "external_premium_saving": 1605.5, "reserve_cost": 109.5, "reserve_carry": 639.8}
  },
  "flow": {
-  "about": "one real investment per case; refused = the same send with one bound made unreachable, so the contract itself reverts",
+  "about": "one real investment per case; refused = the same send with one bound made unreachable, so the contract itself reverts. Cases marked js: false run in Python only, to bound the Tevm run; the JavaScript set still covers every phase and every outcome kind.",
   "refuse_argument": {"transfer": 1, "buyExactOutput": 1, "issue": 2, "deposit": 2, "increasePosition": 4},
   "cases": [
    {"name": "lost closing reply is applied once", "lost": "closing"},
-   {"name": "unknown closing stays stopped", "unknown": "closing"},
+   {"name": "unknown closing stays stopped", "js": false, "unknown": "closing"},
    {"name": "refused closing spends nothing", "refused": "closing"},
    {"name": "lost reserve purchase is applied once", "lost": "fund"},
-   {"name": "unknown reserve purchase stays stopped", "unknown": "fund"},
-   {"name": "refused reserve purchase keeps the closing paid once", "refused": "fund"},
+   {"name": "unknown reserve purchase stays stopped", "js": false, "unknown": "fund"},
+   {"name": "refused reserve purchase keeps the closing paid once", "js": false, "refused": "fund"},
    {"name": "lost issuance reply is applied once", "lost": "issue"},
    {"name": "unknown issuance stays stopped", "unknown": "issue"},
    {"name": "refused issuance keeps the reserve and reissues later", "refused": "issue"},
    {"name": "unavailable issuance quote waits and sends nothing twice", "view": "issue"},
    {"name": "lost deposit reply is booked once", "lost": "deposit"},
-   {"name": "unknown deposit stays stopped", "unknown": "deposit"},
+   {"name": "unknown deposit stays stopped", "js": false, "unknown": "deposit"},
    {"name": "refused deposit retries only the deposit", "refused": "deposit"},
    {"name": "unavailable deposit quote retries only the deposit", "view": "deposit"}
   ]

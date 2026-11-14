@@ -123,6 +123,24 @@ export function netBasketOps(session, basket, buck, { execute, simulate = null }
       if (shares > p.priorShares) throw new Error("basket redemption exceeds owned shares");
       return { ...p, shares, minimumBuck };
     },
+    // Shares a BUCK deposit delivering `amount` net would receive now, priced as the basket prices
+    // it (basket.quote_deposit_shares): equity at the HIGH marks, equity() - gross() + grossAt(HIGH),
+    // after (1 + K)/2 of the dearest pool fee. Advisory; the deposit enforces minShares itself.
+    quoteDepositShares: async (amount, { blockNumber = null } = {}) => {
+      if (typeof amount !== "bigint" || amount <= 0n || amount > maxUint256) throw new Error("positive basket deposit required");
+      blockNumber ??= (await session.client.getBlock()).number;
+      const at = (functionName, args = []) => read(basket, functionName, args, blockNumber);
+      let fee = 0n;
+      for (let i = 0n, n = await at("constituentsLength"); i < n; i++) {
+        const tier = BigInt((await at("constituents", [i]))[4]);
+        if (tier > fee) fee = tier;
+      }
+      const charge = fee * 10n ** 12n * (10n ** 18n + await at("kNow")) / (2n * 10n ** 18n);
+      const net = amount * (10n ** 18n - charge) / 10n ** 18n, supply = await at("totalShares");
+      if (!supply) return net;
+      const high = await at("equity") - await at("gross") + await at("grossAt", [1]);
+      return high > 0n ? net * supply / high : 0n;
+    },
     previewRedemption: async (owner, tokenId, shares) => {
       // eth_call executes the real exit/K/fee logic and discards its writes.
       // A refused quote cannot justify bypassing that same on-chain guard.

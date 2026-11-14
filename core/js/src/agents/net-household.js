@@ -2,13 +2,14 @@
 // The caller supplies an assessed economic plan and optional reserve purchase. Existing SDKs enforce
 // issuance/trade/payment bounds and authenticate each receipt. Only the exact
 // bank payment changes the mortgage; an uncertain phase never sends twice.
-import { IssuancePending } from "../net-world.js";
+import { IssuancePending, ReleasePending } from "../net-world.js";
 import { buyBuck, buyBuckExact, netPurchaseFromReceipt, sellBuck, netSaleFromReceipt } from "../market.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
 import { markNetBasketPositions, netBasketOps } from "../basket.js";
-import { observeNetMarket, netPurchaseCost, netSaleExpected, netSaleInput } from "../net-market-quote.js";
+import { observeNetMarket, netPurchaseCost, netPurchaseExpected, netSaleExpected, netSaleInput } from "../net-market-quote.js";
 import { externalPremiumDue, terms, bestQuotedRefinance, stagedRefinance, refinanceQuoted, netSurplusPurchase,
-  netWalletAdjustment, netWalletTarget } from "./household-policy.js";
+  netWalletAdjustment, netWalletTarget, investmentWant, investmentProgramme, investmentQuoted, stagedInvestment,
+  netInvestorAction, NO } from "./household-policy.js";
 
 const RAW = 1_000_000n, MAX = (1n << 256n) - 1n;
 const PHASES = ["fund", "issue", "export", "mortgage"];
@@ -25,9 +26,11 @@ const bankTerms = (p) => {
 
 // Existing 0.1% owned trade cushion; not another demurrage calculation.
 // The actual wallet balance and unchanged reserve guard govern execution.
-const exportable = (held, reserve) => max(0n, held - reserve - (held + 999n) / 1000n);
-const basketOps = (world) => netBasketOps(world.session, world.basket, world.buck,
+export const exportable = (held, reserve) => max(0n, held - reserve - (held + 999n) / 1000n);
+export const basketOps = (world) => netBasketOps(world.session, world.basket, world.buck,
   { execute: world.netMarket.execute, simulate: world.netMarket.simulate });
+export const EXIT_STEPS = ["redeem", "sell", "release"];
+const later = (x, y) => { for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
 const snake = (key) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 const wire = (value) => {
   if (typeof value === "bigint") return String(value);
@@ -299,6 +302,195 @@ export async function assessRemainder(a, world, day, { expected_wallet_growth = 
 // Read-only successor for surplus, using the same pinned money graph/menu.
 // Existing wallet cash and worthwhile credit funding stay protected. Actual
 // basket exit simulation uses eth_call; it never bypasses K or mutates the chain.
+/** Read-only choice of one quoted issue a mortgage-free household keeps and invests
+ * (net_household.assess_investment). The amount is investmentWant; each bounded actual NFT quote is
+ * scored by investmentQuoted with the dollars its new BUCK would fetch at this block's pool. Wallet
+ * money is never capacity; the lasting reserve stays; a reserve shortfall is a guarded purchase; the
+ * closing fee is fronted in dollars. A first bite is scored against the whole carry line. */
+export async function assessInvestment(a, world, day, { expected_relief_rate, expected_refund_growth,
+  expected_wallet_growth, reserve_floor = null, slippage_bp = 50 } = {}) {
+  const m = a.refinanceMachine, ids = world._credits.get(a.account.address) ?? [];
+  if (world.accounting !== "net" || m.active || m.settlementDue || m.surplusDue || a.calendarMachine.active) {
+    throw new Error("household investment assessment needs idle canonical accounting");
+  }
+  if (a.investor || a.mortgage || a.sold || !ids.length) throw new Error("credit investment needs a mortgage-free insured household");
+  if (a.netRepaymentTarget !== null || a.netTradeUncertain || a.netCancelUncertain || a.netPendingToken !== null
+      || a.netRepaymentInterrupted) throw new Error("household repayment must be reconciled before credit investment");
+  reserve_floor ??= a.netCreditReserve;
+  if (typeof reserve_floor !== "bigint" || reserve_floor < 0n || reserve_floor > MAX
+      || !Number.isInteger(slippage_bp) || slippage_bp < 0 || slippage_bp > 1000) throw new Error("invalid household assessment reserve or slippage");
+  const s = world.session, owner = world.holderAddress(a.account), blockNumber = (await s.client.getBlock()).number;
+  const at = (c, functionName, args = []) => s.client.readContract({ address: c.address, abi: c.abi, functionName, args, blockNumber });
+  for (const id of ids) if ((await at(world.buck, "reductionAuthorization", [id]))[0]) throw new Error("household repayment authorization remains pending");
+  const market = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber });
+  const book = await world.netCreditOps.household(owner, ids, { blockNumber });
+  const retained = min(reserve_floor, book.spendable);
+  const available = await world.netCreditOps.quoteHouseholdActivatedCapacity(owner, ids);
+  if (available.blockNumber !== blockNumber) throw new Error("household assessment block changed");
+  const cash = await at(world.usdc, "balanceOf", [owner]), k = await at(world.kctrl, "currentBuckK");
+  const bvib = await at(world.basket, "basketValueInBuck");
+  // spendable is zero: wallet BUCK is money already owned, not issuing capacity.
+  const state = { accounting: "net", mortgage: 0, face: Number(a.face) / 1e6, joined: a.joined,
+    closing_paid: a.refinanceClosed, k: Number(k) / 1e18, spendable: 0, drawn: Number(book.issued) / 1e6,
+    unactivated: available.maturitiesPending ? 0 : Number(available.unactivatedPresent) / 1e6,
+    activated_capacity: Number(available.capacity) / 1e6,
+    issuance_limit: available.maturitiesPending ? 0 : Number(available.sharedLimit) / 1e6, at_renewal: false,
+    ru: Number(market.reserve_usdc) / 1e6, rb: Number(market.reserve_buck) / 1e6, fee: Number(market.fee_ppm) / 1e6,
+    basket_usd: Number(bvib) / 1e18 * (Number(market.price_num) / Number(market.price_den)),
+    expected_relief_rate, expected_refund_growth, expected_wallet_growth, premium_refund_fraction: 1 };
+  const context = { block: blockNumber, considered: 0, issuance_quotes: 0, rejections: {}, feasible: 0, cash,
+    forecasts: { relief_rate: expected_relief_rate, refund_growth: expected_refund_growth, wallet_growth: expected_wallet_growth },
+    protected_buck: reserve_floor };
+  const done = async (plan, verdict, reason) => {
+    if ((await s.client.getBlock()).number !== blockNumber) throw new Error("household assessment block changed");
+    context.reason = reason;
+    return { plan, verdict, context };
+  };
+  if (!market.reserve_buck || !market.reserve_usdc || !bvib) return done(null, NO, "market-unavailable");
+  const [wanted, why] = investmentWant(state, a.p), want = BigInt(Math.trunc(wanted * 1e6));
+  Object.assign(context, { want, basis: why });
+  if (want < RAW) return done(null, NO, why === "hold" ? "hold" : "below-issue-grain");
+  const t = terms(state, a.p, true);
+  const utilization = a.face * k * BigInt(Math.trunc(a.p.utilization * 1e9)) / (10n ** 18n * 10n ** 9n);
+  const impactPpm = BigInt(Math.trunc(a.p.max_impact_bp * 50));
+  const buckCap = market.reserve_buck * impactPpm / 1_000_000n, cashCap = market.reserve_usdc * impactPpm / 1_000_000n;
+  const fixed = BigInt(Math.trunc(t.fixed_cost * 1e6));
+  const active = book.facilities.reduce((n, f) => n + f.activated, 0n), annual = a.face * BigInt(a.p.premium_bp) / 10000n;
+  let position = 0n;
+  for (const existing of a.receipts) {
+    if ((await at(world.basket, "deposits", [existing]))[2].toLowerCase() === world.buck.address.toLowerCase()) { position = existing; break; }
+  }
+  const refunds = new Map(), bites = [];
+  let best = null;
+  const reject = (reason) => { context.rejections[reason] = (context.rejections[reason] ?? 0) + 1; return null; };
+  // One actual candidate's plan and economics, or null with its rejection counted.
+  const quoted = async (candidate, programme = false) => {
+    context.considered++;
+    if (candidate.reasons.some((r) => r !== "reserve-shortfall")) { candidate.reasons.forEach(reject); return null; }
+    const newly = candidate.requestedSpendable, premium = candidate.premium;
+    if (book.issued + newly + premium > utilization) return reject("utilization");
+    const floor = max(retained, reserveFor(candidate)), buy = max(0n, floor - book.spendable);
+    const cost = netPurchaseCost(market, buy);
+    if (cost === null) return reject("reserve-liquidity");
+    const maximum = (cost * BigInt(10000 + slippage_bp) + 9999n) / 10000n;
+    // A programme is a forecast of bounded bites, not one large issue or reserve purchase.
+    if (!programme && (newly > buckCap || maximum > cashCap || buy * market.gross_scaled > buckCap * market.net_scaled)) {
+      return reject("trade-size");
+    }
+    const deposit = min(newly, exportable(book.spendable + newly + buy, floor));
+    if (deposit < RAW) return reject("deposit-size");
+    if (cash < a.buffer + maximum + fixed) return reject("cash-buffer");
+    let fraction = 1, saved = 0n;
+    if (premium) {
+      const key = `${candidate.tokenId}:${candidate.coverage}`;
+      if (!refunds.has(key)) refunds.set(key, await world.netCreditOps.quotePremiumRefund(candidate.tokenId, candidate.coverage, { blockNumber }));
+      if (refunds.get(key).refundFractionWad === null) return reject("insurer-refund-unavailable");
+      fraction = Number(refunds.get(key).refundFractionWad) / 1e18;
+    }
+    if (candidate.coverage) saved = externalPremiumDue(annual, a.face, active) - externalPremiumDue(annual, a.face, active + candidate.coverage);
+    // What the new BUCK would fetch at this pool, a bite at a time.
+    const leg = min(newly, buckCap);
+    if (!leg) return reject("trade-size");
+    const economics = { usd: Number(netSaleExpected(market, leg) * newly / leg) / 1e6, new_spendable: Number(newly) / 1e6,
+      present_coverage: Number(candidate.afterCoverage - candidate.beforeCoverage) / 1e6, premium: Number(premium) / 1e6,
+      premium_refund_fraction: fraction, external_premium_saving: Number(saved) / 1e6,
+      reserve_cost: (Number(maximum) - Number(buy) * t.buck_value) / 1e6,
+      reserve_carry: Number(buy) / 1e6 * t.buck_value * (a.p.apr - expected_wallet_growth) };
+    return { plan: { candidate, deposit_buck: deposit, cash_buffer: a.buffer, reserve_floor: floor, switch_cost: fixed,
+      reserve_buy_net: buy, reserve_buy_max_usdc: maximum, position_id: position, slippage_bp }, economics };
+  };
+  const menu = async (facility, amount) => {
+    const found = await world.netCreditOps.issueCoverageMenu(owner, facility.tokenId, amount,
+      facility.face * BigInt(facility.premiumRate) * 10n / 10000n, { reserveBuffer: RAW });
+    context.issuance_quotes += found.length;
+    if (found.some((c) => c.blockNumber !== blockNumber)) throw new Error("household assessment block changed");
+    return found;
+  };
+  for (const facility of book.facilities) for (const amount of sizes(want)) {
+    if (amount < RAW) continue;
+    for (const candidate of await menu(facility, amount)) {
+      const option = await quoted(candidate);
+      if (!option) continue;
+      const verdict = investmentQuoted(t, option.economics.usd, option.economics.new_spendable, option.economics.present_coverage,
+        option.economics.premium, { reserveCost: option.economics.reserve_cost, reserveCarry: option.economics.reserve_carry,
+          premiumRefundFraction: option.economics.premium_refund_fraction,
+          externalPremiumSaving: option.economics.external_premium_saving });
+      context.feasible++;
+      bites.push(option);
+      if (!verdict.go) { reject("not-worthwhile"); continue; }
+      // Exact ties prefer less added coverage, then less new issuance.
+      const key = [verdict.value, -option.economics.present_coverage, -option.economics.new_spendable];
+      if (best === null || later(key, best.key)) best = { key, plan: option.plan, verdict, economics: option.economics };
+    }
+  }
+  // A first bite need not repay the whole closing fee alone when the line it begins is worthwhile
+  // and affordable now: score it against that same-asset programme, quoted at this block.
+  const line = BigInt(Math.trunc(investmentProgramme(state, a.p) * 1e6));
+  if (best === null && bites.length && fixed && line > want) {
+    const programmes = [];
+    for (const facility of book.facilities) for (const c of await menu(facility, line)) {
+      const option = await quoted(c, true);
+      if (option) programmes.push({ tokenId: c.tokenId, economics: option.economics });
+    }
+    context.programme_quotes = programmes.length;
+    for (const { plan, economics } of bites) for (const whole of programmes) {
+      if (whole.tokenId !== plan.candidate.tokenId) continue;
+      const { verdict: marginal, programme: score } = stagedInvestment(t, economics, whole.economics);
+      const key = [marginal.value, -economics.present_coverage, -economics.new_spendable];
+      if (marginal.go && (best === null || later(key, best.key))) {
+        best = { key, plan, verdict: marginal, economics };
+        context.programme = { token_id: whole.tokenId, economics: whole.economics, score, bites: (line + want - 1n) / want,
+          basis: "current-credit/capital/per-bite-price", fixed_cost_paid_now: plan.switch_cost,
+          fixed_cost_allocated: -marginal.parts.fixed };
+      }
+    }
+  }
+  if (best === null) return done(null, NO, "no-worthwhile-investment");
+  context.selected = { economics: best.economics, score: best.verdict };
+  context.funding = { cash_floor: best.plan.cash_buffer + best.plan.reserve_buy_max_usdc + best.plan.switch_cost,
+    basis: "selected-investment" };
+  return done(best.plan, best.verdict, context.programme ? "worthwhile-staged-investment" : "worthwhile-investment");
+}
+
+/** Read-only decision of a cash investor (net_household.assess_investor). While BVIB is within its
+ * tolerance of 1 ("invest") it deposits the BUCK it holds, or buys BUCK and deposits them; above it
+ * ("wait") K should fall and the BUCK regain value, so it buys BUCK and holds them. One capped bite. */
+export async function assessInvestor(a, world, day) {
+  const m = a.refinanceMachine, cal = a.calendarMachine;
+  if (!Number.isSafeInteger(day) || day < 0 || world.accounting !== "net" || m.active || m.settlementDue || m.surplusDue
+      || cal.active || !cal.bound || cal.day !== day) throw new Error("investor decision needs prepared, idle canonical accounting");
+  if (!a.investor) throw new Error("an insured household saves and invests through its own components");
+  const s = world.session, owner = world.holderAddress(a.account), blockNumber = (await s.client.getBlock()).number;
+  const at = (c, functionName, args = []) => s.client.readContract({ address: c.address, abi: c.abi, functionName, args, blockNumber });
+  const cash = await at(world.usdc, "balanceOf", [owner]), held = await at(world.buck, "balanceOf", [owner]);
+  const q = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber });
+  const bvib = await at(world.basket, "basketValueInBuck"), tolerance = a.p.bvib_tolerance;
+  const action = netInvestorAction(bvib, tolerance);
+  const context = { block: blockNumber, cash, held, bvib_wad: bvib, tolerance, action, reason: action };
+  const spend = min(max(0n, cash - a.buffer), q.reserve_usdc * BigInt(Math.trunc(a.p.max_impact_bp * 50)) / 1_000_000n);
+  const minimum = spend && q.net_scaled ? netPurchaseExpected(q, spend) * 9950n / 10000n : 0n;
+  const buy = spend >= RAW && minimum >= RAW;
+  let id = 0n;
+  for (const existing of a.receipts) {
+    if ((await at(world.basket, "deposits", [existing]))[2].toLowerCase() === world.buck.address.toLowerCase()) { id = existing; break; }
+  }
+  const base = { cash_buffer: a.buffer, spend_usdc: 0n, minimum_net: 0n, target_principal: 0n, position_id: 0n,
+    redeem_shares: 0n, minimum_buck: 0n, slippage_bp: 50, deposit_buck: 0n };
+  let plan = null;
+  if (action === "invest" && exportable(held, 0n) >= RAW) {
+    plan = { ...base, action: "convert", reserve_floor: 0n, position_id: id, deposit_buck: exportable(held, 0n) };
+    context.reason = "deposit-held-buck";
+  } else if (action === "invest" && buy) {
+    plan = { ...base, action: "save", reserve_floor: held, spend_usdc: spend, minimum_net: minimum, position_id: id };
+    context.reason = "buy-and-deposit";
+  } else if (buy) {
+    plan = { ...base, action: "hold", reserve_floor: held, spend_usdc: spend, minimum_net: minimum };
+    context.reason = "buy-and-hold-for-lower-bvib";
+  } else context.reason = action === "invest" ? "nothing-to-invest" : "hold-for-lower-bvib";
+  if ((await s.client.getBlock()).number !== blockNumber) throw new Error("investor observation changed");
+  return { plan, context };
+}
+
 /** Dollars a discretionary operation must leave: buffer and credit front.
  * A debtor's front comes from the whole refinance assessor; that read is
  * reused when the same day's assessment was made at this same block (a
@@ -407,8 +599,18 @@ export class HouseholdRefinance {
   get active() { return this.flow !== null && ["running", "pending"].includes(this.flow.status); }
   get settlementDue() { return this.flow !== null && this.flow.status === "refused" && ["export", "mortgage"].includes(this.flow.phase); }
   get paymentDue() { return this.settlementDue && this.flow.phase === "mortgage"; }
-  get surplusDue() { return Boolean(this.flow?.kind === "surplus" && this.flow.status === "refused" && this.flow.phase === "deposit"); }
-  label() { return ["surplus", "wallet"].includes(this.flow?.kind) ? this.flow.kind : "refinance"; }
+  /** A known refused basket deposit of owned BUCK: saved cash, or a confirmed credit issue. */
+  get surplusDue() {
+    return Boolean(["surplus", "invest"].includes(this.flow?.kind) && this.flow.status === "refused" && this.flow.phase === "deposit");
+  }
+  label() { return ["surplus", "wallet", "invest", "exit"].includes(this.flow?.kind) ? this.flow.kind : "refinance"; }
+  /** Close a KNOWN refused remainder whose intent no longer applies (the household is leaving).
+   * Confirmed steps stay real holdings; nothing is reversed or sent. An unknown outcome cannot be. */
+  async abandon(world, day, reason) {
+    if (!(this.settlementDue || this.surplusDue)) throw new Error("only a known refused remainder can be abandoned");
+    this.flow.status = "abandoned"; this.agent.fundingPending = false;
+    await this.event(world, day, "abandoned", { reason: reason.slice(0, 200) });
+  }
   /** The selected-facility engine's retained intent; null when idle. A funded
    * target is an intention with protected prior cash, not a burn. `uncertain`
    * must be reconciled before any further send; `waiting` is a known refusal
@@ -454,7 +656,7 @@ export class HouseholdRefinance {
       const externalPremium = externalPremiumDue(monthlyPremium, a.face, facilities.reduce((sum, f) => sum + f.activated, 0n));
       // One surplus operation's own floors are never the lasting policy.
       const surplus = this.flow?.kind === "surplus";
-      const buffer = ["surplus", "wallet"].includes(this.flow?.kind) ? a.buffer : this.flow?.plan.cash_buffer ?? a.buffer;
+      const buffer = ["surplus", "wallet", "exit"].includes(this.flow?.kind) ? a.buffer : this.flow?.plan.cash_buffer ?? a.buffer;
       const reserve = a.netCreditReserve, custody = {};
       const protection = surplus ? { usdc: this.flow.plan.cash_buffer, buck: this.flow.plan.reserve_floor } : null;
       for (const [name, proxy] of [["savings", a.savings], ["wallet", a.wallet]]) if (proxy) {
@@ -499,7 +701,7 @@ export class HouseholdRefinance {
   async event(world, day, status, detail = {}) {
     let block = null;
     try { block = Number((await world.session.client.getBlock()).number); } catch { /* explicit unavailable */ }
-    if (["surplus", "wallet"].includes(this.flow?.kind)) detail = { kind: this.flow.kind, ...detail };
+    if (["surplus", "wallet", "invest", "exit"].includes(this.flow?.kind)) detail = { kind: this.flow.kind, ...detail };
     this.events.push({ schema: 1, seq: this.events.length + 1, member: this.agent.member, decision: this.decisions,
       day, block, phase: this.flow?.phase ?? "idle", status, accounts: await this.accounts(world), ...wire(detail) });
   }
@@ -555,16 +757,20 @@ export class HouseholdRefinance {
   }
   // One cash-only intention, with the same receipt cursor as refinancing.
   // New money never becomes a burn until the existing facility engine settles.
-  async startSurplus(world, p, day, ctr = {}, { context = {} } = {}) {
+  async startSurplus(world, given, day, ctr = {}, { context = {} } = {}) {
+    let p = given;
     if (this.active || this.settlementDue || this.surplusDue) throw new Error("household has unfinished cash work");
-    if (!p || !["save", "retire"].includes(p.action)) throw new Error("invalid household surplus plan");
+    if (!p || !["save", "retire", "hold", "convert"].includes(p.action)) throw new Error("invalid household surplus plan");
+    p = { deposit_buck: 0n, ...p };
     const values = [p.cash_buffer, p.reserve_floor, p.spend_usdc, p.minimum_net, p.target_principal,
-      p.position_id, p.redeem_shares, p.minimum_buck];
+      p.position_id, p.redeem_shares, p.minimum_buck, p.deposit_buck];
+    const convert = p.action === "convert";          // owned BUCK deposited; nothing bought or redeemed
     if (values.some((v) => typeof v !== "bigint" || v < 0n || v > MAX) || !Number.isSafeInteger(p.slippage_bp)
         || p.slippage_bp < 0 || p.slippage_bp > 1000 || p.cash_buffer < this.agent.buffer
         || Boolean(p.spend_usdc) !== Boolean(p.minimum_net) || Boolean(p.redeem_shares) !== Boolean(p.minimum_buck)
-        || Boolean(p.redeem_shares) === Boolean(p.spend_usdc)
-        || p.action === "save" && (p.redeem_shares || p.target_principal) || p.action === "retire" && !p.target_principal
+        || convert !== Boolean(p.deposit_buck) || convert && (p.spend_usdc || p.redeem_shares)
+        || !convert && Boolean(p.redeem_shares) === Boolean(p.spend_usdc)
+        || p.action !== "retire" && (p.redeem_shares || p.target_principal) || p.action === "retire" && !p.target_principal
         || p.redeem_shares && !p.position_id) throw new Error("invalid household surplus bounds");
     const a = this.agent, owner = world.holderAddress(a.account), s = world.session;
     const cash = await s.call(world.usdc, "balanceOf", [owner]);
@@ -574,8 +780,8 @@ export class HouseholdRefinance {
     if (p.target_principal > book.issued) throw new Error("surplus retirement exceeds actual principal");
     if (p.position_id && !a.receipts.includes(p.position_id)) throw new Error("household surplus names an untracked receipt");
     this.decisions++; this.counters = ctr;
-    this.flow = { kind: "surplus", plan: { ...p }, phase: p.redeem_shares ? "redeem" : "buy",
-      status: "running", hash: null, terms: null, revision: 0, acquired: 0n };
+    this.flow = { kind: "surplus", plan: { ...p }, phase: convert ? "deposit" : p.redeem_shares ? "redeem" : "buy",
+      status: "running", hash: null, terms: null, revision: 0, acquired: p.deposit_buck };
     await this.event(world, day, "planned", { plan: p, context, market: await this.market(world), basket: await this.basket(world) });
     return this.advance(world, day, ctr);
   }
@@ -594,14 +800,7 @@ export class HouseholdRefinance {
       }
       f.terms = { preserved: max(held, p.reserve_floor) + 1n };
     } else if (f.phase === "deposit") {
-      const amount = min(f.acquired, exportable(held, p.reserve_floor)), price = await s.call(world.basket, "sharePrice");
-      const minimum = price ? amount * 10n ** 18n / price * BigInt(10000 - p.slippage_bp) / 10000n : 0n;
-      if (!minimum) {
-        f.phase = "complete"; f.retained = true;
-        await this.event(world, day, "retained", { reason: "owned cash below deposit grain/reserve" }); return false;
-      }
-      f.terms = await basketOps(world).prepareDeposit(owner, amount, minimum, { tokenId: p.position_id });
-      await this.event(world, day, "quoted", { basket_terms: Object.fromEntries(Object.entries(f.terms).map(([k, v]) => [snake(k), v])) });
+      return this.prepareDeposit(world, day, f.acquired);
     } else {
       f.terms = await basketOps(world).prepareRedemption(owner, p.position_id, p.redeem_shares, p.minimum_buck);
       f.preserved = max(held, p.reserve_floor) + 1n;
@@ -616,7 +815,7 @@ export class HouseholdRefinance {
     if (phase === "buy") {
       if (r.paid <= 0n || r.paid > p.spend_usdc || r.received < p.minimum_net) throw new Error("surplus purchase differs from bounds");
       a.tradeLoss += r.paid - r.received;
-      if (p.action === "save") a.investedUsd += r.paid;
+      if (["save", "hold"].includes(p.action)) a.investedUsd += r.paid;
       f.acquired = r.received;
       amounts = { usdc: r.paid, net_buck_scaled: r.receivedScaled, nominal_buck: r.nominalReceived };
       preserved = f.terms.preserved; f.phase = p.action === "save" ? "deposit" : "complete";
@@ -625,22 +824,208 @@ export class HouseholdRefinance {
       if (old.principal !== f.terms.priorBasis || old.shares !== f.terms.priorShares) {
         throw new Error("household basket books differ from prepared receipt");
       }
-      let shares, basis;
-      if (phase === "deposit") {
-        shares = r.shares; basis = r.basis;
-        if (!a.receipts.includes(id)) { a.receipts.push(id); world.receipts++; }
-        amounts = { buck: r.received, token_id: id, shares_added: r.sharesAdded };
-        ctr.bcdInvested = (ctr.bcdInvested ?? 0n) + r.received; ctr.bcdInvestments = (ctr.bcdInvestments ?? 0) + 1;
-      } else {
-        shares = r.sharesRemaining; basis = r.basisRemaining; preserved = f.preserved;
+      if (phase === "deposit") amounts = this.bookDeposit(world, r, ctr);
+      else {
+        const shares = r.sharesRemaining, basis = r.basisRemaining;
+        preserved = f.preserved;
         amounts = { buck: r.paid, token_id: id, shares_retired: r.sharesRetired, in_kind: r.inKind };
+        a.basketPrincipal += basis - old.principal; a.shares += shares - old.shares;
+        if (shares) a.book.set(id, { principal: basis, shares });
+        else { a.book.delete(id); a.receipts = a.receipts.filter((v) => v !== id); }
       }
-      a.basketPrincipal += basis - old.principal; a.shares += shares - old.shares;
-      if (shares) a.book.set(id, { principal: basis, shares });
-      else { a.book.delete(id); a.receipts = a.receipts.filter((v) => v !== id); }
       f.phase = "complete";
     }
     if (p.action === "retire") { a.netRepaymentReserve = preserved; a.netRepaymentTarget = p.target_principal; }
+    f.hash = null; f.terms = null; f.status = "running";
+    await this.event(world, day, "confirmed", { operation: phase, amounts,
+      transaction_hash: receipt.transactionHash, receipt_block: receipt.blockNumber ?? null });
+  }
+
+  /** Quote a basket deposit of owned BUCK above the reserve; false when none is sent. */
+  async prepareDeposit(world, day, wanted) {
+    const a = this.agent, f = this.flow, p = f.plan, s = world.session, owner = world.holderAddress(a.account);
+    const amount = min(wanted, exportable(await s.call(world.buck, "balanceOf", [owner]), p.reserve_floor));
+    // Priced as the basket prices a deposit (high marks, less its charge), not its TWAP share price.
+    const expected = amount ? await basketOps(world).quoteDepositShares(amount) : 0n;
+    const minimum = expected * BigInt(10000 - p.slippage_bp) / 10000n;
+    if (!minimum) {
+      f.phase = "complete"; f.retained = true;
+      await this.event(world, day, "retained", { reason: "owned cash below deposit grain/reserve" }); return false;
+    }
+    f.terms = await basketOps(world).prepareDeposit(owner, amount, minimum, { tokenId: p.position_id });
+    await this.event(world, day, "quoted", { basket_terms: Object.fromEntries(Object.entries(f.terms).map(([k, v]) => [snake(k), v])) });
+    return true;
+  }
+  /** Apply one authenticated deposit to the household's receipt books, once. */
+  bookDeposit(world, r, ctr) {
+    const a = this.agent, f = this.flow, id = r.tokenId, old = a.book.get(id) ?? { principal: 0n, shares: 0n };
+    if (old.principal !== f.terms.priorBasis || old.shares !== f.terms.priorShares) {
+      throw new Error("household basket books differ from prepared receipt");
+    }
+    if (!a.receipts.includes(id)) { a.receipts.push(id); world.receipts++; }
+    a.basketPrincipal += r.basis - old.principal; a.shares += r.shares - old.shares;
+    a.book.set(id, { principal: r.basis, shares: r.shares });
+    ctr.bcdInvested = (ctr.bcdInvested ?? 0n) + r.received; ctr.bcdInvestments = (ctr.bcdInvestments ?? 0) + 1;
+    return { buck: r.received, token_id: id, shares_added: r.sharesAdded };
+  }
+  /** Re-read the saved candidate; true when its unchanged terms may be submitted. */
+  async prepareIssue(world, day, label) {
+    const a = this.agent, f = this.flow, p = f.plan, c = p.candidate, owner = world.holderAddress(a.account);
+    let fresh;
+    try { fresh = await world.netCreditOps.assessIssueCandidate(owner, c.tokenId, c.coverage,
+      c.requestedSpendable, c.maxPremium, { reserveBuffer: c.reserveBuffer }); }
+    catch (err) {
+      a.lastError = `${label} issuance observation unavailable: ${err}`.slice(0, 200);
+      await this.event(world, day, "waiting", { reason: a.lastError }); return false;
+    }
+    if (fresh.reasons.length || ["priorPrincipal", "beforeCoverage", "afterCoverage", "premium"].some((key) => fresh[key] !== c[key])
+        || fresh.premiumPool.toLowerCase() !== c.premiumPool.toLowerCase() || reserveFor(fresh) > p.reserve_floor) {
+      await this.refuse(world, day, `${label} issuance terms changed; reassess retained holdings`); return false;
+    }
+    f.issue_candidate = fresh;
+    return true;
+  }
+
+  /** One step of a leaving household's unwinding (net_household.start_exit): a receipt redeemed
+   * home, owned BUCK sold for dollars, or burn(0) releasing coverage no principal needs. Principal is
+   * retired only by the selected-facility engine; none of these issues or retires any. */
+  async startExit(world, given, day, ctr = {}, { context = {} } = {}) {
+    if (this.active || this.settlementDue || this.surplusDue) throw new Error("household has unfinished cash work");
+    const a = this.agent, ids = (world._credits.get(a.account.address) ?? []).map(String);
+    if (!given || !EXIT_STEPS.includes(given.step)) throw new Error("invalid household exit plan");
+    const p = { position_id: 0n, shares: 0n, minimum_buck: 0n, sell_buck: 0n, minimum_usdc: 0n, token_ids: [], ...given };
+    const [redeem, sell, release] = EXIT_STEPS.map((step) => p.step === step);
+    if ([p.position_id, p.shares, p.minimum_buck, p.sell_buck, p.minimum_usdc].some((v) => typeof v !== "bigint" || v < 0n || v > MAX)
+        || !Array.isArray(p.token_ids) || redeem !== Boolean(p.position_id && p.shares && p.minimum_buck)
+        || sell !== Boolean(p.sell_buck && p.minimum_usdc) || release !== Boolean(p.token_ids.length)
+        || redeem && !a.receipts.includes(p.position_id)
+        || release && (new Set(p.token_ids.map(String)).size !== p.token_ids.length || p.token_ids.some((t) => !ids.includes(String(t))))) {
+      throw new Error("invalid household exit bounds");
+    }
+    this.decisions++; this.counters = ctr;
+    this.flow = { kind: "exit", plan: p, phase: p.step, status: "running", hash: null, terms: null, revision: 0 };
+    await this.event(world, day, "planned", { plan: p, context: wire(context), market: await this.market(world), basket: await this.basket(world) });
+    return this.advance(world, day, ctr);
+  }
+  async prepareExit(world, day) {
+    const a = this.agent, f = this.flow, p = f.plan, owner = world.holderAddress(a.account);
+    if (p.step === "redeem") {
+      f.terms = await basketOps(world).prepareRedemption(owner, p.position_id, p.shares, p.minimum_buck);
+      await this.event(world, day, "quoted", { basket_terms: Object.fromEntries(Object.entries(f.terms).map(([k, v]) => [snake(k), v])) });
+    } else if (p.step === "sell" && await world.session.call(world.buck, "balanceOf", [owner]) < p.sell_buck) {
+      await this.refuse(world, day, "exit BUCK balance changed"); return false;
+    }
+    return true;
+  }
+  async applyExit(world, day, r, ctr) {
+    const a = this.agent, f = this.flow, p = f.plan;
+    const receipt = r.receipt ?? { transactionHash: r.transactionHash, blockNumber: r.blockNumber };
+    let amounts;
+    if (p.step === "redeem") {
+      const id = r.tokenId, old = a.book.get(id) ?? { principal: 0n, shares: 0n };
+      if (old.principal !== f.terms.priorBasis || old.shares !== f.terms.priorShares) {
+        throw new Error("household basket books differ from prepared receipt");
+      }
+      a.basketPrincipal += r.basisRemaining - old.principal; a.shares += r.sharesRemaining - old.shares;
+      if (r.sharesRemaining) a.book.set(id, { principal: r.basisRemaining, shares: r.sharesRemaining });
+      else { a.book.delete(id); a.receipts = a.receipts.filter((v) => v !== id); }
+      ctr.hhRedeemed = (ctr.hhRedeemed ?? 0) + 1;
+      amounts = { buck: r.paid, token_id: id, shares_retired: r.sharesRetired, in_kind: r.inKind };
+    } else if (p.step === "sell") {
+      if (r.paid <= 0n || r.paid > p.sell_buck || r.received < p.minimum_usdc) throw new Error("exit sale differs from bounds");
+      a.tradeLoss += r.paid - r.received; a.withdrawnUsd += r.received;
+      amounts = { buck: r.paid, nominal_buck: r.nominalPaid, usdc: r.received };
+    } else {
+      a.releasedCoverage += r.coverage; a.releasedRefund += r.refund;
+      amounts = { coverage: r.coverage, premium_refund_nominal: r.refund,
+        facilities: r.released.map((x) => ({ token_id: x.tokenId, coverage: x.coverage, premium_refund_nominal: x.refund })) };
+    }
+    f.hash = null; f.terms = null; f.status = "running"; f.phase = "complete";
+    await this.event(world, day, "confirmed", { operation: p.step, amounts,
+      transaction_hash: receipt.transactionHash, receipt_block: receipt.blockNumber ?? null });
+  }
+
+  /** One quoted credit investment on the existing cursor (net_household.start_investment): the
+   * closing fee to the bank first, a reserve purchase, the issue, and a basket deposit of the new
+   * BUCK under this owner. A refused deposit keeps the BUCK owned and is retried alone (surplusDue). */
+  async startInvestment(world, given, day, ctr = {}, { context = {} } = {}) {
+    if (this.active || this.settlementDue || this.surplusDue) throw new Error("household has unfinished cash work");
+    const a = this.agent, c = given?.candidate, owner = world.holderAddress(a.account);
+    const ids = world._credits.get(a.account.address) ?? [];
+    if (!given || !c || !Array.isArray(c.reasons)) throw new Error("invalid household investment plan");
+    const p = { switch_cost: 0n, reserve_buy_net: 0n, reserve_buy_max_usdc: 0n, position_id: 0n, slippage_bp: 50, ...given };
+    const values = [p.deposit_buck, p.cash_buffer, p.reserve_floor, p.switch_cost, p.reserve_buy_net, p.reserve_buy_max_usdc, p.position_id];
+    const funding = p.reserve_buy_net > 0n;
+    if (values.some((v) => typeof v !== "bigint" || v < 0n || v > MAX) || !Number.isSafeInteger(p.slippage_bp)
+        || p.slippage_bp < 0 || p.slippage_bp > 1000 || p.deposit_buck <= 0n || p.deposit_buck > c.requestedSpendable
+        || p.cash_buffer < a.buffer || Boolean(p.reserve_buy_max_usdc) !== funding || a.mortgage || a.investor) {
+      throw new Error("invalid household investment bounds");
+    }
+    if (c.reasons.some((reason) => reason !== "reserve-shortfall" || !funding) || !ids.some((id) => id === c.tokenId)
+        || p.reserve_buy_net < c.reserveShortfall || p.reserve_floor < reserveFor(c)) {
+      throw new Error("unavailable household investment candidate");
+    }
+    if (a.refinanceClosed && p.switch_cost) throw new Error("household closing was already paid");
+    if (p.position_id && !a.receipts.includes(p.position_id)) throw new Error("household investment names an untracked receipt");
+    for (const id of ids) if ((await world.session.call(world.buck, "reductionAuthorization", [id]))[0]) {
+      throw new Error("household reduction authorization pending");
+    }
+    if (await world.session.call(world.usdc, "balanceOf", [owner]) < p.cash_buffer + p.reserve_buy_max_usdc + p.switch_cost) {
+      throw new Error("investment would consume the USDC buffer");
+    }
+    this.decisions++; this.counters = ctr;
+    a.netCreditReserve = p.reserve_floor;
+    this.flow = { kind: "invest", plan: { ...p, candidate: { ...c, reasons: [...c.reasons] } }, status: "running", hash: null,
+      terms: null, revision: 0, acquired: 0n, issue_candidate: null,
+      phase: p.switch_cost ? "closing" : funding ? "fund" : "issue" };
+    a.fundingPending = true;
+    const limits = Object.fromEntries(["surplus_policy", "theta", "issue_premium", "carry_utilization", "utilization", "max_impact_bp"]
+      .map((k) => [k, a.p[k]]));
+    const plan = { ...this.flow.plan, candidate: Object.fromEntries(Object.entries(c).map(([k, v]) => [snake(k), v])) };
+    await this.event(world, day, "planned", { plan, context: wire(context), limits, market: await this.market(world),
+      basket: await this.basket(world) });
+    return this.advance(world, day, ctr);
+  }
+  async prepareInvest(world, day) {
+    const a = this.agent, f = this.flow, p = f.plan, owner = world.holderAddress(a.account), s = world.session;
+    if (f.phase === "closing") {
+      if (await s.call(world.usdc, "balanceOf", [owner]) < p.switch_cost + p.reserve_buy_max_usdc + p.cash_buffer) {
+        await this.refuse(world, day, "investment USDC buffer changed"); return false;
+      }
+      f.terms = { amount: p.switch_cost };
+    } else if (f.phase === "fund") {
+      if (await s.call(world.usdc, "balanceOf", [owner]) < p.reserve_buy_max_usdc + p.cash_buffer) {
+        await this.refuse(world, day, "investment reserve USDC buffer changed"); return false;
+      }
+    } else if (f.phase === "issue") return this.prepareIssue(world, day, "investment");
+    else return this.prepareDeposit(world, day, min(f.acquired, p.deposit_buck));
+    return true;
+  }
+  async applyInvest(world, day, r, ctr) {
+    const a = this.agent, f = this.flow, p = f.plan, phase = f.phase;
+    const receipt = r.receipt ?? { transactionHash: r.transactionHash, blockNumber: r.blockNumber };
+    let amounts;
+    if (phase === "closing") {
+      if (r.amount !== f.terms.amount) throw new Error("household closing payment changed");
+      a.switchPaid += r.amount; a.refinanceClosed = true;
+      amounts = { usdc: r.amount, switch_usdc: r.amount };
+      f.phase = p.reserve_buy_net ? "fund" : "issue";
+    } else if (phase === "fund") {
+      if (r.paid <= 0n || r.paid > p.reserve_buy_max_usdc || r.received < p.reserve_buy_net) {
+        throw new Error("household reserve purchase does not match bounds");
+      }
+      a.tradeLoss += r.paid - r.received;
+      amounts = { usdc: r.paid, net_buck_scaled: r.receivedScaled, nominal_buck: r.nominalReceived };
+      f.phase = "issue";
+    } else if (phase === "issue") {
+      a.premiumPaid += r.premium; a.joined = true; f.acquired = r.spendable;
+      amounts = { principal: r.principal, premium: r.premium, spendable: r.spendable };
+      f.phase = "deposit";
+    } else {
+      amounts = this.bookDeposit(world, r, ctr);
+      a.issuedInvest += r.received; a.deploys++;
+      f.phase = "complete";
+    }
     f.hash = null; f.terms = null; f.status = "running";
     await this.event(world, day, "confirmed", { operation: phase, amounts,
       transaction_hash: receipt.transactionHash, receipt_block: receipt.blockNumber ?? null });
@@ -738,6 +1123,8 @@ export class HouseholdRefinance {
   async apply(world, day, result, ctr) {
     if (this.flow.kind === "surplus") return this.applySurplus(world, day, result, ctr);
     if (this.flow.kind === "wallet") return this.applyWallet(world, day, result);
+    if (this.flow.kind === "invest") return this.applyInvest(world, day, result, ctr);
+    if (this.flow.kind === "exit") return this.applyExit(world, day, result, ctr);
     const a = this.agent, f = this.flow, phase = f.phase;
     const receipt = result.receipt ?? { transactionHash: result.transactionHash, blockNumber: result.blockNumber };
     let amounts;
@@ -802,6 +1189,14 @@ export class HouseholdRefinance {
       const ops = basketOps(world);
       return f.phase === "deposit" ? ops.depositFromReceipt(f.terms, receipt, f.hash) : ops.redemptionFromReceipt(f.terms, receipt, f.hash);
     }
+    if (f.kind === "exit") {
+      if (p.step === "redeem") return basketOps(world).redemptionFromReceipt(f.terms, receipt, f.hash);
+      if (p.step === "sell") return netSaleFromReceipt(world, world.netMarket, { address: owner }, receipt,
+        { expectedHash: f.hash, expectedInput: p.sell_buck, minimumOut: p.minimum_usdc });
+      return world.netCreditOps.releaseFromReceipt(owner, p.token_ids, receipt, f.hash);
+    }
+    if (f.kind === "invest" && f.phase === "closing") return world.netSettlementOps.paymentFromReceipt(owner, BANK, f.terms.amount, receipt, f.hash);
+    if (f.kind === "invest" && f.phase === "deposit") return basketOps(world).depositFromReceipt(f.terms, receipt, f.hash);
     if (f.phase === "fund") return netPurchaseFromReceipt(world, world.netMarket, { address: owner }, receipt, f.hash);
     if (f.phase === "issue") return world.netCreditOps.issuanceFromReceipt(owner, f.issue_candidate, receipt, f.hash);
     if (f.phase === "export") return netSaleFromReceipt(world, world.netMarket, { address: owner }, receipt,
@@ -834,23 +1229,20 @@ export class HouseholdRefinance {
         try { prepared = await this.prepareWallet(world, day); }
         catch (err) { await this.refuse(world, day, `wallet observation unavailable: ${err}`); return true; }
         if (!prepared) return true;
+      } else if (f.kind === "exit") {
+        let prepared;
+        try { prepared = await this.prepareExit(world, day); }
+        catch (err) { await this.refuse(world, day, `exit observation unavailable: ${err}`); return true; }
+        if (!prepared) return true;
+      } else if (f.kind === "invest") {
+        let prepared;
+        try { prepared = await this.prepareInvest(world, day); }
+        catch (err) { await this.refuse(world, day, `investment observation unavailable: ${err}`); return true; }
+        if (!prepared) { if (f.phase === "complete") continue; return true; }
       } else if (phase === "issue") {
         // A confirmed reserve buy stays committed while an unavailable view
         // is retried. Neither that retry nor a changed quote buys twice.
-        const c = p.candidate;
-        let fresh;
-        try { fresh = await world.netCreditOps.assessIssueCandidate(owner, c.tokenId, c.coverage,
-          c.requestedSpendable, c.maxPremium, { reserveBuffer: c.reserveBuffer }); }
-        catch (err) {
-          a.lastError = `refinance issuance observation unavailable: ${err}`.slice(0, 200);
-          await this.event(world, day, "waiting", { reason: a.lastError }); return true;
-        }
-        if (fresh.reasons.length || ["priorPrincipal", "beforeCoverage", "afterCoverage", "premium"].some((key) => fresh[key] !== c[key])
-            || fresh.premiumPool.toLowerCase() !== c.premiumPool.toLowerCase()
-            || reserveFor(fresh) > p.reserve_floor) {
-          await this.refuse(world, day, "refinance issuance terms changed; reassess retained holdings"); return true;
-        }
-        f.issue_candidate = fresh;
+        if (!await this.prepareIssue(world, day, "refinance")) return true;
       } else if (phase === "fund") {
         if (await s.call(world.usdc, "balanceOf", [owner]) < p.reserve_buy_max_usdc + p.cash_buffer) {
           await this.refuse(world, day, "refinance reserve USDC buffer changed"); return true;
@@ -880,7 +1272,14 @@ export class HouseholdRefinance {
           if (phase === "buy") result = await buyBuck(world, world.netMarket, { address: owner }, p.spend_usdc, { minOut: p.minimum_net });
           else if (phase === "deposit") result = await basketOps(world).deposit(f.terms);
           else result = await basketOps(world).redeem(f.terms);
-        } else if (phase === "fund") result = await buyBuckExact(world, world.netMarket, { address: owner },
+        } else if (f.kind === "exit") {
+          if (p.step === "redeem") result = await basketOps(world).redeem(f.terms);
+          else if (p.step === "sell") result = await sellBuck(world, world.netMarket, { address: owner }, p.sell_buck,
+            { minOut: p.minimum_usdc });
+          else result = await world.netCreditOps.release(owner, p.token_ids);
+        } else if (f.kind === "invest" && phase === "closing") result = await world.netSettlementOps.payExact(owner, BANK, f.terms.amount);
+        else if (f.kind === "invest" && phase === "deposit") result = await basketOps(world).deposit(f.terms);
+        else if (phase === "fund") result = await buyBuckExact(world, world.netMarket, { address: owner },
           p.reserve_buy_net, p.reserve_buy_max_usdc);
         else if (phase === "issue") result = await world.netCreditOps.issueCandidate(owner, f.issue_candidate);
         else if (phase === "export") result = await sellBuck(world, world.netMarket, { address: owner }, p.export_buck,
@@ -888,7 +1287,7 @@ export class HouseholdRefinance {
         else result = await world.netSettlementOps.payExact(owner, BANK, f.terms.amount);
       } catch (err) {
         f.hash = err.transactionHash ?? null;
-        const reverted = err instanceof IssuancePending && err.reverted
+        const reverted = (err instanceof IssuancePending || err instanceof ReleasePending) && err.reverted
           || err instanceof TransactionReverted && err.receipt?.status === "reverted";
         if (reverted && f.hash) await this.refuse(world, day, String(err));
         else {
@@ -900,14 +1299,17 @@ export class HouseholdRefinance {
       if (!await this.applyKnown(world, day, result, ctr)) return true;
     }
     f.status = "complete"; a.fundingPending = false;
-    a.lastAction = f.kind === "wallet" ? `wallet-${f.plan.action}`
-      : f.kind === "surplus" ? f.retained ? "save-retained" : f.plan.action === "save" ? "save" : "retirement-funded"
+    a.lastAction = f.kind === "wallet" ? `wallet-${f.plan.action}` : f.kind === "exit" ? `exit-${f.plan.step}`
+      : f.kind === "invest" ? f.retained ? "invest-retained" : "invest"
+      : f.kind === "surplus" ? f.plan.action === "retire" ? "retirement-funded"
+        : `${f.plan.action === "hold" ? "buy" : f.plan.action}${f.retained ? "-retained" : ""}`
       : f.satisfied ? "refinance-satisfied" : "refinance";
     a.lastError = "";
     // Completion of a retire plan funds a target; principal changes only in
     // the selected-facility engine's own confirmed records.
     await this.event(world, day, "complete", f.kind === "surplus" ? { outcome: a.lastAction, retirement: this.retirement() }
-      : f.kind === "wallet" ? { outcome: a.lastAction } : {});
+      : ["wallet", "exit"].includes(f.kind) ? { outcome: a.lastAction }
+      : f.kind === "invest" ? { outcome: a.lastAction, basket: await this.basket(world) } : {});
     return true;
   }
 }

@@ -181,12 +181,13 @@ class HouseholdCreditMark:
     state: HouseholdCreditState
     credit_limit: int
     premium_net_scaled: int
-    relief_scaled: int
+    relief_scaled: int | None              # None only when the caller tolerated an unavailable quote
     available_relief_scaled: int
+    relief_unavailable: str | None = None  # why the fund's guarded relief quote was unavailable
 
     @property
     def exceeds_liquidity_limit(self):
-        return self.relief_scaled > self.available_relief_scaled
+        return self.relief_scaled is not None and self.relief_scaled > self.available_relief_scaled
 
 
 @dataclass(frozen=True)
@@ -647,7 +648,8 @@ class NetCreditOps:
             spendable, sum(f.issued for f in facilities),
             sum(f.face - f.activated for f in facilities), sum(f.premium_nominal for f in facilities), facilities)
 
-    def mark_household(self, owner, token_ids, *, block_number=None) -> HouseholdCreditMark:
+    def mark_household(self, owner, token_ids, *, block_number=None,
+                       tolerate_unavailable_relief=False) -> HouseholdCreditMark:
         """Mark separate NFT debt/relief and each insurer's nominal refund.
 
         Pre: distinct owned facilities and callable guarded fund quotes. Post:
@@ -655,14 +657,17 @@ class NetCreditOps:
         Relief is a marked claim, with the shared liquidity limit reported
         separately. Premium value uses only its actual pool's current BUCK
         ratio, excluding unobserved insurer strategies and future funding.
-        A missing price/publication or maturity backlog propagates.
+        A missing price/publication or maturity backlog propagates, unless
+        ``tolerate_unavailable_relief``: then a refused relief quote (the
+        fund's own price guard, say, while a pool sits far from its TWAP)
+        leaves ``relief_scaled`` None with the reason, never a zero.
         """
         address = getattr(owner, "address", owner)
         block = self.chain.w3.eth.block_number if block_number is None else block_number
         state = self.household(address, token_ids, block_number=block)
         read = lambda fn: fn.call(block_identifier=block)
         token = self.stack.token
-        premium_net, relief, pools = 0, 0, {}
+        premium_net, relief, pools, unavailable = 0, 0, {}, None
         for facility in state.facilities:
             if facility.premium_nominal:
                 pool = facility.insurer_pool
@@ -672,10 +677,16 @@ class NetCreditOps:
                     pools[pool] = read(token.functions.accountBalancesScaled(pool))
                 gross, net = pools[pool]
                 premium_net += facility.premium_nominal * Q * net // gross if gross else 0
-            if facility.issued:
-                relief += read(self.stack.fund.functions.previewRelief(facility.token_id, facility.issued))[0]
+            if facility.issued and relief is not None:
+                try:
+                    relief += read(self.stack.fund.functions.previewRelief(facility.token_id, facility.issued))[0]
+                except Exception as exc:
+                    if not tolerate_unavailable_relief:
+                        raise
+                    relief, unavailable = None, str(exc)[:200]
         return HouseholdCreditMark(block, state, read(token.functions.creditLimit(address)), premium_net, relief,
-                                   read(token.functions.availableReliefScaled()))
+                                   read(token.functions.availableReliefScaled()),
+                                   None if relief is not None else unavailable)
 
     def quote_issue(self, token_id: int, coverage: int) -> IssueQuote:
         owner = self.stack.credit.functions.ownerOf(token_id).call()

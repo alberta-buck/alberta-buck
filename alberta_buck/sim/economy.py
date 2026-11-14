@@ -337,7 +337,7 @@ def judge(vector: Path) -> dict:
     invalid                     = [a["member"] for a in members if a.get("exit_started") is not None
                                    and a.get("exited") and (not a.get("released") or a.get("mortgage", 0)
                                    or a.get("limit", 0) or a.get("deposit", 0)
-                                   or a.get("drawn", 0) - a.get("jub", 0) > 0 or a.get("basket_receipts", 0))]
+                                   or a.get("drawn", 0) - (a.get("jub") or 0) > 0 or a.get("basket_receipts", 0))]
     drawn                       = {r: sum(a.get("drawn", 0) for a in members if a.get("role") == r) / 1e12
                                    for r in ("debtor", "saver")}
     pop                         = last.get("pop") or {}

@@ -172,8 +172,10 @@ export function installHouseholdOps(world) {
     const at = (c, functionName, args = []) => s.client.readContract({
       address: c.address, abi: c.abi, functionName, args, blockNumber });
     const owner = world.holderAddress(agent.account);
+    // A refused relief quote is recorded as unavailable and left out of net worth, never a zero.
     const book = await world.netCreditOps.markHousehold(owner,
-      world._credits.get(agent.account.address) ?? [], { blockNumber });
+      world._credits.get(agent.account.address) ?? [], { blockNumber, tolerateUnavailableRelief: true });
+    const relief = book.reliefScaled ?? 0n;
     const accounts = [owner, ...[agent.savings, agent.wallet].filter(Boolean).map((p) => p.address)];
     if (new Set(accounts.map((a) => a.toLowerCase())).size !== accounts.length) {
       throw new Error("household custody accounts must be distinct");
@@ -210,13 +212,14 @@ export function installHouseholdOps(world) {
     const positions = await markNetBasketPositions(s, basket, buck, receiptOwner, agent.receipts, { blockNumber });
     const cashTotal = cashValues.reduce((sum, v) => sum + v, 0n);
     const scaled = buckValues.reduce((sum, v) => sum + v, 0n) + positions.mark * Q + book.premiumNetScaled
-      - book.state.issued * Q + book.reliefScaled;
+      - book.state.issued * Q + relief;
     return { blockNumber, cash: cashValues[0], auxCash: cashTotal - cashValues[0],
       held: buckValues[0] / Q, savedBucks: agent.savings ? buckValues[1] / Q : 0n,
       wallet: agent.wallet ? buckValues.at(-1) / Q : 0n,
       drawn: book.state.issued, limit: book.creditLimit, deposit: book.state.premiumNominal,
       premiumNet: book.premiumNetScaled / Q, insuranceAge: book.state.premiumNominal - book.premiumNetScaled / Q,
-      jub: book.reliefScaled / Q, reliefScaled: book.reliefScaled,
+      jub: book.reliefScaled === null ? null : book.reliefScaled / Q, reliefScaled: book.reliefScaled,
+      reliefUnavailable: book.reliefUnavailable,
       reliefLiquidityLimited: book.exceedsLiquidityLimit, availableReliefScaled: book.availableReliefScaled,
       basketBasis: positions.basis, basketMark: positions.mark, basketRoi: positions.roi,
       basketShares: positions.positions.reduce((sum, p) => sum + p.shares, 0n), basketReceipts: positions.positions.length,
@@ -427,7 +430,7 @@ export function installHouseholdOps(world) {
       "household:wallet-out");
   };
   world.households = { cash, pay, read, buy, issue, invest, mark, reserves, depositBuck, withdraw, redeemToRetire,
-                       divest, saveBucks, tendWallet, emptyWallet };
+                       divest, saveBucks, tendWallet, emptyWallet, swap, impactCap };
   if (world.accounting === "net") {
     // Reuse receipt recovery and selected-NFT repayment rather than another
     // primary-world implementation. Preserve the price-bearing read above.

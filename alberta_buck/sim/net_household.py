@@ -657,6 +657,8 @@ def assess_investment(agent, d, day, *, expected_relief_rate, expected_refund_gr
                       external_premium_due(annual, agent._face0, active + candidate.coverage))
         # What the new BUCK would fetch at this pool, a bite at a time.
         leg = min(new, buck_cap)
+        if not leg:
+            return reject("trade-size")
         economics = dict(usd=market.sell_expected(leg) * new // leg / RAW, new_spendable=new / RAW,
             present_coverage=(candidate.after_coverage - candidate.before_coverage) / RAW,
             premium=premium / RAW, premium_refund_fraction=fraction, external_premium_saving=saving / RAW,
@@ -720,13 +722,14 @@ def assess_investment(agent, d, day, *, expected_relief_rate, expected_refund_gr
 
 
 def assess_investor(agent, d, day):
-    """Read-only decision of a cash investor, who holds BUCK as its money.
+    """Read-only decision of a cash investor, whose dollars are meant for the basket.
 
-    While the BUCK is not dear it buys them with its spare dollars, one
-    capped bite, and keeps them (only BUCK held are demand). When they are
-    dear against the basket by more than its premium after the fee
-    (household_policy.net_investor_action) it converts what it holds into
-    basket shares instead. Neither issues nor retires principal.
+    While the basket's price in BUCK is within its tolerance of 1
+    (household_policy.net_investor_action: "invest") it deposits the BUCK it
+    holds, or buys BUCK with spare dollars and deposits them. Above that
+    ("wait") K is expected to fall and the BUCK to regain value, so it buys
+    BUCK with spare dollars and holds them for later. One capped bite either
+    way. Neither issues nor retires principal.
     """
     m, cal = agent.refinance_machine, agent.calendar_machine
     if (type(day) is not int or day < 0 or getattr(d, "buck_accounting", "") != "net" or m.active or
@@ -739,28 +742,30 @@ def assess_investor(agent, d, day):
     cash, held = read(d.usdc.functions.balanceOf(agent.address)), read(d.buck.functions.balanceOf(agent.address))
     q = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
     bvib = read(d.basket.functions.basketValueInBuck())
-    action = policy.net_investor_action(bvib, q.fee_ppm, agent.p["issue_premium"])
-    context = dict(block=block, cash=cash, held=held, bvib_wad=bvib, action=action,
-                   fair_basis="basket-in-buck x dollar-pool spot", reason=action)
+    tolerance = agent.p["bvib_tolerance"]
+    action = policy.net_investor_action(bvib, tolerance)
+    context = dict(block=block, cash=cash, held=held, bvib_wad=bvib, tolerance=tolerance, action=action,
+                   reason=action)
+    spend = min(max(0, cash - agent.cash_buffer), q.reserve_usdc * int(agent.max_impact_bp * 50) // 10**6)
+    minimum = q.buy_expected(spend) * 9950 // 10_000 if spend and q.net_scaled else 0
+    buy = spend >= RAW and minimum >= RAW
+    tid = 0
+    for existing in agent._basket_receipts:
+        if read(d.basket.functions.deposits(existing))[2].lower() == d.buck.address.lower():
+            tid = existing
+            break
     plan = None
-    if action == "buy":
-        spend = min(max(0, cash - agent.cash_buffer), q.reserve_usdc * int(agent.max_impact_bp * 50) // 10**6)
-        minimum = q.buy_expected(spend) * 9950 // 10_000 if spend and q.net_scaled else 0
-        if spend >= RAW and minimum >= RAW:
-            plan = SurplusPlan("hold", agent.cash_buffer, held, spend, minimum)
-        else:
-            context["reason"] = "no-spare-cash"
+    if action == "invest" and _exportable(held, 0) >= RAW:
+        plan = SurplusPlan("convert", agent.cash_buffer, 0, position_id=tid, deposit_buck=_exportable(held, 0))
+        context["reason"] = "deposit-held-buck"
+    elif action == "invest" and buy:
+        plan = SurplusPlan("save", agent.cash_buffer, held, spend, minimum, position_id=tid)
+        context["reason"] = "buy-and-deposit"
+    elif buy:
+        plan = SurplusPlan("hold", agent.cash_buffer, held, spend, minimum)
+        context["reason"] = "buy-and-hold-for-lower-bvib"
     else:
-        amount = _exportable(held, 0)
-        if amount >= RAW:
-            tid = 0
-            for existing in agent._basket_receipts:
-                if read(d.basket.functions.deposits(existing))[2].lower() == d.buck.address.lower():
-                    tid = existing
-                    break
-            plan = SurplusPlan("convert", agent.cash_buffer, 0, position_id=tid, deposit_buck=amount)
-        else:
-            context["reason"] = "nothing-to-convert"
+        context["reason"] = "nothing-to-invest" if action == "invest" else "hold-for-lower-bvib"
     if d.w3.eth.block_number != block:
         raise ValueError("investor observation changed")
     return dict(plan=plan, context=context)
@@ -1219,13 +1224,15 @@ class HouseholdRefinance:
         a, f = self.agent, self.flow
         p = f["plan"]
         amount = min(wanted, _exportable(d.buck.functions.balanceOf(a.address).call(), p.reserve_floor))
-        price = d.basket.functions.sharePrice().call()
-        minimum = amount * 10**18 // price * (10_000 - p.slippage_bp) // 10_000 if price else 0
+        # Priced as the basket prices a deposit (high marks, less its charge), not its TWAP share price.
+        ops = _basket_ops(d)
+        expected = ops.quote_deposit_shares(amount) if amount else 0
+        minimum = expected * (10_000 - p.slippage_bp) // 10_000
         if not minimum:
             f["phase"], f["retained"] = "complete", True
             self._event(d, day, "retained", reason="owned cash below deposit grain/reserve")
             return False
-        f["terms"] = _basket_ops(d).prepare_deposit(a.address, amount, minimum, token_id=p.position_id)
+        f["terms"] = ops.prepare_deposit(a.address, amount, minimum, token_id=p.position_id)
         self._event(d, day, "quoted", basket_terms=asdict(f["terms"]))
         return True
 

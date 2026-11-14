@@ -16,6 +16,9 @@ export const DEFAULTS = {
   carry_utilization: 0,
   // The investor: opening savings and yearly saving ($k), and the years before it withdraws.
   invest_cash_k: [10, 100], invest_income_k: [2, 20], hold_years: [3, 15],
+  // How far the basket's price in BUCK may stand above 1 while an investor still puts its BUCK into
+  // the basket; above it, it holds BUCK for K to fall. Normal about 1%, bounded to 0..2%.
+  bvib_tolerance: { mean: .01, sd: .005, lo: 0, hi: .02 },
   // A debtor or saver sells its insured asset at this hazard a year, buying back its whole lien first.
   divest_rate: .1,
   // While the BUCK trades at a discount d, a household with a lien pays down
@@ -151,11 +154,25 @@ export function firstPayday(arriveDay, payDay) {
   return arriveDay + (((payDay - arriveDay - 1) % 30) + 30) % 30 + 1;
 }
 
+/** A keyed draw, normal about mean with standard deviation sd, held within lo..hi
+ * (household_policy.normal): twelve keyed uniforms less six, summed in the same order, so both
+ * languages produce the same double. */
+export function normal(seed, member, key, mean, sd, lo, hi) {
+  if (![mean, sd, lo, hi].every(Number.isFinite) || sd < 0 || hi < lo) throw new Error(`invalid household normal: ${key}`);
+  let z = 0;
+  for (let i = 0; i < 12; i++) z += uniform(seed, member, `${key}#${i}`);
+  return Math.min(hi, Math.max(lo, mean + sd * (z - 6)));
+}
+
 export function profile(seed, member, overrides = {}) {
   const p = {};
   for (const [key, setting] of Object.entries({ ...DEFAULTS, ...overrides })) {
     let value = setting;
-    if (Array.isArray(value)) {
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      const keys = Object.keys(value).sort().join();
+      if (keys !== "hi,lo,mean,sd") throw new Error(`invalid household normal: ${key}`);
+      value = normal(seed, member, key, value.mean, value.sd, value.lo, value.hi);
+    } else if (Array.isArray(value)) {
       if (value.length !== 2 || !value.every(Number.isFinite) || value[1] < value[0]) throw new Error(`invalid household range: ${key}`);
       const [lo, hi] = value, u = uniform(seed, member, key);
       if (key === "home_k" && lo <= 0) throw new Error("home_k must be positive");
@@ -184,7 +201,8 @@ export function profile(seed, member, overrides = {}) {
   p.asset_count = p.role === "investor" ? 0 : p.asset_count;
   if (!Number.isFinite(p.pay_day) || p.pay_day < 0 || p.pay_day >= 30) throw new Error("pay_day must be a day of the 30-day month, 0 to 29");
   p.pay_day = Math.trunc(p.pay_day);
-  if (!(p.retire_disc >= 0 && p.retire_disc < 1 && p.issue_premium >= 0)) throw new Error("invalid household price thresholds");
+  if (!(p.retire_disc >= 0 && p.retire_disc < 1 && p.issue_premium >= 0 && Number.isFinite(p.bvib_tolerance)
+      && p.bvib_tolerance >= 0 && p.bvib_tolerance < 1)) throw new Error("invalid household price thresholds");
   if (!(p.utilization > 0 && p.utilization <= 1 && p.living_frac >= 0 && p.living_frac <= 1
     && p.carry_utilization >= 0 && p.carry_utilization <= 1)) {
     throw new Error("invalid household budget fractions");
@@ -324,6 +342,16 @@ export const divestDay = (seed, member, arriveDay, rate) => rate <= 0 ? null
 // An investor holds BUCKs as its money: it buys them, unless they are dear by more than its premium
 // after the fee; then it converts what it holds into basket shares (household_policy.investor_action).
 export const investorAction = (spot, basket, fee, premium) => spot * (1 - fee) > basket * (1 + premium) ? "convert" : "buy";
+
+/** A cash investor's choice on canonical money (household_policy.net_investor_action): "invest" its
+ * BUCK in the basket while BVIB (1e18 = 1) is at most 1 + tolerance; otherwise "wait", holding BUCK
+ * for K to fall and the BUCK to regain value. The tolerance is taken in parts per billion. */
+export function netInvestorAction(bvibWad, tolerance) {
+  if (typeof bvibWad !== "bigint" || bvibWad < 0n || !Number.isFinite(tolerance) || tolerance < 0 || tolerance >= 1) {
+    throw new Error("invalid investor market inputs");
+  }
+  return bvibWad * 10n ** 9n <= (10n ** 9n + BigInt(Math.trunc(tolerance * 1e9))) * 10n ** 18n ? "invest" : "wait";
+}
 
 export const usdcOut = (buck, ru, rb, fee) => rb + buck * (1 - fee) > 0
   ? ru * buck * (1 - fee) / (rb + buck * (1 - fee)) : 0;
@@ -503,6 +531,24 @@ export function stagedRefinance(t, tranche, programme) {
   return { verdict: quotedVerdict({ ...t, fixed_cost: t.fixed_cost * first.usd / whole.usd }, tranche), programme: whole };
 }
 
+const investmentVerdict = (t, c) => investmentQuoted(t, c.usd, c.new_spendable, c.present_coverage, c.premium,
+  { reserveCost: c.reserve_cost ?? 0, reserveCarry: c.reserve_carry ?? 0,
+    premiumRefundFraction: c.premium_refund_fraction ?? null, expectedRefundGrowth: c.expected_refund_growth ?? null,
+    externalPremiumSaving: c.external_premium_saving ?? 0 });
+
+/** One bite of a credit-investment line against the whole line, quoted now (carry.staged_investment):
+ * the programme must pass with the full closing cost, which is then allocated by dollars for the
+ * bite's score only. The actual closing payment remains the full fixed cost. */
+export function stagedInvestment(t, tranche, programme) {
+  const whole = investmentVerdict(t, programme), first = investmentVerdict(t, tranche);
+  if (!whole.go || t.fixed_cost <= 0
+      || ["usd", "new_spendable", "present_coverage", "premium"].some((key) => tranche[key] > programme[key])
+      || (tranche.external_premium_saving ?? 0) > (programme.external_premium_saving ?? 0)) {
+    return { verdict: NO, programme: whole };
+  }
+  return { verdict: investmentVerdict({ ...t, fixed_cost: t.fixed_cost * first.usd / whole.usd }, tranche), programme: whole };
+}
+
 const capacity = (t) => {
   const active = t.activated_capacity ?? 0, e = t.premium_bp / 1000, spc = Math.max(0, t.k * .99 - e);
   if (t.issuance_limit == null) return t.headroom + active + t.unactivated * spc;
@@ -587,6 +633,15 @@ export function investmentWant(s, p) {
     return [Math.max(0, Math.min(capacity(t), keep, rb * p.max_impact_bp / 20000) * .999), "carry"];
   }
   return [0, "hold"];
+}
+
+/** The whole line a mortgage-free household means to keep invested (household_policy.investment_programme):
+ * on the carry line all remaining room up to carry_utilization at today's K; at a premium only the bite. */
+export function investmentProgramme(s, p) {
+  const [buck, why] = investmentWant(s, p);
+  if (why !== "carry") return buck;
+  const keep = s.face * s.k * p.carry_utilization - s.drawn;
+  return Math.max(buck, Math.min(capacity(terms(s, p, true)), keep) * .999);
 }
 
 export function issuance(s, p) {

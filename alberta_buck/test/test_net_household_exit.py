@@ -8,7 +8,8 @@ from buck_core import TransactionReceiptPending
 from buck_core.session import _txhex
 
 from alberta_buck.sim.credit_households import CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent
-from alberta_buck.test.test_net_household_setup import RAW, _surplus_day, household_world  # noqa: F401 (fixture)
+from alberta_buck.test.test_net_household_setup import (RAW, _sell_dollar_pool, _sell_token_pools, _surplus_day,  # noqa: F401
+                                                        household_world)
 from alberta_buck.test.test_net_household_invest import _buy_buck_in_token_pools
 
 EXIT = json.loads((Path(__file__).resolve().parents[2] / "test/fixtures/household-exit.json").read_text())
@@ -158,24 +159,41 @@ def test_investor_withdraws_at_its_horizon_by_redeeming_and_selling(household_wo
     ctr, spec = {}, EXIT["investor"]
     a = _household(d, make, 97, HouseholdInvestorAgent, spec["settings"])
     m = a.refinance_machine
-    opening = _books(d, a)
-    # Not dear: it buys BUCK with its dollars, one capped bite, and HOLDS them as money.
-    assert a.advance_net_investor(d, 0, ctr) is True and a.last_action == "buy", a.last_error
-    held = _books(d, a)
-    assert held["buck"] > RAW and held["receipts"] == () and a.invested_usd == opening["cash"] - held["cash"] > 0
+    opening, tolerance = _books(d, a), spec["settings"]["bvib_tolerance"]
+    assert a.p["bvib_tolerance"] == tolerance
+    # BVIB near 1, within its tolerance: its dollars go to the basket, bought and deposited in one flow.
+    quote = a.assess_net_investor(d, 0)
+    assert quote["context"]["action"] == "invest" and quote["context"]["reason"] == "buy-and-deposit"
+    assert a.advance_net_investor(d, 0, ctr) is True and a.last_action == "save", a.last_error
+    saved, basis = _books(d, a), a._basket_in
+    # Only the 0.1% sizing cushion of the purchase stays in the account (recommendation 35).
+    assert len(saved["receipts"]) == 1 and a._basket_in > RAW and saved["buck"] <= a._basket_in // 500
+    assert a.invested_usd == opening["cash"] - saved["cash"] > 0
     assert a.advance_net_investor(d, 0, ctr) is False, "one decision a day"
     with pytest.raises(ValueError, match="cash investor"):
         make(197, CreditSaverAgent).advance_net_investor(d, 0, ctr)
-    # Dear against the basket by more than its premium: it converts what it holds into basket shares.
-    _buy_buck_in_token_pools(d, spec["token_pool_share"])
+    # A broad sell-off: BVIB rises beyond its tolerance, so K should fall and the BUCK regain value.
+    # It buys BUCK with its spare dollars and holds them instead of buying the basket dear.
+    _sell_dollar_pool(d)
+    _sell_token_pools(d)
     _surplus_day(d, a, 1)
     quote = a.assess_net_investor(d, 1)
-    assert quote["context"]["action"] == "convert" and quote["plan"].deposit_buck <= held["buck"]
-    assert a.advance_net_investor(d, 1, ctr) is True and a.last_action == "convert", a.last_error
+    assert quote["context"]["bvib_wad"] > (1 + tolerance) * 10**18 and quote["context"]["action"] == "wait"
+    assert a.advance_net_investor(d, 1, ctr) is True and a.last_action == "buy", a.last_error
+    held = _books(d, a)
+    assert held["buck"] > RAW and held["receipts"] == saved["receipts"] and a._basket_in == basis
+    # BVIB comes back within its tolerance: it deposits what it held, topping up the same receipt.
+    _buy_buck_in_token_pools(d, spec["token_pool_share"])
+    _surplus_day(d, a, 2)
+    quote = a.assess_net_investor(d, 2)
+    assert quote["context"]["action"] == "invest" and quote["plan"].action == "convert"
+    assert quote["plan"].deposit_buck <= held["buck"] and quote["plan"].position_id == saved["receipts"][0]
+    assert a.advance_net_investor(d, 2, ctr) is True and a.last_action == "convert", a.last_error
     start = _books(d, a)
-    assert len(a._basket_receipts) == 1 and a._basket_in == quote["plan"].deposit_buck and start["buck"] < held["buck"] // 100
+    assert start["receipts"] == saved["receipts"] and start["buck"] < held["buck"] // 100
     assert start["cash"] == held["cash"] and start["supply"] == opening["supply"] and not a._token_ids
-    assert [e["operation"] for e in _events(m, "surplus")] == ["buy", "deposit"] and not a.exit_due(spec["exit_day"])
+    assert [e["operation"] for e in _events(m, "surplus")] == ["buy", "deposit", "buy", "deposit"]
+    assert not a.exit_due(spec["exit_day"] - 1)
     a._exit_day = spec["exit_day"]
     for day in range(spec["exit_day"], spec["last_day"]):
         _leave(d, a, day, ctr)

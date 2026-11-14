@@ -160,6 +160,30 @@ export class HouseholdCalendar {
     this.day = a.lastDay = day; a.nextPay = this.nextPay;
     this.sync();
   }
+  /** Queue the insured asset's sale at its insured value on this prepared day
+   * (household_calendar.schedule_sale): a receipt-backed dollar credit like income, then arrears
+   * and the WHOLE external mortgage from actual dollars in the same period. The counterfactual
+   * sells the same asset on the same day and pays its mortgage. Nothing is sent here. */
+  scheduleSale(world, day) {
+    const a = this.agent;
+    if (!this.bound || this.day !== day || a.sold || a.investor || this.queue.some((p) => p.kind === "sale")) {
+      throw new Error("asset sale needs a prepared calendar and an unsold insured asset");
+    }
+    money(a.face);
+    this.queue.push({ kind: "sale", day, income: a.face }); this.incomeDue += a.face; a.hypoCash += a.face;
+    const paid = min(a.hypoCash, this.shadow.state.balance);
+    if (paid) { this.shadow.recordPayment(`shadow-sale:${day}`, day, paid); a.hypoCash -= paid; }
+    this.sync();
+  }
+  /** Queue payment of arrears and the whole remaining mortgage from dollars now held. */
+  scheduleSettlement(world, day) {
+    const a = this.agent;
+    if (!this.bound || this.day !== day || !a.sold) throw new Error("settlement needs a prepared calendar after the asset sale");
+    if (this.queue.some((p) => p.kind === "sale" || p.kind === "settle")) return false;
+    if (!(this.actual.state.balance || a.livingArrears || a.premiumArrears)) return false;
+    this.queue.push({ kind: "settle", day, income: 0n });
+    return true;
+  }
   async recordMortgage(world, receipt, amount) {
     const stamp = (await world.session.client.getBlock({ blockNumber: receipt.blockNumber })).timestamp;
     const day = Number((stamp - this.epoch) / DAY);
@@ -204,6 +228,7 @@ export class HouseholdCalendar {
     else if (phase === "income") {
       this.incomeDue -= amount;
       if (f.period.kind === "opening") a.started = true;
+      else if (f.period.kind === "sale") a.sold = true; // proceeds, not wages: the asset and its premium are gone
       else a.incomeTotal += amount;
     } else if (phase === "living") { a.livingArrears -= amount; a.livingPaid += amount; }
     else { a.premiumArrears -= amount; a.extPremium += amount; }
@@ -233,7 +258,8 @@ export class HouseholdCalendar {
     while (this.queue.length) {
       if (!this.flow) {
         a.refinanceMachine.decisions++;
-        this.flow = { period: this.queue[0], phase: "income", status: "running", hash: null, amount: 0n };
+        this.flow = { period: this.queue[0], phase: this.queue[0].kind === "settle" ? "living" : "income",
+          status: "running", hash: null, amount: 0n };
         await this.emit(world, day, "planned", { calendar: this.status() });
       }
       const f = this.flow;
@@ -251,9 +277,10 @@ export class HouseholdCalendar {
       }
       while (f.phase !== "complete") {
         const phase = f.phase, cash = await s.call(world.usdc, "balanceOf", [world.holderAddress(a.account)]);
+        const closing = ["sale", "settle"].includes(f.period.kind); // an exit pays the whole balance
         const amount = phase === "income" ? f.period.income
           : min(cash, phase === "living" ? a.livingArrears : phase === "insurance" ? a.premiumArrears
-            : min(a.payment, this.actual.state.balance));
+            : closing ? this.actual.state.balance : min(a.payment, this.actual.state.balance));
         f.amount = amount;
         if (!amount) {
           if (phase === "income" && f.period.kind === "opening") a.started = true;

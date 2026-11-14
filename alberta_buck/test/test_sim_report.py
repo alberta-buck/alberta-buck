@@ -210,3 +210,41 @@ def test_index_links_stay_relative_and_escape_filenames(tmp_path):
     record["buck_accounting"]    = "legacy-signed (Buck<fixture>)"
     report.write_index([record], target)
     assert "legacy-signed (Buck&lt;fixture&gt;)" in target.read_text()
+
+
+def test_digest_decomposes_supply_and_summarises_households_from_recorded_frames(capsys):
+    from alberta_buck.sim import digest
+    member = lambda role, day, **kw: dict(member=f"0/{role}/0", role=role, drawn=0, basket=0, held_buck=0, nw=0, hypo=0,
+                                          action="save", error="", relief_unavailable=None, exited=False) | kw
+    frames = [dict(day=d, buckK=int((.75 - .01 * d) * 1e18), basketVal=int((1 + .01 * (d % 2)) * 1e18),
+                   buck_usd=1_000_000, supply=(100 + 3 * d) * 10**6, eq_lien=(50 + 2 * d) * 10**6,
+                   households=dict(drawn=d * 10**6),
+                   octl=[member("debtor", d, drawn=d * 10**6, nw=-5 * 10**6, hypo=-4 * 10**6,
+                                error="tx reverted: deposit" if d == 3 else ""),
+                         member("investor", d, basket=7 * 10**6, held_buck=2 * 10**6, action="buy",
+                                relief_unavailable="MarkPriceDeviation" if d == 1 else None)])
+              for d in range(7)]
+    frames[-1]["household_faults"] = 1
+    carrying = lambda pool, tokens, basket: dict(carrying=dict(
+        buck_usdc=dict(nominal_scaled=str(pool * 10**42)), basket=dict(nominal_scaled=str(basket * 10**42)),
+        buck_tokens=[dict(nominal_scaled=str(t * 10**42)) for t in tokens]))
+    frames[0]["net"], frames[-1]["net"] = carrying(40, [20, 10], 0), carrying(39, [25, 14], 3)
+    d = digest.digest(dict(frames=frames))
+    assert d["holders"]["first"] == dict(dollar_pool=40., token_pools=30., basket=0., others=30.)
+    assert d["holders"]["last"] == dict(dollar_pool=39., token_pools=39., basket=3., others=37.)
+    assert digest.holders(frames[1]) is None and d["unbacked"] == 118.
+    frames[-1]["net"].update(active_principal=110 * 10**6, deferred_principal=8 * 10**6)
+    assert digest.digest(dict(frames=frames))["unbacked"] == 0. and digest.digest(dict(frames=frames[:2]))["unbacked"] is None
+    assert d["days"] == 7 and d["households"] == 2 and d["observations"] == 14
+    assert d["k"]["first"] == .75 and abs(d["k"]["last"] - .69) < 1e-12
+    assert d["supply"] == dict(change=18.0, basket_lien=12.0, household_principal=6.0, other=0.0)
+    assert abs(d["bvib"]["above_one"] - 3 / 7) < 1e-12 and d["bvib"]["high"] == 1.01
+    assert d["roles"]["debtor"]["vs_counterfactual"] == [-1] and d["roles"]["investor"]["held_buck"] == 2
+    assert d["errors"] == 1 and d["relief_unavailable"] == 1 and d["faults"] == 1
+    assert [p["day"] for p in d["path"]] == [0, 1, 2, 3, 4, 5, 6]
+    with pytest.raises(ValueError, match="no frames"):
+        digest.digest(dict(frames=[]))
+    assert digest.main([]) == 2
+    text = digest.render("v", d)
+    assert "supply +18 BUCK = basket lien +12 + household principal +6 + other +0" in text
+    assert "held: BUCK/USDC pool 40 -> 39; TOKEN/BUCK pools 30 -> 39; basket 0 -> 3; everyone else 30 -> 37" in text

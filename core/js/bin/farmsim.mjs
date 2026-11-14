@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import { anvilSession, tevmSession } from "../src/backends.js";
-import { loadArtifact, repoRoot, fileJournalWriter } from "../src/nodefs.js";
+import { loadAnyArtifact, repoRoot, fileJournalWriter } from "../src/nodefs.js";
 import { buildEquilibriumWorld, DayClock, PidKeeper, WheelKeeper }
   from "../src/scenarios/eqworld.js";
 import { PinWhale } from "../src/agents/whale.js";
@@ -65,7 +65,7 @@ const session = a.backend === "anvil"
 const urArtifact = JSON.parse(readFileSync(
   join(repoRoot(), "alberta_buck", "sim", "artifacts", "UniversalRouter.json"),
   "utf8"));
-const world = await buildEquilibriumWorld(session, loadArtifact, {
+const world = await buildEquilibriumWorld(session, loadAnyArtifact, {
   identity: id, urArtifact, tokens: TOKENS,
   targetBuck: BigInt(a.target) * 10n ** 6n,
   feedSeed: Number(a.seed), stepBp: Number(a.step) });

@@ -1733,7 +1733,7 @@ core-net-math-test: build-uniswap-artifacts core-net-math-vectors-check core-vec
 # (shared test/fixtures/household-wallet.json):
 #   make nix-core-equilibrium-bootstrap-test CORE_EQUILIBRIUM_TEST_FILES=test/net-household-wallet.tevm.test.js
 CORE_EQUILIBRIUM_TEST_ARGS ?=
-CORE_EQUILIBRIUM_TEST_FILES ?= test/net-equilibrium-bootstrap.tevm.test.js test/net-equilibrium-arb.tevm.test.js test/net-household-programme.tevm.test.js test/net-household-resume.tevm.test.js test/net-household-surplus.tevm.test.js test/net-household-wallet.tevm.test.js
+CORE_EQUILIBRIUM_TEST_FILES ?= test/net-equilibrium-bootstrap.tevm.test.js test/net-equilibrium-arb.tevm.test.js test/net-household-programme.tevm.test.js test/net-household-resume.tevm.test.js test/net-household-surplus.tevm.test.js test/net-household-wallet.tevm.test.js test/net-household-invest.tevm.test.js test/net-household-exit.tevm.test.js
 # Fast policy/quote/calendar boundary checks; no EVM or contract compilation.
 #   make nix-core-equilibrium-policy-test
 core-equilibrium-policy-test: core-build-wasm
@@ -1766,7 +1766,7 @@ economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 #   make nix-venv-economy-accounting-test
 economy-accounting-test: economy-bootstrap-test
 	mkdir -p build/test
-	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_household_calendar.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py --basetemp=build/test/economy-accounting -q
+	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_household_calendar.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_household_invest.py alberta_buck/test/test_net_household_exit.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py --basetemp=build/test/economy-accounting -q
 	cd core/js && node --test test/net-basket-mark.tevm.test.js
 
 # Each published crate carries its OWN copy of the vectors it replays:

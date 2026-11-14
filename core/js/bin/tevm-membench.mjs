@@ -52,7 +52,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { tevmSession, snapshotTevm, restoreTevm } from "../src/backends.js";
 import { advanceTime, DAY } from "../src/buckworld.js";
 import { encodePath, urExecArgs } from "../src/router.js";
-import { loadArtifact, repoRoot } from "../src/nodefs.js";
+import { loadAnyArtifact, loadArtifact, repoRoot } from "../src/nodefs.js";
 import { buildEquilibriumWorld, DayClock, PidKeeper }
   from "../src/scenarios/eqworld.js";
 import { PinWhale } from "../src/agents/whale.js";
@@ -317,7 +317,7 @@ const urArtifact = JSON.parse(readFileSync(
   join(repoRoot(), "alberta_buck", "sim", "artifacts", "UniversalRouter.json"), "utf8"));
 const nTok = Math.max(1, Math.min(6, Number(a.tokens)));
 const tBuild = performance.now();
-const world = await buildEquilibriumWorld(session, loadArtifact, {
+const world = await buildEquilibriumWorld(session, loadAnyArtifact, {
   identity: id, urArtifact, tokens: COMMODITIES.slice(0, nTok),
   // The recorded memory curves are the pro-rata basket's, from one
   // constituent up; the machine needs two and a wheel keeper.

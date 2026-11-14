@@ -1874,6 +1874,9 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         number of turns; an unknown outcome stops everything at once. A day
         with nothing due costs one clock read.
         """
+        # Earlier evidence first: a recovered or uncertain outcome consumes the turn, as it always has.
+        if self._recover_pending_operations(d, ctr, day):
+            return
         m, cal                  = self.refinance_machine, self.calendar_machine
         cal.prepare(d, day)                             # bind on arrival; accrue; schedule a payday's bills
         if (not cal.active and not m.active and not m.settlement_due and not m.surplus_due and
@@ -1920,13 +1923,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
     def act(self, d, scenario, day, tick, ctr):
         if tick or day < self.arrive_day or self.exited:
             return
+        if getattr(d, "buck_accounting", "") == "net":
+            return self._act_net(d, day, ctr)
         if self._recover_pending_operations(d, ctr, day):
             return
-        if getattr(d, "buck_accounting", "") == "net":
-            # _act_net above is the dispatcher that replaces this gate. It is not wired yet: the
-            # JavaScript mirror of credit investment, exits and the investor is unwritten, and ten
-            # existing tests still drive recovery through act (the plan's Start here, steps A and B).
-            raise NotImplementedError("canonical household decisions await issuance and exit migration")
         if not self._started:
             cash                = int(self.p["invest_cash_k" if self.investor else "cash_k"] * 1000 * PARITY)
             d.chain.send(d.usdc.functions.mint(self.proxy.address, cash))

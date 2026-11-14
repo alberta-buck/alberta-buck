@@ -3,10 +3,13 @@ import { profile, uniform, issuance, surplusAction, discountedBuyback, usdcOut, 
   arrivalState, arrivalsStep, divestDay, discount, paydown, premium, saving, moneyTarget, externalPremiumDue, firstPayday,
   ROLES } from "./household-policy.js";
 import { TransactionReceiptPending, TransactionReverted } from "../session.js";
-import { HouseholdRefinance, assessRefinance, assessRemainder, assessSurplus, assessWallet, observeRefinanceForecasts } from "./net-household.js";
+import { HouseholdRefinance, assessRefinance, assessRemainder, assessSurplus, assessWallet, observeRefinanceForecasts,
+  assessInvestment, assessInvestor, exportable, basketOps } from "./net-household.js";
+import { observeNetMarket, netPurchaseCost, netPurchaseExpected, netSaleExpected } from "../net-market-quote.js";
 import { HouseholdCalendar } from "./household-calendar.js";
 
 const E6 = 1_000_000n;
+const ACT_TURNS = 6;      // known progress a day; an unknown outcome stops at once
 const units = (n) => BigInt(Math.trunc(n * 1e6));
 const whole = (n) => Number(n) / 1e6;
 const min = (...xs) => xs.reduce((a, b) => a < b ? a : b);
@@ -45,6 +48,12 @@ export class CreditHouseholdAgent {
     this.nextDecision = arrive_day + p.phase;
     this.netRefinanceDay = null; // At most one fresh assessment/resumption per bank day.
     this.netSurplusDay = null; this.nextSurplus = this.nextDecision;
+    this.netInvestDay = null;    // at most one credit-investment assessment per day
+    this.exitWaitDay = null;     // the day a refused or empty exit step last waited
+    this.exitTradeDay = null;    // the day of the last capped exit market bite: one a day
+    this.releasedCoverage = 0n;  // face coverage burn(0) released at exit
+    this.releasedRefund = 0n;    // and the premium deposit it refunded
+    this.tradingReady = false;   // the main account's market approvals, made on its first act
     this.netCreditReserve = 0n; // lasting BUCK issuance front; outlives each operation
     this.netFunding = null;      // { key: block:day:forecasts, funding }: the credit dollar front read there
     this.nextWallet = this.nextPay; // working money is tended once after each payday
@@ -347,9 +356,7 @@ export class CreditHouseholdAgent {
     try {
       if (!this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
       if (await this.recoverPendingOperations(world, day, { continueAfterCalendar: true })) return true;
-      if (this.divestDay !== null && day >= this.divestDay || this.investor && day >= this.exitDay) {
-        throw new Error("canonical household asset exits are not yet integrated");
-      }
+      if (this.exitDue(day)) return false;  // a leaving household's work belongs to advanceNetExit
       const m = this.refinanceMachine;
       if (m.settlementDue) { this.lastAction = "settlement-due"; return true; }
       if (this.netSurplusDay === day || day < this.nextSurplus && !m.surplusDue) return false;
@@ -374,6 +381,293 @@ export class CreditHouseholdAgent {
     } finally { this.netDispatching = false; }
   }
 
+  /** One mortgage-free household's quoted credit investment; observed forecasts by default. */
+  async assessNetInvestment(world, day, forecasts = {}) {
+    const keys = ["expected_relief_rate", "expected_refund_growth", "expected_wallet_growth"];
+    const explicit = keys.some((key) => Object.hasOwn(forecasts, key));
+    if (explicit && !keys.every((key) => Object.hasOwn(forecasts, key))) throw new Error("explicit household forecasts must include all three annual rates");
+    const observed = explicit ? null : await observeRefinanceForecasts(world);
+    const result = await assessInvestment(this, world, day, { ...observed?.values, ...forecasts });
+    if (observed) {
+      if (result.context.block !== observed.observation.blockNumber) throw new Error("household forecast block changed");
+      Object.assign(result.context.forecasts, { source: observed.source, basis: observed.basis });
+    }
+    return result;
+  }
+  async startNetInvestment(world, plan, day, ctr = {}, options = {}) {
+    await this.prepareNetRefinance(world, day);
+    return this.refinanceMachine.startInvestment(world, plan, day, ctr, options);
+  }
+  // Same owner dispatcher: a mortgage-free household's credit investment on its keyed cadence.
+  // Recover earlier evidence first; a known refused deposit is retried alone before new credit; a
+  // debtor is served by refinancing until its mortgage is paid; a declined attempt waits.
+  async advanceNetInvestment(world, day, ctr = {}, { forecasts = {} } = {}) {
+    if (!Number.isSafeInteger(day) || day < 0 || world.accounting !== "net") {
+      throw new Error("household investment needs canonical accounting and an integer day");
+    }
+    if (this.investor) throw new Error("credit investment requires an insured household");
+    if (day < this.arrive_day || this.exited) return false;
+    if (this.netDispatching) throw new Error("household dispatcher is already running");
+    this.netDispatching = true;
+    try {
+      if (!this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
+      if (await this.recoverPendingOperations(world, day, { continueAfterCalendar: true })) return true;
+      if (this.exitDue(day)) return false;
+      const m = this.refinanceMachine;
+      if (this.mortgage || m.settlementDue) return false;
+      if (this.netInvestDay === day || day < this.nextDecision && !m.surplusDue) return false;
+      this.netInvestDay = day;
+      if (day >= this.nextDecision) {
+        this.nextDecision += (Math.floor((day - this.nextDecision) / this.p.decision_days) + 1) * this.p.decision_days;
+      }
+      this.lastError = "";
+      try {
+        if (m.surplusDue) {
+          // The issued or saved BUCK is deposited before any new credit is drawn.
+          await this.prepareNetRefinance(world, day);
+          return await m.resumeSurplus(world, day, ctr);
+        }
+        const assessed = await this.assessNetInvestment(world, day, forecasts);
+        this.lastVerdict = assessed.context.selected ?? null;
+        if (!assessed.plan) {
+          this.lastAction = "invest-hold"; m.decisions++;
+          await m.event(world, day, "declined", { kind: "invest", phase: "assessment", context: assessed.context,
+            reason: assessed.context.reason, market: await m.market(world) });
+          return true;
+        }
+        return await this.startNetInvestment(world, assessed.plan, day, ctr, { context: assessed.context });
+      } catch (err) {
+        this.lastAction = "invest-unavailable"; this.lastError = String(err).slice(0, 200); ctr.household_err = this.lastError;
+        await m.event(world, day, "unavailable", { kind: "invest", phase: "assessment", reason: this.lastError }); return true;
+      } finally { this.lastIssue = this.lastAction; }
+    } finally { this.netDispatching = false; }
+  }
+
+  async assessNetInvestor(world, day) { return assessInvestor(this, world, day); }
+  // Same owner dispatcher: a cash investor's decision on its keyed cadence; its horizon belongs to
+  // advanceNetExit. A known refused deposit is retried alone.
+  async advanceNetInvestor(world, day, ctr = {}) {
+    if (!Number.isSafeInteger(day) || day < 0 || world.accounting !== "net") {
+      throw new Error("investor decision needs canonical accounting and an integer day");
+    }
+    if (!this.investor) throw new Error("investor decision requires a cash investor");
+    if (day < this.arrive_day || this.exited) return false;
+    if (this.netDispatching) throw new Error("household dispatcher is already running");
+    this.netDispatching = true;
+    try {
+      if (!this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
+      if (await this.recoverPendingOperations(world, day, { continueAfterCalendar: true })) return true;
+      const m = this.refinanceMachine;
+      if (this.exitDue(day)) return false;
+      if (this.netSurplusDay === day || day < this.nextDecision && !m.surplusDue) return false;
+      this.netSurplusDay = day;
+      if (day >= this.nextDecision) {
+        this.nextDecision += (Math.floor((day - this.nextDecision) / this.p.decision_days) + 1) * this.p.decision_days;
+      }
+      this.lastError = "";
+      try {
+        if (m.surplusDue) return await this.resumeNetSurplus(world, day, ctr);
+        const assessed = await this.assessNetInvestor(world, day);
+        if (!assessed.plan) {
+          this.lastAction = "investor-wait"; m.decisions++;
+          await m.event(world, day, "declined", { kind: "investor", phase: "assessment", context: assessed.context,
+            reason: assessed.context.reason, market: await m.market(world) });
+          return true;
+        }
+        return await this.startNetSurplus(world, assessed.plan, day, ctr, { context: assessed.context });
+      } catch (err) {
+        this.lastAction = "investor-unavailable"; this.lastError = String(err).slice(0, 200); ctr.household_err = this.lastError;
+        await m.event(world, day, "unavailable", { kind: "investor", phase: "assessment", reason: this.lastError }); return true;
+      } finally { this.lastSurplus = this.lastAction; }
+    } finally { this.netDispatching = false; }
+  }
+
+  /** Whether this household's keyed leaving day has come: its asset sale, or an investor's horizon. */
+  exitDue(day) {
+    const due = this.investor ? this.exitDay : this.divestDay;
+    return due !== null && due !== undefined && day >= due;
+  }
+  // Same owner dispatcher: a leaving household's staged, resumable unwinding
+  // (credit_households.advance_net_exit). After recovery at most ONE step, chosen from what the chain
+  // and books show now. A refused or empty step waits for tomorrow; an unknown outcome stops everything.
+  async advanceNetExit(world, day, ctr = {}) {
+    if (!Number.isSafeInteger(day) || day < 0 || world.accounting !== "net") {
+      throw new Error("household exit needs canonical accounting and an integer day");
+    }
+    if (day < this.arrive_day || this.exited || !this.exitDue(day)) return false;
+    if (this.netDispatching) throw new Error("household dispatcher is already running");
+    this.netDispatching = true;
+    try {
+      if (!this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
+      if (await this.recoverPendingOperations(world, day, { continueAfterCalendar: true })) return true;
+      this.lastError = "";
+      try { return await this.exitStep(world, day, ctr); }
+      catch (err) {
+        this.lastAction = "exit-unavailable"; this.lastError = `${this.exitStage}: ${err}`.slice(0, 200);
+        ctr.household_err = this.lastError; this.exitWaitDay = day;
+        await this.refinanceMachine.event(world, day, "unavailable", { kind: "exit", phase: this.exitStage || "exit",
+          reason: this.lastError });
+        return false;
+      }
+    } finally { this.netDispatching = false; }
+  }
+  async exitStep(world, day, ctr) {
+    const m = this.refinanceMachine, cal = this.calendarMachine, s = world.session, owner = world.holderAddress(this.account);
+    if (this.exitStarted === null) {
+      this.exitStarted = day; this.fundingPending = false;
+      this.buffer = 0n;                                // a leaving household protects no dollar buffer
+      m.decisions++;
+      await m.event(world, day, "started", { kind: "exit", phase: "exit",
+        reason: this.investor ? "investor horizon" : "insured asset sale", market: await m.market(world) });
+    }
+    if (m.settlementDue || m.surplusDue) await m.abandon(world, day, "household is leaving; the unfinished remainder is not resumed");
+    if (this.netRepaymentTarget !== null || this.netRepaymentReserve !== null) return this.resumeNetRepayment(world);
+    const waited = this.exitWaitDay === day, traded = this.exitTradeDay === day;
+    const blockNumber = (await s.client.getBlock()).number;
+    const at = (c, functionName, args = []) => s.client.readContract({ address: c.address, abi: c.abi, functionName, args, blockNumber });
+    const cash = await at(world.usdc, "balanceOf", [owner]);
+    const market = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber });
+    const impact = BigInt(Math.trunc(this.p.max_impact_bp * 50));
+    const buckCap = market.reserve_buck * impact / 1_000_000n, cashCap = market.reserve_usdc * impact / 1_000_000n;
+    // A step that cannot run today is not a failure: record it once, try again tomorrow.
+    const wait = async (stage, reason) => {
+      this.exitStage = stage; this.lastAction = "exit-wait";
+      if (!waited) {
+        this.exitWaitDay = day; this.exitRetries++;
+        await m.event(world, day, "waiting", { kind: "exit", phase: stage, reason: String(reason).slice(0, 200) });
+      }
+      return false;
+    };
+    // Today's market bite is taken; the next is tomorrow's. The normal pace, not a retry.
+    const pace = (stage) => { this.exitStage = stage; this.lastAction = "exit-pace"; return false; };
+    if (!this.investor) {
+      if (!this.sold) {
+        this.exitStage = "sell-asset";
+        cal.scheduleSale(world, day);
+        ctr.hhDivestments = (ctr.hhDivestments ?? 0) + 1;
+        await cal.advance(world, day);
+        return true;
+      }
+      if (cash && cal.scheduleSettlement(world, day)) {
+        this.exitStage = "settle-mortgage";
+        await cal.advance(world, day);
+        return true;
+      }
+    }
+    if (this.wallet) {
+      const held = await at(world.buck, "balanceOf", [this.wallet.address]);
+      const bite = min(exportable(held, 0n), buckCap), minimum = netSaleExpected(market, bite) * 9950n / 10000n;
+      if (bite >= E6 && minimum >= E6) {
+        if (waited || traded) return pace("collect-savings");
+        this.exitStage = "collect-savings";
+        await this.ensureWallet(world);
+        await m.startWallet(world, { action: "sell", wallet: this.wallet.address, cash_buffer: 0n, target: 0n, held,
+          spend_usdc: 0n, minimum_net: 0n, sell_buck: bite, minimum_usdc: minimum, slippage_bp: 50 }, day, ctr,
+          { context: { reason: "exit" } });
+        return this.exitSent(day, true);
+      }
+    }
+    if (this.receipts.length) {
+      this.exitStage = "collect-savings";
+      if (waited) return pace("collect-savings");
+      const rid = this.receipts[0], shares = this.book.get(rid).shares;
+      let found = null, why = "no BUCK-paying exit";
+      for (const part of [1n, 2n, 4n, 8n]) {        // the whole receipt, else a smaller bite the basket can pay
+        const amount = shares / part;
+        if (!amount) break;
+        let quote;
+        try { quote = await basketOps(world).previewRedemption(owner, rid, amount); }
+        catch (err) { why = err; continue; }
+        if (quote.paid >= E6) {
+          found = { step: "redeem", position_id: rid, shares: amount, minimum_buck: quote.paid * 9950n / 10000n };
+          break;
+        }
+      }
+      if (!found) return wait("collect-savings", `basket exit unavailable: ${why}`);
+      await m.startExit(world, found, day, ctr, { context: { reason: "exit" } });
+      return this.exitSent(day);
+    }
+    const ids = world._credits.get(this.account.address) ?? [];
+    const book = ids.length ? await world.netCreditOps.household(owner, ids, { blockNumber }) : null;
+    const held = await at(world.buck, "balanceOf", [owner]);
+    if (book && book.issued) {
+      this.exitStage = "repay-lien";
+      if (held > 1n) {
+        if (waited) return pace("repay-lien");
+        // Every owned BUCK above one raw unit goes to the lien; the engine keeps its own evidence.
+        this.netRepaymentReserve = 1n; this.netRepaymentTarget = book.issued;
+        const before = this.unwound;
+        await this.resumeNetRepayment(world);
+        if (this.unwound === before && !await this.pendingRepayment(world)) {
+          this.netRepaymentReserve = null; this.netRepaymentTarget = null; this.netRepaymentInterrupted = false;
+          return wait("repay-lien", this.lastError || "nothing could be retired today");
+        }
+        return true;
+      }
+      const cost = netPurchaseCost(market, book.issued);
+      const spend = min(cash, cashCap, cost === null ? cashCap : (cost * 10050n + 9999n) / 10000n);
+      const minimum = spend ? netPurchaseExpected(market, spend) * 9950n / 10000n : 0n;
+      if (spend < E6 || minimum < E6) {
+        if (!this.exitShort) ctr.hhDivestShort = (ctr.hhDivestShort ?? 0) + 1;
+        this.exitShort = true;                         // insolvency is not a completed exit
+        return wait("cash-shortfall", "no dollars left to buy back the remaining lien");
+      }
+      if (waited || traded) return pace("repay-lien");
+      await this.startNetSurplus(world, { action: "retire", cash_buffer: 0n, reserve_floor: held, spend_usdc: spend,
+        minimum_net: minimum, target_principal: book.issued, position_id: 0n, redeem_shares: 0n, minimum_buck: 0n,
+        slippage_bp: 50, deposit_buck: 0n }, day, ctr, { context: { reason: "exit" } });
+      return this.exitSent(day, true);
+    }
+    if (book && !this.released) {
+      this.exitStage = "release-coverage";
+      const covered = book.facilities.filter((f) => f.activated).map((f) => f.tokenId);
+      if (!covered.length) this.released = true;
+      else if (waited) return pace("release-coverage");
+      else {
+        await m.startExit(world, { step: "release", token_ids: covered }, day, ctr, { context: { reason: "exit" } });
+        if (!m.active && m.flow.status === "complete") {
+          const left = await world.netCreditOps.household(owner, ids);
+          this.released = !left.facilities.some((f) => f.activated);
+          if (!this.released) return wait("release-coverage", "a facility's pool cannot refund its deposit yet");
+        }
+        return this.exitSent(day);
+      }
+    }
+    const bite = min(exportable(held, 0n), buckCap), minimum = netSaleExpected(market, bite) * 9950n / 10000n;
+    if (bite >= E6 && minimum >= E6) {
+      this.exitStage = "sell-owned-buck";
+      if (waited || traded) return pace("sell-owned-buck");
+      await m.startExit(world, { step: "sell", sell_buck: bite, minimum_usdc: minimum }, day, ctr, { context: { reason: "exit" } });
+      return this.exitSent(day, true);
+    }
+    for (const token of world.tokens) {                  // TOKEN an in-kind basket exit paid: a capped bite a day
+      const amount = await s.call(token.erc20, "balanceOf", [owner]);
+      if (!amount) continue;
+      const [ru, rt] = await world.households.reserves(token.poolUsdc, world.usdc);
+      if (rt && amount * ru / rt <= E6) continue;      // at most one dollar's dust per constituent
+      this.exitStage = "sell-tokens";
+      if (waited || traded) return pace("sell-tokens");
+      await world.households.swap(this.account, token.poolUsdc, token.erc20, world.usdc,
+        min(amount, max(1n, world.households.impactCap(rt, this.p.max_impact_bp))), owner, "household:exit-token");
+      this.withdrawnUsd += await s.call(world.usdc, "balanceOf", [owner]) - cash;
+      return this.exitSent(day, true);
+    }
+    this.exited = true; this.exitStage = "complete"; this.lastAction = "exit";
+    const key = this.investor ? "invExits" : "hhDivested";
+    ctr[key] = (ctr[key] ?? 0) + 1;
+    await m.event(world, day, "complete", { kind: "exit", phase: "complete", outcome: "exited",
+      amounts: { withdrawn_usdc: this.withdrawnUsd, released_coverage: this.releasedCoverage,
+        premium_refund_nominal: this.releasedRefund, retired_principal: this.unwound } });
+    return true;
+  }
+  /** After one exit transaction: a market bite is the day's only one; a proved refusal waits too. */
+  exitSent(day, market = false) {
+    const m = this.refinanceMachine;
+    if (market) this.exitTradeDay = day;
+    if (!m.active && m.flow?.status === "refused") { this.exitWaitDay = day; this.exitRetries++; }
+    return true;
+  }
+
   // PRE: serialized owner, canonical integer bank day, external keeper/control
   // maintenance completed. POST: recover receipts/calendar/buybacks first,
   // resume committed cash before another loan, assess at most once/day.
@@ -390,7 +684,7 @@ export class CreditHouseholdAgent {
     try {
       if (!this.calendarMachine.bound) await this.calendarMachine.prepare(world, day);
       if (await this.recoverPendingOperations(world, day, { continueAfterCalendar: true })) return true;
-      if (this.divestDay !== null && day >= this.divestDay) throw new Error("canonical household asset exits are not yet integrated");
+      if (this.exitDue(day)) return false;  // a leaving household's work belongs to advanceNetExit
       const machine = this.refinanceMachine;
       if (this.netRefinanceDay === day) return false;
       if (!machine.settlementDue && !this.mortgage) { this.lastAction = "mortgage-paid"; return false; }
@@ -943,7 +1237,7 @@ export class CreditHouseholdAgent {
     const s = await world.households.mark(this);
     const net = world.accounting === "net", basis = net ? s.basketBasis : this.basketPrincipal;
     this.usdc = s.cash;
-    this.ledger.push({ day, drawn: s.drawn, limit: s.limit, jub: min(s.jub, s.drawn),
+    this.ledger.push({ day, drawn: s.drawn, limit: s.limit, jub: s.jub === null ? null : min(s.jub, s.drawn),
       mortgageOwing: this.mortgage, hypoOwing: this.hypoMortgage, banked: s.cash, hypoBanked: this.hypoCash,
       nw: s.nw, hypo: this.hypoCash - this.hypoMortgage - this.hypoLivingArrears - this.hypoPremiumArrears,
       arrears: this.livingArrears + this.premiumArrears, hypoArrears: this.hypoLivingArrears + this.hypoPremiumArrears,
@@ -954,7 +1248,8 @@ export class CreditHouseholdAgent {
       basketRoi: net ? s.basketRoi : basis > 0n && this.shares > 0n && world.basketKind === "machine"
         ? Number(s.basketMark - basis) / Number(basis) : null,
       ...(net ? { markBlock: s.blockNumber, auxCash: s.auxCash, held: s.held, savingsHeld: s.savedBucks,
-        premiumNet: s.premiumNet, reliefScaled: s.reliefScaled, availableReliefScaled: s.availableReliefScaled,
+        premiumNet: s.premiumNet, reliefScaled: s.reliefScaled, reliefUnavailable: s.reliefUnavailable,
+        availableReliefScaled: s.availableReliefScaled,
         reliefLiquidityLimited: s.reliefLiquidityLimited, basketShares: s.basketShares,
         machine: this.refinanceMachine.status(), calendar: this.calendarMachine.status() } : {}),
       pending: s.pending, premiumPaid: this.premiumPaid, extPremium: this.extPremium, hypoPremium: this.hypoPremium,
@@ -972,10 +1267,72 @@ export class CreditHouseholdAgent {
       error: this.lastError, decision: this.lastVerdict });
   }
 
+  /** The main account's one-time approvals for guarded purchases and routed sales. */
+  async ensureTrading(world) {
+    if (this.tradingReady) return;
+    await world.households.openTrading(this.account);
+    this.tradingReady = true;
+  }
+  /** An outcome that must be reconciled before this household sends anything more. */
+  netUncertain() {
+    const m = this.refinanceMachine, cal = this.calendarMachine;
+    return Boolean(this.netTradeUncertain || this.netCancelUncertain || this.netPendingToken !== null
+      || m.flow?.status === "pending" || cal.flow?.status === "pending");
+  }
+  /** One day of a canonical household on the one owner dispatcher and receipt cursor
+   * (credit_households._act_net): earlier evidence first (a recovered or uncertain outcome consumes
+   * the turn); the calendar's bills; a leaving household's exit preempts the rest; otherwise a known
+   * refused deposit before new credit, the day's credit decision, the working balance and surplus;
+   * then a few turns of known progress. An unexpected fault is recorded and counted; a
+   * NotImplementedError-like migration gate stays fatal. */
+  async actNet(world, day, ctr) {
+    if (await this.recoverPendingOperations(world, day)) return;
+    const m = this.refinanceMachine, cal = this.calendarMachine;
+    await cal.prepare(world, day);                   // bind on arrival; accrue; schedule a payday's bills
+    if (!cal.active && !m.active && !m.settlementDue && !m.surplusDue && this.netRepaymentTarget === null
+        && this.netRepaymentReserve === null && !this.netTradeUncertain && !this.netCancelUncertain
+        && this.netPendingToken === null && !this.netRepaymentInterrupted && !this.exitDue(day)
+        && day < Math.min(this.nextDecision, this.nextSurplus, this.nextWallet)) return;
+    try {
+      await this.ensureTrading(world);
+      if (this.exitDue(day)) {
+        for (let turn = 0; turn < ACT_TURNS; turn++) if (!await this.advanceNetExit(world, day, ctr) || this.netUncertain()) break;
+        return;
+      }
+      const steps = this.investor ? [(w, dd, c) => this.advanceNetInvestor(w, dd, c)] : [
+        ...(m.surplusDue ? [(w, dd, c) => this.advanceNetSurplus(w, dd, c)] : []),
+        this.p.role === "debtor" && (this.mortgage || m.settlementDue)
+          ? (w, dd, c) => this.advanceNetRefinancing(w, dd, c) : (w, dd, c) => this.advanceNetInvestment(w, dd, c),
+        (w, dd, c) => this.advanceNetWallet(w, dd, c), (w, dd, c) => this.advanceNetSurplus(w, dd, c)];
+      for (const step of steps) {
+        await step(world, day, ctr);
+        if (this.netUncertain()) return;
+      }
+      for (let turn = 0; turn < ACT_TURNS; turn++) {
+        if (!(m.active || cal.active || this.netRepaymentTarget !== null) || this.netUncertain()) break;
+        if (!await this.recoverPendingOperations(world, day, { continueAfterCalendar: true })) break;
+      }
+    } catch (err) {
+      if (err?.name === "NotImplementedError") throw err;
+      // Each component saved its own evidence before sending; record, count, and try again tomorrow.
+      this.netDispatching = false;
+      this.lastAction = "act-unavailable"; this.lastError = String(err).slice(0, 200);
+      ctr.household_err = this.lastError; ctr.household_faults = (ctr.household_faults ?? 0) + 1;
+      await m.event(world, day, "unavailable", { kind: "act", phase: "dispatch", reason: this.lastError });
+    }
+  }
+
   async act(world, day, tick) {
     if (tick || day < this.arrive_day || this.exited) return;
+    if (world.accounting === "net") {
+      // A recovered or uncertain outcome consumes the day, before anything is read or recorded (as before).
+      if (await this.recoverPendingOperations(world, day)) return;
+      const ctr = this.refinanceMachine.counters ??= {};
+      await this.actNet(world, day, ctr);
+      await this.record(world, day);
+      return;
+    }
     if (await this.recoverPendingOperations(world, day)) return;
-    if (world.accounting === "net") throw new Error("canonical household decisions await issuance and exit migration");
     if (!this.started) {
       const cash = units((this.investor ? this.p.invest_cash_k : this.p.cash_k) * 1000);
       await world.fiatIn(this.account, cash, { tag: "household:starting-cash" });

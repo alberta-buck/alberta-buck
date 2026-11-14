@@ -25,7 +25,8 @@ foundation. One Solidity change has been made since it was qualified:
 | =2846ff3a= | A quoted credit-investment score and the shared want rule (pure functions). |
 | =9f344702= | Paydays: each household's own keyed day of the 30-day month. |
 | =cf08b12f= | =burn(0)= releases unused and excess coverage with a proportional deposit refund: Solidity, both SDKs, tests. Fully qualified. |
-| the =wip:= checkpoint after it | /Work in progress, Python only:/ credit investment, asset exits, the investor's decision and the unified act dispatcher (written, not wired). No JavaScript mirror yet. |
+| =f6ed2734= | /Work in progress, Python only:/ credit investment, asset exits, the investor's decision and the unified act dispatcher (written, not wired). |
+| /the opened-loop milestone/ | The investor's BVIB tolerance (owner, 2026-11-13); keyed normal draws; the JavaScript port of investment, exits and the investor; the act loop opened in both languages; the first complete 30-day world; deposit minimums and the daily mark fixed from what it showed. |
 
 The household is built from /components/ on one owner dispatcher and one
 receipt cursor (=HouseholdRefinance=). Where each stands:
@@ -37,23 +38,16 @@ receipt cursor (=HouseholdRefinance=). Where each stands:
 | Surplus: save, top up, redeem, discounted retirement | surplus | qualified | qualified |
 | Working balance (wallet) | wallet | qualified | qualified |
 | =burn(0)= release, SDK =release= | (SDK) | qualified | qualified |
-| Credit investment | invest | done, 16 real-contract tests | *not written* (step A) |
-| Asset exit and investor withdrawal | exit, plus calendar =sale= / =settle= | done, 11 real-contract tests | *not written* (step A) |
-| Investor decision: hold BUCK, convert when dear | surplus (=hold=, =convert=) | done, exercised by the exit tests | *not written* (step A) |
-| Unified daily dispatcher =_act_net= | all | written, *not wired* (step B) | *not written* (step B) |
+| Credit investment | invest | qualified, 16 real-contract tests | qualified, 23 Tevm tests |
+| Asset exit and investor withdrawal | exit, plus calendar =sale= / =settle= | qualified, 11 real-contract tests | qualified, 9 Tevm tests |
+| Investor decision: BVIB tolerance | surplus (=save=, =hold=, =convert=) | qualified, in the exit tests | qualified, in the exit tests |
+| Unified daily dispatcher =_act_net= / =actNet= | all | *wired*; one-year worlds run | wired; JS population world not yet run |
 
-The normal decision loop is therefore still *gated*:
-=CreditHouseholdAgent.act= raises =canonical household decisions await issuance
-and exit migration= on canonical accounting, in both languages. Until it
-opens no population world runs: not the five-year runner, not the savings
-sandbox, not the JavaScript equilibrium demo. The browser-only wallet sandbox
-is unaffected. *No five-year run exists on the corrected accounting.*
-
-At this checkpoint Python and JavaScript differ only by /additions/ on the
-Python side, with one behavioural exception: a household whose exit day has
-come makes the Python =advance_net_refinancing= / =advance_net_surplus= /
-=advance_net_investment= return False (its exit dispatcher owns the work),
-where the JavaScript twins still throw =asset exits are not yet integrated=.
+The normal decision loop is *open*: =CreditHouseholdAgent.act= runs the
+dispatcher on canonical accounting in both languages, and the first complete
+30-day Python world has run (the opened-loop milestone at the end). *No
+five-year run exists yet on the corrected accounting*; step C lengthens the
+short world, step D runs the campaigns.
 
 ** How to work here
 
@@ -78,8 +72,8 @@ where the JavaScript twins still throw =asset exits are not yet integrated=.
   |---------+------+------|
   | =make nix-venv-test-python PYTEST_FILES="<the eighteen files below>" PYTEST_ARGS='--basetemp=build/test/NAME -q'= | Supported Python set | 2 min |
   | =make nix-core-equilibrium-policy-test= | Fast JavaScript policy, quote and calendar units | 1 min |
-  | =make nix-core-equilibrium-bootstrap-test= | Actual JavaScript, six Tevm fixture files together | 30 min |
-  | =... CORE_EQUILIBRIUM_TEST_FILES=test/net-household-wallet.tevm.test.js= | One file (wallet 4 min, resume 11, programme 16, surplus 19, bootstrap 36) | |
+  | =make nix-core-equilibrium-bootstrap-test= | Actual JavaScript, eight Tevm fixture files together (132 tests) | 50 min |
+  | =... CORE_EQUILIBRIUM_TEST_FILES=test/net-household-wallet.tevm.test.js= | One file (exit 2 min, wallet 4, resume 11, programme 21, surplus 19, invest 40, bootstrap 36) | |
   | =make nix-venv-net-demurrage-smoke= | The repayment engine, Python and JavaScript | 5 min |
   | =make nix-core-demo-eqworld= | Browser bundle rebuilds | 1 min |
   | =make nix-test= | All Solidity (needed again once a contract changes) | long |
@@ -91,9 +85,8 @@ where the JavaScript twins still throw =asset exits are not yet integrated=.
   =test_net_household_invest=, =test_net_household_exit=,
   =test_net_economy_report=, =test_sim_report=, =test_settlement=,
   =test_net_repayment_target=, =test_net_demurrage_smoke=, =test_net_market=,
-  =test_net_economy_bootstrap=. (294 pass at this checkpoint, with one more,
-  =test_javascript_investment_programme_and_staged_score_match_python=,
-  a strict expected failure until its JavaScript twins exist; see step A.)
+  =test_net_economy_bootstrap=. (304 pass at the opened-loop checkpoint,
+  none expected to fail.)
 - /Traps that cost time./
   - pyrevm refuses any =eth_call= whose sender is a contract, and every
     simulated household is a proxy. Simulate "as the owner" through
@@ -116,18 +109,26 @@ where the JavaScript twins still throw =asset exits are not yet integrated=.
   - The legacy JavaScript household tests (=credit-household.tevm.test.js=,
     =eqsim.tevm.test.js=) already fail on this branch with =no artifact for
     Permit2=: their packaged artifact loader predates the canonical world.
-    They are not in any target above. Migrate or retire them when the act
-    loop opens (step 5); do not mistake them for regressions.
+    They are not in any target above. Migrate or retire them (step B's
+    remainder); do not mistake them for regressions.
 - /Diagnosing./ Write a scratch pytest that imports =household_world= and the
   helpers from =alberta_buck/test/test_net_household_setup.py= and prints what
   you need (end it with =assert 0= and pass =-s=); run it with the same Make
   target, its path in =PYTEST_FILES=. Printing each record of
   =agent.refinance_machine.events= (=seq=, =kind=, =phase=, =status=,
   =operation=, =reason=, =amounts=) shows a whole scenario.
+- /Reading a world./ =python -m alberta_buck.sim.digest <vector.json>...= (in
+  the venv) prints K, BVIB and price over the run, the supply change split
+  into the basket's lien, household principal and other, who holds the BUCK
+  at the start and the end (BUCK/USDC pool, TOKEN/BUCK pools, basket,
+  everyone else), each role's
+  holdings, actions and net worth against its counterfactual, and the kinds
+  of refusal recorded. No EVM; reads only recorded frames.
 - /Long runs and editing./ The six-file JavaScript acceptance takes 30 to 40
   minutes and reads only JavaScript, fixtures and artifacts. Start it alone
   and work on Python meanwhile; never edit JavaScript, a fixture it reads or
-  rebuild contracts until it reports. A new fixture file is safe.
+  rebuild contracts until it reports. A new fixture file is safe. A
+  one-year Python world (about 45 minutes) can run beside it.
 - /After a contract change./ =make nix-build=, the focused
   =make nix-match-<Contract>Test=, =make nix-test=,
   =make nix-contracts-dist-check=, =make nix-sim-build=, then every target in
@@ -157,90 +158,48 @@ languages: =quote_release= / =release= / =release_from_receipt= (JavaScript
 =quoteRelease= / =release= / =releaseFromReceipt=) and =ReleasePending=. The
 asset exit is its only caller. See the release milestone.
 
-*** A. Mirror credit investment, exits and the investor in JavaScript
+*** A. Mirror credit investment, exits and the investor in JavaScript (done)
 
-Python is the specification; port it line for line, keeping names in the
-usual camel case. What to port, by file:
+Ported function for function (see the opened-loop milestone). JavaScript
+tests: =core/js/test/net-household-invest.tevm.test.js= and
+=net-household-exit.tevm.test.js=, now in =CORE_EQUILIBRIUM_TEST_FILES=, on the
+shared fixtures; cases marked ="js": false= run in Python only, to bound the
+Tevm run. The JavaScript world bootstraps 1M-deep TOKEN pools with a
+leveraged basket: thresholds in the premium and investor fixtures were set
+from the Python world and are asserted, not assumed, in JavaScript.
 
-| Python | JavaScript | Port |
-|--------+------------+------|
-| =household_policy.py= | =household-policy.js= | =investment_programme=, =net_investor_action= |
-| =carry.py= | =household-policy.js= (where =stagedRefinance= lives) | =staged_investment= |
-| =net_household.py= | =net-household.js= | =InvestPlan= and =ExitPlan= (plain objects), =assess_investment=, =assess_investor=; on =HouseholdRefinance=: =start_investment=, =_prepare_issue= (the refinance issue check, now shared), =_prepare_deposit=, =_book_deposit=, =_prepare_invest=, =_apply_invest=, =start_exit=, =_prepare_exit=, =_apply_exit=, =abandon=; =surplus_due= covering =invest=; =_label= with =invest= and =exit=; the surplus plan's =hold= and =convert= actions and =deposit_buck=; the recover and dispatch branches; completion outcomes (=invest=, =invest-retained=, =exit-<step>=, =buy=, =convert=, =...-retained=); =ReleasePending= treated like =IssuancePending= |
-| =household_calendar.py= | =household-calendar.js= | =schedule_sale=, =schedule_settlement=, =_after=; the =sale= period (proceeds credited from an authenticated mint, =_sold= set, not counted as income) and =settle= period (starts at =living=); for both, the mortgage phase pays the whole balance |
-| =credit_households.py= | =credit-household.js= | fields =_net_invest_day=, =_exit_wait_day=, =_exit_trade_day=, =released_coverage=, =released_refund=, =_trading_ready=; =assess_net_investment=, =start_net_investment=, =advance_net_investment=, =assess_net_investor=, =advance_net_investor=, =exit_due=, =advance_net_exit=, =_exit_step=, =_exit_sent=; in =advance_net_surplus=, =advance_net_refinancing= and =advance_net_investment= a due exit returns false instead of throwing; =_ensure_trading=, =_net_uncertain= and =_act_net= belong to step B |
+*** B. Open the act loop (done)
 
-Tests: write =core/js/test/net-household-invest.tevm.test.js= and
-=net-household-exit.tevm.test.js= from the Python files of the same names,
-reading =test/fixtures/household-invest.json= and =household-exit.json=, and
-add both to =CORE_EQUILIBRIUM_TEST_FILES= in the Makefile. Add
-=investmentProgramme= / =stagedInvestment= / =netInvestorAction= to the fast
-policy tests. When those functions exist,
-=test_javascript_investment_programme_and_staged_score_match_python= in
-=alberta_buck/test/test_household_policy.py= XPASSes and so fails (it is
-=xfail(strict=True)=): remove the marker then.
+=act= runs =_act_net= / =actNet= on canonical accounting in both languages.
+Recovery comes first (a recovered or uncertain outcome consumes the day),
+then the calendar, then the components in order (see the opened-loop
+milestone and =README-households.org=, "The daily dispatcher"). Still to do
+here: migrate or retire the legacy JavaScript household tests
+(=credit-household.tevm.test.js=, =eqsim.tevm.test.js=; they fail on a missing
+=Permit2= artifact and are in no target), and run a JavaScript population
+world once (=make nix-core-eqsim=) to measure its cost per household-day.
 
-Traps: Tevm's clock moves with every transaction (compare balances and claim
-age with a tolerance); the JavaScript world bootstraps a leveraged basket with
-1M-deep TOKEN pools, so the premium fixture's TOKEN purchase must mint TOKEN
-to the seeding helper first and its BVIB threshold may need its own value;
-develop each file alone (=CORE_EQUILIBRIUM_TEST_FILES=test/<file>=), several
-minutes each, then the whole six-plus-two set (about 45 minutes).
-
-*** B. Open the act loop
-
-=CreditHouseholdAgent._act_net= (Python) is the dispatcher that replaces the
-gate. It is written but not called: =act= still raises on canonical
-accounting, in both languages. Order: prepare the calendar (binds on the
-arrival day, accrues, schedules a payday's bills); a due exit preempts the
-rest (=advance_net_exit=, a few turns); otherwise a known refused deposit
-before new credit, then the day's credit decision (a debtor's refinancing; a
-mortgage-free household's credit investment; an investor's own choice), the
-working balance and surplus; then a bounded number of turns of /known/
-progress (=ACT_TURNS = 6=); an unknown outcome stops at once. A day with
-nothing due returns after one clock read. Unexpected faults are recorded as
-=kind=act= events and counted in =ctr["household_faults"]=; a
-=NotImplementedError= stays fatal.
-
-When it was wired in this session, ten existing Python tests failed, all
-fixture assumptions, none a money error:
-- Eight call =act= on a later day for a household whose calendar was never
-  bound. =_act_net= prepares the calendar, which binds only on the arrival
-  day (=calendar must bind an idle canonical household on arrival=); the old
-  path reached =_recover_pending_operations= first, which prepares only a
-  bound calendar. Fix the fixtures (act from the arrival day, or bind with
-  =advance_net_calendar(d, arrive_day)=); do not loosen the bind rule.
-- The interactive-driver stub test
-  (=test_readable_books_do_not_allow_unimplemented_interactive_economy_to_finish=)
-  failed inside =_ensure_trading=: =AttributeError: 'SimDriver' object has no
-  attribute 'proxy'= at =self.proxy.bump()=. Not diagnosed; start at the
-  send-attribution hooks (=alberta_buck/sim/acts.py=, =Chain.send=, the
-  =d.chain.actor= the stub sets or leaves).
-- One calendar test expected a balance of opening + income - living -
-  premium - instalment; the opened loop also bought working BUCK on that
-  payday. Pin =money_months=0= in such fixtures or count the wallet.
-
-Then: write =_actNet= in =credit-household.js=, change both =act= methods to
-call it, rewrite the two gate tests (=test_primary_household_setup...= and the
-driver test) to assert the opened behaviour (a draft that did so is in this
-session's history: one driver tick binds the calendar, credits the opening
-dollars and prepares trading; later ticks of the day send nothing), and
-migrate or retire the legacy JavaScript household tests
-(=credit-household.tevm.test.js=, =eqsim.tevm.test.js=; they already fail with
-=no artifact for Permit2=). Hazards still to respect: the flows share one
-cursor (=HouseholdRefinance.start= does not test =surplus_due=, which is why the
-dispatcher retries a deposit first); a debtor's refinance assessment is the
-expensive read (=credit_cash_floor= shares it within one block; keying it by
-day instead was tried and is safe, but needs the JavaScript twin too).
-
-*** C. Short complete worlds
+*** C. Short complete worlds (one-year worlds run; gate open)
 
 =make nix-venv-economy-smoke ECONOMY_SMOKE_DAYS=30= runs the working tree and
-writes =build/sim/economy-smoke.{json,pdf}=; lengthen it by stages. Check, in
-this order: every household's books reconcile (=unwound= equals the sum of
-confirmed reductions; wallet, receipts and principal against chain); supply
-equals open principal plus deferred Jubilee principal; =household_faults= is
-zero; the report charts the new records (investment bites, exits, releases);
+writes =build/sim/economy-smoke.{json,pdf}=; lengthen it by stages (90, 365,
+730 days). The first 30-day world ran on 2026-11-13 (observations 29 to 35):
+two failure kinds were found and fixed (a day's household mark crashing on a
+refused relief quote; deposit minimums priced from the wrong share price).
+90-day and 365-day worlds then completed (observations 36 to 41;
+=ECONOMY_SMOKE_OUT=build/sim/economy-smoke-365.json=, about 45 minutes on
+pyrevm). Variants of the year, each one =--set key=value= on the smoke's
+command (=python -m alberta_buck.sim --experiment ...economy.toml --backend
+pyrevm --days 365 --set ... --out ...=, in the venv): every tolerance 0
+(observation 42), the reverting price path (observation 44). *Gate before step D:* K falls 0.75 ->
+0.45 to 0.55 over the year in all three, BVIB sits 1 to 3% above 1, and the
+basket issues about 0.7 BUCK per BUCK deposited, on cheap days too, into the
+TOKEN/BUCK pools (observations 43 and 45). Recommendation 53 says what to
+find first and the owner's choices. Done: supply equals open plus deferred
+principal exactly, and =household_faults= is zero, in all three (the digest
+prints both). Still to check: every household's books reconcile (=unwound= equals the sum of
+confirmed reductions; wallet, receipts and principal against chain); the
+report charts the new records (investment bites, exits, releases);
 then the measurements the recommendations ask for. Add the broad sell-off and
 the broad purchase (the same share of every BUCK pool) to the shock set.
 =ShockAgent= still uses the numeric =mint= overload and its own swap callback:
@@ -347,7 +306,9 @@ provenance gates. None of these gates an uninterrupted five-year run.
 | (proposed) | A leaving household with a closed exit door, or no dollars for its lien, waits and is retried daily; no forced liquidation. Its wages continue until it has left. | Implemented so (exit milestone, recommendations 40 and 41); confirm. |
 | (proposed) | The insured asset sells at its insured face value on the exit day; actual and counterfactual alike. | Implemented so; there is no house-price model. Confirm or supply one. |
 | (proposed) | A known refused remainder (settlement or deposit) is abandoned when the household starts leaving; its cash is simply owned. | Implemented so (=HouseholdRefinance.abandon=); confirm. |
-| (proposed) | An investor holds the BUCK it buys as money and deposits them only when they are dear by more than its premium. | Implemented so, as the legacy =investor_action= intended; confirm. |
+| 2026-11-13 | (Owner, replacing the proposal above it.) An investor does not wait for the BUCK to be dear: it puts its BUCK in the basket while BVIB is within its own tolerance of 1, because waiting forgoes the basket's return; above that tolerance (K expected to fall, the BUCK to regain value) it buys BUCK and holds them. The tolerance is drawn per investor, normal about 1%, bounded to 0..2%. | Done (=bvib_tolerance=, =net_investor_action=), both languages. |
+| 2026-11-13 | The saver's closing fee is the BuckCredit facility's closing (appraisal, legal, lien registration; =switch_k=, $1k-3k), not a real-estate closing: a saver owns its home outright and a debtor's purchase was financed by its mortgage, so there is no down payment. It is paid once, from savings above the buffer, before the first issue. The owner accepted this. | Answered. |
+| 2026-11-13 | The owner asked whether household settings are drawn from normal distributions. They were all uniform over their ranges; a keyed normal draw (=normal=, identical in both languages) now exists and the investor tolerance uses it. | Open: say which other settings (income, savings, home value, fees, rates) should be normal, and with what mean and spread. No canonical baseline exists yet, so changing them now costs nothing to compare. |
 
 * Direction, source and current state
 
@@ -2759,7 +2720,7 @@ only Solidity change since the canonical foundation was qualified.
     Makefile's artifact list, =buck_core/net_world.py=, =core/js/src/net-world.js=
     and =scripts/contracts-dist.py=).
 
-** Credit-investment milestone: a mortgage-free household issues, keeps and deposits (Python complete; JavaScript pending, step A)
+** Credit-investment milestone: a mortgage-free household issues, keeps and deposits (Python complete; JavaScript ported in the opened-loop milestone)
 
 Step 2 of Start here. A saver, or a debtor whose mortgage is paid, issues
 against its insured asset and keeps the BUCK, depositing them in the basket
@@ -2853,7 +2814,7 @@ under its own account.
     =closing= precedes =fund= and =issue=. A refusal after it leaves the fee
     paid and =refinance_closed= set, so the next plan carries no fee.
 
-** Exit, investor and dispatcher milestone (Python only; JavaScript pending, step A)
+** Exit, investor and dispatcher milestone (Python first; JavaScript ported in the opened-loop milestone)
 
 Steps 3 to 5 of the earlier list, in Python. All three are owner-dispatcher
 components on the same receipt cursor; nothing here changes Solidity.
@@ -2941,3 +2902,181 @@ components on the same receipt cursor; nothing here changes Solidity.
     carries =withdrawn_usdc=, =released_coverage=, =premium_refund_nominal= and
     =retired_principal=; the campaign's books check should sum them over the
     exited households against supply and pool balances.
+
+
+** Investor tolerance, JavaScript port and the opened act loop (complete; the centre's falling K is open)
+
+The owner's answers of 2026-11-13 and steps A and B.
+
+- [X] /Investor tolerance./ =bvib_tolerance=, a keyed draw per investor,
+  normal about 1% with sd 0.5%, held within 0..2%. =net_investor_action(bvib,
+  tolerance)=: =invest= while BVIB <= 1 + tolerance, otherwise =wait=.
+  =assess_investor=: investing, deposit BUCK held (=convert=) or buy and
+  deposit (=save=); waiting, buy BUCK and hold them (=hold=). Both languages.
+- [X] /Keyed normal draws./ =normal(seed, member, key, mean, sd, lo, hi)=:
+  the sum of twelve keyed uniforms less six (Irwin-Hall), clamped to the
+  bounds. Pure addition in the same order, so Python and JavaScript produce
+  the same double (tested over 400 members). A setting given as
+  ={mean, sd, lo, hi}= is drawn this way; a scalar still pins it.
+- [X] /Step A, JavaScript port./ Calendar =sale= / =settle=;
+  =assessInvestment=, =assessInvestor=; on =HouseholdRefinance=:
+  =startInvestment=, =startExit=, =abandon=, the shared =prepareIssue= /
+  =prepareDeposit= / =bookDeposit=, the =hold= and =convert= surplus
+  actions; on the agent: =advanceNetInvestment=, =advanceNetInvestor=,
+  =advanceNetExit= with its =exitStep=; =stagedInvestment=,
+  =investmentProgramme=, =netInvestorAction= in the policy module. Tests:
+  =core/js/test/net-household-invest.tevm.test.js= and
+  =net-household-exit.tevm.test.js= on the shared fixtures; seven fault
+  cases are Python-only (="js": false=) to bound the Tevm run, the rest
+  cover every phase and outcome kind.
+- [X] /Step B, the act loop is open./ =act= calls =_act_net= / =actNet= on
+  canonical accounting in both languages. Recovery comes first, as before (a
+  recovered or uncertain outcome consumes the turn); then the calendar binds
+  or accrues; then the components in the documented order. The ten fixture
+  failures were fixed in the tests, not by loosening the agent: bare-agent
+  fixtures recover before any machine is touched; the driver stub gained the
+  display cache (=proxy.bump=) a real driver builds (the "not diagnosed"
+  =AttributeError=); the two gate tests now assert the opened behaviour. In
+  JavaScript =act= also recovers first and returns before reading or
+  recording anything; a first version called =record= after a recovery and
+  failed three stub-world smoke tests.
+- [X] /Reading a world./ =python -m alberta_buck.sim.digest=: K, BVIB,
+  price, the supply change split by source, who holds the BUCK at the start
+  and the end (the BUCK/USDC pool, the TOKEN/BUCK pools, the basket,
+  everyone else), each role's outcome and the refusal kinds, from a vector
+  alone.
+- [X] /First complete worlds./ =make nix-venv-economy-smoke ECONOMY_SMOKE_DAYS=30= completes on
+  canonical accounting (observations 29 to 35); then 90 and 365 days, and two
+  one-year variants (observations 36 to 45).
+- [X] /The JavaScript CLIs load the canonical world./ =eqsim.mjs=, =farmsim.mjs=
+  and =tevm-membench.mjs= used the packaged-artifact loader, which has no
+  =Permit2=; they now use =loadAnyArtifact= (the vendored builds too), the
+  loader the tests' bundle is built from. A 30-day =make nix-core-eqsim= (one
+  debtor, one basket saver, Tevm in Node) now builds its world and runs on
+  the opened loop; it reached day 25 in 35 minutes, about 80 seconds a
+  simulated day, mostly the work wheel's ticks. A JavaScript population
+  world is impractical on Tevm; an in-browser world must stay small.
+
+*** Checkpoint
+
+- *Evidence*: the eighteen Python files, 304 passed
+  (=build/test/q3-python.log=); JavaScript policy units 80 of 80; the eight
+  Tevm files 132 of 132 (129 in the full run; the three that still asserted
+  the closed gates were corrected and their two files re-run, 42 of 42,
+  =q4-actual.log=); the repayment-engine smoke 35 Python and 21 JavaScript;
+  the browser bundle builds. The 30-, 90- and 365-day Python worlds and both
+  one-year variants complete with no household fault and supply equal to
+  open plus deferred principal.
+
+*** Observations and recommendations (opened loop)
+
+**** Measured
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 29 | 30-day economy smoke, first try | Day 0's snapshot crashed the run: =previewRelief= reverted =MarkPriceDeviation= (the fund refuses a position mark while a basket pool is far from its TWAP, as many households trade on day 0). The daily household mark now tolerates it: relief is recorded unavailable with the reason, left out of that day's net worth and flagged (=relief_unavailable=), never a zero. Transactions are unaffected: they read the guard themselves. |
+| 30 | 30-day economy smoke (=economy.toml=, 43 households: 6 debtors, 6 savers, 31 investors) | The first complete world on canonical accounting runs to the end and writes its JSON and PDF. Supply 24.02M -> 25.80M BUCK (+7.4%); K 0.752 -> 0.734; BUCK/USD low 0.964 (day 9), 0.991 at the end. |
+| 31 | same | Debtors: 5 of 6 refinanced and retired $1.22M of mortgage in 30 days (one $343k), drawing tranches daily once joined. Each sits $1.9k to $6.7k below its counterfactual: the closing fee, premium deposit and execution, not yet repaid by carry (theta is 0.5 to 3 years). |
+| 32 | same | Savers: with =carry_utilization = 0= (the default) none borrowed to invest except one; all six saved dollars into the basket (12.7k to 47.4k BUCK each). |
+| 33 | same | Investors: after the debtors' sales pushed the BUCK to $0.96, 18 of 31 ended the month holding BUCK (BVIB above their tolerance): 671k BUCK held as money, 827k in the basket. The tolerance rule turns a cheap BUCK into BUCK demand, as intended. |
+| 34 | same | 50 of 1,262 sampled household observations (every fifth day) carried a refused basket deposit (=deposit= / =increasePosition= reverted). The household minimum came from the TWAP =sharePrice= with 0.5% slack, while the basket prices a deposit at its HIGH marks and charges (1 + K)/2 of the dearest pool fee (about 0.26%): whenever the high mark led the TWAP by a quarter percent the deposit was refused, retried next day, and blocked that household's wallet and new credit meanwhile. Both SDKs now quote the minimum as the basket prices it (=quote_deposit_shares= / =quoteDepositShares=: =equity() - gross() + grossAt(HIGH)=, less the charge). Re-run of the same world after the change: refused deposits 50 -> 0 of 1,264 observations, recorded household errors 58 -> 7, basket deposits 1.107M -> 1.247M BUCK. |
+| 35 | same, after the change | The seven remaining errors are refused issues (=issuance of facility N needs transaction reconciliation=, a proved revert, resumed next day) and two refused relief reads (=MarkPriceDeviation=) inside a debtor's own assessment. The issue reverts are not yet explained: the SDK's message hides the contract's custom error. |
+| 36 | 90-day economy smoke (same population; 60 households by day 89: 7 debtors, 6 savers, 47 investors) | Completes, 15 recorded errors in 4,256 household observations (refused issues and two refused relief reads), no faults, no exits yet. Supply 24.02M -> 26.93M (+12%). Household basket 2.45M BUCK, +1.2%. Debtors' net worth against the counterfactual now -$4.9k to +$4.5k: carry is starting to repay the switching costs. |
+| 37 | same | K falls steadily, 0.752 -> 0.743 (day 15) -> 0.724 (45) -> 0.695 (75) -> 0.680 (89), while BUCK/USD stays mostly at 0.97 to 0.99: the controller is answering a persistently cheap BUCK, the debtors' conversion supply, by contracting. Supply growth slowed (26.25M to 26.37M between days 45 and 75) as K cut the issuance limit, then resumed. |
+| 38 | 365-day economy smoke (=build/sim/economy-smoke-365.{json,pdf}=; 150 households by day 364: 8 debtors, 7 savers, 135 investors) | A full year on canonical accounting completes: 101 recorded errors in 33,067 household observations (refused basket deposits 35 -- now mostly the deviation guard, refused relief reads 21, a waiting retirement 26, refused issues 8), no faults, no exits (none was keyed due). |
+| 39 | same | *K falls every month*: 0.752 -> 0.735 (day 30) -> 0.679 (90) -> 0.600 (180) -> 0.526 (270) -> 0.445 (364). BVIB (=basketVal=) stays 0.98 to 1.03, mostly 1.01 to 1.03: the BUCK is slightly cheap against the basket all year, and the integral term keeps cutting K without closing that gap. |
+| 40 | same | The scenario's commodity references rise 10 to 25% in USD over the year (e.g. 7.78 -> 9.27, 3.21 -> 4.05), so BUCK/USD rises with its basket, 0.95 -> 1.11. Debtors who owe BUCK and earn dollars lose: their net worth against the counterfactual is -$25.5k to +$4.9k (six of eight negative). Their drawn principal stops growing at about 2.08M from day 150, as K cuts their limits. |
+| 41 | same | Supply 24.02M -> 31.93M: +7.91M = the basket's own lien +5.69M (=eq_lien= 6.02M -> 11.71M) + household principal +2.22M, exactly. 72% of new supply is the basket deploying deposits by issuing against its equity (=eq_equity= 6.09M -> 14.42M, mostly households' 7.7M of deposits). Investors buy BUCK, deposit them, and the basket issues about K BUCK per BUCK of new equity and sells them for TOKEN: deposit demand returns to the market as basket supply. |
+| 42 | the same year with every investor's =bvib_tolerance= pinned to 0 (=--set agents.HouseholdPopulationAgent.bvib_tolerance=0=; =build/sim/economy-365-tolerance0.{json,pdf}=) | The override applied: investors ended with 3.88M BUCK in the basket and 2.11M held as money (the default year: 6.93M and 0.74M), and the investor population is smaller (100 against 135 by day 364; arrivals follow the economy). K 0.752 -> 0.553 (the default year 0.445): the fall is a third slower but still monotonic. BVIB 0.98 to 1.03, above 1 on 91% of days (97%). Supply +6.61M = basket lien +3.93M (59%) + household principal +2.68M; the debtors drew more (2.56M against 2.17M) as K cut their limits less. Debtors -$14.8k to +$2.5k against the counterfactual (-$25.5k to +$4.9k); savers -$2.1k to +$8.0k. 29 recorded errors in 27,291 observations (101 in 33,067), no faults. |
+| 43 | both one-year worlds, read by the digest's new holder split (=net.carrying=: nominal BUCK of the Carrying accounts) | *The new supply ends up in the TOKEN/BUCK pools.* Default year: of +7.91M, the TOKEN/BUCK pools gained +6.65M (11.10M -> 17.75M, 84%), the basket's own idle BUCK +0.58M, everyone else (households, arbitrageurs, keepers, the bootstrap lender) +1.10M, while the BUCK/USDC pool lost 0.42M. Zero-tolerance year: of +6.61M, TOKEN/BUCK pools +4.32M (65%), basket +0.52M, everyone else +2.19M (the investors' 2.1M held as money). The basket issues against its equity and buys TOKEN with the BUCK: its lien becomes BUCK inventory in the TOKEN/BUCK pools, which is exactly where BVIB is priced. |
+| 44 | the same year on the reverting price path (=--set scenario.prices=revert=; =build/sim/economy-365-revert.{json,pdf}=; 131 households) | *Without commodity inflation K falls just as far.* BUCK/USD stays 0.97 to 1.02 all year (the historical path: 0.95 -> 1.11), yet K 0.752 -> 0.469 (0.445), BVIB above 1 on 97% of days (97%), supply +7.91M (+7.91M), of which the TOKEN/BUCK pools hold +6.56M (83%). The year-long fall is not the controller tracking rising commodities. Debtors, whose BUCK lien no longer appreciates, now gain: -$19.1k to +$36.0k against the counterfactual, six of eight positive (the historical path: six of eight negative), which confirms recommendation 51. Savers drew no credit and sit within $1k of the counterfactual. 32 recorded errors in 30,241 observations, no faults; supply equals open principal exactly. |
+| 45 | all three years: the basket's lien day by day against the sign of BVIB | The basket issues on almost every day, including the 330 to 353 days a year when the BUCK is cheap against it (BVIB > 1): reverting path +4.63M of lien on those days (13k a day) and +0.69M on the 11 days at or below 1 (63k a day); historical +5.39M and +0.30M; zero tolerance +3.22M and +0.71M. Over the year the basket's lien grows about 0.7 BUCK per BUCK of new equity (reverting: equity +7.76M, lien +5.32M; households deposited 7.29M), so roughly 70% of the households' BUCK demand returns to the TOKEN/BUCK pools as the basket's own new supply. Per day the issuance is counter-cyclical (five times faster when the BUCK is dear), but it never stops while the BUCK is cheap. |
+
+**** Recommendations
+
+44. /Count marks taken without relief./ A campaign should report how many
+    household-days had =relief_unavailable=; if they cluster after shocks the
+    fund's mark guard is doing its job, but net-worth charts must say so.
+45. /Quote what the contract will do, from the contract's own terms./ Two
+    of the first world's three failure kinds were a household or snapshot
+    using a neighbouring number (the TWAP share price; an always-available
+    relief quote). Any new minimum must be derived from the same marks the
+    contract checks, or from a simulation as the owner.
+46. /Refinancing is fast./ Joined debtors take a tranche every day, so most
+    of a debtor's convertible mortgage is refinanced within weeks, limited by
+    pool depth (0.5% a bite) and utilization. In a five-year run the supply
+    jump happens in the first months; a shock scheduled at day 730 meets a
+    population already mostly converted. Consider a cell with a slower
+    adoption cadence to see the transition itself.
+47. /Saver credit needs the carry line or a premium./ With the default
+    =carry_utilization = 0= savers never borrow unless the BUCK is dear by
+    =issue_premium=; the first month had no premium. Decide the centre cell's
+    =carry_utilization= deliberately (the owner's call); recommendation 33
+    says how long a line takes to fill.
+48. /Name every revert./ =IssuancePending= and the basket operations report
+    "needs transaction reconciliation" or "basket operation reverted"
+    without the contract's error. Decode the custom error from the receipt
+    (the selector is in the ABIs) into the refusal event, so a campaign can
+    count refusals by cause (=CreditExceeded=, =PremiumLimitExceeded=,
+    =Slippage=, =MinOut=, =MarkPriceDeviation=).
+49. /Watch K's drift before the long runs./ At -0.07 a quarter the centre
+    population would take K to its floor within about a year unless debtor
+    conversion saturates (it should: their mortgages are finite and K cuts
+    their limits) or BUCK demand (investors holding, savers saving, wallets)
+    catches up. Run 365 days next and chart K against cumulative debtor
+    conversion and investor holdings; if K is still falling at the end, the
+    centre cell's population mix (debtor and investor rates) or the
+    controller's gains need the owner's attention before a five-year
+    campaign is meaningful.
+50. /Before any five-year campaign: the basket's deployment loop./ The
+    year's K decline with BVIB never back at 1 (observation 39) comes with
+    72% of new supply being the basket's own lien (observation 41). Who
+    holds the BUCK (=doc/review/who-holds.py= found the earlier K runaway
+    this way), then the same year without investors and with half the
+    investor rate, will show whether investor deposits feed basket issuance
+    that keeps the BUCK cheap. This is the owner's question before choosing
+    the centre cell: the basket deploying deposits by issuing up to K times
+    equity (the 2026-10-11 deployment ideal) is a design choice, and in this
+    population it is the largest single source of supply.
+51. /Debtors carry the inflation risk./ With commodities rising in USD the
+    BUCK rises too, and a debtor's BUCK lien costs more dollars to repay.
+    The households' =risk= setting prices this (0 to 1% a year); the year
+    shows losses of several percent of the lien. Report each debtor's
+    BUCK/USD exposure beside its net worth, and consider whether =risk=
+    should be drawn wider or depend on observed commodity drift.
+52. /The investor tolerance may set where BVIB rests./ The centre was
+    balanced on legacy accounting by investors /holding/ BUCK as money
+    (=economy.toml=: "only BUCKs held are demand"). Under the owner's
+    2026-11-13 rule an investor deposits whenever BVIB is within its
+    tolerance, the basket redeploys deposits by issuing, and only investors
+    whose tolerance is below the current excess hold. That would make BVIB
+    settle near 1 plus a typical tolerance (it sat at 1.01 to 1.03 all year),
+    a standing error the integral controller answers by lowering K
+    indefinitely. Tested (observation 42): pinning every tolerance to 0 slows
+    K's fall by a third but does not stop it, and BVIB still rests above 1
+    on 91% of days. The tolerance is a contributor, not the cause.
+53. /The centre's K decline is structural; decide the basket's deployment
+    before step D./ Neither the investors' tolerance (observation 42) nor
+    commodity inflation (observation 44) causes the year-long fall: the
+    supply side outruns BUCK demand in every variant, and the largest
+    supply is the basket issuing about 0.7 BUCK per BUCK deposited, on cheap
+    days too (observation 45), into the very pools that price BVIB. On
+    legacy accounting the household-economy plan found the opposite
+    (=doc/review/household-economy-plan.org=, the 2026-10-17 entry): a BUCK
+    deposit repaid the machine's lien and the machine bought TOKEN only when
+    a pair separated from its reference, so deposits were BUCK demand. First
+    find which difference turned deposits into issuance on canonical
+    accounting (where a deposit lands, or how the upkeep sizes the book
+    against equity). Then the owner's choices, each to try for a year
+    before any campaign: (a) the basket does not issue against new equity while
+    BVIB > 1 (deployment follows the same signal as K); (b) it issues up to
+    K x equity as now, and the population's investor rate rises until
+    demand balances (the centre was calibrated on legacy accounting, where
+    deposits were not redeployed); (c) accept a falling K as the
+    equilibrium's answer and let the five-year runs show where it settles.
+54. /Name the controlled gap in the charts./ BVIB is the controlled
+    variable, not BUCK/USD: in the reverting year the BUCK held its dollar
+    price while BVIB sat 1 to 2% above 1. Every campaign chart that shows
+    BUCK/USD should show BVIB beside it, and the digest's holder split
+    (TOKEN/BUCK pools, BUCK/USDC pool, basket, everyone else) beside
+    supply.
