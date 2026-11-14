@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
 
 from alberta_buck.sim.anvil import Anvil
 from alberta_buck.sim.loop import run
@@ -48,6 +49,11 @@ def main(argv=None) -> int:
                     help="calendar days advanced per iteration (coarse macro "
                          "mode for long horizons; default 1)")
     ap.add_argument("--out", default=None, help="output JSON path")
+    ap.add_argument("--record", default=None, metavar="DIR",
+                    help="write a run record (alberta_buck.sim.runrecord) under DIR "
+                         "(default $SIM_RUNS or build/runs); --no-record writes none")
+    ap.add_argument("--no-record", action="store_true")
+    ap.add_argument("--run-id", default=None, help="the run record's directory name")
     ap.add_argument("--port", type=int, default=None, help="anvil port")
     # historical-scenario window (real macro data)
     ap.add_argument("--start", default=None, help="historical: ISO start date")
@@ -137,9 +143,22 @@ def main(argv=None) -> int:
         from alberta_buck.sim.pyrevm_backend import PyrevmAnvil as Backend
     else:
         Backend = Anvil
-    with Backend(port=a.port) as anvil:
-        summary = run(sc, anvil, out_path=a.out, basket_impl=basket_impl,
-                      director_impl=a.director, controller_impl=a.controller)
+    recorder = None
+    if not a.no_record:
+        from alberta_buck.sim.runrecord import RunRecorder
+        name = Path(a.out).stem if a.out else (getattr(getattr(sc, "experiment", None), "name", None) or sc.name)
+        recorder = RunRecorder(a.record, name, run_id=a.run_id, engine=a.backend)
+    try:
+        with Backend(port=a.port) as anvil:
+            summary = run(sc, anvil, out_path=a.out, basket_impl=basket_impl,
+                          director_impl=a.director, controller_impl=a.controller, recorder=recorder)
+    except BaseException as e:
+        if recorder is not None and recorder.manifest:
+            recorder.close("failed", error=repr(e))
+        raise
+    if recorder is not None and recorder.manifest:
+        recorder.close("complete", outputs=dict(vector=summary.get("json"), pdf=summary.get("pdf")))
+        print(f"[sim] run record: {recorder.dir}")
     ok = summary["cycle_trades"] > 0 and summary["all_eoa_verified"]
     return 0 if ok else 1
 

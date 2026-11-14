@@ -1090,6 +1090,7 @@ class Snapshotter:
             **_t15_frame(ctr),
             **eqsave,
             **{k: v for k, v in ctr.items() if k.startswith(("wh_", "shk_", "dk_"))},
+            "household_faults": ctr.get("household_faults", 0),   # dispatcher faults (kind=act events)
         })
         if ag_t:
             self.frames[-1]["ag"] = ag_t

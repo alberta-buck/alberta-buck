@@ -26,7 +26,8 @@ foundation. One Solidity change has been made since it was qualified:
 | =9f344702= | Paydays: each household's own keyed day of the 30-day month. |
 | =cf08b12f= | =burn(0)= releases unused and excess coverage with a proportional deposit refund: Solidity, both SDKs, tests. Fully qualified. |
 | =f6ed2734= | /Work in progress, Python only:/ credit investment, asset exits, the investor's decision and the unified act dispatcher (written, not wired). |
-| /the opened-loop milestone/ | The investor's BVIB tolerance (owner, 2026-11-13); keyed normal draws; the JavaScript port of investment, exits and the investor; the act loop opened in both languages; the first complete 30-day world; deposit minimums and the daily mark fixed from what it showed. |
+| =c8c6c278= | The investor's BVIB tolerance (owner, 2026-11-13); keyed normal draws; the JavaScript port of investment, exits and the investor; the act loop opened in both languages; the first complete 30-day world; deposit minimums and the daily mark fixed from what it showed. |
+| /the run-record milestone/ | One run record (=build/runs=, schema =buck-run/1=) written by every Python run and importable from earlier vectors; the local dashboard with its Overview tab, live or finished; the plan for one format, location and interface (step F). |
 
 The household is built from /components/ on one owner dispatcher and one
 receipt cursor (=HouseholdRefinance=). Where each stands:
@@ -70,23 +71,24 @@ short world, step D runs the campaigns.
 
   | Command | What | Time |
   |---------+------+------|
-  | =make nix-venv-test-python PYTEST_FILES="<the eighteen files below>" PYTEST_ARGS='--basetemp=build/test/NAME -q'= | Supported Python set | 2 min |
-  | =make nix-core-equilibrium-policy-test= | Fast JavaScript policy, quote and calendar units | 1 min |
+  | =make nix-venv-test-python PYTEST_FILES="<the nineteen files below>" PYTEST_ARGS='--basetemp=build/test/NAME -q'= | Supported Python set | 2 min |
+  | =make nix-core-equilibrium-policy-test= | Fast JavaScript policy, quote, calendar and dashboard units (83) | 1 min |
   | =make nix-core-equilibrium-bootstrap-test= | Actual JavaScript, eight Tevm fixture files together (132 tests) | 50 min |
   | =... CORE_EQUILIBRIUM_TEST_FILES=test/net-household-wallet.tevm.test.js= | One file (exit 2 min, wallet 4, resume 11, programme 21, surplus 19, invest 40, bootstrap 36) | |
   | =make nix-venv-net-demurrage-smoke= | The repayment engine, Python and JavaScript | 5 min |
   | =make nix-core-demo-eqworld= | Browser bundle rebuilds | 1 min |
   | =make nix-test= | All Solidity (needed again once a contract changes) | long |
 
-  The eighteen Python files: =core/python/tests/= =test_net_market_quote=,
+  The nineteen Python files: =core/python/tests/= =test_net_market_quote=,
   =test_artifacts=, =test_router=, =test_session=, =test_net_purchase_outcome=;
   =alberta_buck/test/= =test_household_policy=, =test_household_calendar=,
   =test_net_basket_mark=, =test_net_household_setup=,
   =test_net_household_invest=, =test_net_household_exit=,
   =test_net_economy_report=, =test_sim_report=, =test_settlement=,
   =test_net_repayment_target=, =test_net_demurrage_smoke=, =test_net_market=,
-  =test_net_economy_bootstrap=. (304 pass at the opened-loop checkpoint,
-  none expected to fail.)
+  =test_net_economy_bootstrap=, =test_runrecord=. (309 pass at the
+  run-record checkpoint, none expected to fail. =test_economy.py= is not in
+  the set: its short-world test still expects legacy accounting.)
 - /Traps that cost time./
   - pyrevm refuses any =eth_call= whose sender is a contract, and every
     simulated household is a proxy. Simulate "as the owner" through
@@ -124,6 +126,12 @@ short world, step D runs the campaigns.
   everyone else), each role's
   holdings, actions and net worth against its counterfactual, and the kinds
   of refusal recorded. No EVM; reads only recorded frames.
+- /Watching a run./ =make nix-venv-dashboard= (=http://127.0.0.1:8890/=)
+  shows every run record under =build/runs=, finished or growing; every
+  =python -m alberta_buck.sim= run writes one, and =make nix-venv-run-import
+  VECTORS=...= makes one from an earlier vector. See =README-simulations.org=,
+  "Run records and the dashboard". Never bind the tunnel's ports (8000,
+  8797, 8798); the server refuses them.
 - /Long runs and editing./ The six-file JavaScript acceptance takes 30 to 40
   minutes and reads only JavaScript, fixtures and artifacts. Start it alone
   and work on Python meanwhile; never edit JavaScript, a fixture it reads or
@@ -136,11 +144,13 @@ short world, step D runs the campaigns.
 
 ** Remaining work, in order
 
-Steps 0 and 1 are done. Credit investment, asset exits and the investor's
-decision are implemented and tested *in Python only*. Step A mirrors them in
-JavaScript; step B opens the act loop; then the worlds, the campaigns and the
-sandboxes. Each step is a phase: implement in both languages, qualify, write
-the observations here, then commit.
+Steps 0, 1, A and B are done; C has run its one-year worlds and waits on the
+owner's answer to recommendation 53. The owner's direction of 2026-11-14 put
+step F (one run record, one dashboard, fewer tools) ahead of the campaigns:
+its first phase, R1, is done; R2 (live control) and R3 (the component tabs)
+come next, and they are how the campaigns will be watched. Each step is a
+phase: implement in both languages, qualify, write the observations here,
+then commit.
 
 *** 0. Paydays (done)
 
@@ -196,8 +206,9 @@ pyrevm --days 365 --set ... --out ...=, in the venv): every tolerance 0
 basket issues about 0.7 BUCK per BUCK deposited, on cheap days too, into the
 TOKEN/BUCK pools (observations 43 and 45). Recommendation 53 says what to
 find first and the owner's choices. Done: supply equals open plus deferred
-principal exactly, and =household_faults= is zero, in all three (the digest
-prints both). Still to check: every household's books reconcile (=unwound= equals the sum of
+principal exactly in all three, and no household's event log holds a
+dispatcher fault (=kind= =act=); the fault counter itself reached the frames
+only afterwards (observation 46). Still to check: every household's books reconcile (=unwound= equals the sum of
 confirmed reductions; wallet, receipts and principal against chain); the
 report charts the new records (investment bites, exits, releases);
 then the measurements the recommendations ask for. Add the broad sell-off and
@@ -231,7 +242,7 @@ start, stop or probe the tunnel origin ports 8000, 8797 or 8798. The
 JavaScript demo (=make nix-core-demo-eqworld-serve=, =make nix-core-eqsim=)
 needs step B in JavaScript before a population is practical.
 
-*** F. Consolidate the simulations, shocks and sandboxes
+*** F. One run record, one dashboard, fewer tools (started: R1 done)
 
 The owner's direction of 2026-11-12: fewer simulations, each able to apply a
 range of shocks to a population whose response is configurable, inspectable
@@ -260,29 +271,65 @@ household lineages (=CreditHouseholdAgent=, =BuckCreditDebtorAgent= /
 =ExternalDebtRetireeAgent= / =FatCreditBorrowerAgent=, =SaverAgent= /
 =BasketSaver=).
 
-Plan, after step D's first centre run (do not refactor what no run uses):
-1. /One world./ The household economy (=economy.toml=) is the world. Agent
-   response levels are its existing settings (=surplus_policy=, =theta=,
-   =carry_utilization=, =issue_premium=, =retire_disc=, =paydown_*=,
-   =money_*=, =divest_rate=, population rates) plus arb and whale counts;
-   cells name presets of them.
-2. /One shock vocabulary./ Make every injector an intervention kind in
-   =experiment.py= applied to that world: =raid= (dump, squeeze, grind,
-   periodic), =lpexit=, =bookload=, =broad_selloff= / =broad_purchase= (the
-   same share of every BUCK pool, the only move that changes fair value),
-   the control-lab paths as =price_path= (step, ramp, sine, noise), and the
-   existing ones. =economy.py= =STRESSES=, the catalogue arms and the
-   server's =shock= op then all compile to it.
-3. /One runner, one judge, one renderer./ =economy.py= (freeze, fan out,
-   resume) runs every cell set, including the catalogue's; =eqmetrics= plus
-   =report.py= judge and render; the HTML index stays.
-4. /One engine./ Fold =SimDriver= into =loop.run= with the server's
-   callbacks; the TUI and the sandbox both step it.
-5. /Retire/ the legacy-basket paths (=sim-tui-prorata=, kdesign, the
-   =prorata= / =ops= arms) once their stress coverage exists as cells, and
-   the older household and saver agents once nothing casts them.
-6. /JavaScript/: one CLI and one demo over =eqworld.js= with a cast option.
-The control lab stays a separate diagnostic (no agents, by design).
+*The owner's direction of 2026-11-14:* one run record and one dashboard for
+every test world, simulation and sandbox, readable after a run or while it
+grows, with a tab per ecosystem component (the Jubilee fund, the BuckBasket,
+the insurers and their pools, the agents in aggregate) and a drill-down to one
+agent's state and its state-machine steps; ideally interactive (add
+participants, change their settings, apply shocks). Live engine: the Python
+session server, local first. The same page must also run on a small Tevm world
+in the browser tab with fewer capabilities: an in-browser world is the only way
+many people can each run a BUCK economy without loading a central server, so
+that path is kept. Use the work to bring the tools into one format, location
+and interface, retiring duplicates.
+
+Phases, each qualified and recorded here before its commit:
+
+- *R1. The run record and the Overview (done; see the run-record milestone).*
+  =alberta_buck/sim/runrecord.py= (schema =buck-run/1=: =manifest.json=, and
+  =frames= / =events= / =agents= / =interventions= as append-only JSON
+  Lines); every =python -m alberta_buck.sim= run records under =build/runs=;
+  =runrecord import= makes records from earlier vectors; the local server
+  =alberta_buck/sim/dashboard.py=; the page =core/js/dashboard/= with its
+  Overview tab and a capability-declaring source interface
+  (=src/sources.js=). Shape pinned for both languages by
+  =test/fixtures/run-record.json=.
+- *R2. Live control.* The session server (=server.py=) writes a run record per
+  session (=capabilities.control= = its control URL); the dashboard gains a
+  control bar for what the server already accepts (pause, step, pace, shock,
+  population, knob, reset) and, new, adding a household with chosen settings
+  and changing one agent's settings. Every operator action lands in
+  =interventions.jsonl=, so a session can be exported as an experiment and
+  replayed. Local only; the public server keeps refusing unsigned sends.
+- *R3. The component tabs.* BuckBasket (equity, lien, gross, share price,
+  weights against targets, the wheel's operations, deposits and redemptions,
+  guard trips), Market (every pool, the triangle gaps, arbitrage), Jubilee
+  fund, Insurers and pools (the frames do not yet record the insurers' pools:
+  add the reads first), Agents (a table by role from =agents.jsonl=, then one
+  agent: its books over time and its events, step by step, with
+  transactions), Events (refusals by decoded cause, recommendation 48). The
+  server gains filtered reads (=events?member==, =agents?member==).
+- *R4. JavaScript writes the same record.* A frame builder beside
+  =eqworld.js= that reproduces =test/fixtures/run-record.json=; the Node
+  CLIs (=eqsim=, =farmsim=) write =build/runs=; a =BrowserWorldSource=
+  feeds the dashboard from a world in the tab (the sandbox build bundles the
+  page). Capabilities narrow there: no campaign history, a small cast.
+- *R5. One location and one runner.* The campaign runner (=economy.py=)
+  writes each cell's record under =build/runs/<campaign>/<cell>= and its judge
+  reads records; =catalogue.py=, =sweep.py= and =star.py= become cell sets of
+  that runner; the PDF report renders from a record; the vector's 25-day
+  full rewrite (observation 49) goes once nothing reads it. Every injector
+  becomes an intervention kind in =experiment.py= (=raid=, =lpexit=,
+  =bookload=, =broad_selloff= / =broad_purchase=, =price_path= for the
+  control lab's step, ramp, sine and noise, and the existing ones).
+- *R6. Retire* what no cell uses: the TUI, =kdesign=, the =prorata= / =ops=
+  basket arms, the legacy JavaScript household tests (=credit-household=,
+  =eqsim= Tevm tests; they fail on =Permit2=), the older household and saver
+  agents once nothing casts them, the control lab's own HTML presentation
+  once its stages are experiments writing records, and the campaign index
+  page once the dashboard groups runs by campaign. The savings tab of the
+  public sandbox reads the same frames through a source, or gives way to a
+  read-only dashboard.
 
 *** G. Later
 
@@ -3080,3 +3127,106 @@ The owner's answers of 2026-11-13 and steps A and B.
     BUCK/USD should show BVIB beside it, and the digest's holder split
     (TOKEN/BUCK pools, BUCK/USDC pool, basket, everyone else) beside
     supply.
+
+** Run-record milestone: one record, the dashboard's Overview (R1 complete)
+
+The owner's direction of 2026-11-14 (step F): one format, location and
+interface for every test world, simulation and sandbox, watched through one
+dashboard; Python first and local; the in-browser Tevm world kept as the
+scalable public path. This is phase R1.
+
+- [X] /The run record./ =alberta_buck/sim/runrecord.py=, schema =buck-run/1=:
+  =manifest.json= (rewritten atomically: status, revision and whether the
+  tree had changes, scenario, tokens, contracts from the deployment manifest,
+  cast, units, outputs, capabilities) and four append-only JSON Lines files.
+  =frame_record= groups a snapshot frame by component (=control=, =market=,
+  =supply= with sources and holders, =basket=, =jubilee=, =population=,
+  =households=, =health=); absent sources are null, never zero. Money in raw
+  integers, prices and ratios as floats. Readers take whole lines only.
+- [X] /Every Python run records./ =python -m alberta_buck.sim= writes
+  =build/runs/<out-stem or experiment>-<time>/= (=--record DIR=,
+  =--no-record=, =--run-id=; =$SIM_RUNS=); a failed run is closed =failed=
+  with its error. Ids generated in the same second get a counter; a chosen id
+  (a campaign cell) keeps an unfinished earlier attempt beside it and never
+  replaces a complete one. Campaign cells record under
+  =build/sim/economy/<campaign>/records/<cell>=. =loop.run= takes a
+  =recorder=.
+- [X] /Earlier runs open too./ =python -m alberta_buck.sim.runrecord import
+  <vector>...= (=make nix-venv-run-import VECTORS=...=) writes a record from
+  a vector (its revision unrecorded, its time the file's); re-importing the
+  same vector replaces only its own view.
+- [X] /The dashboard./ =alberta_buck/sim/dashboard.py= (=make
+  nix-venv-dashboard=, =127.0.0.1:8890=; refuses the tunnel's ports) serves
+  =core/js/dashboard/= and a read-only API (=/api/runs=, =manifest=,
+  =frames?since==, =interventions=), extending each run's frames from the
+  last whole line. The page: a run picker, status (running, stale after two
+  minutes without an update, complete, failed), the component tabs named
+  (only the Overview built), a time-range row, eight headline figures and
+  six charts (K; BVIB with BUCK/USD about 1; who holds the BUCK; supply by
+  source; households by role; refusals and faults), interventions marked on
+  each, one crosshair across all charts, the tooltip on the hovered one,
+  keyboard stepping, a table view per chart, light and dark from a validated
+  palette, a phone layout. A running record is polled every two seconds.
+- [X] /One source interface./ =core/js/dashboard/src/sources.js=: a source
+  gives =manifest=, =frames(since)=, =interventions= and its
+  =capabilities= (=live=, =control=, =agents=, =events=); tabs ask before
+  offering anything. =HttpRunSource= now; a =BrowserWorldSource= (R4) and the
+  live session's control (R2) plug in without a new page.
+- [X] /The shape is pinned for both languages./ =test/fixtures/run-record.json=:
+  snapshot frames and the records they make; =alberta_buck/test/test_runrecord.py=
+  proves the Python recorder writes them, =core/js/test/dashboard-series.test.js=
+  reads them (and is part of =make nix-core-equilibrium-policy-test=). A
+  JavaScript world must reproduce them (R4).
+- [X] /The fault counter reaches the frames./ =household_faults= was counted
+  but never captured (observation 46); the snapshot records it now and the
+  digest counts dispatcher-fault events where the counter is absent.
+- [X] /Screenshots./ =core/js/dashboard/bin/screenshot.mjs <url> <out.png>
+  [light|dark] [width]= captures the page and, separately, one chart under the
+  pointer, and prints the page's console errors.
+
+*** Checkpoint
+
+- *Evidence*: the supported Python set with =test_runrecord.py= (nineteen
+  files), 309 passed (=build/test/q5-python.log=); JavaScript policy units
+  with =dashboard-series.test.js=, 83 of 83. A 20-day and a 60-day economy
+  world recorded themselves; the page followed the 60-day one live; light,
+  dark and phone captures showed no console error and one tooltip per hover.
+  No JavaScript world code and no contract changed, so the Tevm files were
+  not re-run (132 of 132 at =c8c6c278=).
+
+*** Observations and recommendations (run records)
+
+**** Measured
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 46 | the three one-year vectors | =household_faults= (the dispatcher's fault counter, =ctr=) was never written into a frame, so the digest's "faults 0" was a default. The households' event logs settle it: no =kind= =act= event in any of the three years, so there were no faults. Since this milestone the frame carries the counter. |
+| 47 | =make nix-core-eqsim JS_EQ_ARGS="--days 30 --policy adaptive"= (one debtor, one basket saver, Tevm in Node) | Completes: 30 days in 41 minutes (about 80 s a day), no journal mismatches. The debtor refinanced its whole mortgage on the opened loop (mortgage 0, 223,134 BUCK drawn, 11.5k dollars banked); K 0.7527, BVIB 0.997, BUCK/USD 0.981 at the end. The JavaScript act loop runs end to end outside its tests. |
+| 48 | the reverting year's record (=build/runs/economy-365-revert=, imported) | Frames 563 kB (1.5 kB a day); agents 8.8 MB (24 kB a day at 80 to 131 households); events 27.4 MB for 16,276 events, 63% of it the per-event account snapshot (=accounts=). Importing the three years took 4.4 s. A five-year world of 200 households would write about 3 MB of frames, 70 MB of agent lines and 300 MB of events. |
+| 49 | =snapshot.write= | The vector is rewritten whole every 25 days as a checkpoint; at a year it is 100 to 124 MB, so a five-year run writes several gigabytes of checkpoints, each serializing every earlier frame. The append-only record costs one line a day. |
+| 50 | a 60-day economy world recording while the dashboard watched (=build/runs/economy-growing-check=) | The page advanced from day 13 to day 18 in 20 seconds without a reload (about 4 s a simulated day at 42 to 48 households on pyrevm), showing "Running"; it then completed with K 0.752 -> 0.711, supply +2.35M (basket lien +0.83M, household principal +1.52M), BVIB above 1 on 93% of days: the year's pattern from the first weeks. |
+
+**** Recommendations
+
+55. /Watch the first campaign live./ The centre's K decline is visible on
+    the Overview within its first weeks (observation 50). Start the next
+    centre run with the dashboard open; R2's controls then let the owner try
+    recommendation 53's choices on a running world before committing a
+    campaign to one.
+56. /Keep the browser world small, and measure it first./ One debtor and one
+    saver cost about 80 s a simulated day on Tevm in Node (observation 47),
+    mostly the work wheel's ticks; a visitor will not wait 40 minutes for a
+    month. Before R4, profile a day (=bin/tevm-membench.mjs=) and give the
+    in-tab world a lighter cast (fewer wheel turns a day, fewer pools), then
+    record what its source can and cannot show in its capabilities.
+57. /Trim event snapshots before five-year campaigns./ Write an event's
+    =accounts= only when they changed since that household's previous event,
+    or move them to their own file; that cuts the event log by about half
+    (observation 48) without losing the drill-down.
+58. /Retire the vector's checkpoint rewrite after R5./ Once the PDF and the
+    judge read records, the 25-day full rewrite (observation 49) can stop;
+    until then a five-year campaign's disk and time budget must include it.
+59. /The savings sandbox shares the path./ When the session server writes
+    records (R2), the public savings tab and the dashboard can read the same
+    frames; the public server stays read- and sign-only, and operator control
+    stays on localhost.

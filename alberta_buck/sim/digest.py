@@ -5,9 +5,11 @@ who holds it, what the households did, and what was refused.
 
 Reads the snapshot vector the runner writes (report.finish); sends nothing and needs no EVM. Every
 figure comes from recorded frames: =supply=, =eq_lien= (the basket's own principal), the households'
-aggregate =drawn= and per-member =octl= marks (sampled every fifth day), and the Carrying accounts'
-nominal BUCK in =net.carrying= (the BUCK/USDC pool, the TOKEN/BUCK pools, the basket). Money is in
-whole BUCK or dollars; ratios are plain floats.
+aggregate =drawn= and per-member =octl= marks (every day on canonical accounting), the Carrying
+accounts' nominal BUCK in =net.carrying= (the BUCK/USDC pool, the TOKEN/BUCK pools, the basket), and
+the households' state-machine events (a dispatcher fault is a kind=act event; frames recorded since
+2026-11-14 also carry the =household_faults= counter). Money is in whole BUCK or dollars; ratios are
+plain floats.
 """
 from collections import Counter
 import json
@@ -87,7 +89,9 @@ def digest(vector):
         unbacked=_unbacked(last),
         observations=len(marks), errors=sum(errors.values()), error_kinds=dict(errors.most_common(8)),
         relief_unavailable=sum(bool(a.get("relief_unavailable")) for a in marks),
-        faults=last.get("household_faults") or 0, path=path)
+        faults=(last["household_faults"] if last.get("household_faults") is not None else
+                sum(e.get("kind") == "act" for f in frames for e in f.get("household_events") or [])),
+        path=path)
 
 
 def render(name, d):

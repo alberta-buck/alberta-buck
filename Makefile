@@ -864,6 +864,21 @@ economy-smoke: sim-build core-build-py
 	python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy.toml \
 		--backend pyrevm --days $(ECONOMY_SMOKE_DAYS) --out "$(ECONOMY_SMOKE_OUT)"
 	python -m alberta_buck.sim.report "$(ECONOMY_SMOKE_OUT)"
+# Run records and the dashboard (README-simulations.org, "Run records and the dashboard"). Every
+# `python -m alberta_buck.sim` run records under $(SIM_RUNS) (default build/runs) as it goes; the
+# dashboard reads them, finished or growing. Local only: it binds 127.0.0.1.
+#   make nix-venv-dashboard [DASHBOARD_PORT=8890]
+#   make nix-venv-run-import VECTORS="build/sim/economy-smoke-365.json ..."   # earlier vectors
+#   make nix-venv-dashboard-test
+DASHBOARD_PORT ?= 8890
+.PHONY: dashboard run-import dashboard-test
+dashboard:
+	python -m alberta_buck.sim.dashboard --port $(DASHBOARD_PORT)
+run-import:
+	python -m alberta_buck.sim.runrecord import $(VECTORS)
+dashboard-test:
+	python -m pytest alberta_buck/test/test_runrecord.py -q
+	cd core/js && node --test test/dashboard-series.test.js
 # Full household lifecycle gate, including currently unported canonical
 # action cases. Use economy-accounting-test for completed migration blocks;
 # its passing component checks do not imply this full lifecycle is enabled.
@@ -1737,7 +1752,8 @@ CORE_EQUILIBRIUM_TEST_FILES ?= test/net-equilibrium-bootstrap.tevm.test.js test/
 # Fast policy/quote/calendar boundary checks; no EVM or contract compilation.
 #   make nix-core-equilibrium-policy-test
 core-equilibrium-policy-test: core-build-wasm
-	cd core/js && node --test test/net-market-quote.test.js test/household-policy.test.js test/household-calendar.test.js
+	cd core/js && node --test test/net-market-quote.test.js test/household-policy.test.js test/household-calendar.test.js \
+		test/dashboard-series.test.js
 
 core-equilibrium-bootstrap-test: sim-build core-equilibrium-policy-test
 	node core/js/bin/bundle-artifacts.mjs
@@ -1766,7 +1782,7 @@ economy-bootstrap-test: sim-build core-build-py core-equilibrium-bootstrap-test
 #   make nix-venv-economy-accounting-test
 economy-accounting-test: economy-bootstrap-test
 	mkdir -p build/test
-	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_household_calendar.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_household_invest.py alberta_buck/test/test_net_household_exit.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py --basetemp=build/test/economy-accounting -q
+	python -m pytest core/python/tests/test_net_market_quote.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_household_calendar.py alberta_buck/test/test_net_basket_mark.py alberta_buck/test/test_net_household_setup.py alberta_buck/test/test_net_household_invest.py alberta_buck/test/test_net_household_exit.py alberta_buck/test/test_net_economy_report.py alberta_buck/test/test_sim_report.py alberta_buck/test/test_runrecord.py --basetemp=build/test/economy-accounting -q
 	cd core/js && node --test test/net-basket-mark.tevm.test.js
 
 # Each published crate carries its OWN copy of the vectors it replays:

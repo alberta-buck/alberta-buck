@@ -493,6 +493,39 @@ campaign held parity on all policies and cleared every mortgage; it did not esta
 universally best policy. The newer default is the agreed behavioral baseline, not a promise
 that every population mix passes.
 
+* Run records and the dashboard
+
+Every =python -m alberta_buck.sim= run writes a /run record/ as it goes: one directory under
+=build/runs= (or =$SIM_RUNS=, or =--record DIR=; =--no-record= writes none; =--run-id= names it).
+The dashboard reads any of them, finished or still growing:
+
+#+begin_src sh
+make nix-venv-dashboard                         # http://127.0.0.1:8890/ (DASHBOARD_PORT=...)
+make nix-venv-run-import VECTORS="build/sim/economy-smoke-365.json"   # an earlier vector's record
+make nix-venv-dashboard-test
+#+end_src
+
+A record (schema =buck-run/1=, =alberta_buck/sim/runrecord.py=) is a =manifest.json= (what ran:
+scenario, seed, revision and whether the tree had changes, contracts, cast, status, outputs,
+capabilities) and four append-only JSON Lines files: =frames.jsonl= (one line a day, grouped by
+component: =control= K, BVIB and the PID terms; =market= prices; =supply= with its sources and its
+holders; =basket=; =jubilee=; =population=; =households=; =health=), =events.jsonl= (every household
+state-machine step), =agents.jsonl= (each household's books each day) and =interventions.jsonl=.
+Money is in raw integer units (1e-6 BUCK or USDC); prices and ratios are floats. A reader takes
+whole lines only, so a growing run reads like a finished one. The record is for observation; the
+vector (=--out=) remains a run's exact record and the input of the PDF report.
+
+The dashboard (=core/js/dashboard=, served by =alberta_buck/sim/dashboard.py=) has an Overview
+tab: the latest day's figures, then K, BVIB with BUCK/USD, who holds the BUCK, supply by source,
+households by role, and refusals and faults, with the run's interventions marked on every chart.
+Hovering one chart moves a crosshair on all of them; each chart has a table view. A running record
+is polled every two seconds; one not updated for two minutes shows as stale. Pages read their data
+through a /source/ that states its capabilities (=core/js/dashboard/src/sources.js=), so the same
+page can later show a small world running in the browser tab, and a live Python session's
+controls, without a page of its own. The other tabs (market, basket, Jubilee fund, insurers and
+pools, agents with drill-down, events) are named and not yet built; the plan is in
+[[file:doc/review/bucknet-economy-implementation.org][the implementation plan]], "One run record, one dashboard".
+
 * Inspect, smoke-test, run
 
 #+begin_src sh

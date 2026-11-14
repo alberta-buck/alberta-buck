@@ -252,7 +252,10 @@ def run(args) -> int:
             cmd                += ["--set", s]
         if days:
             cmd                += ["--days", str(days)]
-        return cmd + (["--out", str(out)] if out else [])
+        # Each cell's run record lands beside the campaign's vectors (the dashboard: --runs <base>/records).
+        record                  = (["--record", str(base / "records"), "--run-id", Path(out).stem] if out
+                                   else ["--no-record"])
+        return cmd + (["--out", str(out)] if out else []) + record
 
     # Warm each seed's identity cache once, alone, before runs fan out and race to write it.
     for seed in sorted({c.seed for c in todo}):

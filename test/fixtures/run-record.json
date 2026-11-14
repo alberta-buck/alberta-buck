@@ -1,0 +1,671 @@
+{
+ "note": "Run-record frames (schema buck-run/1): 'flat' are snapshot frames, 'frames' what alberta_buck.sim.runrecord.frame_record makes of them. Read by alberta_buck/test/test_runrecord.py and core/js/test/dashboard-series.test.js; a JavaScript world's frames must have the same shape.",
+ "schema": "buck-run/1",
+ "tokens": [
+  "LABR",
+  "CNST"
+ ],
+ "flat": [
+  {
+   "day": 0,
+   "buckK": 750000000000000000,
+   "basketVal": 990000000000000000,
+   "buck_usd": 1010000,
+   "supply": 40000000,
+   "eq_lien": 10000000,
+   "eq_equity": 15000000,
+   "basketNav": 25000000,
+   "eq_share_price": 1000000000000000000,
+   "eq_held_buck": 10000000,
+   "eq_liquidity": 0,
+   "pid_p": -100,
+   "pid_i": -2000,
+   "pid_d": 3,
+   "refUsd": [
+    250000,
+    7800000
+   ],
+   "spotUsdc": [
+    251000,
+    7790000
+   ],
+   "spotBuck": [
+    249000,
+    7810000
+   ],
+   "net": {
+    "block": 100,
+    "active_principal": 40000000,
+    "deferred_principal": 0,
+    "available_relief_scaled": "1500000000000000000000000000000000000000000",
+    "jubilee": {
+     "nominal": 1000000,
+     "cash": 990000,
+     "position": {
+      "mark": 2000000
+     }
+    },
+    "carrying": {
+     "buck_usdc": {
+      "nominal_scaled": "15000000000000000000000000000000000000000000"
+     },
+     "buck_tokens": [
+      {
+       "nominal_scaled": "8000000000000000000000000000000000000000000"
+      },
+      {
+       "nominal_scaled": "6000000000000000000000000000000000000000000"
+      }
+     ],
+     "basket": {
+      "nominal_scaled": "0"
+     }
+    }
+   },
+   "households": {
+    "active": 6,
+    "exited": 0,
+    "nw": 5000000,
+    "hypo": 4000000,
+    "drawn": 0,
+    "basket": 3000000,
+    "basket_mark": 3100000,
+    "cash": 700000,
+    "mortgage": 9000000
+   },
+   "pop": {
+    "gap": 0.01,
+    "k_factor": 0.9,
+    "debtor": {
+     "arrived": 2,
+     "active": 2,
+     "exited": 0
+    },
+    "saver": {
+     "arrived": 1,
+     "active": 1,
+     "exited": 0
+    },
+    "investor": {
+     "arrived": 3,
+     "active": 3,
+     "exited": 0
+    }
+   },
+   "octl": [
+    {
+     "member": "0/debtor/0",
+     "role": "debtor",
+     "nw": 1,
+     "hypo": 2,
+     "drawn": 3,
+     "action": "save",
+     "error": "",
+     "relief_unavailable": null
+    },
+    {
+     "member": "0/debtor/1",
+     "role": "debtor",
+     "nw": 1,
+     "hypo": 2,
+     "drawn": 3,
+     "action": "save",
+     "error": "",
+     "relief_unavailable": null
+    },
+    {
+     "note": "not a household"
+    }
+   ],
+   "household_events": [
+    {
+     "agent": "CreditHouseholdAgent#1",
+     "seq": 1,
+     "member": "0/debtor/0",
+     "kind": "surplus",
+     "phase": "dispatch",
+     "status": "confirmed"
+    }
+   ]
+  },
+  {
+   "day": 1,
+   "buckK": 749000000000000000,
+   "basketVal": 1010000000000000000,
+   "buck_usd": 995000,
+   "supply": 41000000,
+   "eq_lien": 10500000,
+   "eq_equity": 15500000,
+   "basketNav": 26000000,
+   "eq_share_price": 1000000000000000000,
+   "eq_held_buck": 10500000,
+   "eq_liquidity": 100000,
+   "pid_p": -100,
+   "pid_i": -2000,
+   "pid_d": 3,
+   "refUsd": [
+    250000,
+    7800000
+   ],
+   "spotUsdc": [
+    251000,
+    7790000
+   ],
+   "spotBuck": [
+    249000,
+    7810000
+   ],
+   "net": {
+    "block": 101,
+    "active_principal": 41000000,
+    "deferred_principal": 0,
+    "available_relief_scaled": "1500000000000000000000000000000000000000000",
+    "jubilee": {
+     "nominal": 1000000,
+     "cash": 990000,
+     "position": {
+      "mark": 2000000
+     }
+    },
+    "carrying": {
+     "buck_usdc": {
+      "nominal_scaled": "14900000000000000000000000000000000000000000"
+     },
+     "buck_tokens": [
+      {
+       "nominal_scaled": "8400000000000000000000000000000000000000000"
+      },
+      {
+       "nominal_scaled": "6300000000000000000000000000000000000000000"
+      }
+     ],
+     "basket": {
+      "nominal_scaled": "100000000000000000000000000000000000000000"
+     }
+    }
+   },
+   "households": {
+    "active": 6,
+    "exited": 0,
+    "nw": 5000000,
+    "hypo": 4000000,
+    "drawn": 400000,
+    "basket": 3000000,
+    "basket_mark": 3100000,
+    "cash": 700000,
+    "mortgage": 9000000
+   },
+   "pop": {
+    "gap": 0.01,
+    "k_factor": 0.9,
+    "debtor": {
+     "arrived": 2,
+     "active": 2,
+     "exited": 0
+    },
+    "saver": {
+     "arrived": 1,
+     "active": 1,
+     "exited": 0
+    },
+    "investor": {
+     "arrived": 3,
+     "active": 3,
+     "exited": 0
+    }
+   },
+   "octl": [
+    {
+     "member": "0/debtor/0",
+     "role": "debtor",
+     "nw": 1,
+     "hypo": 2,
+     "drawn": 3,
+     "action": "save",
+     "error": "tx reverted",
+     "relief_unavailable": null
+    },
+    {
+     "member": "0/debtor/1",
+     "role": "debtor",
+     "nw": 1,
+     "hypo": 2,
+     "drawn": 3,
+     "action": "save",
+     "error": "",
+     "relief_unavailable": null
+    },
+    {
+     "note": "not a household"
+    }
+   ],
+   "household_events": [
+    {
+     "agent": "CreditHouseholdAgent#1",
+     "seq": 1,
+     "member": "0/debtor/0",
+     "kind": "surplus",
+     "phase": "dispatch",
+     "status": "confirmed"
+    }
+   ]
+  },
+  {
+   "day": 2,
+   "buckK": 747000000000000000,
+   "basketVal": 1020000000000000000,
+   "buck_usd": 990000,
+   "supply": 42500000,
+   "eq_lien": 11200000,
+   "eq_equity": 16200000,
+   "basketNav": 27400000,
+   "eq_share_price": 1000000000000000000,
+   "eq_held_buck": 11200000,
+   "eq_liquidity": 250000,
+   "pid_p": -100,
+   "pid_i": -2000,
+   "pid_d": 3,
+   "refUsd": [
+    250000,
+    7800000
+   ],
+   "spotUsdc": [
+    251000,
+    7790000
+   ],
+   "spotBuck": [
+    249000,
+    7810000
+   ],
+   "net": {
+    "block": 102,
+    "active_principal": 42500000,
+    "deferred_principal": 0,
+    "available_relief_scaled": "1500000000000000000000000000000000000000000",
+    "jubilee": {
+     "nominal": 1000000,
+     "cash": 990000,
+     "position": {
+      "mark": 2000000
+     }
+    },
+    "carrying": {
+     "buck_usdc": {
+      "nominal_scaled": "14800000000000000000000000000000000000000000"
+     },
+     "buck_tokens": [
+      {
+       "nominal_scaled": "8900000000000000000000000000000000000000000"
+      },
+      {
+       "nominal_scaled": "6700000000000000000000000000000000000000000"
+      }
+     ],
+     "basket": {
+      "nominal_scaled": "250000000000000000000000000000000000000000"
+     }
+    }
+   },
+   "households": {
+    "active": 6,
+    "exited": 1,
+    "nw": 5000000,
+    "hypo": 4000000,
+    "drawn": 900000,
+    "basket": 3000000,
+    "basket_mark": 3100000,
+    "cash": 700000,
+    "mortgage": 9000000
+   },
+   "pop": {
+    "gap": 0.01,
+    "k_factor": 0.9,
+    "debtor": {
+     "arrived": 2,
+     "active": 2,
+     "exited": 0
+    },
+    "saver": {
+     "arrived": 1,
+     "active": 1,
+     "exited": 0
+    },
+    "investor": {
+     "arrived": 4,
+     "active": 3,
+     "exited": 1
+    }
+   },
+   "octl": [
+    {
+     "member": "0/debtor/0",
+     "role": "debtor",
+     "nw": 1,
+     "hypo": 2,
+     "drawn": 3,
+     "action": "save",
+     "error": "tx reverted",
+     "relief_unavailable": null
+    },
+    {
+     "member": "0/debtor/1",
+     "role": "debtor",
+     "nw": 1,
+     "hypo": 2,
+     "drawn": 3,
+     "action": "save",
+     "error": "tx reverted",
+     "relief_unavailable": null
+    },
+    {
+     "note": "not a household"
+    }
+   ],
+   "household_events": [
+    {
+     "agent": "CreditHouseholdAgent#1",
+     "seq": 1,
+     "member": "0/debtor/0",
+     "kind": "act",
+     "phase": "dispatch",
+     "status": "unavailable"
+    },
+    {
+     "agent": "CreditHouseholdAgent#1",
+     "seq": 2,
+     "member": "0/debtor/0",
+     "kind": "surplus",
+     "phase": "dispatch",
+     "status": "confirmed"
+    }
+   ]
+  }
+ ],
+ "frames": [
+  {
+   "day": 0,
+   "block": 100,
+   "control": {
+    "k": 0.75,
+    "bvib": 0.99,
+    "pid": {
+     "p": -100,
+     "i": -2000,
+     "d": 3
+    }
+   },
+   "market": {
+    "buck_usd": 1.01,
+    "tokens": [
+     {
+      "symbol": "LABR",
+      "ref_usd": 0.25,
+      "usdc": 0.251,
+      "buck": 0.249
+     },
+     {
+      "symbol": "CNST",
+      "ref_usd": 7.8,
+      "usdc": 7.79,
+      "buck": 7.81
+     }
+    ]
+   },
+   "supply": {
+    "total": 40000000,
+    "active_principal": 40000000,
+    "deferred_principal": 0,
+    "basket_lien": 10000000,
+    "household_principal": 0,
+    "holders": {
+     "dollar_pool": 15000000,
+     "token_pools": 14000000,
+     "basket": 0,
+     "others": 11000000
+    }
+   },
+   "basket": {
+    "equity": 15000000,
+    "lien": 10000000,
+    "nav": 25000000,
+    "share_price": 1.0,
+    "held_buck": 10000000,
+    "idle_buck": 0
+   },
+   "jubilee": {
+    "nominal": 1000000,
+    "cash": 990000,
+    "position_mark": 2000000,
+    "relief_available": 1500000
+   },
+   "population": {
+    "roles": {
+     "debtor": {
+      "arrived": 2,
+      "active": 2,
+      "exited": 0
+     },
+     "saver": {
+      "arrived": 1,
+      "active": 1,
+      "exited": 0
+     },
+     "investor": {
+      "arrived": 3,
+      "active": 3,
+      "exited": 0
+     }
+    },
+    "gap": 0.01,
+    "k_factor": 0.9
+   },
+   "households": {
+    "active": 6,
+    "exited": 0,
+    "nw": 5000000,
+    "hypo": 4000000,
+    "drawn": 0,
+    "basket": 3000000,
+    "basket_mark": 3100000,
+    "cash": 700000,
+    "mortgage": 9000000
+   },
+   "health": {
+    "errors": 0,
+    "relief_unavailable": 0,
+    "faults": 0,
+    "events": 1
+   }
+  },
+  {
+   "day": 1,
+   "block": 101,
+   "control": {
+    "k": 0.749,
+    "bvib": 1.01,
+    "pid": {
+     "p": -100,
+     "i": -2000,
+     "d": 3
+    }
+   },
+   "market": {
+    "buck_usd": 0.995,
+    "tokens": [
+     {
+      "symbol": "LABR",
+      "ref_usd": 0.25,
+      "usdc": 0.251,
+      "buck": 0.249
+     },
+     {
+      "symbol": "CNST",
+      "ref_usd": 7.8,
+      "usdc": 7.79,
+      "buck": 7.81
+     }
+    ]
+   },
+   "supply": {
+    "total": 41000000,
+    "active_principal": 41000000,
+    "deferred_principal": 0,
+    "basket_lien": 10500000,
+    "household_principal": 400000,
+    "holders": {
+     "dollar_pool": 14900000,
+     "token_pools": 14700000,
+     "basket": 100000,
+     "others": 11300000
+    }
+   },
+   "basket": {
+    "equity": 15500000,
+    "lien": 10500000,
+    "nav": 26000000,
+    "share_price": 1.0,
+    "held_buck": 10500000,
+    "idle_buck": 100000
+   },
+   "jubilee": {
+    "nominal": 1000000,
+    "cash": 990000,
+    "position_mark": 2000000,
+    "relief_available": 1500000
+   },
+   "population": {
+    "roles": {
+     "debtor": {
+      "arrived": 2,
+      "active": 2,
+      "exited": 0
+     },
+     "saver": {
+      "arrived": 1,
+      "active": 1,
+      "exited": 0
+     },
+     "investor": {
+      "arrived": 3,
+      "active": 3,
+      "exited": 0
+     }
+    },
+    "gap": 0.01,
+    "k_factor": 0.9
+   },
+   "households": {
+    "active": 6,
+    "exited": 0,
+    "nw": 5000000,
+    "hypo": 4000000,
+    "drawn": 400000,
+    "basket": 3000000,
+    "basket_mark": 3100000,
+    "cash": 700000,
+    "mortgage": 9000000
+   },
+   "health": {
+    "errors": 1,
+    "relief_unavailable": 0,
+    "faults": 0,
+    "events": 1
+   }
+  },
+  {
+   "day": 2,
+   "block": 102,
+   "control": {
+    "k": 0.747,
+    "bvib": 1.02,
+    "pid": {
+     "p": -100,
+     "i": -2000,
+     "d": 3
+    }
+   },
+   "market": {
+    "buck_usd": 0.99,
+    "tokens": [
+     {
+      "symbol": "LABR",
+      "ref_usd": 0.25,
+      "usdc": 0.251,
+      "buck": 0.249
+     },
+     {
+      "symbol": "CNST",
+      "ref_usd": 7.8,
+      "usdc": 7.79,
+      "buck": 7.81
+     }
+    ]
+   },
+   "supply": {
+    "total": 42500000,
+    "active_principal": 42500000,
+    "deferred_principal": 0,
+    "basket_lien": 11200000,
+    "household_principal": 900000,
+    "holders": {
+     "dollar_pool": 14800000,
+     "token_pools": 15600000,
+     "basket": 250000,
+     "others": 11850000
+    }
+   },
+   "basket": {
+    "equity": 16200000,
+    "lien": 11200000,
+    "nav": 27400000,
+    "share_price": 1.0,
+    "held_buck": 11200000,
+    "idle_buck": 250000
+   },
+   "jubilee": {
+    "nominal": 1000000,
+    "cash": 990000,
+    "position_mark": 2000000,
+    "relief_available": 1500000
+   },
+   "population": {
+    "roles": {
+     "debtor": {
+      "arrived": 2,
+      "active": 2,
+      "exited": 0
+     },
+     "saver": {
+      "arrived": 1,
+      "active": 1,
+      "exited": 0
+     },
+     "investor": {
+      "arrived": 4,
+      "active": 3,
+      "exited": 1
+     }
+    },
+    "gap": 0.01,
+    "k_factor": 0.9
+   },
+   "households": {
+    "active": 6,
+    "exited": 1,
+    "nw": 5000000,
+    "hypo": 4000000,
+    "drawn": 900000,
+    "basket": 3000000,
+    "basket_mark": 3100000,
+    "cash": 700000,
+    "mortgage": 9000000
+   },
+   "health": {
+    "errors": 2,
+    "relief_unavailable": 0,
+    "faults": 1,
+    "events": 2
+   }
+  }
+ ]
+}

@@ -55,11 +55,13 @@ def turn_wheel(d, rounds: int = 1, max_work: int = 12, ctr=None) -> int:
 
 def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machine",
         director_impl="pairs", on_day_start=None, on_frame=None,
-        controller_impl="direct") -> dict:
+        controller_impl="direct", recorder=None) -> dict:
     """on_day_start(day, d, agents, ctr): a mutation window before the
     day's ticks (the sim server applies population/knob controls here).
     on_frame(frame): called with each just-captured snapshot frame (the
-    sim server streams these to its clients)."""
+    sim server streams these to its clients).
+    recorder: a runrecord.RunRecorder, opened here and fed every captured
+    day; the caller closes it (complete or failed)."""
     from alberta_buck.sim import report
     out_path = report.output_path(out_path, scenario.days)
     if out_path and scenario.days >= report.FIVE_YEARS:
@@ -175,6 +177,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
         snap.meta["experiment"] = exp.resolved()
         if iv is not None:
             snap.meta["interventions_applied"] = iv.applied
+    if recorder is not None:
+        recorder.open(scenario=scenario, meta=snap.meta, tokens=snap.tokens)
     # Capital baselines: computed AFTER bootstrap so the dm baseline
     # includes the bootstrap deposits (otherwise day-0 P&L would jump
     # by the bootstrap principal).
@@ -305,6 +309,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
             pass
         snap.capture(day, ctr, agents, init_val, reb_init, dm_init,
                      ledger=ledger)
+        if recorder is not None:
+            recorder.frame(snap.frames[-1], applied=iv.applied if iv is not None else ())
         if on_frame is not None:
             on_frame(snap.frames[-1])
         # Incremental checkpoint: flush the vector periodically so a long run
