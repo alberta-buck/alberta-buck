@@ -4021,3 +4021,45 @@ there; points programs are a later candidate for a controlled on- and off-ramp.
     Ki x error x one year; once the bootstrap mix balances issuance and
     redemption, the residual error should be small and the leak can lengthen
     (the owner expects longer), which the same five-year runs will show.
+
+** The household lifecycle and the bootstrap mix (owner's direction, 2026-11-14)
+
+The owner: shelve points programs. Build the household lifecycle (debt retirement,
+investment accumulation, then retirement income) with a typical mix of young,
+middle-aged and retired households; that mix should reach an equilibrium K, and
+varying the proportion of each should give a different one. The economy introduces
+young families at a rate relative to its existing population, and the debt load of
+the incoming families grows slowly as the economy's capacity grows.
+
+The design, fitted to the household economy as it is (roles keep their machinery;
+the lifecycle decides which role a household plays and when it stops earning):
+
+| stage | role | arrives with | does |
+|-------+------+--------------+------|
+| young family (25 to 40) | debtor | an insured home and a mortgage (scaled by the economy's capacity) | refinances into BUCK credit (issuance), sells for its mortgage, saves its surplus, pays down its liability |
+| middle-aged (40 to 64) | saver, investor | an insured asset (saver) or savings (investor) | accumulates: a share in the BUCK basket, a share in an external USD fund (about 8% a year) |
+| retired (65 on) | investor | savings in proportion to the years worked | draws its savings down as income over its remaining years, the basket and the fund in proportion, then leaves |
+
+- [ ] /L1. The lifecycle in the policy./ Settings =age= (years at arrival),
+  =retire_age= (65), =drawdown_years= (25), =usd_fund_share=, =usd_fund_return=
+  (0.08); a household's age on a day, its stage, and the share of its savings a
+  retiree draws down on a payday (1 / months left). Python and JS alike, tested
+  on the shared fixture.
+- [ ] /L2. Accumulation split./ An investor's saving goes =usd_fund_share= to the
+  external fund (off chain, compounding at =usd_fund_return=), the rest into the
+  basket as today.
+- [ ] /L3. Retirement drawdown./ After =retire_age=, each payday the investor
+  redeems that share of its basket shares (paid in BUCK, the new exits), sells
+  the BUCK it does not spend, and takes the same share of its fund; after
+  =drawdown_years= it leaves as an investor leaves today. Its wages stop.
+- [ ] /L4. The population./ An initial mix by stage (young, middle-aged, retired,
+  with their age ranges); young families arriving at a rate per year of the
+  current population; the incoming mortgage scaled by the economy's capacity
+  (the BUCK/USDC route's depth, which bounded refinancing before), from car-sized
+  loans in an empty economy up to the full range.
+- [ ] /L5. The equilibrium./ Five-year runs from an empty economy, varying the
+  mix; where K settles (with the one-year leak) and BVIB about 1.
+
+The JavaScript port of the household agents follows L1 (the policy is mirrored
+now); its agent behaviour for L2 to L4 follows once the Python worlds show the
+equilibrium.
