@@ -743,3 +743,20 @@ def test_the_lifecycle_works_retires_and_draws_down():
                 {"age": -1.}):
         with pytest.raises(ValueError):
             hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | bad)
+
+
+def test_the_lifecycle_population_and_the_mortgage_cap():
+    """Lifecycle population settings default off and validate; a debtor's mortgage cap scales its home
+    down to fit at its own loan-to-value, and touches no other role."""
+    p = hp.population({})
+    assert (p["lifecycle"], p["initial_retirees"], p["young_rate"], p["mortgage_supply_share"]) == (False, 0, 0., 0.)
+    assert p["young_age"] == [25., 40.] and p["retired_age"] == [65., 85.]
+    on = hp.population({"lifecycle": "true", "initial_retirees": 3, "young_rate": .03, "young_age": [20, 30]})
+    assert on["lifecycle"] is True and on["initial_retirees"] == 3 and on["young_age"] == [20., 30.]
+    for bad in ({"young_rate": -1}, {"mortgage_supply_share": -.1}, {"retired_age": [80, 70]}, {"initial_retirees": 1.5}):
+        with pytest.raises(ValueError):
+            hp.population(bad)
+    base = FIXTURE["settings"] | {"home_k": [500., 500.], "ltv": [.5, .5], "role": "debtor"}
+    capped = hp.profile(FIXTURE["seed"], "0", base | {"mortgage_cap_k": 50.})
+    assert capped["home_k"] == 100. and hp.profile(FIXTURE["seed"], "0", base)["home_k"] == 500.
+    assert hp.profile(FIXTURE["seed"], "0", base | {"mortgage_cap_k": 50., "role": "saver"})["home_k"] == 500.

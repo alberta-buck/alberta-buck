@@ -10,6 +10,8 @@ export const DEFAULTS = {
   // draws its savings down over drawdown_years, then leaves; 0 keeps it outside the lifecycle. A share
   // usd_fund_share of its saving goes to an external USD fund returning usd_fund_return a year.
   age: 0, retire_age: 65, drawdown_years: 25, usd_fund_share: 0, usd_fund_return: .08,
+  // A debtor's mortgage at most this ($k; 0: no cap), its home scaled down to fit at its loan-to-value.
+  mortgage_cap_k: 0,
   risk: [0, .01], switch_k: [1, 3], penalty_months: 3, term_months: 60, renew_frac: [0, 1],
   retire_disc: [.005, .03], issue_premium: [.005, .025], utilization: [.65, .85],
   buffer_k: 10, max_impact_bp: [25, 100], decision_days: [5, 20], surplus_policy: "adaptive",
@@ -45,6 +47,11 @@ export const POPULATION = {
   growth: "steady", gain: 50, gain_cap: 4, signal_halflife_days: 30, settle_days: 7, max_members: 2000,
   // Issuers arrive faster as K rises, by (1 - k_ref) / (1 - K).
   k_ref: .75, k_pace: true,
+  // The lifecycle: members aged by stage (young families, middle-aged, initial retirees with savings),
+  // young families arriving at young_rate a year per member, a new debtor's mortgage capped at
+  // mortgage_supply_share of the BUCK supply (at least mortgage_floor_k). Read by the Python worlds.
+  lifecycle: false, young_age: [25, 40], middle_age: [40, 64], retired_age: [65, 85], initial_retirees: 0,
+  retiree_cash_k: [100, 500], young_rate: 0, mortgage_supply_share: 0, mortgage_floor_k: 10,
 };
 // Older settings, still accepted when no role is named: a total split between savers and debtors.
 export const LEGACY_POPULATION = { initial: 10, arrival_rate: 6, saver_share: .5 };
@@ -191,7 +198,7 @@ export function profile(seed, member, overrides = {}) {
     "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
     "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double",
     "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap", "premium_fixed_usd",
-    "age", "retire_age", "drawdown_years", "usd_fund_share"]) {
+    "age", "retire_age", "drawdown_years", "usd_fund_share", "mortgage_cap_k"]) {
     if (!Number.isFinite(p[key]) || p[key] < 0) throw new Error(`invalid household parameter: ${key}`);
   }
   if (p.home_k <= 0 || p.max_impact_bp > 10000 || p.renew_frac > 1) throw new Error("invalid household size, impact or renewal fraction");
@@ -225,6 +232,7 @@ export function profile(seed, member, overrides = {}) {
   if (!Number.isFinite(p.usd_fund_return) || p.usd_fund_return <= -1) {
     throw new Error("invalid lifecycle: usd_fund_return must exceed -1");
   }
+  if (p.mortgage_cap_k > 0 && p.role === "debtor" && p.ltv > 0) p.home_k = Math.min(p.home_k, p.mortgage_cap_k / p.ltv);
   p.premium_bp = Math.trunc(p.premium_bp + p.premium_fixed_usd * 10000 / (p.home_k * 1000));
   return p;
 }
@@ -257,6 +265,17 @@ export function population(given = {}) {
   for (const k of ["gain", "gain_cap", "signal_halflife_days", "k_ref"]) p[k] = Number(p[k]);
   if (!(p.k_ref >= 0 && p.k_ref < 1)) throw new Error("k_ref must be in [0, 1)");
   p.k_pace = [true, 1, "true", "True"].includes(p.k_pace);
+  p.lifecycle = [true, 1, "true", "True"].includes(p.lifecycle);
+  p.initial_retirees = count(Number(p.initial_retirees), "initial_retirees");
+  for (const k of ["young_rate", "mortgage_supply_share", "mortgage_floor_k"]) {
+    p[k] = Number(p[k]);
+    if (!(Number.isFinite(p[k]) && p[k] >= 0)) throw new Error(`${k} must be a non-negative number`);
+  }
+  for (const k of ["young_age", "middle_age", "retired_age", "retiree_cash_k"]) {
+    const [lo, hi] = p[k].map(Number);
+    if (!(lo >= 0 && lo <= hi)) throw new Error(`${k} must be a range [lo, hi] with 0 <= lo <= hi`);
+    p[k] = [lo, hi];
+  }
   p.settle_days = count(Number(p.settle_days), "settle_days");
   p.max_members = count(Number(p.max_members), "max_members");
   if (!GROWTH.includes(p.growth)) throw new Error(`growth must be one of ${GROWTH}`);

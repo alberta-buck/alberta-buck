@@ -197,9 +197,11 @@ class HouseholdCalendar:
         self.shadow._grow(self.shadow.state, day)
         if day == self.next_pay:
             income = a.income_annual // 12
-            if getattr(a, "lifecycle", False):
+            if getattr(a, "lifecycle", False) and a.investor:
                 # The lifecycle: the external fund grows a month; a retired household earns no wages; a
                 # working one saves usd_fund_share of them in the fund (off chain), the rest as before.
+                # Investors only, while they alone draw their savings down (a retired debtor or saver
+                # would otherwise owe its living with no income).
                 a.usd_fund = int(a.usd_fund * policy.fund_growth(a.p["usd_fund_return"], 30))
                 if policy.stage(a.p, a.arrive_day, day) != "working":
                     income = 0

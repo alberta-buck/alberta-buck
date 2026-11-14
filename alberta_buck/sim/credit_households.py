@@ -2238,6 +2238,8 @@ class HouseholdPopulationAgent(Agent):
             for role in policy.ROLES:
                 for k in range(self.pop[f"initial_{role}s"]):
                     self._arrive(d, scenario, rng, agents, arbs, role, k, day)
+            for k in range(self.pop["initial_retirees"]):
+                self._arrive(d, scenario, rng, agents, arbs, "investor", f"r{k}", day, stage="retired")
         bvib                    = None
         if day >= self.pop["settle_days"]:
             try:
@@ -2248,22 +2250,40 @@ class HouseholdPopulationAgent(Agent):
             k_now               = d.kctrl.functions.buckK().call() / 1e18
         except Exception:
             k_now               = None  # an unreadable K leaves the issuers' pace at its reference
+        pop                     = self.pop
+        if pop["young_rate"]:
+            # Young families arrive at young_rate a year per member present, on top of the debtor rate.
+            present             = sum(1 for a in self.members if a._started and not a.exited)
+            pop                 = pop | {"debtor_rate": pop["debtor_rate"] + pop["young_rate"] * present}
         for role, k in policy.arrivals_step(self.state, scenario.seed, self.population, day, scenario.days,
-                                            bvib, k_now, self.pop):
+                                            bvib, k_now, pop):
             self._arrive(d, scenario, rng, agents, arbs, role, self.pop[f"initial_{role}s"] + k, day)
-        ctr["pop"]              = self.summary()
+        ctr["pop"]              = self.summary(day)
 
-    def _arrive(self, d, scenario, rng, agents, arbs, role, k, day):
+    def _arrive(self, d, scenario, rng, agents, arbs, role, k, day, stage=None):
         if len(self.members) >= self.pop["max_members"]:
             raise ValueError("household arrivals exceed max_members; raise the bound or lower the rates")
         agent                   = ROLE_CLASSES[role](max(a.idx for a in agents) + 1)
-        agent.settings          = self.settings | {"role": role}
+        agent.settings          = self.settings | {"role": role} | self._lifecycle_settings(d, role, stage)
         agent.member            = f"{self.population}/{role}/{k}"
         agent.arrive_day        = day
         agent.setup(d, scenario, rng)
         agents.append(agent)
         arbs.append(agent)
         self.members.append(agent)
+
+    def _lifecycle_settings(self, d, role, stage):
+        """A new member's age by its stage, a retiree's savings, and a young family's mortgage cap."""
+        pop, out                = self.pop, {}
+        if pop["lifecycle"]:
+            stage               = stage or ("young" if role == "debtor" else "middle")
+            out["age"]          = pop[f"{stage}_age"]
+            if stage == "retired":
+                out.update(invest_cash_k=pop["retiree_cash_k"], invest_income_k=0.)
+        if role == "debtor" and pop["mortgage_supply_share"] > 0:
+            supply              = d.buck.functions.totalIssued().call()      # raw, 1e-6 BUCK
+            out["mortgage_cap_k"] = max(pop["mortgage_floor_k"], pop["mortgage_supply_share"] * supply / 1e9)
+        return out
 
     def add_member(self, d, scenario, rng, agents, arbs, role, day, overrides=None):
         """One household arrives now, by an operator's hand (the add_household intervention): the
@@ -2287,7 +2307,7 @@ class HouseholdPopulationAgent(Agent):
         self.members.append(agent)
         return agent.member
 
-    def summary(self):
+    def summary(self, day=None):
         s                       = self.state
         out                     = dict(average=s["average"], gap=s["gap"], k_factor=s["k_factor"],
                                        multiplier=dict(s["multiplier"]))
@@ -2295,4 +2315,13 @@ class HouseholdPopulationAgent(Agent):
             mine                = [a for a in self.members if a.p["role"] == role]
             out[role]           = dict(arrived=len(mine), active=sum(a._started and not a.exited for a in mine),
                                        exited=sum(a.exited for a in mine))
+        if self.pop["lifecycle"]:
+            # Present members by life stage on their last mark (young families are the debtors).
+            out["stages"]       = stages = dict(young=0, middle=0, retired=0)
+            for a in self.members:
+                if a._started and not a.exited:
+                    life        = policy.stage(a.p, a.arrive_day, day) if day is not None else None
+                    st          = "young" if a.p["role"] == "debtor" else (
+                        "retired" if a.lifecycle and a.investor and life == "retired" else "middle")
+                    stages[st] += 1
         return out

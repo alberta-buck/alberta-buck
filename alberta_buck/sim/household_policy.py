@@ -48,7 +48,10 @@ DEFAULTS                        = dict(
     # and saves until retire_age, then draws its savings down as income over drawdown_years, then leaves.
     # 0 (the default) keeps the household outside the lifecycle, as before. A share usd_fund_share of
     # what it saves goes to an external USD fund returning usd_fund_return a year, the rest to the basket.
-    age=0., retire_age=65., drawdown_years=25., usd_fund_share=0., usd_fund_return=.08)
+    age=0., retire_age=65., drawdown_years=25., usd_fund_share=0., usd_fund_return=.08,
+    # A debtor's mortgage at most this ($k; 0: no cap): its insured home is scaled down to fit at its own
+    # loan-to-value, so a young economy's families arrive with smaller debts (HouseholdPopulationAgent).
+    mortgage_cap_k=0.)
 POLICIES                        = ("adaptive", "basket", "retire", "discount")
 ROLES                           = ("debtor", "saver", "investor")
 SUPPLY                          = ("debtor", "saver")   # drawn while the BUCK is dear; investors while it is cheap
@@ -58,7 +61,14 @@ POPULATION                      = dict(
     growth="steady", gain=50., gain_cap=4., signal_halflife_days=30., settle_days=7, max_members=2000,
     # Issuers arrive faster as K rises, by (1 - k_ref) / (1 - K): the BUCKs an insured dollar yields
     # grow without bound as K nears 1, so no rational household stays away.
-    k_ref=.75, k_pace=True)
+    k_ref=.75, k_pace=True,
+    # The lifecycle (2026-11-14). With it on, members get an age by stage: debtors are young families
+    # (young_age), savers and investors middle-aged (middle_age), and initial_retirees arrive retired
+    # (retired_age) with retiree_cash_k of savings. Young families also arrive at young_rate a year per
+    # member present. A new debtor's mortgage is capped at mortgage_supply_share of the BUCK supply (at
+    # least mortgage_floor_k), so the incoming debt load grows with the economy (0: no cap).
+    lifecycle=False, young_age=[25., 40.], middle_age=[40., 64.], retired_age=[65., 85.], initial_retirees=0,
+    retiree_cash_k=[100., 500.], young_rate=0., mortgage_supply_share=0., mortgage_floor_k=10.)
 # Older settings, still accepted when no role is named: a total split between savers and debtors.
 LEGACY_POPULATION               = dict(initial=10, arrival_rate=6., saver_share=.5)
 
@@ -123,7 +133,7 @@ def profile(seed, member, overrides=None):
                 "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
                 "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double",
                 "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap", "premium_fixed_usd",
-                "age", "retire_age", "drawdown_years", "usd_fund_share"):
+                "age", "retire_age", "drawdown_years", "usd_fund_share", "mortgage_cap_k"):
         if not math.isfinite(result[key]) or result[key] < 0:
             raise ValueError(f"invalid household parameter: {key}")
     if result["home_k"] <= 0 or result["max_impact_bp"] > 10000 or result["renew_frac"] > 1:
@@ -160,6 +170,8 @@ def profile(seed, member, overrides=None):
     result["phase"]              = int(uniform(seed, member, "phase") * result["decision_days"])
     result["term_months"]        = max(1, int(result["term_months"]))
     result["renew_in"]           = int(result["renew_frac"] * result["term_months"])
+    if result["mortgage_cap_k"] > 0 and result["role"] == "debtor" and result["ltv"] > 0:
+        result["home_k"]         = min(result["home_k"], result["mortgage_cap_k"] / result["ltv"])
     result["premium_bp"]         = int(result["premium_bp"] + result["premium_fixed_usd"] * 10000 / (result["home_k"] * 1000))
     return result
 
@@ -197,6 +209,17 @@ def population(given):
     if not 0 <= result["k_ref"] < 1:
         raise ValueError("k_ref must be in [0, 1)")
     result["k_pace"]            = result["k_pace"] in (True, 1, "true", "True")
+    result["lifecycle"]         = result["lifecycle"] in (True, 1, "true", "True")
+    result["initial_retirees"]  = _count(float(result["initial_retirees"]), "initial_retirees")
+    for key in ("young_rate", "mortgage_supply_share", "mortgage_floor_k"):
+        result[key]             = float(result[key])
+        if not math.isfinite(result[key]) or result[key] < 0:
+            raise ValueError(f"{key} must be a non-negative number")
+    for key in ("young_age", "middle_age", "retired_age", "retiree_cash_k"):
+        lo, hi                  = (float(v) for v in result[key])
+        if not 0 <= lo <= hi:
+            raise ValueError(f"{key} must be a range [lo, hi] with 0 <= lo <= hi")
+        result[key]             = [lo, hi]
     result["settle_days"]       = _count(float(result["settle_days"]), "settle_days")
     result["max_members"]       = _count(float(result["max_members"]), "max_members")
     if result["growth"] not in GROWTH:

@@ -359,3 +359,18 @@ test("the lifecycle works, retires and draws down (as in Python)", () => {
     assert.throws(() => profile(f.seed, "0", { ...f.settings, ...bad }));
   }
 });
+
+test("the lifecycle population and the mortgage cap (as in Python)", () => {
+  const p = population({});
+  assert.deepEqual([p.lifecycle, p.initial_retirees, p.young_rate, p.mortgage_supply_share], [false, 0, 0, 0]);
+  const on = population({ lifecycle: "true", initial_retirees: 3, young_rate: .03, young_age: [20, 30] });
+  assert.equal(on.lifecycle, true);
+  assert.deepEqual(on.young_age, [20, 30]);
+  for (const bad of [{ young_rate: -1 }, { mortgage_supply_share: -.1 }, { retired_age: [80, 70] }, { initial_retirees: 1.5 }]) {
+    assert.throws(() => population(bad));
+  }
+  const base = { ...f.settings, home_k: [500, 500], ltv: [.5, .5], role: "debtor" };
+  assert.equal(profile(f.seed, "0", { ...base, mortgage_cap_k: 50 }).home_k, 100);
+  assert.equal(profile(f.seed, "0", base).home_k, 500);
+  assert.equal(profile(f.seed, "0", { ...base, mortgage_cap_k: 50, role: "saver" }).home_k, 500);
+});
