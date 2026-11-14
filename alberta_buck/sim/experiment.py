@@ -153,6 +153,10 @@ DEFAULTS: dict = {
         "dtmax_days": 0.0,         # 0 => unclamped (uint256.max)
         "target_buck_m": 10.0,     # $M common TOKEN/BUCK pool depth
         "target_buck_lp_m": 10.0,  # $M BUCK/USDC seed
+        # The wheel's job retiring the basket's own principal from cash above its liquidity
+        # target (JubileeKind, retireCredit through the fund's relief): $M of principal a job,
+        # 0 disables it (as deployed before 2026-11-14).
+        "basket_retirement_cap_m": 0.0,
     },
     "agents": {},                  # {cls: {knob: [lo,hi] | scalar}}
     "interventions": [],
@@ -209,6 +213,7 @@ def deploy_params(exp) -> SimpleNamespace:
         dtmax_secs=int(dep["dtmax_days"] * 86400),
         target_buck=int(dep["target_buck_m"] * M6),
         target_buck_lp=int(dep["target_buck_lp_m"] * M6),
+        basket_retirement_cap=int(dep.get("basket_retirement_cap_m", 0.0) * M6),
     )
 
 

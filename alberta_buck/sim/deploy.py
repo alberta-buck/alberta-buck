@@ -881,8 +881,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         chain.send(wheel.functions.setValuationSource(stack.fund.address), sender=gov)
         chain.send(stack.fund.functions.setValuationWheel(wheel.address), sender=gov)
         chain.send(stack.fund.functions.setInvestmentKeeper(wheel.address), sender=gov)
+        retire_cap = getattr(dp, "basket_retirement_cap", 0)
         chain.send(wheel.functions.setJubilee(stack.fund.address,
-                   (8, 1000, 100, dp.target_buck // 100, E6, 0)), sender=gov)
+                   (8, 1000, 100, dp.target_buck // 100, E6, retire_cap)), sender=gov)
         if verbose:
             eqd_s = d.equity_director.address[:10] + "..." if d.equity_director else "none"
             print(f"[deploy] equity basket {basket.address[:10]}...  "

@@ -157,6 +157,48 @@ What to build and test, in this order:
 6. /The population mix as cells./ Wage earners, enterprises and portfolio
    holders in thirds at the centre, and the corners, each from both K0.
 
+*The basket against the owner's vision (2026-11-14).* The owner: the basket
+issues BUCK against its equity and deploys them (rebalancing, arbitrage) for
+return; a later fall in K makes no call on it. When a holder retires a
+position and the basket cannot issue BUCK to pay it, the exit is paid in
+kind, its share of the holdings, so no remaining holder is made worse off. As
+K falls, rebalancing and arbitrage go on, but BUCK flowing in produce fewer
+new BUCK because the credit is under water by some measure. The Jubilee fund
+keeps little cash (a target of about 1%), pays large reliefs in chunks, and
+recharges from demurrage and by selling its basket position. How the code
+stands (=src/basket/BuckBasketEquity*.sol=, =BasketUpkeepFacet.sol=,
+=src/wheel/JubileeKind.sol=, =src/JubileeFund.sol=):
+
+| The vision | Today | Match |
+|------------+-------+-------|
+| Issue against equity, deploy for return | The upkeep pairs every TOKEN with issued BUCK at once (the BUCK stay in the position), sizes the book against parity, and the wheel places spare liquidity (=_fundCash= issues up to the room =_issuableS=) | yes |
+| No call when K falls | Nothing forces repayment; a K below the lien only stops new room. The trim refills liquidity "first back under the limit" when liquidity is short, a self-correction, not a call | yes |
+| BUCK exits paid from what the basket can pay, else in kind, no burden on others | Exits never issue: paid from wallet cash if it suffices (=_exit=), else pro rata in kind (=_exitInKind=: a fraction of every position and idle TOKEN; the leaver leaves TOKEN covering its share of the lien; released BUCK stay as cash). Cash is refilled between exits by issuance while K allows | yes, but |
+| ... and an under-water basket still lets holders leave | =_exitSnapshot= reverts every exit, cash or in kind, when the credit is short before or after (=CreditShortfallIncreased=). The net mark keeps that from happening in practice (it has not fired in any run so far) | no |
+| As K falls, inflows issue fewer BUCK: under water "by some measure" | The measure is the net mark's: K bounds the lien less the BUCK held in the basket's own positions (=_creditValueS=). The upkeep leans against parity: while the BUCK is cheap it aims to hold BUCK, and it did, the lien less held BUCK at -5% to -8% of equity all year. So inflows add no net issuance; the gross issuance (about 0.8 BUCK per BUCK deposited) is pool depth beside TOKEN, unrestrained by K | in net terms |
+| The basket retires lien from cash it does not need | =JubileeKind='s retirement job (=retireCredit= through the fund's =reduce=, chunked across blocks) exists; the worlds deploy it disabled (=retirementCap= 0), so the lien never shrinks and its relief only accrues (observation 56) | built, off |
+| Jubilee keeps little cash, chunks large reliefs, recharges | Reserve target 10% of the accrued claim (=reserveTargetBp= 1000); excess invested in its basket receipt (budget half-life a day, 1% threshold); each relief at most 10% of its cash (=ReliefLiquidityLimit=; the tab's "relief available"), plus a shared per-block budget, so large ones chunk; recharged by demurrage and by the wheel's scheduled sale of receipt shares (at most 10% of the receipt a job) | shape yes; 10% not 1% |
+
+Corrections to earlier readings: F2 stands as arithmetic (K never binds the
+basket's gross lien) but the net mark is deliberate and its lean already
+holds the basket net long BUCK while the BUCK is cheap, so the basket is not
+simply "issuing into a cheap BUCK"; what keeps BVIB above 1 needs a flow
+decomposition by actor (debtors' conversions, investors' purchases,
+arbitrage, the wheel), recommendation 69. Observation 56's unpaid relief is
+not the fund failing to pay: relief is paid only when principal is retired
+or renewed, and the basket never retires (its job is off); the 6k "available"
+is the 10%-of-cash cap per operation.
+
+Gaps against the vision, smallest first: (1) turn the basket's retirement job
+on (configuration only: =deploy.basket_retirement_cap_m=, added
+2026-11-14; a one-year world with it on is running,
+=build/runs/economy-365-retire=); (2) let an under-water basket's holders
+leave in kind instead of refusing them (a contract change in =_exitSnapshot=
+and the post-exit check: "no greater shortfall" rather than "no shortfall");
+(3) decide whether K should reach the gross lien, which needs (2) first
+(otherwise every exit is refused) and costs the basket pool depth and fee
+income; (4) the Jubilee reserve target, 10% today against the owner's ~1%.
+
 Running many worlds on datasim.local: every cell writes its run record as
 it goes, so a dashboard on that machine reads them all while they grow
 (=--runs= at the campaign's =records= directory). Its live control is
@@ -3508,11 +3550,13 @@ tabs are how to see that in any run, finished or live.
 
 **** Recommendations
 
-64. /Find out why the basket's relief is unpaid (observation 56)./ Who
-    claims it (the wheel's fund jobs), whether the fund's liquid cash limits
-    it while its demurrage income sits in a basket position, and whether the
-    basket's equity should count it. A five-year run would carry about five
-    times the backlog.
+64. /The basket's relief accrues because it never retires principal
+    (observation 56)./ Relief is paid on retirement or renewal; the
+    basket's retirement job is deployed off (=retirementCap= 0). Turning it on
+    (=deploy.basket_retirement_cap_m=) pays the relief in chunks of at most
+    10% of the fund's cash; whether the basket's equity should count unpaid
+    relief remains a design question. A five-year run would carry about five
+    times the backlog if left off.
 65. /The Events tab next./ Refusals by decoded cause across all households
     and days (recommendation 48 first: decode each revert's custom error into
     the event), and a list of the latest refused steps linking to the
@@ -3533,3 +3577,12 @@ tabs are how to see that in any run, finished or live.
     priced. If K is to be the economy's lever, it has to reach them, or the
     basket's response to K has to be written another way (the build list's
     item 2). This is the first thing to settle before the five-year runs.
+
+69. /Decompose who holds BVIB above 1./ The basket is net long BUCK while
+    the BUCK is cheap, yet BVIB stays 1 to 3% above 1 all year. Record each
+    actor class's BUCK bought and sold a day (debtors' conversions,
+    investors' purchases, arbitrageurs, the wheel, the market maker; the
+    snapshot's =mx.cls= has per-class volumes) and chart them on the Market
+    tab: the persistent seller should be visible, and so whether the gap is
+    conversion pressure or the arbitrage cost band (which an integral
+    controller would also chase without end).
