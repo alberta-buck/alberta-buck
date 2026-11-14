@@ -207,6 +207,55 @@ def test_investor_withdraws_at_its_horizon_by_redeeming_and_selling(household_wo
     assert not d.chain.mismatches
 
 
+def test_a_retired_investor_draws_its_savings_down_as_monthly_income(household_world):
+    """The lifecycle (household_policy.stage): an investor 45 days from retirement saves half its wages
+    in the external fund and the rest in the basket; retired, it earns no wages and each month redeems a
+    month's share of its receipt (paid in BUCK) and sells it for dollars a capped bite a day, the fund
+    paying the same share off chain; it leaves when its drawdown ends."""
+    d, _, make = household_world
+    ctr, spec = {}, EXIT["investor"]
+    year = 365.25
+    settings = spec["settings"] | {"age": 65 - 45 / year, "drawdown_years": 2., "usd_fund_share": .5}
+    a = _household(d, make, 96, HouseholdInvestorAgent, settings)
+    m, month = a.refinance_machine, a.income_annual // 12
+    assert a.lifecycle and a._exit_day == int(year * (2 + 45 / year)), "it leaves when its drawdown ends"
+    assert a.advance_net_investor(d, 0, ctr) is True and a.last_action == "save", a.last_error
+    # The first payday, still working: half the wages go to the fund, half arrive as dollars.
+    _surplus_day(d, a, 30)
+    cash = _books(d, a)["cash"]
+    a.advance_net_investor(d, 30, ctr)
+    assert a.usd_fund == month // 2, "half of the wages went to the fund"
+    receipt = a._basket_receipts[0]
+    shares0, fund0 = a._receipt_book[receipt][1], a.usd_fund
+    # Retired from day 45: on day 46 a month's share of the receipt is redeemed home in BUCK, and the
+    # fund pays the same share.
+    _surplus_day(d, a, 46)
+    share = 30 / ((65 + 2 - (settings["age"] + 46 / year)) * year)
+    assert a.advance_net_investor(d, 46, ctr) is True and a.last_action == "drawdown", a.last_error
+    shares1 = a._receipt_book[receipt][1]
+    assert shares0 - shares1 == pytest.approx(shares0 * share, rel=.01) and ctr["hhDrawdowns"] == 1
+    assert a.usd_fund_paid == pytest.approx(fund0 * share, rel=.01) and a.usd_fund == fund0 - a.usd_fund_paid
+    assert _books(d, a)["buck"] > RAW and a._drawdown_to_sell > 0
+    # The next days sell what the redemption paid, a capped bite a day, and nothing else.
+    for day in range(47, 52):
+        _surplus_day(d, a, day)
+        before = a.withdrawn_usd
+        a.advance_net_investor(d, day, ctr)
+        if a._drawdown_to_sell == 0:
+            break
+        assert a.withdrawn_usd > before
+    assert a._drawdown_to_sell == 0 and a.withdrawn_usd > 0 and _books(d, a)["buck"] < RAW
+    assert [e["context"]["reason"] for e in m.events if e.get("kind") == "exit" and e["status"] == "planned"][:2] \
+        == ["drawdown", "drawdown"]
+    # The next payday pays no wages; the fund has grown a month.
+    _surplus_day(d, a, 60)
+    cash, fund = _books(d, a)["cash"], a.usd_fund
+    a.advance_net_investor(d, 60, ctr)
+    assert _books(d, a)["cash"] <= cash, "no wages once retired"
+    assert a.usd_fund >= fund
+    assert not d.chain.mismatches
+
+
 def test_exit_releases_coverage_that_no_principal_backs(household_world):
     d, _, make = household_world
     ctr, spec = {}, EXIT["release"]

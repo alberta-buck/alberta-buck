@@ -66,6 +66,16 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         self.premium_rate       = p["premium_bp"]
         self.cash_buffer        = 0 if self.investor else int(p["buffer_k"] * 1000 * PARITY)
         self._exit_day          = self.arrive_day + int(365 * p["hold_years"]) if self.investor else None
+        # The lifecycle (household_policy.stage): an investor of an age works and saves until retire_age,
+        # draws its savings down as income, and leaves when its drawdown ends, not at a horizon.
+        self.lifecycle          = p["age"] > 0
+        if self.lifecycle and self.investor:
+            years_left          = p["retire_age"] + p["drawdown_years"] - p["age"]
+            self._exit_day      = self.arrive_day + max(0, int(policy.YEAR_DAYS * years_left))
+        self.usd_fund           = 0                     # the external USD fund (off chain), raw dollars
+        self.usd_fund_paid      = 0                     # what it has paid out as retirement income
+        self._next_drawdown     = None                  # the next day a retired investor draws its month
+        self._drawdown_to_sell  = 0                     # BUCK a month's redemption paid, still to sell
         self._divest_day        = (None if self.investor
                                    else policy.divest_day(scenario.seed, self.member, self.arrive_day, p["divest_rate"]))
         self._wallet            = None                  # the BUCK working balance, apart from the lien
@@ -551,6 +561,66 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         finally:
             self._net_dispatching = False
 
+    def _drawdown_due(self, day):
+        """A retired lifecycle investor's month of income is due, or what it redeemed waits to be sold."""
+        if not (self.lifecycle and self.investor) or policy.stage(self.p, self.arrive_day, day) != "retired":
+            return False
+        return self._drawdown_to_sell > 0 or self._next_drawdown is None or day >= self._next_drawdown
+
+    def _drawdown_step(self, d, day, ctr):
+        """One step of a retired household's monthly income (household_policy.drawdown_share).
+
+        On the month's first step it takes that share of its external fund (paid off chain) and redeems
+        that share of a basket receipt home, paid in BUCK (the basket's exits); on the following days it
+        sells what the redemption paid for dollars, one capped market bite a day, as an exit sells.
+        Neither issues nor retires principal. Returns True when it sent a transaction.
+        """
+        m                       = self.refinance_machine
+        if self._drawdown_to_sell <= 0:
+            share               = policy.drawdown_share(self.p, self.arrive_day, day)
+            paid                = int(self.usd_fund * share)
+            self.usd_fund      -= paid
+            self.usd_fund_paid += paid
+            self._next_drawdown = day + policy.MONTH_DAYS
+            self.last_action    = "drawdown"
+            for rid in list(self._basket_receipts):
+                shares          = self._receipt_book[rid][1]
+                amount          = min(shares, max(1, int(shares * share)))
+                try:
+                    quote       = _basket_ops(d).preview_redemption(self.address, rid, amount)
+                except Exception as exc:
+                    m._event(d, day, "waiting", kind="drawdown", phase="redeem", reason=str(exc)[:200])
+                    return False
+                if quote["paid"] < PARITY:
+                    continue
+                before          = d.buck.functions.balanceOf(self.address).call()
+                m.start_exit(d, ExitPlan("redeem", position_id=rid, shares=amount,
+                                         minimum_buck=quote["paid"] * 9950 // 10_000),
+                             day, ctr, context=dict(reason="drawdown", share=share, fund_paid=paid))
+                # What the redemption actually paid is the month's income to sell (0 if it is not settled).
+                self._drawdown_to_sell = max(0, d.buck.functions.balanceOf(self.address).call() - before)
+                ctr["hhDrawdowns"] = ctr.get("hhDrawdowns", 0) + 1
+                self.last_action = "drawdown"           # the exit step names itself; this is the month's income
+                return True
+            return False
+        if self._exit_trade_day == day:
+            return False                                # one market bite a day
+        block                   = d.w3.eth.block_number
+        held                    = d.buck.functions.balanceOf(self.address).call(block_identifier=block)
+        market                  = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
+        cap                     = market.reserve_buck * int(self.max_impact_bp * 50) // 10**6
+        bite                    = min(_exportable(held, 0), cap, self._drawdown_to_sell)
+        minimum                 = market.sell_expected(bite) * 9950 // 10_000
+        if bite < PARITY or minimum < PARITY:
+            self._drawdown_to_sell = 0                  # nothing worth a sale is left of this month's
+            return False
+        m.start_exit(d, ExitPlan("sell", sell_buck=bite, minimum_usdc=minimum), day, ctr,
+                     context=dict(reason="drawdown"))
+        self._drawdown_to_sell -= bite
+        self._exit_trade_day = day
+        self.last_action        = "drawdown-sell"
+        return True
+
     def assess_net_investor(self, d, day):
         return assess_investor(self, d, day)
 
@@ -581,6 +651,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             m = self.refinance_machine
             if self.exit_due(day):
                 return False
+            if self._drawdown_due(day):
+                return self._drawdown_step(d, day, ctr)
             if self._net_surplus_day == day or day < self._next_decision and not m.surplus_due:
                 return False
             self._net_surplus_day = day
@@ -2022,6 +2094,8 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                   income_total=self.income_total, living_paid=self.living_paid, hypo_living=self.hypo_living,
                   decision=self._last_verdict, error=self.last_error, arrive_day=self.arrive_day)
         st.update(self.exit_state())
+        if self.lifecycle:
+            st.update(age=self.p["age"], usd_fund=self.usd_fund, usd_fund_paid=self.usd_fund_paid)
         if getattr(d, "buck_accounting", "") == "net":
             st["machine"] = self.refinance_machine.status()
             st["calendar"] = self.calendar_machine.status()

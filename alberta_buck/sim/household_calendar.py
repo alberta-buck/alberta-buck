@@ -6,6 +6,7 @@ settlement-token units. Payment dates are simulation days, after that day's
 interest. The counterfactual uses the same convention.
 """
 from dataclasses import dataclass
+from alberta_buck.sim import household_policy as policy
 from alberta_buck.sim.household_policy import first_payday
 from buck_core import TransactionReceiptPending, TransactionReverted
 from buck_core.session import Expect, _txhex
@@ -196,6 +197,16 @@ class HouseholdCalendar:
         self.shadow._grow(self.shadow.state, day)
         if day == self.next_pay:
             income = a.income_annual // 12
+            if getattr(a, "lifecycle", False):
+                # The lifecycle: the external fund grows a month; a retired household earns no wages; a
+                # working one saves usd_fund_share of them in the fund (off chain), the rest as before.
+                a.usd_fund = int(a.usd_fund * policy.fund_growth(a.p["usd_fund_return"], 30))
+                if policy.stage(a.p, a.arrive_day, day) != "working":
+                    income = 0
+                else:
+                    fund = income * int(a.p["usd_fund_share"] * 10**9) // 10**9
+                    a.usd_fund += fund
+                    income -= fund
             living = 0 if a.investor else income * int(a.p["living_frac"] * 10**9) // 10**9
             full = 0 if a._sold else a._face0 * a.premium_rate // 10_000 // 12
             premium = a._external_premium_due(d, full)  # read before committing this period
