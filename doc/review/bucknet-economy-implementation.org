@@ -122,7 +122,11 @@ What to build and test, in this order:
 1. /The natural K (H1)./ The same one-year centre from K0 = 0.5 on both price
    paths, beside the K0 = 0.75 years: one K reached from above and below is
    the natural K of this mix; both falling means the drift is structural
-   (F2). Running since 2026-11-14 (=build/runs/economy-365-k050{,-revert}=).
+   (F2). Run on 2026-11-14 (=build/runs/economy-365-k050{,-revert}=,
+   observation 60): from 0.5, K fell all year too, to 0.249 (history) and
+   0.276 (reverting), against 0.445 and 0.469 from 0.75. The four years do
+   not converge (0.25 apart at the start, about 0.2 at the end) and none
+   flattens: no natural K appears while K cannot reach the basket (F2).
 2. /Decide whether K bounds the basket's held BUCK (F2, recommendation 68)./
    The owner's expectation (H3) is a basket that answers K: a falling K makes
    it pull BUCK out of circulation (withdraw the BUCK side of its positions,
@@ -3500,6 +3504,7 @@ tabs are how to see that in any run, finished or live.
 | 57 | Market tab, reverting year | Triangle gaps swing about +-2% day to day and end at 0.39% at most; the USDC pools stay within about +-1% of their references; the BUCK in the BUCK/USDC pool stays near 10M all year while the TOKEN/BUCK pools grow from 11.1M to 17.7M (observation 43). |
 | 58 | Agents tab, reverting year, the household furthest below its counterfactual | 0/debtor/7 arrived on day 330, drew 478k BUCK within its limit in about 30 days, and paid its dollar mortgage down from about 700k to 270k; it ends 19.1k dollars below its counterfactual, its switching costs and the conversion's price impact not yet repaid. Its 157 steps (assessments declined, exports, mortgage payments, saving deposits) read in order on the page. |
 | 59 | 30 days from K0 = 0.40 (=build/runs/underwater-k040=, recording the contract's headroom and mark) | Expected the basket to open under water (its lien is 0.43 of its gross mark); it opened with +2.48M of headroom and ended at +3.09M, K 0.402 -> 0.388, BVIB above 1 on most days. The mark was 1.75 to 1.81 times the gross, exactly equity + held BUCK / K: as K falls the mark rises, so the limit falls only on the small lien the basket no longer holds. |
+| 60 | the centre year from K0 = 0.5 on both price paths (=economy-365-k050{,-revert}=; re-imported records) | *No natural K from below either.* History: K 0.502 -> 0.249, BVIB above 1 on 95% of days, supply +6.37M of which the basket's lien +5.10M (80%), household principal +1.27M; BUCK/USD 1.016 -> 1.109. Reverting: K 0.502 -> 0.276, BVIB above 1 on 93%, supply +7.31M, basket lien +5.98M (82%). The lien less held BUCK ended at -0.054 and -0.065 of equity: K never bound the basket. Debtors drew half as much as from 0.75 (1.27M and 1.32M against 2.17M and 2.59M), so a lower K slowed the households and not the basket; households' net worth against the counterfactual -$9.4k to +$5.2k (history), -$0.7k to +$24.9k (reverting). |
 
 **** Recommendations
 
