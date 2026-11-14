@@ -7,7 +7,7 @@
 import { chartData, format, stackTops, ticks } from "./series.js";
 
 const SVG = "http://www.w3.org/2000/svg";
-const MARGIN = { top: 14, right: 112, bottom: 26, left: 58 };
+const MARGIN = { top: 14, right: 128, bottom: 26, left: 58 };
 const NARROW = 480;            // below this width: no end labels (the legend names the series)
 const HEIGHT = 220;
 
@@ -140,8 +140,9 @@ export class TimeChart {
     const { width, right, x, y, lo, hi, tops, iw } = g;
     const { days, series } = this.data;
     const svg = el("svg", { viewBox: `0 0 ${width} ${HEIGHT}`, width, height: HEIGHT, "aria-hidden": "true" });
+    const empty = series.every((s) => s.values.every((v) => v === null || !Number.isFinite(v)));
 
-    for (const t of ticks(lo, hi, 4)) {
+    for (const t of empty ? [] : ticks(lo, hi, 4)) {
       svg.append(el("line", { x1: MARGIN.left, x2: width - right, y1: y(t), y2: y(t), class: "grid" }));
       const label = el("text", { x: MARGIN.left - 8, y: y(t) + 4, class: "axis-label", "text-anchor": "end" });
       label.textContent = this.spec.unit === "ratio" ? Number(t.toPrecision(6)).toString() : format(t, this.spec.unit);
@@ -208,11 +209,12 @@ export class TimeChart {
       for (const e of ends) {
         svg.append(el("line", { x1: width - right + 6, x2: width - right + 16, y1: e.y, y2: e.y, class: "line", style: `--c: var(--series-${e.j + 1})` }));
         const t = el("text", { x: width - right + 20, y: e.y + 4, class: "direct-label" });
-        t.textContent = e.label;
+        // The margin holds about 18 characters; the legend and tooltip carry the whole name.
+        t.textContent = e.label.length > 18 ? `${e.label.slice(0, 17)}…` : e.label;
         svg.append(t);
       }
     }
-    if (days.length && series.every((s) => s.values.every((v) => v === null || !Number.isFinite(v)))) {
+    if (days.length && empty) {
       // A run recorded before these fields existed: say so rather than draw empty axes.
       const t = el("text", { x: MARGIN.left + iw / 2, y: MARGIN.top + (HEIGHT - MARGIN.top - MARGIN.bottom) / 2,
         class: "empty-label", "text-anchor": "middle" });

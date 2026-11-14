@@ -80,7 +80,8 @@ function view(id) {
   if (views[id]) return views[id];
   const root = $(`panel-${id}`), tokens = state.manifest?.tokens ?? [];
   views[id] = id === "overview" ? new OverviewTab(root, bus)
-    : id === "market" ? new ChartTab(root, bus, MARKET(tokens), (f) => tabTiles("market", f))
+    : id === "market" ? new ChartTab(root, bus, MARKET(tokens, !state.frames.length || state.frames.some((f) => f.market?.pools)),
+      (f) => tabTiles("market", f))
       : id === "basket" ? new ChartTab(root, bus, BASKET(tokens), (f) => tabTiles("basket", f))
         : id === "jubilee" ? new ChartTab(root, bus, JUBILEE(), (f) => tabTiles("jubilee", f))
           : id === "agents" ? new AgentsTab(root, bus, panel) : null;

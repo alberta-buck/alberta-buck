@@ -80,6 +80,10 @@ test("the BuckBasket, Market and Jubilee tabs read the recorded frame shape", as
   assert.ok(Math.abs(gap - (0.249 * 0.99 / 0.251 - 1) * 100) < 1e-9);
   const pools = stackTops(chartData(MARKET(tokens).find((s) => s.id === "pools"), frames));
   assert.equal(Math.round(pools.at(-1)[2] * 1e6), 14_800_000 + 8_900_000 + 6_700_000);
+  const older = frames.map((f) => ({ ...f, market: { ...f.market, pools: null } }));
+  const together = chartData(MARKET(tokens, false).find((s) => s.id === "pools"), older);
+  assert.deepEqual(together.series.map((x) => x.key), ["dollar", "tokens"], "a run without per-pool BUCK shows the pools' total");
+  assert.equal(Math.round(stackTops(together).at(-1)[2] * 1e6), 14_800_000 + 15_600_000);
   const t = Object.fromEntries(tabTiles("basket", frames).map((x) => [x.id, x.value]));
   assert.ok(Math.abs(t.le - 11.2 / 16.2) < 1e-12 && t.equity === 16.2 && t.headroom === -0.25);
   assert.deepEqual(tabTiles("nothing", frames), []);

@@ -178,8 +178,9 @@ export const BASKET = (tokens = []) => [
   },
 ];
 
-// The Market tab: every pool, and whether the three-pool triangles agree.
-export const MARKET = (tokens = []) => [
+// The Market tab: every pool, and whether the three-pool triangles agree. `split`: the run records
+// each TOKEN/BUCK pool's BUCK (since 2026-11-14); older runs show the pools' total.
+export const MARKET = (tokens = [], split = true) => [
   {
     id: "buck_usd", title: "BUCK in USD", unit: "ratio", kind: "line",
     note: "The BUCK's dollar price in its USDC pool.",
@@ -209,10 +210,12 @@ export const MARKET = (tokens = []) => [
   },
   {
     id: "pools", title: "BUCK in the pools", unit: "buck", kind: "stack",
-    note: "Nominal BUCK in the BUCK/USDC pool and in each TOKEN/BUCK pool.",
+    note: split ? "Nominal BUCK in the BUCK/USDC pool and in each TOKEN/BUCK pool."
+      : "Nominal BUCK in the BUCK/USDC pool and in the TOKEN/BUCK pools together: this run was recorded before each pool was (2026-11-14); re-importing its vector splits them.",
     series: [
       { key: "dollar", label: "BUCK/USDC", value: (f) => buck(f.supply?.holders?.dollar_pool) },
-      ...tokens.map((sym, i) => ({ key: sym, label: `${sym}/BUCK`, value: (f) => buck(f.market?.pools?.[i]?.buck) })),
+      ...(split ? tokens.map((sym, i) => ({ key: sym, label: `${sym}/BUCK`, value: (f) => buck(f.market?.pools?.[i]?.buck) }))
+        : [{ key: "tokens", label: "TOKEN/BUCK pools (together)", value: (f) => buck(f.supply?.holders?.token_pools) }]),
     ],
   },
   {
