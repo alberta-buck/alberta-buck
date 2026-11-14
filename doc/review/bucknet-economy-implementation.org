@@ -51,6 +51,118 @@ dispatcher on canonical accounting in both languages, and the first complete
 five-year run exists yet on the corrected accounting*; step C lengthens the
 short world, step D runs the campaigns.
 
+** The economy we are modelling: participants and the natural K (owner, 2026-11-14)
+
+The owner's view, after the one-year worlds' falling K:
+
+- /H1. The natural K is unknown./ A falling K may be the economy seeking its
+  equilibrium; no one knows yet where K rests in a varied BUCK economy. Run
+  from K0 = 0.5 as well as 0.75.
+- /H2. The basket is the BUCK's T-bill./ Its rebalancing and arbitrage
+  returns are the BUCK economy's risk-free return. An owner with a better
+  opportunity does what the basket does: buys assets, insures them, issues
+  BUCK against them, buys more; when it divests it must buy BUCK to retire
+  its liens, which is BUCK demand.
+- /H3. The worlds are bootstrap-sized./ One mortgage converted BUCK -> USDC
+  is a large share of the whole economy; in a mature one most flows are
+  BUCK <-> assets (TOKEN), and the basket's large standing position answers
+  K: a falling K should make the basket pull BUCK out of circulation.
+- /H4. Behaviour by signal./ BVIB > 1 (BUCK cheap): sell assets for BUCK;
+  do not retire liens early (their relief is a risk-free 2% a year), do not
+  sit on large balances (2% a year demurrage), deposit in the basket. BVIB <
+  1 (BUCK dear): sell BUCK, buy assets, issue more credit and buy more,
+  until equilibrium.
+- /H5. A third of the participants is missing./ Wage earners paying down
+  mortgages and saving (the households: have), enterprises issuing BUCK
+  credit to fund their businesses (missing), and holders of portfolios
+  drawing them down for retirement or keeping them for heirs (the investor
+  covers only accumulation). With a realistic mix K should settle where the
+  flows balance.
+
+What the contract and the runs say:
+
+- /F1. The rates are as stated./ =NetDemurrageMath=: balances decay by
+  exp(-0.02 / year); relief accrues linearly over 50 years, 2% of principal a
+  year. A lien is cheaper than free; idle BUCK costs 2% a year.
+- /F2. K does not bound the basket's held BUCK, and that is nearly all of its
+  lien./ The basket's limit is its contract's =headroom()=: K times its
+  credit's mark, less its lien. Under the net-mark policy the mark is its
+  equity (LOW marks, less unpaid relief) plus the BUCK it holds in its own
+  pool positions over K (=BuckBasketEquityStorage._creditValueS=: "Buck
+  allows a lien of K x the mark, so adding the held BUCKs over K makes that K
+  x equity + held"). So the limit is K x equity + held BUCK, and K bounds
+  only the lien the basket no longer holds. Measured exactly on 2026-11-14:
+  mark 14.13M at K 0.752 and 21.12M at K 0.402, against equity + held / K of
+  14.15M and 21.2M. In every world the basket holds more BUCK than it owes:
+  (lien - held) / equity ended at -0.076 (reverting year), -0.059 (history),
+  -0.058 (K0 = 0.5, day 230, K 0.35), while K binds only when that ratio
+  reaches K. So K never restrained the basket, the source of 70% of new
+  supply (observation 45), at any K reached; it bound only the debtors, from
+  day 150 (observation 40). The controller cuts a limit the largest issuer is
+  exempt from: this explains the monotonic fall better than tolerance or
+  inflation (observations 42 and 44). And H3's response could not happen even
+  at the limit: the wheel trims back under it only inside its
+  liquidity-shortfall branch (=BuckBasketEquityWheel.sol=). The BUCK held in
+  the TOKEN/BUCK pools is what a TOKEN seller receives and what prices BVIB,
+  so it is in circulation for the market even though the policy treats it as
+  the basket's own (owner's question, recommendation 68).
+- /F3. Every organic flow crosses the dollar route./ Debtors sell BUCK for
+  USDC (their mortgages and wages are in dollars), investors buy BUCK with
+  USDC, the basket buys TOKEN with BUCK. No agent buys TOKEN as an input or
+  sells output for BUCK, so the BUCK <-> asset circulation of H3 is absent
+  and a $10M BUCK/USDC pool carries the economy's organic flow.
+- /F4. H4's cheap-BUCK deposit adds supply today./ With the basket
+  redeploying deposits at L/E 0.82, a BUCK deposited while BUCK is cheap
+  returns 0.82 BUCK of new issuance to the TOKEN/BUCK pools (observation 43);
+  the deposit is the right private choice and a weak public one until K
+  binds the basket.
+
+What to build and test, in this order:
+
+1. /The natural K (H1)./ The same one-year centre from K0 = 0.5 on both price
+   paths, beside the K0 = 0.75 years: one K reached from above and below is
+   the natural K of this mix; both falling means the drift is structural
+   (F2). Running since 2026-11-14 (=build/runs/economy-365-k050{,-revert}=).
+2. /Decide whether K bounds the basket's held BUCK (F2, recommendation 68)./
+   The owner's expectation (H3) is a basket that answers K: a falling K makes
+   it pull BUCK out of circulation (withdraw the BUCK side of its positions,
+   sell TOKEN for BUCK, retire lien). Under the net mark it never has to. The
+   choices to try live, each for a year from both K0: count held BUCK against
+   K (mark the credit at equity alone); or keep the net mark and have the
+   wheel deleverage whenever headroom is negative, not only when liquidity is
+   short; or bound held BUCK by its own share of K.
+3. /The enterprise (H2, H5)./ A third agent role: an owner with a project
+   return r (a keyed draw, say normal about 10% a year) compares it with the
+   basket's trailing return and the cost of BUCK credit (negative: relief
+   less the premium deposit's forgone return); while r is higher it insures
+   the asset under construction, draws its K-scaled credit and buys its
+   inputs as TOKEN (LABR, CNST, NRGC are labour, construction and energy),
+   faster when the BUCK is dear (BVIB < 1, inputs cheap in BUCK), slower when
+   cheap; on completion it sells the output, buys BUCK and retires the lien.
+   Its flows are BUCK <-> TOKEN, both ways, timed by BVIB; consumed inputs
+   leave the pools (a sink), the feed and whale restoring TOKEN/USDC.
+4. /The portfolio holder (H5)./ Generalise the investor: a large opening
+   portfolio (basket shares, BUCK, dollars), an income drawn from it (about
+   4% a year), rebalancing between the basket and dollar assets on relative
+   value (BVIB, the basket's return), a bequest motive setting the drawdown.
+5. /A mature opening (H3)./ Besides today's transition economy (dollar
+   mortgages refinanced into BUCK), a world that opens already circulating:
+   households with BUCK liens and basket shares, wages partly in BUCK,
+   enterprises mid-project, pools deep enough that one household is under
+   0.1% of a day's flow. Compare where K settles in each.
+6. /The population mix as cells./ Wage earners, enterprises and portfolio
+   holders in thirds at the centre, and the corners, each from both K0.
+
+Running many worlds on datasim.local: every cell writes its run record as
+it goes, so a dashboard on that machine reads them all while they grow
+(=--runs= at the campaign's =records= directory). Its live control is
+loopback-only, so reach it through an SSH tunnel (=ssh -L
+8890:127.0.0.1:8890 datasim.local=), which keeps it loopback on both ends.
+Two additions make that the normal path: the dashboard listing several
+runs directories (or a campaign tree) grouped by campaign; and a control
+channel in the run directory itself (=control.jsonl=, read by the CLI loop
+between days), so batch cells can be steered like dashboard sessions.
+
 ** How to work here
 
 - /Two languages, one behaviour./ Every change is mirrored:
@@ -244,7 +356,7 @@ start, stop or probe the tunnel origin ports 8000, 8797 or 8798. The
 JavaScript demo (=make nix-core-demo-eqworld-serve=, =make nix-core-eqsim=)
 needs step B in JavaScript before a population is practical.
 
-*** F. One run record, one dashboard, fewer tools (started: R1 and R2 done)
+*** F. One run record, one dashboard, fewer tools (started: R1, R2 and most of R3 done)
 
 The owner's direction of 2026-11-12: fewer simulations, each able to apply a
 range of shocks to a population whose response is configurable, inspectable
@@ -305,7 +417,8 @@ Phases, each qualified and recorded here before its commit:
   recorded with =source= =operator=; an exported experiment replays a
   session exactly. Local only; the public server keeps refusing unsigned
   sends.
-- *R3. The component tabs.* BuckBasket (equity, lien, gross, share price,
+- *R3. The component tabs (BuckBasket, Market, Jubilee fund and Agents done;
+  see the component-tabs milestone; Insurers and Events open).* BuckBasket (equity, lien, gross, share price,
   weights against targets, the wheel's operations, deposits and redemptions,
   guard trips), Market (every pool, the triangle gaps, arbitrage), Jubilee
   fund, Insurers and pools (the frames do not yet record the insurers' pools:
@@ -3335,3 +3448,83 @@ local sessions run inside the dashboard's own server instead of beside it.
     same engine (same day, same effect, now listed in the vector's
     =interventions_applied=); it still writes no run record. Recording there
     needs a disk budget per visitor and a retention rule first.
+
+
+** Component-tabs milestone: BuckBasket, Market, Jubilee fund, Agents (R3, part)
+
+The owner's discussion of 2026-11-14 (the economy section near the top) asks
+whether K is finding a natural level and whether the basket answers it; these
+tabs are how to see that in any run, finished or live.
+
+- [X] /The record carries the tabs' data./ The snapshot reads the basket's
+  own =headroom()= and =markNow()= each day (older records: limit estimated
+  as K x equity + held BUCK, the net-mark formula); =frame_record= adds them and the
+  basket's unpaid relief, carried fee, held weights against the upkeep's targets and
+  declared weights, and the wheel's cumulative trades; the market's BUCK in
+  each TOKEN/BUCK pool and the arbitrageurs' cumulative trades. The shared
+  fixture and both tests carry them. Earlier vectors re-import with them
+  (=runrecord import=; a run's own record is replaced by the import of the
+  vector it wrote, once it has finished).
+- [X] /One household's history without loading the whole log./
+  =dashboard.LineIndex= keeps byte ranges per household for =agents.jsonl=
+  and =events.jsonl=, extended from the last whole line, and each one's
+  latest line: =/api/runs/<id>/agents= (the table), =agents?member==,
+  =events?member==.
+- [X] /The tabs./ A generic chart tab (=ChartTab=) for Overview, Market,
+  BuckBasket and Jubilee fund, specified in =series.js= (the BuckBasket tab's
+  first chart is the lien against the contract's limit, lien + headroom; the
+  second, what K bounds, (lien - held) / equity, against K) (=MARKET(tokens)=,
+  =BASKET(tokens)=, =JUBILEE()=, =tabTiles=; daily changes of cumulative
+  counters by =perDay=); the Agents tab (=agents.js=): a sortable, filtered
+  table and a drill-down (three charts and the state-machine timeline),
+  linked to the live settings form. Only the shown tab is redrawn; the tab is
+  kept in the URL. Six categorical slots, validated in both modes.
+
+*** Checkpoint
+
+- *Evidence*: the supported Python set (twenty files), 313 passed
+  (=build/test/q9-python.log=); JavaScript policy and dashboard units 85 of
+  85; =make nix-dashboard-live-check= clean after the last page change
+  (=q10-live.log=); light captures of the four new tabs with no console error
+  and one tooltip per hover; the contract's mark measured against equity +
+  held BUCK / K in two worlds (F2, observation 59).
+
+*** Observations and recommendations (component tabs)
+
+**** Measured
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 55 | BuckBasket tab, both one-year worlds | Lien per BUCK of equity flat at 0.82 to 0.85 from day 30 to the end while K falls from 0.75 to 0.47 (reverting) or 0.45 (history); the lien less the BUCK the basket holds in its pool positions is below zero all year (-0.076 and -0.059 of equity at the end), far from the K it would have to reach to bind (F2). Held weights stay within about 1.5 percentage points of the upkeep's targets; the share price ends at 1.009 (reverting). |
+| 56 | Jubilee fund tab, reverting year | The basket's unpaid relief grows steadily to 169k BUCK (about 2% a year on its average lien, as accrued), while the fund has 6k of relief available: its cash is 60k and its basket position is marked at 506k. The basket earns relief that is not being paid. |
+| 57 | Market tab, reverting year | Triangle gaps swing about +-2% day to day and end at 0.39% at most; the USDC pools stay within about +-1% of their references; the BUCK in the BUCK/USDC pool stays near 10M all year while the TOKEN/BUCK pools grow from 11.1M to 17.7M (observation 43). |
+| 58 | Agents tab, reverting year, the household furthest below its counterfactual | 0/debtor/7 arrived on day 330, drew 478k BUCK within its limit in about 30 days, and paid its dollar mortgage down from about 700k to 270k; it ends 19.1k dollars below its counterfactual, its switching costs and the conversion's price impact not yet repaid. Its 157 steps (assessments declined, exports, mortgage payments, saving deposits) read in order on the page. |
+| 59 | 30 days from K0 = 0.40 (=build/runs/underwater-k040=, recording the contract's headroom and mark) | Expected the basket to open under water (its lien is 0.43 of its gross mark); it opened with +2.48M of headroom and ended at +3.09M, K 0.402 -> 0.388, BVIB above 1 on most days. The mark was 1.75 to 1.81 times the gross, exactly equity + held BUCK / K: as K falls the mark rises, so the limit falls only on the small lien the basket no longer holds. |
+
+**** Recommendations
+
+64. /Find out why the basket's relief is unpaid (observation 56)./ Who
+    claims it (the wheel's fund jobs), whether the fund's liquid cash limits
+    it while its demurrage income sits in a basket position, and whether the
+    basket's equity should count it. A five-year run would carry about five
+    times the backlog.
+65. /The Events tab next./ Refusals by decoded cause across all households
+    and days (recommendation 48 first: decode each revert's custom error into
+    the event), and a list of the latest refused steps linking to the
+    household.
+66. /The Insurers tab needs reads first./ The frames do not record the
+    insurers' pools: add each pool's premium deposits, coverage, facilities
+    and liquidity limit to =net_snapshot.observe=, then the tab.
+67. /Many runs on datasim.local./ Point a dashboard on that machine at a
+    campaign's =records= directory and reach it through an SSH tunnel (live
+    control stays loopback-only); then add a listing over several runs
+    directories grouped by campaign, and a =control.jsonl= channel in each
+    run directory so batch cells can be steered like dashboard sessions.
+68. /Owner's question: does K bound the basket's held BUCK?/ Under the
+    net-mark policy (=_creditValueS=) the BUCK the basket issued and holds as
+    the BUCK side of its own pool positions is exempt from K, and in every
+    world that is more than its whole lien (F2, observation 59). Those BUCK sit
+    in the TOKEN/BUCK pools, where TOKEN sellers receive them and BVIB is
+    priced. If K is to be the economy's lever, it has to reach them, or the
+    basket's response to K has to be written another way (the build list's
+    item 2). This is the first thing to settle before the five-year runs.

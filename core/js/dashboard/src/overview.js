@@ -1,6 +1,6 @@
-// The Overview tab: the run's headline figures for its latest day, then K, BVIB and price,
-// who holds the BUCK, where it came from, the population and its refusals -- each chart
-// marked with the run's interventions.
+// A chart tab: its headline figures for the latest day, then its charts, each marked with the
+// run's interventions. The Overview, BuckBasket, Market and Jubilee fund tabs are all this, with
+// their own chart specifications (series.js).
 
 import { TimeChart } from "./chart.js";
 import { OVERVIEW, format, tiles, windowFrames } from "./series.js";
@@ -12,13 +12,14 @@ const html = (tag, attrs = {}, text = null) => {
   return node;
 };
 
-export class OverviewTab {
-  constructor(root, bus) {
+export class ChartTab {
+  constructor(root, bus, specs, tilesFn) {
     this.root = root;
+    this.tilesFn = tilesFn;
     this.tiles = html("div", { class: "tiles" });
     this.grid = html("div", { class: "charts" });
     root.replaceChildren(this.tiles, this.grid);
-    this.charts = OVERVIEW.map((spec) => {
+    this.charts = specs.map((spec) => {
       const card = html("section", { class: "card", "aria-label": spec.title });
       this.grid.append(card);
       return new TimeChart(card, spec, bus);
@@ -27,7 +28,7 @@ export class OverviewTab {
 
   update({ frames, manifest, interventions, range }) {
     const shown = windowFrames(frames, range);
-    this.tiles.replaceChildren(...tiles(frames, manifest).map((t) => {
+    this.tiles.replaceChildren(...this.tilesFn(frames, manifest).map((t) => {
       const tile = html("div", { class: "tile" });
       tile.append(html("div", { class: "tile-label" }, t.label));
       tile.append(html("div", { class: "tile-value" }, format(t.value, t.unit)));
@@ -40,5 +41,11 @@ export class OverviewTab {
       label: `${iv.source === "operator" ? "operator: " : ""}${iv.action ?? "intervention"}${iv.ok === false ? " (refused)" : ""}`,
     }));
     for (const chart of this.charts) chart.update(shown, markers);
+  }
+}
+
+export class OverviewTab extends ChartTab {
+  constructor(root, bus) {
+    super(root, bus, OVERVIEW, tiles);
   }
 }

@@ -12,6 +12,11 @@ const errors = [];
 page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
 page.on("pageerror", (e) => errors.push(String(e)));
 await page.goto(url);
+if (new URL(url).searchParams.get("tab") === "agents") {
+  // The Agents tab: open the household that leads the table, so its drill-down is captured too.
+  await page.waitForSelector(".agents-table tbody tr", { timeout: 20000 });
+  await page.locator(".agents-table tbody tr").first().click();
+}
 await page.waitForSelector(".card svg path.line", { timeout: 20000 });
 await page.waitForTimeout(500);
 await page.screenshot({ path: out, fullPage: true });

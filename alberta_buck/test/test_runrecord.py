@@ -115,7 +115,16 @@ def test_dashboard_server_reads_runs_and_refuses_what_it_does_not_serve(tmp_path
             rec.frame(flat)                              # the run grows; the page asks for what is new
         assert [f["day"] for f in get("/api/runs/live/frames?since=0")] == [1, 2]
         assert get("/api/runs/live/frames?since=2") == [] and get("/api/runs/live/interventions") == []
+        latest = {r["member"]: r for r in get("/api/runs/live/agents")}
+        assert sorted(latest) == ["0/debtor/0", "0/debtor/1"] and latest["0/debtor/0"]["day"] == 2
+        assert [r["day"] for r in get("/api/runs/live/agents?member=0/debtor/0")] == [0, 1, 2]
+        assert [(e["day"], e["kind"]) for e in get("/api/runs/live/events?member=0/debtor/0")] == [
+            (0, "surplus"), (1, "surplus"), (2, "act"), (2, "surplus")]
+        assert get("/api/runs/live/events?member=nobody") == []
         assert b"<title>t</title>" in urllib.request.urlopen(base + "/", timeout=10).read()
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(base + "/api/runs/live/events", timeout=10)
+        assert e.value.code == 400
         for bad in ("/api/runs/nope/manifest", "/api/runs/..%2F..%2Fetc/manifest", "/api/runs/live/secrets"):
             with pytest.raises(urllib.error.HTTPError) as e:
                 urllib.request.urlopen(base + bad, timeout=10)

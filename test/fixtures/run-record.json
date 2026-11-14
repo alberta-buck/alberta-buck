@@ -126,7 +126,32 @@
      "phase": "dispatch",
      "status": "confirmed"
     }
-   ]
+   ],
+   "eq_w": [
+    6000,
+    4000
+   ],
+   "eq_lean": [
+    6100,
+    3900
+   ],
+   "eq_decl": [
+    6000,
+    4000
+   ],
+   "eq_unpaid_relief": 20000,
+   "eq_carried_fee": 0,
+   "wh_eq_buy": 0,
+   "wh_eq_buy_n": 0,
+   "wh_eq_sell": 0,
+   "wh_eq_sell_n": 0,
+   "wh_eq_respond": 0,
+   "wh_eq_respond_n": 0,
+   "cycleTrades": 10,
+   "directTrades": 5,
+   "ubTrades": 3,
+   "eq_headroom": 900000,
+   "eq_mark": 14000000
   },
   {
    "day": 1,
@@ -248,7 +273,32 @@
      "phase": "dispatch",
      "status": "confirmed"
     }
-   ]
+   ],
+   "eq_w": [
+    5950,
+    4050
+   ],
+   "eq_lean": [
+    6100,
+    3900
+   ],
+   "eq_decl": [
+    6000,
+    4000
+   ],
+   "eq_unpaid_relief": 40000,
+   "eq_carried_fee": 5000,
+   "wh_eq_buy": 1000000,
+   "wh_eq_buy_n": 3,
+   "wh_eq_sell": 400000,
+   "wh_eq_sell_n": 2,
+   "wh_eq_respond": 900000,
+   "wh_eq_respond_n": 1,
+   "cycleTrades": 17,
+   "directTrades": 7,
+   "ubTrades": 4,
+   "eq_headroom": 300000,
+   "eq_mark": 14400000
   },
   {
    "day": 2,
@@ -378,7 +428,32 @@
      "phase": "dispatch",
      "status": "confirmed"
     }
-   ]
+   ],
+   "eq_w": [
+    5900,
+    4100
+   ],
+   "eq_lean": [
+    6100,
+    3900
+   ],
+   "eq_decl": [
+    6000,
+    4000
+   ],
+   "eq_unpaid_relief": 60000,
+   "eq_carried_fee": 10000,
+   "wh_eq_buy": 2000000,
+   "wh_eq_buy_n": 6,
+   "wh_eq_sell": 800000,
+   "wh_eq_sell_n": 4,
+   "wh_eq_respond": 1800000,
+   "wh_eq_respond_n": 2,
+   "cycleTrades": 24,
+   "directTrades": 9,
+   "ubTrades": 5,
+   "eq_headroom": -250000,
+   "eq_mark": 14660000
   }
  ],
  "frames": [
@@ -409,7 +484,22 @@
       "usdc": 7.79,
       "buck": 7.81
      }
-    ]
+    ],
+    "pools": [
+     {
+      "symbol": "LABR",
+      "buck": 8000000
+     },
+     {
+      "symbol": "CNST",
+      "buck": 6000000
+     }
+    ],
+    "arb": {
+     "cycles": 10,
+     "direct": 5,
+     "ub": 3
+    }
    },
    "supply": {
     "total": 40000000,
@@ -430,7 +520,33 @@
     "nav": 25000000,
     "share_price": 1.0,
     "held_buck": 10000000,
-    "idle_buck": 0
+    "idle_buck": 0,
+    "headroom": 900000,
+    "mark": 14000000,
+    "unpaid_relief": 20000,
+    "carried_fee": 0,
+    "weights": [
+     {
+      "symbol": "LABR",
+      "held_bp": 6000,
+      "target_bp": 6100,
+      "declared_bp": 6000
+     },
+     {
+      "symbol": "CNST",
+      "held_bp": 4000,
+      "target_bp": 3900,
+      "declared_bp": 4000
+     }
+    ],
+    "wheel": {
+     "buy": 0,
+     "sell": 0,
+     "respond": 0,
+     "buys": 0,
+     "sells": 0,
+     "responds": 0
+    }
    },
    "jubilee": {
     "nominal": 1000000,
@@ -504,7 +620,22 @@
       "usdc": 7.79,
       "buck": 7.81
      }
-    ]
+    ],
+    "pools": [
+     {
+      "symbol": "LABR",
+      "buck": 8400000
+     },
+     {
+      "symbol": "CNST",
+      "buck": 6300000
+     }
+    ],
+    "arb": {
+     "cycles": 17,
+     "direct": 7,
+     "ub": 4
+    }
    },
    "supply": {
     "total": 41000000,
@@ -525,7 +656,33 @@
     "nav": 26000000,
     "share_price": 1.0,
     "held_buck": 10500000,
-    "idle_buck": 100000
+    "idle_buck": 100000,
+    "headroom": 300000,
+    "mark": 14400000,
+    "unpaid_relief": 40000,
+    "carried_fee": 5000,
+    "weights": [
+     {
+      "symbol": "LABR",
+      "held_bp": 5950,
+      "target_bp": 6100,
+      "declared_bp": 6000
+     },
+     {
+      "symbol": "CNST",
+      "held_bp": 4050,
+      "target_bp": 3900,
+      "declared_bp": 4000
+     }
+    ],
+    "wheel": {
+     "buy": 1000000,
+     "sell": 400000,
+     "respond": 900000,
+     "buys": 3,
+     "sells": 2,
+     "responds": 1
+    }
    },
    "jubilee": {
     "nominal": 1000000,
@@ -599,7 +756,22 @@
       "usdc": 7.79,
       "buck": 7.81
      }
-    ]
+    ],
+    "pools": [
+     {
+      "symbol": "LABR",
+      "buck": 8900000
+     },
+     {
+      "symbol": "CNST",
+      "buck": 6700000
+     }
+    ],
+    "arb": {
+     "cycles": 24,
+     "direct": 9,
+     "ub": 5
+    }
    },
    "supply": {
     "total": 42500000,
@@ -620,7 +792,33 @@
     "nav": 27400000,
     "share_price": 1.0,
     "held_buck": 11200000,
-    "idle_buck": 250000
+    "idle_buck": 250000,
+    "headroom": -250000,
+    "mark": 14660000,
+    "unpaid_relief": 60000,
+    "carried_fee": 10000,
+    "weights": [
+     {
+      "symbol": "LABR",
+      "held_bp": 5900,
+      "target_bp": 6100,
+      "declared_bp": 6000
+     },
+     {
+      "symbol": "CNST",
+      "held_bp": 4100,
+      "target_bp": 3900,
+      "declared_bp": 4000
+     }
+    ],
+    "wheel": {
+     "buy": 2000000,
+     "sell": 800000,
+     "respond": 1800000,
+     "buys": 6,
+     "sells": 4,
+     "responds": 2
+    }
    },
    "jubilee": {
     "nominal": 1000000,

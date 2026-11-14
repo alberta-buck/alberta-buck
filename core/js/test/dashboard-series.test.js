@@ -52,3 +52,45 @@ test("windows, tiles, status, formats and ticks", () => {
   assert.deepEqual(ticks(0.98, 1.03, 5), [0.98, 0.99, 1, 1.01, 1.02, 1.03]);
   assert.deepEqual(ticks(0, 32e6, 4), [0, 1e7, 2e7, 3e7]);
 });
+
+test("the BuckBasket, Market and Jubilee tabs read the recorded frame shape", async () => {
+  const { BASKET, MARKET, JUBILEE, tabTiles } = await import("../dashboard/src/series.js");
+  const tokens = FIXTURE.tokens;
+  for (const specs of [BASKET(tokens), MARKET(tokens), JUBILEE()]) {
+    for (const s of specs) {
+      const d = chartData(s, frames);
+      for (const series of d.series) {
+        assert.ok(series.values.every((v) => v === null || Number.isFinite(v)), `${s.id}.${series.key}`);
+        assert.ok(series.values.some((v) => v !== null), `${s.id}.${series.key} is recorded in the fixture`);
+      }
+    }
+  }
+  const lev = chartData(BASKET(tokens).find((s) => s.id === "leverage"), frames).series;
+  assert.ok(lev[0].values[2] === 0 && Math.abs(lev[1].values[2] - 11.2 / 16.2) < 1e-12 && lev[2].values[2] === 0.747,
+    "the fixture's basket holds all it owes: K bounds nothing");
+  const limit = chartData(BASKET(tokens).find((s) => s.id === "limit"), frames).series;
+  assert.deepEqual([limit[0].values[2], limit[1].values[2]], [11.2, 10.95], "lien + the contract's headroom (under water)");
+  const { basketLimit } = await import("../dashboard/src/series.js");
+  const old = { control: { k: 0.5 }, basket: { lien: 4e6, equity: 6e6, held_buck: 3e6 } };
+  assert.equal(basketLimit(old), 6e6, "without the contract's headroom: K x equity + held BUCK (the net mark)");
+  assert.deepEqual(chartData(BASKET(tokens).find((s) => s.id === "wheel"), frames).series[0].values, [null, 1, 1],
+    "a cumulative counter is drawn as its daily change");
+  assert.deepEqual(chartData(BASKET(tokens).find((s) => s.id === "weights"), frames).series.map((s) => s.values[2]), [-2, 2]);
+  const gap = chartData(MARKET(tokens).find((s) => s.id === "triangle"), frames).series[0].values[2];
+  assert.ok(Math.abs(gap - (0.249 * 0.99 / 0.251 - 1) * 100) < 1e-9);
+  const pools = stackTops(chartData(MARKET(tokens).find((s) => s.id === "pools"), frames));
+  assert.equal(Math.round(pools.at(-1)[2] * 1e6), 14_800_000 + 8_900_000 + 6_700_000);
+  const t = Object.fromEntries(tabTiles("basket", frames).map((x) => [x.id, x.value]));
+  assert.ok(Math.abs(t.le - 11.2 / 16.2) < 1e-12 && t.equity === 16.2 && t.headroom === -0.25);
+  assert.deepEqual(tabTiles("nothing", frames), []);
+});
+
+test("the Agents table's columns and an event's detail", async () => {
+  const { COLUMNS, eventDetail } = await import("../dashboard/src/agents.js");
+  const row = { member: "0/debtor/1", role: "debtor", day: 9, nw: 2_000_000, hypo: 5_000_000, drawn: 7_000_000, exited: false, error: "tx reverted" };
+  const v = Object.fromEntries(COLUMNS.map((c) => [c.key, c.value(row)]));
+  assert.equal(v.vs, -3); assert.equal(v.drawn, 7); assert.equal(v.basket, null); assert.equal(v.state, "refused: tx reverted");
+  assert.equal(format(-3, "usd"), "-$3.00");
+  assert.equal(eventDetail({ seq: 4, day: 2, kind: "surplus", phase: "x", status: "confirmed", accounts: { big: 1 }, operation: "deposit", amounts: { buck: "5" } }),
+    '{"operation":"deposit","amounts":{"buck":"5"}}');
+});

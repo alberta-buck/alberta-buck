@@ -9,6 +9,9 @@ Serves core/js/dashboard/ and a JSON API over a runs directory (alberta_buck.sim
   GET  /api/runs/<id>/manifest            one run's manifest
   GET  /api/runs/<id>/frames?since=<day>  its frames after that day (all without since)
   GET  /api/runs/<id>/interventions       its interventions
+  GET  /api/runs/<id>/agents              each household's latest line (the Agents table)
+  GET  /api/runs/<id>/agents?member=<m>   one household's lines, day by day
+  GET  /api/runs/<id>/events?member=<m>   one household's state-machine steps
 
 and live sessions: worlds it runs itself (server.Session, one thread and pyrevm EVM each), each
 writing its run record as it goes (live-<sid>), kept until its operator stops it:
@@ -111,8 +114,59 @@ class FrameCache:
             return rows
 
 
+class LineIndex:
+    """A JSON Lines file's lines grouped by member, as byte ranges, extended from the last whole line;
+    and each member's latest line. One household's history is read without loading the whole file."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.files: dict[str, tuple[int, dict, dict]] = {}
+
+    def _update(self, path: Path):
+        key = str(path)
+        offset, ranges, latest = self.files.get(key, (0, {}, {}))
+        if path.exists() and path.stat().st_size < offset:          # rewritten: start again
+            offset, ranges, latest = 0, {}, {}
+        try:
+            with open(path, "rb") as f:
+                f.seek(offset)
+                data = f.read()
+        except FileNotFoundError:
+            return ranges, latest
+        start = 0
+        while True:
+            end = data.find(b"\n", start)
+            if end < 0:
+                break
+            line = data[start:end]
+            if line.strip():
+                row = json.loads(line)
+                member = row.get("member")
+                if member is not None:
+                    ranges.setdefault(member, []).append((offset + start, end - start))
+                    latest[member] = row
+            start = end + 1
+        self.files[key] = (offset + start, ranges, latest)
+        return ranges, latest
+
+    def latest(self, path: Path) -> list[dict]:
+        with self.lock:
+            return list(self._update(path)[1].values())
+
+    def member(self, path: Path, member: str) -> list[dict]:
+        with self.lock:
+            spans = list(self._update(path)[0].get(member, []))
+        with open(path, "rb") as f:
+            out = []
+            for start, length in spans:
+                f.seek(start)
+                out.append(json.loads(f.read(length)))
+        return out
+
+
 def make_handler(root: Path, static: Path = STATIC, live: LiveSessions | None = None):
     cache = FrameCache()
+    lines = LineIndex()
 
     class Handler(SimpleHTTPRequestHandler):
         extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".js": "text/javascript",
@@ -235,6 +289,14 @@ def make_handler(root: Path, static: Path = STATIC, live: LiveSessions | None = 
                     if parts[3] == "interventions":
                         rows, _ = runrecord.read_lines(directory / runrecord.FILES["interventions"])
                         return self._json(rows)
+                    if parts[3] in ("agents", "events"):
+                        path = directory / runrecord.FILES[parts[3]]
+                        member = (parse_qs(url.query).get("member") or [None])[0]
+                        if member is not None:
+                            return self._json(lines.member(path, member))
+                        if parts[3] == "agents":
+                            return self._json(lines.latest(path))
+                        raise ValueError("events are read one household at a time: ?member=")
                 return self._json({"error": "unknown request"}, 404)
             except LookupError as e:
                 return self._json({"error": str(e)}, 404)

@@ -212,6 +212,13 @@ export class TimeChart {
         svg.append(t);
       }
     }
+    if (days.length && series.every((s) => s.values.every((v) => v === null || !Number.isFinite(v)))) {
+      // A run recorded before these fields existed: say so rather than draw empty axes.
+      const t = el("text", { x: MARGIN.left + iw / 2, y: MARGIN.top + (HEIGHT - MARGIN.top - MARGIN.bottom) / 2,
+        class: "empty-label", "text-anchor": "middle" });
+      t.textContent = "Not recorded in this run";
+      svg.append(t);
+    }
     this.cross = el("line", { y1: MARGIN.top, y2: HEIGHT - MARGIN.bottom, class: "crosshair", visibility: "hidden" });
     svg.append(this.cross);
     this.plot.querySelector("svg")?.remove();

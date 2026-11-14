@@ -1,19 +1,23 @@
 // The dashboard page: pick a run, watch it. A finished run is read once; a running one is
-// polled for the days it has added. Tabs other than the Overview are named but not yet built.
+// polled for the days it has added. One tab is shown at a time and only it is redrawn; the
+// Insurers and Events tabs are named and not yet built.
 
+import { AgentsTab } from "./agents.js";
 import { HoverBus } from "./chart.js";
 import { ControlPanel, newSessionForm } from "./controls.js";
 import { LiveControl } from "./live.js";
-import { OverviewTab } from "./overview.js";
-import { runStatus } from "./series.js";
+import { ChartTab, OverviewTab } from "./overview.js";
+import { BASKET, JUBILEE, MARKET, runStatus, tabTiles } from "./series.js";
 import { HttpRunSource, listRuns } from "./sources.js";
 
 const POLL_MS = 2000;
 const MANIFEST_MS = 10000;
 const TABS = [
   ["overview", "Overview"], ["market", "Market"], ["basket", "BuckBasket"], ["jubilee", "Jubilee fund"],
-  ["insurers", "Insurers and pools"], ["agents", "Agents"], ["events", "Events"],
+  ["insurers", "Insurers and pools", "Not yet recorded: the frames do not read the insurers' pools"],
+  ["agents", "Agents"], ["events", "Events", "Not yet built"],
 ];
+const AGENTS_MS = 10000;
 const STATUS = {
   running: ["Running", "good"], complete: ["Complete", "neutral"], failed: ["Failed", "critical"],
   stale: ["Stale: not updated for 2 minutes", "warning"], incomplete: ["Incomplete", "warning"],
@@ -27,9 +31,9 @@ const store = {
 };
 
 const state = { source: null, manifest: null, frames: [], interventions: [], range: "all", timer: null, lastManifest: 0,
-  control: null, session: null };
+  control: null, session: null, tab: "overview", lastAgents: 0 };
 const bus = new HoverBus();
-let overview = null;
+let views = {};
 let panel = null;
 
 // A live session's own state outranks its record's age: a paused world writes nothing for a while.
@@ -50,15 +54,49 @@ function theme(next) {
 
 function tabs() {
   const bar = $("tabs");
-  for (const [id, label] of TABS) {
+  const panels = $("panels");
+  for (const [id, label, off] of TABS) {
     const b = document.createElement("button");
     b.type = "button";
     b.role = "tab";
+    b.id = `tab-${id}`;
     b.textContent = label;
-    b.setAttribute("aria-selected", String(id === "overview"));
-    if (id !== "overview") { b.disabled = true; b.title = "Not yet built"; }
+    b.setAttribute("aria-controls", `panel-${id}`);
+    if (off) { b.disabled = true; b.title = off; }
+    b.addEventListener("click", () => select(id));
     bar.append(b);
+    const p = document.createElement("main");
+    p.id = `panel-${id}`;
+    p.className = "panel";
+    p.setAttribute("role", "tabpanel");
+    p.setAttribute("aria-labelledby", `tab-${id}`);
+    p.hidden = true;
+    panels.append(p);
   }
+}
+
+// Each run gets fresh views: its commodities name the Market and BuckBasket series.
+function view(id) {
+  if (views[id]) return views[id];
+  const root = $(`panel-${id}`), tokens = state.manifest?.tokens ?? [];
+  views[id] = id === "overview" ? new OverviewTab(root, bus)
+    : id === "market" ? new ChartTab(root, bus, MARKET(tokens), (f) => tabTiles("market", f))
+      : id === "basket" ? new ChartTab(root, bus, BASKET(tokens), (f) => tabTiles("basket", f))
+        : id === "jubilee" ? new ChartTab(root, bus, JUBILEE(), (f) => tabTiles("jubilee", f))
+          : id === "agents" ? new AgentsTab(root, bus, panel) : null;
+  return views[id];
+}
+
+function select(id) {
+  state.tab = id;
+  for (const [t] of TABS) {
+    $(`tab-${t}`).setAttribute("aria-selected", String(t === id));
+    $(`panel-${t}`).hidden = t !== id;
+  }
+  const url = new URL(location.href);
+  url.searchParams.set("tab", id);
+  history.replaceState(null, "", url);
+  render(true);
 }
 
 function showStatus() {
@@ -78,10 +116,20 @@ function showStatus() {
     .filter(Boolean).join(" · ");
 }
 
-function render() {
-  if (!overview) overview = new OverviewTab($("overview"), bus);
-  overview.update({ frames: state.frames, manifest: state.manifest, interventions: state.interventions, range: state.range });
+function render(switched = false) {
   $("empty").hidden = state.frames.length > 0;
+  if (!state.source) return;
+  const v = view(state.tab);
+  if (!v) return;
+  if (v instanceof AgentsTab) {
+    // The table is read on demand: on switching to it, and every ten seconds while a run grows.
+    if (switched || Date.now() - state.lastAgents > AGENTS_MS) {
+      state.lastAgents = Date.now();
+      v.show({ source: state.source, range: state.range });
+    }
+    return;
+  }
+  v.update({ frames: state.frames, manifest: state.manifest, interventions: state.interventions, range: state.range });
 }
 
 async function poll() {
@@ -128,7 +176,10 @@ async function poll() {
 async function open(id) {
   clearTimeout(state.timer);
   const src = new HttpRunSource(id);
-  Object.assign(state, { source: src, frames: [], interventions: [], lastManifest: Date.now(), control: null, session: null });
+  Object.assign(state, { source: src, frames: [], interventions: [], lastManifest: Date.now(), control: null, session: null,
+    lastAgents: 0 });
+  views = {};
+  for (const [t] of TABS) $(`panel-${t}`).replaceChildren();
   $("run").value = id;
   const url = new URL(location.href);
   url.searchParams.set("run", id);
@@ -146,7 +197,7 @@ async function open(id) {
     if (!state.control) panel.detach();
     showStatus();
     state.frames = await src.frames(-1);
-    render();
+    render(true);
     $("problem").hidden = true;
   } catch (e) {
     $("problem").hidden = false;
@@ -207,9 +258,11 @@ async function main() {
     b.addEventListener("click", () => {
       state.range = b.dataset.range;
       for (const o of document.querySelectorAll("#range button")) o.setAttribute("aria-pressed", String(o === b));
-      if (state.frames.length) render();
+      if (state.frames.length) render(true);
     });
   }
+  const wantedTab = new URL(location.href).searchParams.get("tab");
+  select(TABS.some(([t, , off]) => t === wantedTab && !off) ? wantedTab : "overview");
   const runs = await refreshRuns();
   const pick = $("run");
   pick.addEventListener("change", () => open(pick.value));

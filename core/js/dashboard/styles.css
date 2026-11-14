@@ -16,6 +16,8 @@
   --series-2: #eb6834;
   --series-3: #1baf7a;
   --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
   --good: #0ca30c;
   --warning: #fab219;
   --critical: #d03b3b;
@@ -38,6 +40,8 @@
     --series-2: #d95926;
     --series-3: #199e70;
     --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
     --tooltip: #242423;
     --focus: #3987e5;
   }
@@ -57,6 +61,8 @@
   --series-2: #d95926;
   --series-3: #199e70;
   --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
   --tooltip: #242423;
   --focus: #3987e5;
 }
@@ -195,3 +201,24 @@ a.button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .field small { color: var(--text-muted); }
 .field.check { flex-direction: row; align-items: center; gap: 6px; }
 .live-form button[type="submit"] { font-weight: 600; }
+
+/* The Agents tab: a sortable table of households, and one household's drill-down. */
+.agents-table { max-height: 420px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; }
+.agents-table tbody tr { cursor: pointer; }
+.agents-table tbody tr:hover { background: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+.agents-table tbody tr.selected { background: color-mix(in srgb, var(--series-1) 14%, transparent); }
+.agents-table tbody tr:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.agents-table td:nth-child(10) { text-align: left; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-table td:nth-child(9) { text-align: left; }
+.agents-table td:nth-child(2) { text-align: left; }
+button.sort { border: none; background: none; padding: 0; font: inherit; color: inherit; font-weight: 600; cursor: pointer; }
+th[aria-sort="ascending"] button.sort::after { content: " \2191"; }
+th[aria-sort="descending"] button.sort::after { content: " \2193"; }
+.drill { margin-top: 14px; }
+.drill > .card-head { margin-bottom: 8px; }
+.drill .events { margin-top: 12px; }
+.drill .events td { text-align: left; }
+.drill .events td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--text-secondary); max-width: 640px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drill .events tr.fault td { color: var(--critical); }
+.panel[hidden] { display: none; }
+.empty-label { fill: var(--text-muted); font-size: 12px; }

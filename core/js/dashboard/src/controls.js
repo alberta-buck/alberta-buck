@@ -179,18 +179,33 @@ export class ControlPanel {
       f.surplus_policy.options[0].textContent = `unchanged (${m?.settings?.surplus_policy ?? "?"})`;
     };
     member.addEventListener("change", show);
-    const load = h("button", { type: "button", class: "ghost", on: { click: async () => {
+    const loadMembers = async () => {
       try {
         members = (await this.control.members()).filter((m) => !m.exited);
         member.replaceChildren(...members.map((m) => h("option", { value: m.member }, `${m.member} (${m.role})`)));
         show();
       } catch (e) { this.result.textContent = `Households: ${e.message}`; }
-    } } }, "Load households");
+    };
+    const load = h("button", { type: "button", class: "ghost", on: { click: loadMembers } }, "Load households");
     const details = this.form("Change a household's settings", "Decision settings only: its home, mortgage, income and role are fixed at arrival. Placeholders show current values; blank fields are unchanged.",
       [field("Household", member), load, ...keys.map((k) => field(k.replaceAll("_", " "), f[k])), field("Surplus policy", f.surplus_policy)],
       () => this.run("Household settings", () => this.control.intervene({ action: "household_settings", member: member.value, settings: filled(f) })));
-    details.addEventListener("toggle", () => { if (details.open && !members.length) load.click(); });
+    details.addEventListener("toggle", () => { if (details.open && !members.length) loadMembers(); });
+    this.changeDetails = details;
+    this.pickMember = async (name) => {
+      details.open = true;
+      if (!members.some((m) => m.member === name)) await loadMembers();
+      member.value = name;
+      show();
+    };
     return details;
+  }
+
+  // From the Agents tab: this household, in the settings form.
+  async openFor(name) {
+    if (!this.control || !this.pickMember) return;
+    await this.pickMember(name);
+    this.changeDetails.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 }
 

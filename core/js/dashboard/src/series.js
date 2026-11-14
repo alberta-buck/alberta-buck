@@ -75,12 +75,222 @@ export function windowFrames(frames, range) {
   return frames.filter((f) => f.day > last - Number(range));
 }
 
-// One chart's data: days, and each series' values (null where not recorded).
+// One chart's data: days, and each series' values (null where not recorded). A series' value is
+// value(frame, index, frames), so a daily change can read the day before.
 export function chartData(spec, frames) {
   return {
     days: frames.map((f) => f.day),
-    series: spec.series.map((s) => ({ key: s.key, label: s.label, values: frames.map((f) => s.value(f)) })),
+    series: spec.series.map((s) => ({ key: s.key, label: s.label, values: frames.map((f, i) => s.value(f, i, frames)) })),
   };
+}
+
+// The change since the previous recorded day of a cumulative counter (null on the first day).
+export const perDay = (get) => (f, i, frames) => {
+  if (i === 0) return null;
+  const a = get(frames[i - 1]), b = get(f);
+  return a === null || b === null || a === undefined || b === undefined ? null : Number(b) - Number(a);
+};
+
+const ratioOf = (a, b) => (a === null || a === undefined || !b ? null : Number(a) / Number(b));
+
+// The basket's issuance limit in raw units: the contract's own (lien + headroom) when recorded.
+// Its credit is marked at equity + held BUCK / K (BuckBasketEquityStorage._creditValueS, the "net
+// mark"), so the limit K x mark is K x equity + the BUCK it holds in its own pool positions; older
+// records are estimated that way (at TWAP rather than LOW marks, before unpaid relief).
+export function basketLimit(f) {
+  const b = f.basket ?? {};
+  if (b.headroom !== null && b.headroom !== undefined && b.lien !== null && b.lien !== undefined) {
+    return Number(b.lien) + Number(b.headroom);
+  }
+  const k = f.control?.k;
+  if (k === null || k === undefined || b.equity === null || b.equity === undefined) return null;
+  return k * Number(b.equity) + Number(b.held_buck ?? 0);
+}
+
+// What K bounds: the lien less the BUCK the basket still holds, per BUCK of its equity.
+const netLienRatio = (f) => {
+  const b = f.basket ?? {};
+  if (b.lien === null || b.lien === undefined || !b.equity) return null;
+  return (Number(b.lien) - Number(b.held_buck ?? 0)) / Number(b.equity);
+};
+const pct = (v) => (v === null || v === undefined || !Number.isFinite(v) ? null : v * 100);
+
+// The BuckBasket tab. Leverage against K's cap is the chart behind observation F2: below the cap,
+// K does not restrain the basket's issuance.
+export const BASKET = (tokens = []) => [
+  {
+    id: "limit", title: "Lien against K's limit", unit: "buck", kind: "line",
+    note: "The basket may issue up to K times its credit's mark, and the mark is its equity plus the BUCK it holds in its own pool positions over K: so the limit is K x equity + held BUCK. Above it the basket is under water; the wheel trims back only when its liquidity is also short. Records made before 2026-11-14 lack the contract's headroom and are estimated by that formula.",
+    series: [
+      { key: "lien", label: "Lien", value: (f) => buck(f.basket?.lien) },
+      { key: "limit", label: "Limit", value: (f) => buck(basketLimit(f)) },
+    ],
+  },
+  {
+    id: "leverage", title: "What K bounds, and K", unit: "ratio", kind: "line", reference: 0,
+    note: "K bounds only the lien the basket no longer holds as BUCK: its lien less its held BUCK, per BUCK of equity. It binds when this reaches K. Below zero, the basket holds more BUCK than it owes.",
+    series: [
+      { key: "net", label: "(Lien - held) / equity", value: netLienRatio },
+      { key: "le", label: "Lien / equity", value: (f) => ratioOf(f.basket?.lien, f.basket?.equity) },
+      { key: "k", label: "K", value: (f) => num(f.control?.k) },
+    ],
+  },
+  {
+    id: "book", title: "Equity, lien and gross", unit: "buck", kind: "line",
+    note: "Equity is the depositors' claim; the lien is the BUCK the basket has issued against its holdings; gross is their sum, the holdings' value.",
+    series: [
+      { key: "equity", label: "Equity", value: (f) => buck(f.basket?.equity) },
+      { key: "lien", label: "Lien", value: (f) => buck(f.basket?.lien) },
+      { key: "nav", label: "Gross", value: (f) => buck(f.basket?.nav) },
+    ],
+  },
+  {
+    id: "share", title: "Share price", unit: "ratio", kind: "line", reference: 1,
+    note: "BUCK a share redeems for: the depositors' return from rebalancing, fees and arbitrage.",
+    series: [{ key: "share", label: "Share price", value: (f) => num(f.basket?.share_price) }],
+  },
+  {
+    id: "wheel", title: "Wheel trades a day", unit: "buck", kind: "line",
+    note: "BUCK the basket's wheel spent buying TOKEN and received selling it, each day.",
+    series: [
+      { key: "buy", label: "Bought TOKEN for", value: perDay((f) => buck(f.basket?.wheel?.buy)) },
+      { key: "sell", label: "Sold TOKEN for", value: perDay((f) => buck(f.basket?.wheel?.sell)) },
+    ],
+  },
+  {
+    id: "weights", title: "Held weight against target", unit: "pp", kind: "line", reference: 0,
+    note: "Each constituent's held weight less the upkeep's target, in percentage points.",
+    series: tokens.map((sym, i) => ({
+      key: sym, label: sym,
+      value: (f) => {
+        const w = f.basket?.weights?.[i];
+        return w && w.held_bp !== null && w.target_bp !== null ? (w.held_bp - w.target_bp) / 100 : null;
+      },
+    })),
+  },
+  {
+    id: "relief", title: "Relief owed and fees carried", unit: "buck", kind: "line",
+    note: "Jubilee relief the basket has earned on its lien and not yet been paid, and fees its held BUCK carries.",
+    series: [
+      { key: "unpaid", label: "Unpaid relief", value: (f) => buck(f.basket?.unpaid_relief) },
+      { key: "fee", label: "Carried fee", value: (f) => buck(f.basket?.carried_fee) },
+    ],
+  },
+];
+
+// The Market tab: every pool, and whether the three-pool triangles agree.
+export const MARKET = (tokens = []) => [
+  {
+    id: "buck_usd", title: "BUCK in USD", unit: "ratio", kind: "line",
+    note: "The BUCK's dollar price in its USDC pool.",
+    series: [{ key: "buck_usd", label: "BUCK/USD", value: (f) => num(f.market?.buck_usd) }],
+  },
+  {
+    id: "triangle", title: "Triangle gap by commodity", unit: "pct", kind: "line", reference: 0,
+    note: "A TOKEN's price through BUCK (its BUCK pool times BUCK/USD) against its USDC pool. Arbitrage keeps these near zero; a standing gap is flow the arbitrageurs cannot carry.",
+    series: tokens.map((sym, i) => ({
+      key: sym, label: sym,
+      value: (f) => {
+        const t = f.market?.tokens?.[i], u = f.market?.buck_usd;
+        return t && t.buck && t.usdc && u ? pct((t.buck * u) / t.usdc - 1) : null;
+      },
+    })),
+  },
+  {
+    id: "pinning", title: "USDC pools against their references", unit: "pct", kind: "line", reference: 0,
+    note: "Each TOKEN/USDC pool's price against the scenario's reference: how closely the market maker holds the outside world.",
+    series: tokens.map((sym, i) => ({
+      key: sym, label: sym,
+      value: (f) => {
+        const t = f.market?.tokens?.[i];
+        return t && t.usdc && t.ref_usd ? pct(t.usdc / t.ref_usd - 1) : null;
+      },
+    })),
+  },
+  {
+    id: "pools", title: "BUCK in the pools", unit: "buck", kind: "stack",
+    note: "Nominal BUCK in the BUCK/USDC pool and in each TOKEN/BUCK pool.",
+    series: [
+      { key: "dollar", label: "BUCK/USDC", value: (f) => buck(f.supply?.holders?.dollar_pool) },
+      ...tokens.map((sym, i) => ({ key: sym, label: `${sym}/BUCK`, value: (f) => buck(f.market?.pools?.[i]?.buck) })),
+    ],
+  },
+  {
+    id: "arb", title: "Arbitrage trades a day", unit: "count", kind: "line",
+    note: "Trades by the arbitrageurs each day: cycles through BUCK and USDC, direct TOKEN trades, and BUCK/USDC trades.",
+    series: [
+      { key: "cycles", label: "Cycles", value: perDay((f) => num(f.market?.arb?.cycles)) },
+      { key: "direct", label: "Direct", value: perDay((f) => num(f.market?.arb?.direct)) },
+      { key: "ub", label: "BUCK/USDC", value: perDay((f) => num(f.market?.arb?.ub)) },
+    ],
+  },
+];
+
+// The Jubilee fund tab.
+export const JUBILEE = () => [
+  {
+    id: "fund", title: "Jubilee fund", unit: "buck", kind: "line",
+    note: "The fund's nominal and net cash, and the mark of its basket position. Demurrage on every balance (2% a year) pays in; relief to issuers (2% of principal a year) pays out.",
+    series: [
+      { key: "cash", label: "Cash", value: (f) => buck(f.jubilee?.cash) },
+      { key: "nominal", label: "Nominal", value: (f) => buck(f.jubilee?.nominal) },
+      { key: "position", label: "Position mark", value: (f) => buck(f.jubilee?.position_mark) },
+    ],
+  },
+  {
+    id: "relief", title: "Relief available and owed", unit: "buck", kind: "line",
+    note: "Relief the fund can pay now, and relief the basket has earned and not yet been paid.",
+    series: [
+      { key: "available", label: "Available", value: (f) => buck(f.jubilee?.relief_available) },
+      { key: "unpaid", label: "Basket's unpaid relief", value: (f) => buck(f.basket?.unpaid_relief) },
+    ],
+  },
+  {
+    id: "principal", title: "Principal: open and deferred", unit: "buck", kind: "line",
+    note: "Open principal is every BUCK in existence; deferred principal is retired against the fund and not yet settled.",
+    series: [
+      { key: "active", label: "Open", value: (f) => buck(f.supply?.active_principal) },
+      { key: "deferred", label: "Deferred", value: (f) => buck(f.supply?.deferred_principal) },
+    ],
+  },
+];
+
+// Each tab's headline figures for the latest day.
+export function tabTiles(id, frames) {
+  const f = frames[frames.length - 1];
+  if (!f) return [];
+  if (id === "basket") {
+    const limit = basketLimit(f);
+    const recorded = f.basket?.headroom !== null && f.basket?.headroom !== undefined;
+    return [
+      { id: "equity", label: "Equity", value: buck(f.basket?.equity), unit: "buck", detail: "BUCK" },
+      { id: "lien", label: "Lien", value: buck(f.basket?.lien), unit: "buck", detail: "BUCK" },
+      { id: "le", label: "Lien / equity", value: ratioOf(f.basket?.lien, f.basket?.equity), unit: "ratio" },
+      { id: "headroom", label: "Headroom", value: limit === null ? null : buck(limit - Number(f.basket.lien)), unit: "buck",
+        detail: recorded ? "below 0: under water" : "estimated: K x equity + held" },
+      { id: "share", label: "Share price", value: num(f.basket?.share_price), unit: "ratio" },
+      { id: "idle", label: "Idle BUCK", value: buck(f.basket?.idle_buck), unit: "buck" },
+    ];
+  }
+  if (id === "market") {
+    const gaps = (f.market?.tokens ?? []).map((t) => (t.buck && t.usdc && f.market.buck_usd ? Math.abs(t.buck * f.market.buck_usd / t.usdc - 1) : null))
+      .filter((v) => v !== null);
+    return [
+      { id: "buck_usd", label: "BUCK/USD", value: num(f.market?.buck_usd), unit: "ratio" },
+      { id: "gap", label: "Widest triangle gap", value: gaps.length ? Math.max(...gaps) * 100 : null, unit: "pct" },
+      { id: "dollar", label: "BUCK/USDC pool", value: buck(f.supply?.holders?.dollar_pool), unit: "buck", detail: "BUCK" },
+      { id: "tokens", label: "TOKEN/BUCK pools", value: buck(f.supply?.holders?.token_pools), unit: "buck", detail: "BUCK" },
+    ];
+  }
+  if (id === "jubilee") {
+    return [
+      { id: "cash", label: "Fund cash", value: buck(f.jubilee?.cash), unit: "buck", detail: "BUCK" },
+      { id: "available", label: "Relief available", value: buck(f.jubilee?.relief_available), unit: "buck" },
+      { id: "unpaid", label: "Basket's unpaid relief", value: buck(f.basket?.unpaid_relief), unit: "buck" },
+      { id: "deferred", label: "Deferred principal", value: buck(f.supply?.deferred_principal), unit: "buck" },
+    ];
+  }
+  return [];
 }
 
 // A stack's cumulative tops, bottom series first; a missing value counts as 0 within a day
@@ -133,6 +343,9 @@ export function format(value, unit) {
   if (value === null || value === undefined || Number.isNaN(value)) return "n/a";
   if (unit === "ratio") return value.toFixed(4);
   if (unit === "count") return Math.round(value).toLocaleString("en-US");
+  if (unit === "pct") return `${value.toFixed(2)}%`;
+  if (unit === "pp") return `${value >= 0 ? "+" : ""}${value.toFixed(2)} pp`;
+  if (unit === "usd") return `${value < 0 ? "-" : ""}$${format(Math.abs(value), "buck")}`;
   if (unit === "buck") {
     const a = Math.abs(value);
     if (a >= 1e9) return (value / 1e9).toFixed(2) + "B";

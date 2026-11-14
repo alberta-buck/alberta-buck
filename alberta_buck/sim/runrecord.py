@@ -91,6 +91,10 @@ def revision(root=None) -> dict | None:
     return dict(commit=commit, dirty=dirty) if commit else None
 
 
+def _at(values, i):
+    return values[i] if values and i < len(values) else None
+
+
 def holders(net) -> dict | None:
     """Raw BUCK held by the Carrying accounts a frame's =net.carrying= records: the BUCK/USDC pool,
     the TOKEN/BUCK pools and the basket. Everyone else is supply less these."""
@@ -121,6 +125,10 @@ def frame_record(flat: dict, tokens) -> dict:
     roles                       = {role: dict(arrived=v.get("arrived"), active=v.get("active"), exited=v.get("exited"))
                                    for role, v in pop.items() if isinstance(v, dict) and "arrived" in v}
     spots                       = zip(tokens, flat.get("refUsd") or [], flat.get("spotUsdc") or [], flat.get("spotBuck") or [])
+    carried                     = (net.get("carrying") or {}).get("buck_tokens") or []
+    weights                     = [dict(symbol=s, held_bp=_at(flat.get("eq_w"), i), target_bp=_at(flat.get("eq_lean"), i),
+                                        declared_bp=_at(flat.get("eq_decl"), i))
+                                   for i, s in enumerate(tokens)] if flat.get("eq_w") else None
     return _jsonable({
         "day": flat["day"],
         "block": net.get("block"),
@@ -128,13 +136,21 @@ def frame_record(flat: dict, tokens) -> dict:
                         pid=dict(p=flat.get("pid_p"), i=flat.get("pid_i"), d=flat.get("pid_d"))),
         "market": dict(buck_usd=_price(flat.get("buck_usd")),
                        tokens=[dict(symbol=s, ref_usd=_price(r), usdc=_price(u), buck=_price(b))
-                               for s, r, u, b in spots]),
+                               for s, r, u, b in spots],
+                       pools=[dict(symbol=s, buck=_scaled(row.get("nominal_scaled")))
+                              for s, row in zip(tokens, carried)] if carried else None,
+                       arb=dict(cycles=flat.get("cycleTrades"), direct=flat.get("directTrades"), ub=flat.get("ubTrades"))),
         "supply": dict(total=supply, active_principal=net.get("active_principal"),
                        deferred_principal=net.get("deferred_principal"), basket_lien=flat.get("eq_lien"),
                        household_principal=hh.get("drawn") if hh else None, holders=held),
         "basket": dict(equity=flat.get("eq_equity"), lien=flat.get("eq_lien"), nav=flat.get("basketNav"),
                        share_price=_ratio(flat.get("eq_share_price")), held_buck=flat.get("eq_held_buck"),
-                       idle_buck=flat.get("eq_liquidity")),
+                       idle_buck=flat.get("eq_liquidity"), headroom=flat.get("eq_headroom"), mark=flat.get("eq_mark"),
+                       unpaid_relief=flat.get("eq_unpaid_relief"),
+                       carried_fee=flat.get("eq_carried_fee"), weights=weights,
+                       wheel=dict(buy=flat.get("wh_eq_buy"), sell=flat.get("wh_eq_sell"), respond=flat.get("wh_eq_respond"),
+                                  buys=flat.get("wh_eq_buy_n"), sells=flat.get("wh_eq_sell_n"),
+                                  responds=flat.get("wh_eq_respond_n"))),
         "jubilee": dict(nominal=jubilee.get("nominal"), cash=jubilee.get("cash"),
                         position_mark=(jubilee.get("position") or {}).get("mark"),
                         relief_available=_scaled(net.get("available_relief_scaled"))) if jubilee else None,
@@ -314,9 +330,13 @@ def import_vector(path, root=None, run_id=None) -> Path:
     rec = RunRecorder(root, path.stem, run_id=run_id or _slug(path.stem), engine="pyrevm")
     old = rec.dir / "manifest.json"
     if old.exists():
-        # Re-importing the same vector replaces its derived view; anything else is left alone.
-        if (json.loads(old.read_text()).get("source") or {}).get("vector") != str(path):
+        # Re-importing the same vector replaces its derived view, as does importing the vector a run
+        # wrote beside its own record (a newer reader of the same frames); anything else is left alone.
+        earlier = json.loads(old.read_text())
+        if str(path) not in ((earlier.get("source") or {}).get("vector"), (earlier.get("outputs") or {}).get("vector")):
             raise FileExistsError(f"{rec.dir} holds another run; pass run_id")
+        if earlier.get("status") == "running":
+            raise FileExistsError(f"{rec.dir} is still running")
         for f in rec.dir.iterdir():
             f.unlink()
         rec.dir.rmdir()

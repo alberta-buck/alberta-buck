@@ -217,6 +217,10 @@ def _eqsave_frame(d, ctr) -> dict:
         try:
             f["eq_lien"] = int(b.functions.lien().call())
             f["eq_liquidity"] = int(b.functions.liquidity().call())
+            # The contract's own limit: K x the credit's (activated) mark, less the lien; negative
+            # is "under water". The wheel trims back under it only when liquidity is also short.
+            f["eq_headroom"] = int(b.functions.headroom().call())
+            f["eq_mark"] = int(b.functions.markNow().call())
             if canonical:
                 # Match the basket's LOW position mark, including its exact
                 # Carrying ratio and the same order of integer rounding.

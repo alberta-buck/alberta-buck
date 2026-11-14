@@ -5,6 +5,8 @@
 //   manifest()          -> the run's manifest
 //   frames(since)       -> frames after day `since`, in day order
 //   interventions()     -> shocks and setting changes applied, with their days
+//   agents(member?)     -> each household's latest line, or one household's lines
+//   events(member)      -> one household's state-machine steps
 //   capabilities        -> { live, control, agents, events }: live = the run is still
 //                          growing; control = it accepts commands (later: the Python
 //                          session's control channel); agents / events = the per-agent
@@ -42,6 +44,15 @@ export class HttpRunSource {
 
   interventions() {
     return this.get("interventions");
+  }
+
+  // Each household's latest line, or one household's lines day by day.
+  agents(member = null) {
+    return this.get(member === null ? "agents" : `agents?member=${encodeURIComponent(member)}`);
+  }
+
+  events(member) {
+    return this.get(`events?member=${encodeURIComponent(member)}`);
   }
 
   get capabilities() {
