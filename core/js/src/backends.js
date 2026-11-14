@@ -9,7 +9,7 @@
 // Both sign with well-known anvil/tevm dev accounts (mnemonic "test test
 // ... junk"), so one code path -- local-account raw txs -- serves both.
 
-import { createPublicClient, createWalletClient, http, publicActions } from "viem";
+import { bytesToHex, createPublicClient, createWalletClient, http, publicActions } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import { Session } from "./session.js";
@@ -86,4 +86,92 @@ export async function restoreTevm(session, snap) {
     await c.request({ method: "evm_mine", params: [] });
   }
   return session;
+}
+
+// --- Tevm's retained history (doc/reports/tevm-memory.org) ----------------------------------------
+// Tevm keeps a full copy of the world state under every mined block's state root and, under
+// automine, mines a block per transaction; every read deep-copies the VM, so its cost grows with
+// the state. Pruning old roots and trimming the two system rings at each day keeps both flat.
+
+// Cancun's EIP-4788 (2 slots/block) and Prague's EIP-2935 (1 slot/block)
+// ring buffers: 8191-entry rings, so up to 24,573 slots of live state that
+// every Tevm deepCopy (each eth_call, each mined block) dumps and copies.
+export const SYSTEM_RINGS = [
+  "0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02",   // EIP-4788 beacon roots
+  "0x0000F90827F1C53a10cb7A02335B175320002935",   // EIP-2935 history
+];
+
+/** Clear the system rings' storage (code, nonce, balance kept). */
+export async function trimSystemRings(client) {
+  for (const address of SYSTEM_RINGS) await client.tevmSetAccount({ address, state: {} });
+}
+
+/** Tevm's retained history, by kind (doc/reports/tevm-memory.org). */
+export async function tevmRetained(session, { dumpSize = false } = {}) {
+  const n = session.client.transport.tevm;
+  const vm = await n.getVm();
+  const bs = vm.stateManager._baseState;
+  const rm = await n.getReceiptsManager();
+  const pool = await n.getTxPool();
+  const out = {
+    roots: bs.stateRoots.size,
+    chainBlocks: vm.blockchain.blocksByNumber.size,
+    rcptKeys: rm.mapDb._cache?.size ?? -1,
+    poolHandled: pool.handled?.size ?? -1,
+  };
+  if (dumpSize) {
+    const cur = bs.stateRoots.get(bs.getCurrentStateRoot());
+    let accounts = 0, slots = 0;
+    for (const v of Object.values(cur ?? {})) {
+      accounts += 1;
+      slots += Object.keys(v.storage ?? {}).length;
+    }
+    out.dumpKB = Math.round(JSON.stringify(cur,
+      (_, v) => (typeof v === "bigint" ? v.toString() : v)).length / 1024);
+    out.accounts = accounts;
+    out.slots = slots;
+  }
+  return out;
+}
+
+/**
+ * Drop Tevm's per-block history: the full-state snapshot keyed by each
+ * block's state root (all but the last `keepRoots` blocks -- only calls
+ * AT an old block need them), and the block objects + receipts + tx-hash
+ * index older than `keep` blocks (>= 256 keeps BLOCKHASH and parent
+ * lookups whole).  Genesis, every tagged block and the live state root
+ * are always kept.  Returns how many state snapshots were dropped.
+ */
+export async function pruneTevm(session, { keep = 256, keepRoots = 8 } = {}) {
+  const n = session.client.transport.tevm;
+  const vm = await n.getVm();
+  const chain = vm.blockchain;
+  const bs = vm.stateManager._baseState;
+  const rm = await n.getReceiptsManager();
+  const head = chain.blocksByTag.get("latest").header.number;
+  const floor = head - BigInt(keep);
+  const rootFloor = head - BigInt(keepRoots);
+  const live = new Set([bs.getCurrentStateRoot()]);
+  const drop = [];
+  for (const [num, blk] of chain.blocksByNumber) {
+    if (num === 0n || num > rootFloor) live.add(bytesToHex(blk.header.stateRoot));
+    if (num !== 0n && num <= floor) drop.push(blk);
+  }
+  for (const blk of chain.blocksByTag.values()) live.add(bytesToHex(blk.header.stateRoot));
+  for (const blk of drop) {
+    chain.blocksByNumber.delete(blk.header.number);
+    await rm.deleteReceipts(blk);
+  }
+  for (const [h, blk] of chain.blocks) {
+    const num = blk.header.number;
+    if (num !== 0n && num <= floor) chain.blocks.delete(h);
+  }
+  let dropped = 0;
+  for (const r of [...bs.stateRoots.keys()]) {
+    if (!live.has(r)) { bs.stateRoots.delete(r); dropped++; }
+  }
+  // The pool's seen-hash map only dedupes resubmissions of mined txs.
+  const pool = await n.getTxPool();
+  if (pool.txsInPool === 0) pool.handled?.clear();
+  return dropped;
 }

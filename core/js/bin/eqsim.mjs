@@ -15,7 +15,9 @@ import { join } from "node:path";
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { anvilSession, tevmSession } from "../src/backends.js";
+import { anvilSession, tevmSession, pruneTevm, trimSystemRings, tevmRetained } from "../src/backends.js";
+import { profileClient } from "../src/tevm-profile.js";
+import { artifacts as bundled } from "../artifacts/bundle.mjs";
 import { loadAnyArtifact, repoRoot, fileJournalWriter } from "../src/nodefs.js";
 import { buildEquilibriumWorld, DayClock, PidKeeper, WheelKeeper }
   from "../src/scenarios/eqworld.js";
@@ -42,6 +44,8 @@ const { values: a } = parseArgs({ options: {
   budget:  { type: "string", default: "25000" },  // saver stake, $
   plot:    { type: "string", default: "" },
   journal: { type: "string", default: "" },
+  profile: { type: "string", default: "" },       // write a per-method / per-function timing table here
+  prune:   { type: "boolean", default: false },    // drop Tevm's old state roots and trim the system rings daily
 } });
 const days = Number(a.days);
 
@@ -86,8 +90,16 @@ const agents = [
   debtor,
 ];
 
+// Profile (doc/reports/tevm-memory.org, "CPU"): time every request by method and function, and
+// read Tevm's retained history at each day's end.
+const prof = a.profile ? profileClient(session.client, Object.entries(bundled).map(([n, art]) => [n, art.abi])) : null;
+const tevm = a.backend !== "anvil";
 const t0 = performance.now();
-await runDays(world, agents, { days, onDay: (d) => world.record(d) });
+await runDays(world, agents, { days, onDay: async (d) => {
+  await world.record(d);
+  if (tevm && a.prune) { await pruneTevm(session); await trimSystemRings(session.client); }
+  if (prof) prof.day(d, tevm ? await tevmRetained(session, { dumpSize: true }) : {});
+} });
 const ms = Math.round(performance.now() - t0);
 
 const S = world.series;
@@ -133,5 +145,9 @@ if (a.plot) {
   ];
   writeFileSync(a.plot, svgDoc(charts));
   console.error(`chart -> ${a.plot}`);
+}
+if (prof) {
+  writeFileSync(a.profile, JSON.stringify({ days, ms, prune: a.prune, ...prof.report() }, null, 1));
+  console.error(`profile -> ${a.profile}`);
 }
 process.exit(session.mismatches.length ? 1 : 0);

@@ -49,7 +49,9 @@ import { join } from "node:path";
 import { bytesToHex, keccak256, toBytes, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession, snapshotTevm, restoreTevm } from "../src/backends.js";
+import { tevmSession, snapshotTevm, restoreTevm, pruneTevm, trimSystemRings, tevmRetained, SYSTEM_RINGS }
+  from "../src/backends.js";
+export { pruneTevm, trimSystemRings, SYSTEM_RINGS };
 import { advanceTime, DAY } from "../src/buckworld.js";
 import { encodePath, urExecArgs } from "../src/router.js";
 import { loadAnyArtifact, loadArtifact, repoRoot } from "../src/nodefs.js";
@@ -103,88 +105,7 @@ function emit(rec) {
 const gc = globalThis.gc ?? (() => {});
 const node = (session) => session.client.transport.tevm;
 
-// Cancun's EIP-4788 (2 slots/block) and Prague's EIP-2935 (1 slot/block)
-// ring buffers: 8191-entry rings, so up to 24,573 slots of live state that
-// every Tevm deepCopy (each eth_call, each mined block) dumps and copies.
-export const SYSTEM_RINGS = [
-  "0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02",   // EIP-4788 beacon roots
-  "0x0000F90827F1C53a10cb7A02335B175320002935",   // EIP-2935 history
-];
-
-/** Clear the system rings' storage (code, nonce, balance kept). */
-export async function trimSystemRings(client) {
-  for (const address of SYSTEM_RINGS) await client.tevmSetAccount({ address, state: {} });
-}
-
-/** Tevm's retained history, by kind. */
-async function tevmInternals(session, { dumpSize = false } = {}) {
-  const n = node(session);
-  const vm = await n.getVm();
-  const bs = vm.stateManager._baseState;
-  const rm = await n.getReceiptsManager();
-  const pool = await n.getTxPool();
-  const out = {
-    roots: bs.stateRoots.size,
-    chainBlocks: vm.blockchain.blocksByNumber.size,
-    rcptKeys: rm.mapDb._cache?.size ?? -1,
-    poolHandled: pool.handled?.size ?? -1,
-  };
-  if (dumpSize) {
-    const cur = bs.stateRoots.get(bs.getCurrentStateRoot());
-    let accounts = 0, slots = 0;
-    for (const v of Object.values(cur ?? {})) {
-      accounts += 1;
-      slots += Object.keys(v.storage ?? {}).length;
-    }
-    out.dumpKB = Math.round(JSON.stringify(cur,
-      (_, v) => (typeof v === "bigint" ? v.toString() : v)).length / 1024);
-    out.accounts = accounts;
-    out.slots = slots;
-  }
-  return out;
-}
-
-/**
- * Drop Tevm's per-block history: the full-state snapshot keyed by each
- * block's state root (all but the last `keepRoots` blocks -- only calls
- * AT an old block need them), and the block objects + receipts + tx-hash
- * index older than `keep` blocks (>= 256 keeps BLOCKHASH and parent
- * lookups whole).  Genesis, every tagged block and the live state root
- * are always kept.  Returns how many state snapshots were dropped.
- */
-export async function pruneTevm(session, { keep = 256, keepRoots = 8 } = {}) {
-  const n = node(session);
-  const vm = await n.getVm();
-  const chain = vm.blockchain;
-  const bs = vm.stateManager._baseState;
-  const rm = await n.getReceiptsManager();
-  const head = chain.blocksByTag.get("latest").header.number;
-  const floor = head - BigInt(keep);
-  const rootFloor = head - BigInt(keepRoots);
-  const live = new Set([bs.getCurrentStateRoot()]);
-  const drop = [];
-  for (const [num, blk] of chain.blocksByNumber) {
-    if (num === 0n || num > rootFloor) live.add(bytesToHex(blk.header.stateRoot));
-    if (num !== 0n && num <= floor) drop.push(blk);
-  }
-  for (const blk of chain.blocksByTag.values()) live.add(bytesToHex(blk.header.stateRoot));
-  for (const blk of drop) {
-    chain.blocksByNumber.delete(blk.header.number);
-    await rm.deleteReceipts(blk);
-  }
-  for (const [h, blk] of chain.blocks) {
-    const num = blk.header.number;
-    if (num !== 0n && num <= floor) chain.blocks.delete(h);
-  }
-  let dropped = 0;
-  for (const r of [...bs.stateRoots.keys()]) {
-    if (!live.has(r)) { bs.stateRoots.delete(r); dropped++; }
-  }
-  // The pool's seen-hash map only dedupes resubmissions of mined txs.
-  const pool = await n.getTxPool();
-  if (pool.txsInPool === 0) pool.handled?.clear();
-  return dropped;
-}
+const tevmInternals = tevmRetained;
 
 /** Everything the agents observe, for before/after-reload equality. */
 async function probe(world, holders) {
