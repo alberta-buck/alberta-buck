@@ -1,15 +1,17 @@
-// Where a Tevm world's time goes: every JSON-RPC request the session's client makes, timed by
-// method and, for calls and sends, by the contract function its 4-byte selector names. Wraps
-// client.request in place (viem's actions call it at call time), so nothing else changes.
+// Where a Tevm world's time goes: every action the session's client is asked for (readContract,
+// writeContract, waitForTransactionReceipt, getBlock, request, ...), timed by action and, for
+// contract actions and raw calls, by the contract function. Wraps the client's own properties in
+// place, so nothing else changes.
 //
 //   const prof = profileClient(session.client, abis);   // abis: [[name, abi], ...]
 //   ... run ...
 //   prof.day(d)          // close a day's bucket (wall time and counts since the last)
 //   prof.report()        // { methods, functions, days }
 //
-// Timings nest: a send's eth_sendTransaction includes the mining Tevm does under automine, and
-// viem's waitForTransactionReceipt adds its own requests. Self time is not separated here; use
-// node --cpu-prof for that.
+// viem binds each action to the client in a closure when the client is built, so an action's own
+// internal requests are not seen here -- only what the caller asked for, which is the cost the
+// caller can change. Under automine a writeContract includes the block Tevm mines for it. For self
+// time inside Tevm, use node --cpu-prof.
 
 import { toFunctionSelector } from "viem";
 
@@ -27,6 +29,9 @@ export function selectorNames(abis) {
   return names;
 }
 
+const SKIP = new Set(["extend", "transport", "chain", "account", "key", "name", "type", "uid",
+                      "pollingInterval", "cacheTime", "batch", "ccipRead"]);
+
 export function profileClient(client, abis = []) {
   const names = selectorNames(abis);
   const methods = new Map(), functions = new Map(), days = [];
@@ -36,25 +41,29 @@ export function profileClient(client, abis = []) {
     r.count += 1; r.ms += ms; r.max = Math.max(r.max, ms);
     map.set(key, r);
   };
-  const original = client.request.bind(client);
-  client.request = async (args, options) => {
-    const t0 = performance.now();
-    try {
-      return await original(args, options);
-    } finally {
-      const ms = performance.now() - t0;
-      const method = args?.method ?? "?";
-      add(methods, method, ms);
-      dayCounts.set(method, (dayCounts.get(method) ?? 0) + 1);
-      const p = args?.params?.[0];
-      const data = p?.data ?? p?.input;
-      if ((method === "eth_call" || method === "eth_sendTransaction" || method === "eth_estimateGas")
-          && typeof data === "string" && data.length >= 10) {
-        const sel = data.slice(0, 10);
-        add(functions, `${method === "eth_call" ? "call" : method === "eth_estimateGas" ? "estimate" : "send"} ${names.get(sel) ?? sel}`, ms);
-      }
-    }
+  const fnName = (method, p) => {
+    if (p?.functionName) return p.functionName;
+    const q = method === "request" ? p?.params?.[0] : p;
+    const data = q?.data ?? q?.input;
+    return typeof data === "string" && data.length >= 10 ? (names.get(data.slice(0, 10)) ?? data.slice(0, 10)) : null;
   };
+  for (const key of Object.keys(client)) {
+    const original = client[key];
+    if (SKIP.has(key) || typeof original !== "function") continue;
+    client[key] = async (...args) => {
+      const t0 = performance.now();
+      try {
+        return await original(...args);
+      } finally {
+        const ms = performance.now() - t0;
+        const method = key === "request" ? `request ${args[0]?.method ?? "?"}` : key;
+        add(methods, method, ms);
+        dayCounts.set(method, (dayCounts.get(method) ?? 0) + 1);
+        const fn = fnName(key, args[0]);
+        if (fn) add(functions, `${method} ${fn}`, ms);
+      }
+    };
+  }
   const table = (map) => [...map.entries()].map(([key, r]) => ({ key, count: r.count, ms: Math.round(r.ms),
     avg: +(r.ms / r.count).toFixed(1), max: Math.round(r.max) })).sort((a, b) => b.ms - a.ms);
   return {

@@ -30,7 +30,8 @@ import { lineChart, svgDoc } from "../src/chart.js";
 import id from "../src/identity.js";
 
 const { values: a } = parseArgs({ options: {
-  backend: { type: "string", default: "tevm" },   // tevm | anvil (long runs)
+  backend: { type: "string", default: "tevm" },   // tevm | anvil (long runs) | webevm (spike)
+  engine:  { type: "string", default: "revm" },   // webevm only: revm | ethereumjs
   rpc:     { type: "string", default: "http://127.0.0.1:8545" },
   days:    { type: "string", default: "180" },
   step:    { type: "string", default: "80" },     // walk step, bp/day
@@ -53,8 +54,8 @@ const days = Number(a.days);
 // around multi-year ones.  Long runs point at a fresh anvil (the
 // fidelity anchor), which holds chain state in its own process.
 const jopt = a.journal ? { journal: fileJournalWriter(a.journal) } : {};
-const session = a.backend === "anvil"
-  ? await anvilSession(a.rpc, jopt)
+const session = a.backend === "anvil" ? await anvilSession(a.rpc, jopt)
+  : a.backend === "webevm" ? await (await import("../src/webevm-backend.js")).webevmSession({ ...jopt, engine: a.engine })
   : await tevmSession(jopt);
 const urArtifact = JSON.parse(readFileSync(
   join(repoRoot(), "alberta_buck", "sim", "artifacts", "UniversalRouter.json"),
@@ -93,7 +94,7 @@ const agents = [
 // Profile (doc/reports/tevm-memory.org, "CPU"): time every request by method and function, and
 // read Tevm's retained history at each day's end.
 const prof = a.profile ? profileClient(session.client, Object.entries(bundled).map(([n, art]) => [n, art.abi])) : null;
-const tevm = a.backend !== "anvil";
+const tevm = a.backend === "tevm";
 const t0 = performance.now();
 await runDays(world, agents, { days, onDay: async (d) => {
   await world.record(d);

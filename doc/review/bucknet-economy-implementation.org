@@ -3685,14 +3685,14 @@ decisions on exits, relief and the reserve"), implemented tests first.
   invariant E4 restated, E7 added), =doc/BASKET-MACHINE.org=,
   =doc/BASKET-MACHINE-TASKS.org= (the in-kind question answered),
   =alberta-buck-ethereum-wheel.org=.
-- [ ] /Next session, in order./ =make nix-sim-build= (the simulations'
-  artifacts) and the JS bundle; the twenty-file Python set; the JS policy
-  units and the eight Tevm files (households' exits now receive BUCK where
-  they received TOKEN; their "sell in-kind TOKEN" step should find nothing);
-  a 30-day and a one-year economy world, compared with
-  =economy-smoke-365=; SDK wrappers for =redeemInKind= (Python
-  =basket.py=, JS =basket.js=) if any agent wants them; then the contracts
-  release.
+- [X] /Qualified in the simulations./ =make nix-sim-build= and the JS bundle;
+  the twenty-file Python set (313 passed); the JS policy units and the Tevm
+  files (85 of 85); a 30-day economy world, identical to the pre-change one;
+  a 45-day world with half the investors leaving on day 20.
+- [ ] /Still to do./ The one-year economy world compared with
+  =economy-smoke-365= (running: =build/sim/exits-365.json=); SDK wrappers for
+  =redeemInKind= (Python =basket.py=, JS =basket.js=) if any agent wants
+  them; then the contracts release.
 
 *** Checkpoint
 
@@ -3700,8 +3700,13 @@ decisions on exits, relief and the reserve"), implemented tests first.
   Jubilee suite green; =make nix-test= 1,548 passed, 0 failed, 1 skipped
   (=build/test/c7-nixtest.log=); =make nix-contracts-dist-check= passes (its
   lint warnings are the existing style set; the library's new casts carry
-  their safety notes). Not yet run on this revision: the Python set, the JS
-  Tevm files, the worlds.
+  their safety notes). Then, on the same revision: the Python set 313 passed
+  (=build/test/q11-python.log=), the JS policy units and Tevm files 85 of 85
+  (=q11-policy.log=, =q11-actual.log=); the 30-day economy world identical to
+  the one before the change (no household exits in 30 days); a 45-day
+  withdrawal world (=economy.toml= plus =set_population exit_now=0.5= on day
+  20, =build/test/economy-exit-check.toml=): 15 exits completed, 14
+  redemptions paid 447k BUCK, none in kind, no faults.
 
 *** Observations and recommendations (exits)
 
@@ -3711,6 +3716,7 @@ decisions on exits, relief and the reserve"), implemented tests first.
 |---+---------+-------------|
 | 61 | the centre year with the basket's retirement job on (=deploy.basket_retirement_cap_m=0.1=, =build/runs/economy-365-retire=) | Identical to the default year (K 0.4451, the same supply and holders): the job never ran. It retires only from cash above the liquidity target, and the wheel deploys every spare BUCK before any accumulates. |
 | 62 | the exit tests | Retiring principal through BUCK's settlement deactivates coverage in proportion, so the first implementation's retirement left the shortfall larger than before; re-activating the free backing in =retireCredit= fixed it, and the fuzz now pins the exact retirement: max(0, lien - K x (equity after paying) - before). |
+| 63 | the 45-day withdrawal world | Half the investors leaving at once completed every exit in BUCK (447k over 14 redemptions); none needed the in-kind path and none reverted. Their sales of TOKEN through the pools moved BUCK/USD down to 0.953 before the wheel and arbitrage pulled it back: the leavers' slippage is the remaining holders' gain, as the owner expected, but it is a visible price event. |
 
 **** Recommendations
 
@@ -3724,3 +3730,116 @@ decisions on exits, relief and the reserve"), implemented tests first.
     TWAP band per call, and the leaver's =minBuck=. In the worlds, record each
     exit's slippage and the wheel's capture afterwards (the owner's expected
     transfer to the remaining holders), on the BuckBasket tab.
+
+** In-browser engine milestone: what Tevm spends its time on, and webevm + revm instead
+
+The owner asked (2026-11-14) why Tevm is so slow, whether retained history is the
+cause, and whether anyone else has an EVM that runs entirely in a browser.
+
+- [X] /Profiler./ =core/js/src/tevm-profile.js= times every action a session's
+  client is asked for (viem binds actions in closures, so wrapping
+  =client.request= alone saw only the direct =evm_mine= calls) by action and
+  by contract function; =eqsim.mjs --profile FILE= writes it with the day
+  timings and, on Tevm, the retained history per day (=--prune= prunes and
+  trims daily).
+- [X] /History is not the cost./ Four days, stock against pruned daily: 107,
+  149, 125, 181 s against 107, 146, 121, 174 s, while the kept state roots stay
+  at 9 instead of growing to 218 and the storage slots at 678 instead of 1,140.
+  The state stays about 1.1 MB either way (=build/test/prof-stock.json=,
+  =prof-prune.json=).
+- [X] /What it is./ A CPU profile of one day (=node --cpu-prof=): 69% of the
+  CPU in the garbage collector, 14% in viem's hex conversions, 5% in
+  =@tevm/state=. Every call-frame commit runs =dumpCanonicalGenesis=, which
+  re-encodes every account's whole code as a hex string; every read and
+  every mined block copies the VM, and =generateCanonicalGenesis= parses that
+  hex back into bytes. About 1 MB of the 1.1 MB state is contract bytecode, so
+  each read and each frame allocates and discards megabytes of strings. By
+  action (=prof-actions.json=, two days): =writeContract= averages 2.0 s (the
+  controller's =tick= 4.6 s, up to 18 s), =readContract= 254 ms, mining
+  0.23 s.
+- [X] /The one-line fix, tested./ Memoising code hex to bytes and back
+  (bytecode never changes) in a patched copy of =@tevm/state=, loaded through
+  a Node resolve hook (=core/js/node_modules/.cache/tevm-patch/=, not
+  installed): two days in 27 s instead of 234 s (8.7x), identical K, BVIB and
+  BUCK/USD; with the earlier fast-commit patch as well, 20.5 s (11.4x). Worth
+  an upstream issue; not adopted, because of the next item.
+- [X] /Upstream Tevm./ The checkout at =~/src/tevm= (rc.153) has replaced the
+  EthereumJS engine with ZEVM, a Zig EVM loaded as a native Node addon: fast,
+  but it does not run in a browser, and its WASM adapter is not implemented.
+  The published 1.0.0-next.149 we use is the last JavaScript one.
+- [X] /The survey./ Of the in-browser EVMs found (webevm, guillotine-mini,
+  EthereumJS v10 alone, Solenoid/YEVM, SputnikVM), webevm
+  (github.com/wighawag/webevm, MIT, npm =webevm= 0.9.1) is the one that is a
+  whole node: an execution-only EIP-1193 node on =@ethereumjs/vm= with a flat
+  state (no copy per read; checkpoint and revert), an optional revm-wasm
+  engine reading the node's state through host callbacks, Worker hosting and
+  IndexedDB persistence, a conformance battery against =ethereum/tests=, and
+  playwright tests on Chromium and WebKit. Its one gap for our worlds was time:
+  mined blocks took the wall clock (or one fixed =blockEnv.timestamp=), with no
+  =evm_setNextBlockTimestamp=. It holds no keys (no =eth_sendTransaction=),
+  which our sessions never needed: they sign locally.
+- [X] /The fork./ =~/src/webevm= (origin =pjkundert/webevm=, upstream
+  =wighawag/webevm=), branch =feature/block-clock-cheats=: the node's clock
+  with =evm_setNextBlockTimestamp=, =evm_increaseTime=,
+  =evm_setBlockTimestampInterval= / =evm_removeBlockTimestampInterval= and
+  =evm_mine= (with an optional timestamp); unchanged when no cheat is issued;
+  a battery run on both engines and both browsers (the executed =TIMESTAMP=,
+  intervals, a refused transaction keeps the next timestamp, =loadState= drops
+  it, refusals), ADR 0015, README, glossary, changeset. Written to the
+  repository's own conventions so it can go upstream.
+- [X] /Our side./ =core/js/src/webevm-backend.js= (=webevmSession({engine:
+  "revm" | "ethereumjs"})=, Node-only for now: it reads the wasm from disk;
+  =WEBEVM_DIR= names the fork's built package) and =eqsim.mjs --backend
+  webevm [--engine revm]=. Every block is its parent plus one second (the
+  interval), so a run's timestamps do not depend on its speed.
+- [ ] /Next./ The browser: a bundle of the sandbox on webevm (the wasm from its
+  URL, a Worker host), replacing =tevmSession= there; the remaining Tevm-only
+  calls (=tevmSetAccount=, =tevmDumpState= / =tevmLoadState=, the profile's
+  retained-history probe) mapped to webevm's =evm_setAccount= and
+  =dumpState= / =loadState=; the Tevm test files run on webevm; a pinned
+  webevm dependency (the fork's tag, or upstream once the clock is merged
+  there); memory over a five-year run (webevm keeps every block, receipt and
+  log).
+
+*** Checkpoint
+
+- *Evidence*: the same eqsim world (one debtor, one basket saver, the arb, the
+  whales, the wheel and PID keepers) on three engines. Two days: stock Tevm
+  234,490 ms, webevm on EthereumJS 3,828 ms, webevm on revm 217 ms; the
+  printed summaries identical apart from the time. Thirty days on webevm +
+  revm: 2.4 s (Tevm: 41 minutes, observation 47) with observation 47's
+  figures to the digit (K 0.7527, BVIB 0.997, BUCK/USD 0.981, mortgage
+  refinanced, 223,134 BUCK drawn, 11.5k banked). One year: 31.7 s, 87 ms a
+  simulated day (89 ms on day 1, 191 ms on day 180, 60 ms on day 364), no
+  mismatches, 866 MB peak resident memory. The fork's two block-clock
+  specs pass on Chromium and WebKit, both engines.
+
+*** Observations and recommendations (in-browser engine)
+
+**** Measured
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 64 | Tevm, four days stock and pruned (=build/test/prof-stock.json=, =prof-prune.json=) | Pruning Tevm's history daily keeps its memory flat and changes the time per day by under 5%: history was the memory ceiling, never the CPU one. |
+| 65 | Tevm, one day under =--cpu-prof= | 69% of the CPU is garbage collection of the hex strings Tevm makes when it serialises the whole state (code included) on every call-frame commit and every read's VM copy. A memo of code hex to bytes and back alone makes it 8.7x faster with identical results. |
+| 66 | webevm + revm, two days, thirty days, a year | About 1,000x faster than Tevm with identical results: a simulated day in tens of milliseconds, reads at 0.2 ms (Tevm 254 ms), the controller's =tick= at 6 ms (Tevm 4.6 s). A year of the small world is half a minute. |
+| 67 | webevm on its own EthereumJS engine | 60x faster than Tevm on the same EthereumJS interpreter: the gain is mostly webevm's flat state (no state copy per read), and revm adds another 18x. |
+
+**** Recommendations
+
+72. /Move the in-browser world to webevm + revm./ It removes the reason the
+    in-browser sandbox had to stay small (observation 47's 80 s a day): a
+    visitor's browser can now run years of the canonical world in minutes, so
+    the sandbox can show the same five-year runs the server does, and the
+    savings sandbox can replay a saver's whole horizon. Keep Tevm only until
+    the sandbox and the Tevm test files run on webevm.
+73. /Offer the clock upstream./ The fork's branch is written to webevm's own
+    conventions (battery, ADR, changeset); a pull request to =wighawag/webevm=
+    keeps us on a maintained package rather than a fork. Until it merges, pin
+    the fork by tag.
+74. /Measure memory before a five-year browser run./ 866 MB resident for a
+    year in Node includes every block, receipt and log webevm keeps; a browser
+    tab's budget is lower. If it grows with the run, the remedy is on webevm's
+    side (a bounded block store, as its =stateHistory= already bounds state).
+75. /Report the code-hex memo to Tevm./ Anyone else on the JavaScript Tevm
+    pays the same 8.7x; it is a small, safe patch.
