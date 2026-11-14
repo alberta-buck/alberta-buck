@@ -428,7 +428,7 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    wasm kernels already web-target).  Met by
    =core/js/demo/buckworld.html= (=make nix-core-demo-buckworld=): a
    DOM-free controller (=demo/src/app.js=) drives the story and is
-   gated twice -- once with node-loaded deps (=app.tevm.test.js=), and
+   gated twice -- once with node-loaded deps (=app.webevm.test.js=), and
    once as the EXACT shipped esbuild bundle executed headless under a
    minimal DOM stub (=demo.bundle.test.js=), which must complete the
    scripted opening (two kernel-ceremony citizens, credit line,
@@ -550,7 +550,7 @@ Gotcha: =BN254.sol= struct components are UPPERCASE =X=/=Y= at the ABI
    (=demo/src/eqapp.js=; boot -> tick -> addSaver/addDebtor mid-run ->
    status/roster/charts), built by =make nix-core-demo-eqworld=
    (~4.4 MB bundle incl. the vendored Universal Router artifact) and
-   gated twice -- =eqapp.tevm.test.js= (controller with node deps:
+   gated twice -- =eqapp.webevm.test.js= (controller with node deps:
    dynamic adds, a completed saver cycle, all five panels render) and
    =eqdemo.bundle.test.js= (the EXACT shipped bundle headless: the
    opening cast boots live, the page's own controls add agents and

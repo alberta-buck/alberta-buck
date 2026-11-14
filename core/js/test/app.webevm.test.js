@@ -1,4 +1,4 @@
-// Phase 4 Stage 2: the demo CONTROLLER end-to-end on Tevm.
+// Phase 4 Stage 2: the demo CONTROLLER end-to-end on webevm + revm.
 //
 // The browser page (demo/buckworld.html) drives BuckWorldApp with
 // web-loaded dependencies; this gate drives the SAME class with
@@ -13,8 +13,7 @@ import { createRequire } from "node:module";
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable } from "../src/nodefs.js";
+import { loadArtifact, artifactsAvailable, nodeWebevmSession } from "../src/nodefs.js";
 
 const require = createRequire(import.meta.url);
 let id = null;
@@ -42,7 +41,7 @@ test("demo controller: citizens, handshake, payments, time, demurrage", { skip }
   };
 
   const app = new BuckWorldApp({
-    session: await tevmSession(),
+    session: await nodeWebevmSession(),
     identity: id.default,
     artifacts: loadArtifact,
     makeAccount: () => privateKeyToAccount(generatePrivateKey()),

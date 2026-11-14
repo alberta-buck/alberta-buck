@@ -9,7 +9,7 @@
 //
 // Build: make nix-sandbox-build  (esbuild bundle -> sandbox/dist/app.js)
 
-import { tevmSession } from "../../src/backends.js";
+import { webevmSession } from "../../src/webevm.js";
 import { loadIdentity } from "../../src/identity-web.js";
 import { artifact } from "../../artifacts/sandbox.mjs";
 import { SandboxApp } from "./app.js";
@@ -151,7 +151,7 @@ async function bootWorld() {
   let txs = 0;
   const app = await SandboxApp.open({
     identity, artifacts: artifact, store,
-    newSession: () => tevmSession(),
+    newSession: () => webevmSession({ wasm: "./wasm/revm.wasm" }),
     onJournal: (e) => {
       txs += 1;
       if ($("loading").hidden) return;

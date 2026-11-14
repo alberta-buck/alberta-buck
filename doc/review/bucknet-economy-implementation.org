@@ -3844,3 +3844,83 @@ cause, and whether anyone else has an EVM that runs entirely in a browser.
     side (a bounded block store, as its =stateHistory= already bounds state).
 75. /Report the code-hex memo to Tevm./ Anyone else on the JavaScript Tevm
     pays the same 8.7x; it is a small, safe patch.
+
+** Sandbox on webevm, and the first five-year runs
+
+- [X] /The fork pushed./ =pjkundert/webevm=, branch =feature/block-clock-cheats=
+  (3869c21), ready for a pull request upstream.
+- [X] /The dependency./ =core/js/vendor/webevm-0.9.1-clock-3869c21.tgz= (329 kB,
+  =npm pack= of the fork's build), pinned by =core/js/package.json= as a
+  =file:= dependency; =core/js/vendor/README.md= says how to refresh it. It
+  brought =@ethereumjs/*= 10.1.2 -> 10.1.3 (patch).
+- [X] /The modules./ =src/webevm.js= (browser-safe: =webevmSession({wasm})=,
+  =snapshotWebevm= / =restoreWebevm= over webevm's own =dumpState= /
+  =loadState=, blocks and logs kept); =src/dev-keys.js= (the dev accounts, so a
+  browser bundle needs no backend module); =nodefs.js= =revmWasm()= and
+  =nodeWebevmSession()= for Node. =eqsim.mjs= defaults to webevm.
+- [X] /The sandbox./ =sandbox/src/main.js= and =app.js= on webevm + revm; the
+  saved-world format is version 5 (an older save starts a new world with a
+  notice, as any version change does); the build copies =revm.wasm= beside the
+  identity kernel. The bundle no longer contains Tevm: =app.js= 2.93 MB ->
+  1.89 MB, plus =wasm/revm.wasm= 1.23 MB; webevm and revm-wasm are in the
+  generated third-party notices.
+- [X] /The demo pages./ =buckworld.html= and =eqworld.html= on webevm too; their
+  node gates renamed =app.webevm.test.js=, =eqapp.webevm.test.js=.
+- [X] /Checkpoints./ The vector's incremental checkpoint now doubles its period
+  (days 25, 50, 100, ..., 1600): a five-year run's checkpoints cost about two
+  final vectors in all, where every 25 days cost about 37 (recommendation 58,
+  until the vector retires). The run record is appended daily and survives a
+  kill.
+- [X] /The wheel keeper's gas./ =eqworld.js= takes =world.tickGas=
+  (=eqsim.mjs --tick-gas=); the default stays 12M.
+- [ ] /Running./ The first Python five-year economy world
+  (=build/sim/economy-5y.json=, run record =build/runs/economy-5y=; about four
+  hours at the one-year world's 39 minutes a year).
+
+*** Checkpoint
+
+- *Evidence*: =sandbox.app.webevm.test.js= 14 of 14 in 7 s (the whole story,
+  saved, reopened, imported); =make nix-wallet-sandbox-test= 15 of 15 in 11 s,
+  the real page in Chromium included (certify, register, introduce, trade,
+  pay, reload); screenshots of all four tabs on webevm; the eq demo's shipped
+  bundle passes headless on webevm. The qualified Tevm set
+  (=make nix-core-equilibrium-bootstrap-test=) 85 of 85 on this tree, so the
+  dependency bump and the dev-keys move changed nothing there. Failing before
+  and after, unchanged: the buckworld demo controller and its bundle
+  (an ABI argument-count mismatch: the old demo predates the current
+  contracts), =eqapp.webevm.test.js= and the other files a bare =node --test=
+  runs without the staged Permit2 artifact.
+- *Five years of the JS world* (=eqsim.mjs --days 1825=, one debtor, one
+  basket saver, the arb, whales, wheel and PID keepers, webevm + revm): 198 s,
+  2.4 GB peak resident. With the keeper's 12M gas per tick it stops on day
+  1443, when a wheel tick needs 13.8M; with 29M it completes.
+
+*** Observations and recommendations (sandbox on webevm, five-year JS world)
+
+**** Measured
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 69 | the sandbox on webevm (the controller gate and the page in Chromium) | The whole sandbox story runs in 7 s in Node and the page test in 11 s, and the page carries 1 MB less JavaScript. The in-browser world is no longer the thing that limits what a visitor can do. |
+| 70 | five years of the JS world (=build/test/eqsim-5y.svg=) | K holds at 0.75 for about 200 days, then falls in a straight line to 0 by about day 1600, while BVIB stays 0 to 2% above 1 throughout: the controller's integral keeps lowering K and the basket observable never comes back to 1. When K reaches 0, BVIB jumps to 1.16 and BUCK/USD falls to 0.93 and stays there. The debtor ends ahead of its counterfactual. The same wind-down the Python household economy shows in a year (K 0.75 to 0.45, observation 68), in a world with one debtor. |
+| 71 | the wheel's ticks over the five years | Per-slot gas is flat for four years (peaks 10.2M), then from day 1443, as K nears 0.15, ticks need up to 13.9M: the keeper's 12M limit is crossed only in the collapse regime. |
+
+**** Recommendations
+
+76. /K's wind-down is the five-year question./ Both worlds, Python with 150
+    households and JS with one debtor, lower K steadily while BVIB stays a
+    little above 1, and the JS world reaches K = 0 in about four and a half
+    years. Recommendation 68 (does K bound the basket's held BUCK?) and 69
+    (decompose who holds BVIB above 1) are the questions to settle before a
+    five-year campaign is a measurement of the design rather than of this
+    drift; a small JS world now runs five years in about three minutes, so
+    candidate answers can be tried quickly before the Python campaign.
+77. /Give the keeper the block, not 12M./ A wheel tick near K = 0 needs 13.9M
+    gas; a keeper on a real chain would estimate and pay up to the block limit.
+    Raise the simulated keeper's default (or estimate per tick) once 76 is
+    understood, so a world in the collapse regime records the collapse rather
+    than stopping.
+78. /Release blocker: the webevm dependency./ =alberta-buck-core= cannot be
+    published with a =file:= dependency. Before its next release, either
+    upstream has released the clock or the fork is published under a scope
+    (the owner's call).

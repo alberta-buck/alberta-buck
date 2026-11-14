@@ -6,7 +6,7 @@
 // reads, and the agents' own ledgers.
 //
 // All the logic, none of the DOM: eqmain.js (the page) constructs it
-// with browser-loaded dependencies; the node gate (eqapp.tevm.test.js)
+// with browser-loaded dependencies; the node gate (eqapp.webevm.test.js)
 // drives the SAME class with node-loaded ones.
 
 import { advanceTime, DAY, DEPLOY_DEFAULTS } from "../../src/buckworld.js";

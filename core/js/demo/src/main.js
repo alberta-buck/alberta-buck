@@ -6,7 +6,7 @@
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession } from "../../src/backends.js";
+import { webevmSession } from "../../src/webevm.js";
 import { loadIdentity } from "../../src/identity-web.js";
 import { JournalWriter } from "../../src/journal.js";
 import { artifact } from "../../artifacts/bundle.mjs";
@@ -92,9 +92,10 @@ async function main() {
   const identity = await loadIdentity("./wasm-web/buck_identity_bg.wasm");
   await mathInit({ module_or_path: "./wasm-web/buck_math_bg.wasm" });
 
-  $("status").textContent = "booting in-browser EVM (tevm)…";
-  const session = await tevmSession({
+  $("status").textContent = "booting in-browser EVM (webevm + revm)…";
+  const session = await webevmSession({
     journal: new JournalWriter(journalLine),
+    wasm: "./wasm-web/revm.wasm",
   });
   app = new BuckWorldApp({
     session, identity, artifacts: artifact,

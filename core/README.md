@@ -32,7 +32,7 @@ Python package keeps working and transitions onto these incrementally.
                   (citizens + market) and eqworld.html (the BUCK-K
                   loop: live chart panels, dynamic add-saver /
                   add-debtor) -- each gated headlessly over the exact
-                  shipped esbuild bundle.  Deps: viem + tevm
+                  shipped esbuild bundle.  Deps: viem + webevm (tevm kept for comparison)
                   (`npm ci` in core/js).
       rust/       cargo workspace: buck-math -- the integer monetary kernel
                   (BuckCredit depreciation, canonical compounded cash and

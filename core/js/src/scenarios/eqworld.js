@@ -398,7 +398,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       do {
         const scan = bounded ? (remaining < 4n ? remaining : 4n) : 0n;
         const receipt = await session.send(wheel, "tick", [bounded ? 1n : budget, scan],
-          { tag: `${base}:tick:${receipts.length}`, gas: 12_000_000n });
+          { tag: `${base}:tick:${receipts.length}`, gas: world.tickGas ?? 12_000_000n });
         receipts.push(receipt);
         const work = parseEventLogs({ abi: wheel.abi, logs: receipt.logs, eventName: "Ticked" })
           .reduce((sum, e) => sum + e.args.work, 0n);

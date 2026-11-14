@@ -4,8 +4,9 @@ The JavaScript side of the Alberta Buck platform: one testing API over every
 EVM backend, an agent simulation platform that runs in a browser, and
 BigInt-native wrappers around the WebAssembly kernels.
 
-- **`Session`** -- the ChainSession API. Send, call and deploy against Tevm
-  in-process, anvil, or a public testnet, with the same code. Every
+- **`Session`** -- the ChainSession API. Send, call and deploy against an
+  in-process EVM (webevm + revm, or Tevm), anvil, or a public testnet, with
+  the same code. Every
   state-changing operation declares whether it is expected to succeed or
   revert, so expectation mismatches are first-class results rather than
   surprises.
@@ -20,9 +21,9 @@ BigInt-native wrappers around the WebAssembly kernels.
   the halves each party performs: `issueCredential` (the issuer, off-chain)
   and `registerWallet` (the holder); `insureAsset` (the insurer) and
   `activateCredit` (the holder). `observer.js` decodes the chain as the
-  public sees it, identity material marked opaque. `snapshotTevm` /
-  `restoreTevm` and `codec.js` save a Tevm world as JSON and bring it back,
-  clock included.
+  public sees it, identity material marked opaque. `snapshotWebevm` /
+  `restoreWebevm` and `codec.js` save an in-process world as JSON and bring
+  it back, clock included (`snapshotTevm` / `restoreTevm` for Tevm).
 - **Kernel wrappers** -- `identity.js` and `wallet.js` wrap
   [`alberta-buck-kernel`](https://www.npmjs.com/package/alberta-buck-kernel)
   in a BigInt-native API; `identity-web.js` and `wallet-web.js` do the same
@@ -41,11 +42,15 @@ this package's dependency graph.
 ## Use
 
 ```js
-import { tevmSession, runDays } from "alberta-buck-core";
+import { runDays } from "alberta-buck-core";
+import { nodeWebevmSession } from "alberta-buck-core/nodefs";
 
-const session = await tevmSession();          // or anvilSession(...)
+const session = await nodeWebevmSession();    // or tevmSession(), anvilSession(...)
 // ... deploy contracts, then let agents run simulated days
 ```
+
+In a browser, `webevmSession({ wasm })` takes revm's engine from a URL the page
+serves (`node_modules/revm-wasm/wasm/revm.wasm`, copied beside the bundle).
 
 ```js
 import identity from "alberta-buck-core/identity";

@@ -1934,16 +1934,17 @@ core-demo-identity:	core-build-wasm-web
 	@echo "       then open http://localhost:8000/identity-proofs.html"
 
 # The interactive buckworld page: bundle the controller + platform +
-# viem/tevm into demo/app.js (the wasm binaries stay separate files the
-# page fetches from wasm-web/).  Browser shims: the npm `buffer` polyfill
-# (string_decoder in tevm's tree), and an empty `fs` (an @tevm/node
-# state-persistence path the browser never takes).
+# viem/webevm into demo/app.js (the wasm binaries, revm's engine among them,
+# stay separate files the page fetches from wasm-web/).  Browser shims: the
+# npm `buffer` polyfill, and an empty `fs` for any node-only path the
+# browser never takes.
 core-demo-buckworld:	core-build-wasm-web core-js-artifacts
 	cd core/js && npx esbuild demo/src/main.js --bundle --format=esm \
 		--platform=browser --outfile=demo/app.js \
 		--alias:buffer=buffer \
 		--alias:fs=./demo/src/shims/fs-empty.js \
 		--log-limit=8
+	cp core/js/node_modules/revm-wasm/wasm/revm.wasm core/js/demo/wasm-web/
 	@echo "demo ready: python3 -m http.server -d core/js/demo 8000"
 	@echo "       then open http://localhost:8000/buckworld.html"
 
@@ -1955,6 +1956,7 @@ core-demo-eqworld:	core-build-wasm-web core-js-artifacts
 		--alias:buffer=buffer \
 		--alias:fs=./demo/src/shims/fs-empty.js \
 		--log-limit=8
+	cp core/js/node_modules/revm-wasm/wasm/revm.wasm core/js/demo/wasm-web/
 	@echo "demo ready: make nix-core-demo-eqworld-serve EQWORLD_PORT=8983"
 
 EQWORLD_PORT ?= 8983
@@ -2013,6 +2015,7 @@ sandbox-build:	sandbox-artifacts core-build-wasm-web
 	mkdir -p $(SANDBOX_DIST)/wasm
 	cp core/js/sandbox/index.html core/js/sandbox/styles.css $(SANDBOX_DIST)/
 	cp core/js/kernel/web/buck_identity_bg.wasm $(SANDBOX_DIST)/wasm/
+	cp core/js/node_modules/revm-wasm/wasm/revm.wasm $(SANDBOX_DIST)/wasm/
 	printf '{"server": %s}\n' '$(if $(SANDBOX_SIM_SERVER),"$(SANDBOX_SIM_SERVER)",null)' \
 		> $(SANDBOX_DIST)/sim-server.json
 	python3 scripts/third_party_notices.py sandbox core/js/artifacts/sandbox-meta.json \
@@ -2022,7 +2025,7 @@ sandbox-build:	sandbox-artifacts core-build-wasm-web
 # static server; the Python savings backend and five-year economy are separate.
 .PHONY: wallet-sandbox-test
 wallet-sandbox-test: sandbox-build
-	cd core/js && node --test test/sandbox.app.tevm.test.js test/sandbox.browser.test.js
+	cd core/js && node --test test/sandbox.app.webevm.test.js test/sandbox.browser.test.js
 
 # ── Licences and third-party notices in what we publish ───────────────
 #

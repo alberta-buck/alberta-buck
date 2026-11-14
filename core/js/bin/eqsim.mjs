@@ -18,7 +18,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { anvilSession, tevmSession, pruneTevm, trimSystemRings, tevmRetained } from "../src/backends.js";
 import { profileClient } from "../src/tevm-profile.js";
 import { artifacts as bundled } from "../artifacts/bundle.mjs";
-import { loadAnyArtifact, repoRoot, fileJournalWriter } from "../src/nodefs.js";
+import { loadAnyArtifact, repoRoot, fileJournalWriter, nodeWebevmSession } from "../src/nodefs.js";
 import { buildEquilibriumWorld, DayClock, PidKeeper, WheelKeeper }
   from "../src/scenarios/eqworld.js";
 import { PinWhale } from "../src/agents/whale.js";
@@ -30,7 +30,7 @@ import { lineChart, svgDoc } from "../src/chart.js";
 import id from "../src/identity.js";
 
 const { values: a } = parseArgs({ options: {
-  backend: { type: "string", default: "tevm" },   // tevm | anvil (long runs) | webevm (spike)
+  backend: { type: "string", default: "webevm" }, // webevm | tevm | anvil
   engine:  { type: "string", default: "revm" },   // webevm only: revm | ethereumjs
   rpc:     { type: "string", default: "http://127.0.0.1:8545" },
   days:    { type: "string", default: "180" },
@@ -46,16 +46,16 @@ const { values: a } = parseArgs({ options: {
   plot:    { type: "string", default: "" },
   journal: { type: "string", default: "" },
   profile: { type: "string", default: "" },       // write a per-method / per-function timing table here
-  prune:   { type: "boolean", default: false },    // drop Tevm's old state roots and trim the system rings daily
+  prune:   { type: "boolean", default: false },
+  "tick-gas": { type: "string", default: "" },    // the wheel keeper's gas per tick (default 12M)    // drop Tevm's old state roots and trim the system rings daily
 } });
 const days = Number(a.days);
 
-// tevm keeps every block in JS memory: fine for demo-scale runs, OOM
-// around multi-year ones.  Long runs point at a fresh anvil (the
-// fidelity anchor), which holds chain state in its own process.
+// webevm + revm (the default) runs a year of this cast in about half a minute; tevm is kept for
+// comparison (about 100 s a day, doc/reports/tevm-memory.org); anvil is the fidelity anchor.
 const jopt = a.journal ? { journal: fileJournalWriter(a.journal) } : {};
 const session = a.backend === "anvil" ? await anvilSession(a.rpc, jopt)
-  : a.backend === "webevm" ? await (await import("../src/webevm-backend.js")).webevmSession({ ...jopt, engine: a.engine })
+  : a.backend === "webevm" ? await nodeWebevmSession({ ...jopt, engine: a.engine })
   : await tevmSession(jopt);
 const urArtifact = JSON.parse(readFileSync(
   join(repoRoot(), "alberta_buck", "sim", "artifacts", "UniversalRouter.json"),
@@ -65,6 +65,7 @@ const world = await buildEquilibriumWorld(session, loadAnyArtifact, {
   targetBuck: BigInt(a.target) * 10n ** 6n,
   feedSeed: Number(a.seed), stepBp: Number(a.step) });
 
+if (a["tick-gas"]) world.tickGas = BigInt(a["tick-gas"]);
 const HOUSE = BigInt(a.house) * 10n ** 6n;
 const debtorAcct = privateKeyToAccount(generatePrivateKey());
 const saver = new BasketSaver({

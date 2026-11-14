@@ -6,7 +6,7 @@
 // production identity contracts, the unmodified Uniswap periphery, trades
 // through Permit2), and an observer's view of everything the chain shows.
 // main.js (the page) constructs it with browser-loaded dependencies; the
-// node gate (test/sandbox.app.tevm.test.js) drives the SAME class with
+// node gate (test/sandbox.app.webevm.test.js) drives the SAME class with
 // node-loaded ones.
 //
 // Every action runs one at a time, then the app decodes the new blocks for
@@ -30,7 +30,7 @@ import {
   buildMarket, attachNetMarket, marketRecord, marketContracts, fiatIn, buckPrice, poolReserves,
   openTrading, tradingOpen, buyBuck, buyBuckExact, sellBuck,
 } from "../../src/market.js";
-import { snapshotTevm, restoreTevm } from "../../src/backends.js";
+import { snapshotWebevm, restoreWebevm } from "../../src/webevm.js";
 import { observe } from "../../src/observer.js";
 import { encodeJSON, decodeJSON } from "../../src/codec.js";
 import { JournalWriter } from "../../src/journal.js";
@@ -48,7 +48,7 @@ const PROTOCOL_REASONS = {
 };
 
 export const FORMAT = "alberta-buck-sandbox";
-export const VERSION = 4; // canonical compounded Buck, explicit liabilities and per-insurer pools
+export const VERSION = 5; // the chain on webevm (its dumpState: blocks and logs kept); 4 was Tevm's
 export const BUCK = 1_000_000n;                  // 6 decimals
 export const USDC = 1_000_000n;                  // 6 decimals
 
@@ -126,7 +126,7 @@ export class SandboxApp {
   /**
    * @param deps.identity   the buck-identity kernel API
    * @param deps.artifacts  (name) => {abi, bytecode}
-   * @param deps.newSession async () => a FRESH tevm Session (deployer account)
+   * @param deps.newSession async () => a FRESH webevm Session (deployer account)
    * @param deps.store      {load, save, clear} of JSON text (store.js), or null
    * @param deps.rng        scalar drawer (tests inject; default WebCrypto)
    * @param deps.newKey     () => a private key for a new account (tests inject)
@@ -620,7 +620,7 @@ export class SandboxApp {
 
   async #serialize() {
     return encodeJSON({ format: FORMAT, version: VERSION,
-                        chain: await snapshotTevm(this.session), app: this.state });
+                        chain: await snapshotWebevm(this.session), app: this.state });
   }
 
   async #save() {
@@ -642,7 +642,7 @@ export class SandboxApp {
       throw new SandboxError(`sandbox world version ${saved.version}; this sandbox reads ${VERSION}`);
     }
     const session = await this.newSession();
-    await restoreTevm(session, saved.chain);
+    await restoreWebevm(session, saved.chain);
     const world = await attachNetBuckWorld(session, this.artifacts, saved.app.world,
       { identity: this.identity });
     if ((await session.client.getCode({ address: world.buck.address }) ?? "0x") === "0x") {

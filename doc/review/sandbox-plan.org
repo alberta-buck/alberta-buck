@@ -178,7 +178,7 @@ risks, settled:
 * S2, done (2026-09-25)
 
 =core/js/sandbox/src/app.js= (=SandboxApp=) and =store.js= (=idbStore=, falling back to
-=memoryStore= where storage is refused), with =test/sandbox.app.tevm.test.js=: the whole story
+=memoryStore= where storage is refused), with =test/sandbox.app.webevm.test.js=: the whole story
 with no DOM, 12 steps, about 10 s.  The shape the UI builds on:
 
 - *Actions* (queued, one at a time; each then observes, saves and notifies =onChange=):

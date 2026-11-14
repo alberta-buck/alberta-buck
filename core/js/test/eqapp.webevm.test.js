@@ -11,8 +11,7 @@ import { join } from "node:path";
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable, repoRoot } from "../src/nodefs.js";
+import { loadArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
 
 let id = null;
 try {
@@ -35,7 +34,7 @@ test("eqapp: dynamic savers/debtors + live chart panels", { skip }, async () => 
   const { EqWorldApp } = await import("../demo/src/eqapp.js");
 
   const app = new EqWorldApp({
-    session: await tevmSession(),
+    session: await nodeWebevmSession(),
     identity: id.default,
     artifacts: loadArtifact,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")),

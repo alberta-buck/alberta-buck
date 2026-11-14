@@ -1,4 +1,4 @@
-// The sandbox CONTROLLER end to end on Tevm, with no DOM
+// The sandbox CONTROLLER end to end on webevm + revm, with no DOM
 // (doc/review/sandbox-plan.org, S2): the page drives SandboxApp with
 // browser-loaded dependencies and IndexedDB; this gate drives the SAME
 // class with node-loaded ones and a memory store.
@@ -15,8 +15,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 
-import { tevmSession } from "../src/backends.js";
-import { loadAnyArtifact } from "../src/nodefs.js";
+import { loadAnyArtifact, nodeWebevmSession } from "../src/nodefs.js";
 
 let id = null;
 try {
@@ -55,7 +54,7 @@ describe("sandbox controller: the whole story, saved and restored", { skip }, ()
     deps = {
       identity: id.default ?? id,
       artifacts: loadAnyArtifact,
-      newSession: () => tevmSession(),
+      newSession: () => nodeWebevmSession(),
       rng: () => {
         seed = (seed * 6364136223846793005n + 1442695040888963407n) & ((1n << 256n) - 1n);
         const v = seed % id.ORDER;

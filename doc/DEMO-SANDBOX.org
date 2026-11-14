@@ -7,7 +7,7 @@ The design owner's ruling of 2026-09-27: three sandboxes, three sites.  The
 first two are live; this document plans the third and waits on a "go".
 
 - *sandbox.albertabuck.ca* -- the sandbox as built: Issuer, Wallets,
-  Credit, Observer, in the visitor's tab (Tevm), on a clock that moves only
+  Credit, Observer, in the visitor's tab (webevm + revm), on a clock that moves only
   when they move it; no Savings tab.  Cloudflare Pages, from =master=
   (=.github/workflows/sandbox-pages.yml=).  LIVE.
 - *savings-sandbox.albertabuck.ca* -- the Savings tab (=doc/SANDBOX.org=
@@ -102,7 +102,7 @@ byte-identical); it is part of the demo-sandbox experiment only.
    the new Permit2 and router, USDC).  *Medium, about a day.*
 2. *Page: a remote mode for =SandboxApp=.*  A session over the world's RPC
    with the page's own keys (the bank key in the deployer's role);
-   =open()= attaches instead of building; no =snapshotTevm= / =restoreTevm=,
+   =open()= attaches instead of building; no =snapshotWebevm= / =restoreWebevm=,
    Export, Import (Reset = a new world); =advance()= becomes a /Step/ op; the
    world bar shows the sim's day, K and prices (from the frames, as the
    Savings tab does); the tools' view re-read after each frame; the Observer
@@ -110,7 +110,7 @@ byte-identical); it is part of the demo-sandbox experiment only.
 3. *The ceremonies on the harness* -- certify, register, introduce, open
    trading, pay, insure, quote, activate -- each checked against the server
    world (a node test driving =SandboxApp= in remote mode against a local
-   server, the counterpart of =test/sandbox.app.tevm.test.js=).  *The main
+   server, the counterpart of =test/sandbox.app.webevm.test.js=).  *The main
    risk* (section 4).  *A day, if they pass as expected.*
 4. *Saving from the tools' wallets.*  The Savings deposit / receipt / redeem
    flow offered on each wallet: TOKENs from the faucet, or the wallet's own

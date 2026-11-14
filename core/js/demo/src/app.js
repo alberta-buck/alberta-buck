@@ -1,8 +1,8 @@
 // The buckworld demo CONTROLLER -- all the logic, none of the DOM.
 //
 // main.js (the page) constructs it with browser-loaded dependencies
-// (tevmSession, loadIdentity, the bundled artifacts); the node gate
-// (test/app.tevm.test.js) drives the SAME class with node-loaded ones.
+// (webevmSession, loadIdentity, the bundled artifacts); the node gate
+// (test/app.webevm.test.js) drives the SAME class with node-loaded ones.
 // Every mutation goes through the Session, so the journal records the
 // whole interactive story -- including the protocol's refusals.
 

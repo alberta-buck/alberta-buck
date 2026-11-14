@@ -12,6 +12,7 @@ export { settlementOps, settlementPaymentFromReceipt } from "./settlement.js";
 export { observeNetMarket, netSaleExpected, netSaleInput, netPurchaseExpected, netPurchaseCost } from "./net-market-quote.js";
 export { buildBuckWorld, worldRecord, attachBuckWorld, attachNetBuckWorld } from "./buckworld.js";
 export { DEV_KEYS, devAccount, anvilSession, tevmSession } from "./backends.js";
+export { WEBEVM_CHAIN_ID, webevmSession, snapshotWebevm, restoreWebevm } from "./webevm.js";
 export { MIN_SQRT_RATIO, MAX_SQRT_RATIO, HUGE, Q96, isqrt, sqrtPriceX96,
          fullRangeTicks, spotFromSqrtPriceX96 } from "./v3.js";
 export { runDays } from "./world.js";

@@ -117,3 +117,20 @@ export function fileJournalWriter(path) {
   mkdirSync(dirname(resolve(path)), { recursive: true });
   return new JournalWriter((line) => appendFileSync(path, line));
 }
+
+let revmModule = null;
+/** revm-wasm's engine, compiled once per process, for webevmSession({ wasm }) under Node. */
+export async function revmWasm() {
+  if (!revmModule) {
+    const file = join(dirname(require.resolve("revm-wasm/package.json")), "wasm", "revm.wasm");
+    revmModule = await WebAssembly.compile(readFileSync(file));
+  }
+  return revmModule;
+}
+
+/** webevmSession with revm's wasm read from node_modules (the Node form of the browser's URL). */
+export async function nodeWebevmSession(opts = {}) {
+  const { webevmSession } = await import("./webevm.js");
+  const engine = opts.engine ?? "revm";
+  return webevmSession({ ...opts, engine, ...(engine === "revm" ? { wasm: await revmWasm() } : {}) });
+}

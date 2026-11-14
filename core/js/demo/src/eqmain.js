@@ -9,7 +9,7 @@
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession } from "../../src/backends.js";
+import { webevmSession } from "../../src/webevm.js";
 import { loadIdentity } from "../../src/identity-web.js";
 import { JournalWriter } from "../../src/journal.js";
 import { artifact } from "../../artifacts/bundle.mjs";
@@ -233,8 +233,9 @@ async function main() {
   $("status").textContent =
     "deploying the equilibrium world on the in-browser EVM " +
     "(BUCK stack, basket, three pools, Universal Router)…";
-  const session = await tevmSession({
+  const session = await webevmSession({
     journal: new JournalWriter(journalLine),
+    wasm: "./wasm-web/revm.wasm",
   });
   app = new EqWorldApp({
     session, identity, artifacts: artifact,

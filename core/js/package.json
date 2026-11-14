@@ -40,7 +40,8 @@
     "alberta-buck-contracts": "0.3.0",
     "alberta-buck-kernel": "0.4.0",
     "tevm": "^1.0.0-next.149",
-    "viem": "^2.54.2"
+    "viem": "^2.54.2",
+    "webevm": "file:vendor/webevm-0.9.1-clock-3869c21.tgz"
   },
   "devDependencies": {
     "buffer": "^6.0.3",

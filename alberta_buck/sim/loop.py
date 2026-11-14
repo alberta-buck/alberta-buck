@@ -318,9 +318,12 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
             on_frame(snap.frames[-1])
         # Incremental checkpoint: flush the vector periodically so a long run
         # killed mid-flight still yields usable partial data (and can be
-        # plotted).  Cheap relative to a day's on-chain work; final write below
-        # still produces the complete vector.
-        if out_path and day > 0 and day % 25 == 0:
+        # plotted); the final write below still produces the complete vector.
+        # Each write serializes every earlier frame, so the period doubles
+        # (days 25, 50, 100, 200, ...): the checkpoints of a five-year run cost
+        # about two final vectors in all, where every 25 days cost about 37.
+        # The run record (runrecord.py) is appended daily and survives a kill.
+        if out_path and day > 0 and day % 25 == 0 and (day // 25) & (day // 25 - 1) == 0:
             snap.write(out_path)
         if verbose and (day % 20 == 0 or day == scenario.days - 1):
             f = snap.frames[-1]

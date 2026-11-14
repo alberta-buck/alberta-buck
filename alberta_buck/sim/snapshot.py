@@ -1123,8 +1123,8 @@ class Snapshotter:
                "frames": self.frames}
         if self.meta:
             out["meta"] = self.meta
-        # Atomic: the incremental checkpoint rewrites this file every 25
-        # days while the run continues, and a reader plotting a run in
+        # Atomic: the incremental checkpoint rewrites this file (days 25, 50,
+        # 100, ...) while the run continues, and a reader plotting a run in
         # flight would otherwise be able to catch a half-written file.
         # Write beside it and rename, which is atomic within a filesystem.
         tmp = p.with_suffix(p.suffix + ".tmp")
