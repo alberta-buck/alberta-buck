@@ -218,10 +218,13 @@ income; (4) the Jubilee reserve target, 10% today against the owner's ~1%.
   prices, cannot cover that, or whose slippage passes the holder's own
   minimum. The holders who stay keep their equity per share and their
   shortfall does not grow.
-- /Unpaid relief is equity./ It already counts in the basket's equity and
-  share price; it is to count as collateral too, as if that much of the lien
-  had been paid down (today =_creditValueS= deducts it: "unpaid claims ...
-  never issuance collateral").
+- /Unpaid relief is equity, not collateral./ It counts in the basket's
+  equity and share price (it already does: =buckEq= = cash - lien + relief).
+  It becomes credit only when crystallised: an owner closes its BuckCredit
+  (receiving the relief) and opens a new one on the larger equity. For the
+  basket, crystallising is retiring principal (its retirement job), after
+  which the smaller lien leaves more room. So =_creditValueS= keeps excluding
+  unpaid relief, as it does today.
 - /The Jubilee reserve stays at 10%/ of the accrued claim, each relief at most
   10% of its cash; 90% deployed in the basket is the intended use.
 
@@ -246,11 +249,10 @@ households' exit staging):
 4. An in-kind request (a separate entry point, keeping =redeem= /
    =redeemShares= BUCK-only) delivers TOKEN for the holder's net equity, its
    lien share settled in BUCK as above.
-5. Count unpaid relief in =_creditValueS=.
-6. Tests first: an under-water exit proceeds in BUCK; the shortfall does not
+5. Tests first: an under-water exit proceeds in BUCK; the shortfall does not
    grow; the remaining holders' equity per share does not fall; the leaver
-   bears slippage and its =minBuck= binds; the in-kind request; relief in
-   collateral; the exit gate in the households' staging (it no longer waits
+   bears slippage and its =minBuck= binds; the in-kind request; unpaid
+   relief in equity and not in collateral; the exit gate in the households' staging (it no longer waits
    on a closed door). A contract change: the full qualification (=make
    nix-test=, contracts-dist, both SDKs, the Tevm files) and a release.
 
