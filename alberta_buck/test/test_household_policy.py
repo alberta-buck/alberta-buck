@@ -69,6 +69,18 @@ def test_net_refinance_scores_only_incremental_insurance(case):
     assert carry.refinance(t, 4900, 5000).parts["premium"] == 0
 
 
+def test_a_fixed_premium_cost_makes_small_loans_proportionally_dearer():
+    """premium_bp + premium_fixed_usd / insured value: $100 a year adds 50 bp to a $20k car, 2 to a $500k home."""
+    base = FIXTURE["settings"] | {"premium_bp": [50., 50.], "premium_fixed_usd": 100.}
+    car = hp.profile(FIXTURE["seed"], "0", base | {"home_k": [20., 20.]})
+    home = hp.profile(FIXTURE["seed"], "0", base | {"home_k": [500., 500.]})
+    assert (car["premium_bp"], home["premium_bp"]) == (100, 52)
+    assert hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"])["premium_bp"] == \
+        hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"premium_fixed_usd": 0.})["premium_bp"]
+    with pytest.raises(ValueError, match="premium_fixed_usd"):
+        hp.profile(FIXTURE["seed"], "0", FIXTURE["settings"] | {"premium_fixed_usd": -1.})
+
+
 def test_external_premium_rejects_impossible_inputs():
     for args in ((1, 0, 0), (1, 10, 11), (-1, 10, 0), (1, 10, -1), (True, 10, 0),
                  (1, 10.5, 0), (2**256, 10, 0)):

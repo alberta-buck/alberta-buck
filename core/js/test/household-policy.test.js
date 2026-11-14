@@ -327,3 +327,13 @@ test("each household keeps one keyed day of the month for its payday", async () 
     "pinning the payday moves no other draw");
   for (const bad of [30, -1, NaN, "7"]) assert.throws(() => profile(41404, "payday/0", { pay_day: bad }), /pay_day/);
 });
+
+test("a fixed premium cost makes small loans proportionally dearer (as in Python)", () => {
+  const base = { ...f.settings, premium_bp: [50, 50], premium_fixed_usd: 100 };
+  const car = profile(f.seed, "0", { ...base, home_k: [20, 20] });
+  const home = profile(f.seed, "0", { ...base, home_k: [500, 500] });
+  assert.deepEqual([car.premium_bp, home.premium_bp], [100, 52]);
+  assert.equal(profile(f.seed, "0", f.settings).premium_bp,
+    profile(f.seed, "0", { ...f.settings, premium_fixed_usd: 0 }).premium_bp);
+  assert.throws(() => profile(f.seed, "0", { ...f.settings, premium_fixed_usd: -1 }), /premium_fixed_usd/);
+});

@@ -3,6 +3,9 @@ import { netPurchaseExpected, netPurchaseCost, netSaleExpected } from "../net-ma
 export const DEFAULTS = {
   home_k: [200, 1500], ltv: [.05, .85], income_frac: [.20, .35], living_frac: [.55, .70],
   cash_k: [20, 60], apr: [.045, .075], premium_bp: [25, 100], theta: [.5, 3],
+  // A fixed yearly cost per insured asset, in dollars, on top of the premium rate: premium_bp +
+  // premium_fixed_usd / value, so a small loan's premium is proportionally higher. 0: the rate alone.
+  premium_fixed_usd: 0,
   risk: [0, .01], switch_k: [1, 3], penalty_months: 3, term_months: 60, renew_frac: [0, 1],
   retire_disc: [.005, .03], issue_premium: [.005, .025], utilization: [.65, .85],
   buffer_k: 10, max_impact_bp: [25, 100], decision_days: [5, 20], surplus_policy: "adaptive",
@@ -183,7 +186,7 @@ export function profile(seed, member, overrides = {}) {
   for (const key of ["home_k", "ltv", "income_frac", "cash_k", "apr", "premium_bp", "theta", "risk", "switch_k",
     "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
     "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double",
-    "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap"]) {
+    "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap", "premium_fixed_usd"]) {
     if (!Number.isFinite(p[key]) || p[key] < 0) throw new Error(`invalid household parameter: ${key}`);
   }
   if (p.home_k <= 0 || p.max_impact_bp > 10000 || p.renew_frac > 1) throw new Error("invalid household size, impact or renewal fraction");
@@ -211,7 +214,7 @@ export function profile(seed, member, overrides = {}) {
   p.phase = Math.trunc(uniform(seed, member, "phase") * p.decision_days);
   p.term_months = Math.max(1, Math.trunc(p.term_months));
   p.renew_in = Math.trunc(p.renew_frac * p.term_months);
-  p.premium_bp = Math.trunc(p.premium_bp);
+  p.premium_bp = Math.trunc(p.premium_bp + p.premium_fixed_usd * 10000 / (p.home_k * 1000));
   return p;
 }
 
