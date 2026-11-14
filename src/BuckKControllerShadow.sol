@@ -233,7 +233,7 @@ contract BuckKControllerShadow is BuckKControllerDirect {
         int256 setpoint = buckValue   / TO18;   // ppm (== PPM in direct mode)
         int256 process  = basketValue / TO18;   // ppm
         int256 err      = setpoint - process;   // ppm
-        int256 newI     = I + _integralStep(err, dt);   // ppm*seconds
+        int256 newI     = _leakedI(I, dt) + _integralStep(err, dt);   // ppm*seconds
         int256 dErr     = err - P;              // ppm
         int256 rawOutput = int256(buckK0)
             + Kp * err

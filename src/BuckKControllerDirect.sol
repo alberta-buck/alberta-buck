@@ -60,6 +60,19 @@ interface IBuckBasketRef {
 ///           - basketValue < 1.0 (BUCK overvalued, deflation):
 ///                error > 0  ->  buckK INCREASES  ->  credit expands.
 ///
+///         LEAK
+///         ----
+///         With `leakTau` set, each cycle first decays the integrator toward 0
+///         by `I * dt / leakTau` (first order; a cycle of `leakTau` or longer
+///         forgets it), then adds the cycle's increment.  The integral of a
+///         sustained error e then settles at e * leakTau instead of growing
+///         without bound, so buckK settles at buckK0 + Kp*e + Ki*e*leakTau
+///         rather than winding to a rail, and returns to buckK0 at parity.
+///         buckK0 is the target K: the integrator holds K away from it only
+///         while the error persists.  An error the loop cannot correct (no
+///         actor responds to K) then moves K by a bounded amount.  `leakTau`
+///         = 0 (the default) is the unleaked integrator.
+///
 ///         BuckBasket is the privileged caller of `reprime()` -- it invokes
 ///         that hook after `addBasketToken` so the dilution-induced jump in
 ///         basketValue doesn't manifest as a single-cycle P/I spike.
@@ -77,6 +90,10 @@ contract BuckKControllerDirect is BuckKControllerBase {
     event BasketSet(address indexed basket);
     event Reprimed(int256 newP, int256 newI);
     event BuckK0Updated(uint256 buckK0, int256 newI);
+    event LeakUpdated(uint256 leakTau);
+
+    /// @notice The integrator's leak time constant, in seconds; 0 = no leak.
+    uint256 public leakTau;
 
     constructor(
         int256 _Kp, int256 _Ki, int256 _Kd,
@@ -126,6 +143,20 @@ contract BuckKControllerDirect is BuckKControllerBase {
         return err * dt;
     }
 
+    /// @dev The integrator after one cycle's leak, before its increment:
+    ///      `i - i * dt / leakTau`, or 0 once `dt >= leakTau`; `i` unchanged
+    ///      with no leak.  Shared by compute() here and in the shadow
+    ///      controller.
+    function _leakedI(int256 i, int256 dt) internal view returns (int256) {
+        uint256 tau = leakTau;
+        if (tau == 0) return i;
+        // tau is a duration in seconds set by governance, far below int256 range.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        if (dt >= int256(tau)) return 0;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return i - i * dt / int256(tau);
+    }
+
     /// @dev Bumpless-transfer algebra for the ppm embodiment (virtual, with
     ///      compute() and reprime(), so BuckKControllerShadow can carry a
     ///      second loop with its own state inside the same algebra -- WP-13):
@@ -150,6 +181,16 @@ contract BuckKControllerDirect is BuckKControllerBase {
         emit BuckK0Updated(_buckK0, I);
     }
 
+    /// @notice Governance: set the integrator's leak time constant (seconds;
+    ///         0 = no leak).  Bumpless: the integrator and buckK are unchanged
+    ///         here; from the next cycle I decays toward 0, so buckK moves
+    ///         toward buckK0 unless the error persists.
+    function setLeak(uint256 _leakTau) external {
+        require(msg.sender == governance, "Not governance");
+        leakTau = _leakTau;
+        emit LeakUpdated(_leakTau);
+    }
+
     /// @notice Run (or cache) one PID cycle in ppm space and return buckK.
     /// @dev    Permissionless; cheap cached-read when dT has not elapsed.
     function compute() external virtual override returns (uint256) {
@@ -166,7 +207,7 @@ contract BuckKControllerDirect is BuckKControllerBase {
         uint256 effective = elapsed > dTMax ? dTMax : elapsed;
         int256  dt = int256(effective);
 
-        int256 newI = I + _integralStep(err, dt);   // ppm*seconds
+        int256 newI = _leakedI(I, dt) + _integralStep(err, dt);   // ppm*seconds
         int256 dErr = err - P;                  // ppm  (P holds previous err)
 
         int256 uP = Kp * err;                   // 1e18

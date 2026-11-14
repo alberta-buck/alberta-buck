@@ -16,7 +16,8 @@ reproduce the standard macro run):
     FatCreditBorrowerAgent = 5
 
     [deploy]              # controller + pool-depth initial conditions
-    k0 = 0.75             # neutral feed-forward LTV
+    k0 = 0.75             # the target K the integrator leaks back to
+    leak_days = 365.0     # the integrator's leak time constant (0 = none)
     kmax = 0.95           # rails; 0.95 keeps "railed" solvent (1/(1-K)=20x)
     tau_i_days = 90.0     # integral time (with dk_rail/e_max -> Ki)
 
@@ -137,7 +138,8 @@ DEFAULTS: dict = {
         "agents": {},              # count overrides
     },
     "deploy": {
-        "k0": 0.75,
+        "k0": 0.75,                # the target K the integrator leaks back to (the owner suspects it is
+                                   # near the natural equilibrium, 2026-11-14)
         "kmin": 0.0,
         "kmax": 0.95,
         # Gains: raw real-gain overrides (kp/ki/kd) win when present;
@@ -151,6 +153,11 @@ DEFAULTS: dict = {
         "kp_frac": 0.02,
         "dt": 1800,
         "dtmax_days": 0.0,         # 0 => unclamped (uint256.max)
+        # The integrator's leak time constant (BuckKControllerDirect.setLeak): the integral of a
+        # sustained error settles at error x leak, so K settles at k0 + Ki x error x leak instead of
+        # winding to a rail, and returns to k0 at parity. 0 = no leak (as deployed before 2026-11-14);
+        # the owner's default is at least a year.
+        "leak_days": 365.0,
         "target_buck_m": 10.0,     # $M common TOKEN/BUCK pool depth
         "target_buck_lp_m": 10.0,  # $M BUCK/USDC seed
         # The wheel's job retiring the basket's own principal from cash above its liquidity
@@ -211,6 +218,7 @@ def deploy_params(exp) -> SimpleNamespace:
         kp_scaled=kp, ki_scaled=ki, kd_scaled=kd,
         dt=int(dep["dt"]),
         dtmax_secs=int(dep["dtmax_days"] * 86400),
+        leak_secs=int(dep.get("leak_days", 0.0) * 86400),
         target_buck=int(dep["target_buck_m"] * M6),
         target_buck_lp=int(dep["target_buck_lp_m"] * M6),
         basket_retirement_cap=int(dep.get("basket_retirement_cap_m", 0.0) * M6),

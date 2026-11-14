@@ -48,7 +48,9 @@ const { values: a } = parseArgs({ options: {
   profile: { type: "string", default: "" },       // write a per-method / per-function timing table here
   prune:   { type: "boolean", default: false },
   "tick-gas": { type: "string", default: "" },    // the wheel keeper's gas per tick (default 12M)
-  without: { type: "string", default: "" },      // drop cast members: debtor,saver,arb,whales,wheel,pid    // drop Tevm's old state roots and trim the system rings daily
+  without: { type: "string", default: "" },
+  k0:      { type: "string", default: "" },       // the controller's buckK0 (default 0.75)
+  "leak-days": { type: "string", default: "" },   // the integrator's leak time constant, days (default 365; 0 = none)      // drop cast members: debtor,saver,arb,whales,wheel,pid    // drop Tevm's old state roots and trim the system rings daily
 } });
 const days = Number(a.days);
 
@@ -64,7 +66,11 @@ const urArtifact = JSON.parse(readFileSync(
 const world = await buildEquilibriumWorld(session, loadAnyArtifact, {
   identity: id, urArtifact,
   targetBuck: BigInt(a.target) * 10n ** 6n,
-  feedSeed: Number(a.seed), stepBp: Number(a.step) });
+  feedSeed: Number(a.seed), stepBp: Number(a.step),
+  params: {
+    ...(a.k0 ? { k0: BigInt(Math.round(Number(a.k0) * 1e6)) * 10n ** 12n } : {}),
+    ...(a["leak-days"] !== "" ? { leakTau: BigInt(Math.round(Number(a["leak-days"]) * 86400)) } : {}),
+  } });
 
 if (a["tick-gas"]) world.tickGas = BigInt(a["tick-gas"]);
 const HOUSE = BigInt(a.house) * 10n ** 6n;

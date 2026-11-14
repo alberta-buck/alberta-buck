@@ -148,7 +148,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const targetBuck = opts.targetBuck ?? 10n ** 13n;
 
   const world = await buildBuckWorld(session, artifacts,
-    { identity: opts.identity, rng: opts.rng,
+    { identity: opts.identity, rng: opts.rng, params: opts.params,
       // Synthetic infrastructure still needs the registry harness for SimLP
       // and router binds. Basket/wheel use their governed authorizers.
       registryArtifact: "IdentityRegistryHarness",

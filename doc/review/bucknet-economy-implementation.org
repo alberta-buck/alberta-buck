@@ -3947,3 +3947,77 @@ cause, and whether anyone else has an EVM that runs entirely in a browser.
     published with a =file:= dependency. Before its next release, either
     upstream has released the clock or the fork is published under a scope
     (the owner's call).
+
+** The leaky integrator, and the bootstrap economy's actors (owner's direction, 2026-11-14)
+
+The owner's reading of observations 70 to 73: with no actor responding to K, BVIB
+wanders with prices and K wanders inversely; the leak is the right safety net, but a
+real BUCK economy has actors who respond to K. A household with interest-bearing debt
+issues BUCKs and retires that debt when K makes it worthwhile, then later accumulates
+BUCKs to retire its liability (or the Jubilee does so over 50 years), so the system
+issues and redeems BUCKs in balance. Once issuance and redemption flows balance at some
+K, the integral stops moving. The task is to find the minimal set of actors, in a
+realistic mix, that brings an economy up from zero: not $100,000 mortgage
+redemptions on day one, but small household loans and savings first, building from
+there; points programs are a later candidate for a controlled on- and off-ramp.
+
+- [X] /The leak./ =BuckKControllerDirect.setLeak(tau)= (governance; 0 = none, the
+  contract's default): each cycle the integrator first decays by =I x dt / tau=
+  (first order; a cycle of tau or longer forgets it), then adds the cycle's
+  increment. The integral of a sustained error e settles at e x tau, so K settles
+  at K0 + Kp e + Ki e tau instead of railing, and returns to K0 at parity. Shared
+  with the shadow controller (=_leakedI=). Seven new tests in
+  =test/BuckKControllerDirect.t.sol= on the simulations' own gains (one cycle is
+  first order; a cycle longer than tau forgets; a sustained 1% error rails the
+  unleaked loop and settles the leaked one at the predicted K; parity returns K to
+  K0 within 0.001 after five time constants; a leak lifts a railed K). =make
+  nix-test= 1,555 passed, 0 failed.
+- [X] /Defaults (owner)./ The worlds deploy a one-year leak by default
+  (=deploy.leak_days= 365 in Python, =leakTau= in =core/js/src/buckworld.js=; the
+  owner: at least a year, probably longer). K0 stays 0.75: the owner suspects it is
+  near the natural equilibrium, and it leaves every test as it was (0.5 was tried;
+  33 Python tests sized for 0.75 failed). =eqsim.mjs --k0 --leak-days=.
+- [ ] /The actors, as the owner describes them./
+  | actor | in the household economy today | to build |
+  |-------+--------------------------------+-----------|
+  | borrowers with small interest-bearing loans (cars, consumer debt) | the debtor, with insured assets of $200k to $1.5M (=home_k=, log-uniform) | the same debtor with the range scaled down; premiums proportionally higher for small loans: one straight line, the premium a rate on the insured value plus a fixed cost per policy (proposed =premium_fixed_usd=) |
+  | households saving, then retiring | savers (a share of the K-scaled limit kept drawn) and investors (USD into the basket, withdrawn whole at a horizon) | one household over its life: accumulate for decades, then draw the savings down as retirement income, not one withdrawal |
+  | savings outside BUCK | none | a share of each household's savings in an external USD fund returning about 8% a year over the long run: the basket's competitor for those savings |
+  | issuers that respond to K | arrivals paced by (1 - k_ref) / (1 - K) and by the price gap; debtors pay down when the BUCK is cheap; asset sales settle liens (10% a year) | kept; checked against the bootstrap mix |
+  | points programs | none | later: points to BUCKs and back at a controlled rate |
+- [ ] /Then the bootstrap world./ An experiment that starts from an empty economy
+  with small loans and savers, grows into the full mix, and runs five years; the
+  measure is whether K settles (issuance and redemption balance) and where, with
+  BVIB about 1.
+
+*** Checkpoint
+
+- *Evidence*: the five-year JS world (=eqsim.mjs --days 1825 --tick-gas
+  29000000=), walk 80 bp a day. At K0 0.5 with the actors removed: no leak, K
+  0.49, 0.39, 0.20, 0 at years 1 to 4 (BVIB 1.15 after); leak 90 days, K 0.43 at
+  year 5; 180 days, 0.37; 365 days, 0.26 (=build/test/leak-*.log=). On the new
+  defaults (K0 0.75, one-year leak): K 0.74, 0.67, 0.60, 0.55, 0.51 at years 1 to
+  5, levelling, with or without the households (=leak-def-*.log=); the debtor
+  ends with its mortgage refinanced and $141k banked. The Python set 331 passed
+  on the new defaults; the sandbox gates 15 of 15; the JS policy units 65 of 65.
+
+*** Observations and recommendations (leak and bootstrap)
+
+**** Measured
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 74 | the leak sweep at K0 0.5, no households | A leak bounds K: the longer the leak, the further a persistent error carries it (0.43, 0.37 and 0.26 after five years at 90, 180 and 365 days), but never to a rail, where the unleaked loop reached 0 in four years. With BVIB about 1% above 1 for years, K settles about Ki x 1% x tau below K0, as the tests predict. |
+| 75 | the new defaults, five years | K falls a quarter in five years and levels off; the one debtor and one saver of the small JS cast make no visible difference to K: they are too small to be the actors the owner means. |
+
+**** Recommendations
+
+79. /Build the owner's actors in this order./ The fixed-cost premium and the
+    scaled loan range first (settings only, both languages); then the household
+    lifecycle (accumulate, then draw down) with the external USD fund at about 8%
+    as the alternative; then the bootstrap experiment from an empty economy. Each
+    is measured by where K settles over five years.
+80. /Lengthen the leak with evidence./ A year bounds K's wander to about
+    Ki x error x one year; once the bootstrap mix balances issuance and
+    redemption, the residual error should be small and the leak can lengthen
+    (the owner expects longer), which the same five-year runs will show.

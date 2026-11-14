@@ -59,7 +59,9 @@ function requireNetIssueAbi(artifact) {
 // Controller deploy defaults -- the SAME values experiment.deploy_params
 // derives for the Python sim (gains real*1e12: Kp = kp_frac*dk_rail/e_max
 // = 0.1 -> 1e11; Ki = dk_rail/(e_max*tau_I) = 0.5/777600s -> 643004;
-// dt 1800s; K rails 0..0.95, K0 0.75).
+// dt 1800s; K rails 0..0.95; K0 0.75, the target K, and a one-year
+// integrator leak back to it).  leakTau (seconds) sets
+// BuckKControllerDirect.setLeak after deploy when nonzero.
 export const DEPLOY_DEFAULTS = {
   kp: 100_000_000_000n,
   ki: 643_004n,
@@ -68,6 +70,7 @@ export const DEPLOY_DEFAULTS = {
   kmin: 0n,
   kmax: 950_000_000_000_000_000n,
   k0: 750_000_000_000_000_000n,
+  leakTau: 365n * 86_400n,
 };
 
 export const DAY = 86_400;
@@ -183,6 +186,9 @@ export async function buildBuckWorld(session, artifacts, opts = {}) {
   const kctrl = await session.deploy(artifacts("BuckKControllerDirect"),
     [p.kp, p.ki, p.kd, p.dt, p.kmin, p.kmax, p.k0, gov],
     { name: "BuckKControllerDirect", gas });
+  if (p.leakTau > 0n) {
+    await session.send(kctrl, "setLeak", [p.leakTau], { tag: "world:kctrl.setLeak" });
+  }
   let buck, net = null;
   if (accounting === "net") {
     net = await deployNetStack(session, artifacts, { registry: reg, credit, controller: kctrl, governance: gov, insurancePool: poolAcct });
