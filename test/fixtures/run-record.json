@@ -90,6 +90,11 @@
      "arrived": 3,
      "active": 3,
      "exited": 0
+    },
+    "stages": {
+     "young": 1,
+     "middle": 2,
+     "retired": 0
     }
    },
    "octl": [
@@ -237,6 +242,11 @@
      "arrived": 3,
      "active": 3,
      "exited": 0
+    },
+    "stages": {
+     "young": 1,
+     "middle": 2,
+     "retired": 1
     }
    },
    "octl": [
@@ -384,6 +394,11 @@
      "arrived": 4,
      "active": 3,
      "exited": 1
+    },
+    "stages": {
+     "young": 2,
+     "middle": 2,
+     "retired": 1
     }
    },
    "octl": [
@@ -573,7 +588,12 @@
      }
     },
     "gap": 0.01,
-    "k_factor": 0.9
+    "k_factor": 0.9,
+    "stages": {
+     "young": 1,
+     "middle": 2,
+     "retired": 0
+    }
    },
    "households": {
     "active": 6,
@@ -709,7 +729,12 @@
      }
     },
     "gap": 0.01,
-    "k_factor": 0.9
+    "k_factor": 0.9,
+    "stages": {
+     "young": 1,
+     "middle": 2,
+     "retired": 1
+    }
    },
    "households": {
     "active": 6,
@@ -845,7 +870,12 @@
      }
     },
     "gap": 0.01,
-    "k_factor": 0.9
+    "k_factor": 0.9,
+    "stages": {
+     "young": 2,
+     "middle": 2,
+     "retired": 1
+    }
    },
    "households": {
     "active": 6,

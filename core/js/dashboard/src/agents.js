@@ -21,6 +21,8 @@ const money = (raw) => (raw === null || raw === undefined ? null : Number(raw) /
 export const COLUMNS = [
   { key: "member", label: "Household", value: (r) => r.member, text: true },
   { key: "role", label: "Role", value: (r) => r.role ?? "", text: true },
+  { key: "stage", label: "Stage", value: (r) => r.stage ?? "", text: true },
+  { key: "age", label: "Age", value: (r) => (r.age === undefined || r.age === null ? null : Math.floor(r.age)), unit: "count" },
   { key: "day", label: "Day", value: (r) => r.day, unit: "count" },
   { key: "vs", label: "Net worth vs counterfactual", value: (r) => (r.nw === undefined || r.hypo === undefined ? null : money(r.nw - r.hypo)), unit: "usd" },
   { key: "drawn", label: "Drawn", value: (r) => money(r.drawn), unit: "buck" },
@@ -49,6 +51,15 @@ export const MEMBER = [
       { key: "limit", label: "Limit", value: (r) => money(r.limit) },
       { key: "basket", label: "Basket", value: (r) => money(r.basket) },
       { key: "held", label: "Held BUCK", value: (r) => money(r.held_buck) },
+    ],
+  },
+  {
+    id: "m-savings", title: "Savings: the basket and the USD fund", unit: "usd", kind: "line",
+    note: "Its basket savings at their mark, and its external USD fund (off chain, about 8% a year) with what that fund has paid out as retirement income. The fund lines are empty for a household outside the lifecycle.",
+    series: [
+      { key: "basket_mark", label: "Basket (mark)", value: (r) => money(r.basket_mark) },
+      { key: "usd_fund", label: "USD fund", value: (r) => money(r.usd_fund) },
+      { key: "usd_fund_paid", label: "Fund paid out", value: (r) => money(r.usd_fund_paid) },
     ],
   },
   {

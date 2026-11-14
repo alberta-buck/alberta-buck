@@ -256,6 +256,53 @@ def test_a_retired_investor_draws_its_savings_down_as_monthly_income(household_w
     assert not d.chain.mismatches
 
 
+def test_a_retired_saver_lives_on_its_pension_and_draws_down_the_rest(household_world):
+    """The lifecycle for a household with an insured asset: while it works it saves half of what its
+    wages leave after its bills in the external fund; retired, it earns pension_frac (20%) of its wages
+    while its living costs stay, and the month's shortfall comes from the fund and its basket savings in
+    proportion to their values, the basket's part redeemed home in BUCK and sold."""
+    d, _, make = household_world
+    ctr, spec = {}, EXIT["saver"]
+    year = 365.25
+    settings = spec["settings"] | {"age": 65 - 20 / year, "usd_fund_share": .5}
+    a = _household(d, make, 95, CreditSaverAgent, settings)
+    for day in range(3):
+        if day:
+            _surplus_day(d, a, day)
+        a.advance_net_investment(d, day, ctr, forecasts=FORECASTS)
+        assert a.last_action == "invest", (day, a.last_error)
+    wages = a.income_annual // 12
+    bills = wages * 5 // 10 + a._face0 * a.premium_rate // 10_000 // 12 + a.payment
+    assert a.lifecycle and a._basket_receipts and a.usd_fund == (wages - bills) // 2, "the day-1 payday saved"
+    # Retired from day 20: the day-31 payday pays the pension, a fifth of the wages.
+    _surplus_day(d, a, 31)
+    assert a.calendar_machine.queue[-1]["income"] == wages // 5
+    a.advance_net_calendar(d, 31, ctr)
+    # Its dollars are spent elsewhere: the next month's shortfall must come from its savings.
+    cash = d.usdc.functions.balanceOf(a.address).call()
+    a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("transfer", args=[d.simlp.address, cash - RAW]))
+    _surplus_day(d, a, 32)
+    fund, shares0 = a.usd_fund, a._receipt_book[a._basket_receipts[0]][1]
+    assert a.advance_net_drawdown(d, 32, ctr) is True and a.last_action == "drawdown", a.last_error
+    context = [e for e in a.refinance_machine.events if e.get("kind") == "exit" and e["status"] == "planned"][-1]["context"]
+    need, from_basket = int(context["need_usdc"]), int(context["basket_usdc"])
+    assert 0 < a.usd_fund_paid < fund and a.usd_fund == fund - a.usd_fund_paid, "both pay their share"
+    assert a.usd_fund_paid + from_basket == need, "together they cover the shortfall"
+    assert a._receipt_book[a._basket_receipts[0]][1] < shares0 and a._drawdown_to_sell > 0
+    # The redemption is no market trade: the same day sells what it paid, the day's one market bite.
+    assert a.advance_net_drawdown(d, 32, ctr) is True and a.last_action == "drawdown-sell", a.last_error
+    assert a.advance_net_drawdown(d, 32, ctr) is False, "one market bite a day"
+    for day in range(33, 40):
+        _surplus_day(d, a, day)
+        a.advance_net_drawdown(d, day, ctr)
+        if a._drawdown_to_sell == 0:
+            break
+    assert a._drawdown_to_sell == 0 and a.withdrawn_usd > 0
+    held = d.usdc.functions.balanceOf(a.address).call()
+    assert held >= bills - wages // 5, "next month's bills are covered beyond the pension"
+    assert not d.chain.mismatches
+
+
 def test_exit_releases_coverage_that_no_principal_backs(household_world):
     d, _, make = household_world
     ctr, spec = {}, EXIT["release"]

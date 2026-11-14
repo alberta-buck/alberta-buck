@@ -49,6 +49,9 @@ DEFAULTS                        = dict(
     # 0 (the default) keeps the household outside the lifecycle, as before. A share usd_fund_share of
     # what it saves goes to an external USD fund returning usd_fund_return a year, the rest to the basket.
     age=0., retire_age=65., drawdown_years=25., usd_fund_share=0., usd_fund_return=.08,
+    # A retired household's income: this share of its former wages (a public pension such as Social
+    # Security or the CPP); its living costs stay, and its savings make up the difference.
+    pension_frac=.2,
     # A debtor's mortgage at most this ($k; 0: no cap): its insured home is scaled down to fit at its own
     # loan-to-value, so a young economy's families arrive with smaller debts (HouseholdPopulationAgent).
     mortgage_cap_k=0.)
@@ -133,14 +136,14 @@ def profile(seed, member, overrides=None):
                 "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
                 "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double",
                 "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap", "premium_fixed_usd",
-                "age", "retire_age", "drawdown_years", "usd_fund_share", "mortgage_cap_k"):
+                "age", "retire_age", "drawdown_years", "usd_fund_share", "mortgage_cap_k", "pension_frac"):
         if not math.isfinite(result[key]) or result[key] < 0:
             raise ValueError(f"invalid household parameter: {key}")
     if result["home_k"] <= 0 or result["max_impact_bp"] > 10000 or result["renew_frac"] > 1:
         raise ValueError("invalid household size, impact or renewal fraction")
     if result["hold_years"] <= 0:
         raise ValueError("an investor's hold_years must be positive")
-    if result["retire_age"] <= 0 or result["drawdown_years"] <= 0 or result["usd_fund_share"] > 1:
+    if result["retire_age"] <= 0 or result["drawdown_years"] <= 0 or result["usd_fund_share"] > 1 or result["pension_frac"] > 1:
         raise ValueError("invalid lifecycle: retire_age and drawdown_years positive, usd_fund_share at most 1")
     if not math.isfinite(result["usd_fund_return"]) or result["usd_fund_return"] <= -1:
         raise ValueError("invalid lifecycle: usd_fund_return must exceed -1")

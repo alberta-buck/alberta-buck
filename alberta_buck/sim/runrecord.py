@@ -43,7 +43,9 @@ FILES                           = dict(frames="frames.jsonl", events="events.jso
 UNITS                           = dict(money="raw integer, 1e-6 BUCK or USDC", price="float, USD or BUCK per unit",
                                        ratio="float", day="simulated day index from 0")
 AGENT_FIELDS                    = ("role", "nw", "hypo", "drawn", "limit", "basket", "basket_mark", "held_buck", "cash",
-                                   "mortgage", "action", "error", "exited", "active", "relief_unavailable")
+                                   "mortgage", "action", "error", "exited", "active", "relief_unavailable",
+                                   # the lifecycle (household_policy.stage): present only for households with an age
+                                   "age", "stage", "usd_fund", "usd_fund_paid")
 MANIFEST_EVERY                  = 10        # days between manifest refreshes while running
 
 
@@ -156,7 +158,8 @@ def frame_record(flat: dict, tokens) -> dict:
         "jubilee": dict(nominal=jubilee.get("nominal"), cash=jubilee.get("cash"),
                         position_mark=(jubilee.get("position") or {}).get("mark"),
                         relief_available=_scaled(net.get("available_relief_scaled"))) if jubilee else None,
-        "population": dict(roles=roles, gap=pop.get("gap"), k_factor=pop.get("k_factor")) if pop else None,
+        "population": dict(roles=roles, gap=pop.get("gap"), k_factor=pop.get("k_factor"),
+                           stages=pop.get("stages")) if pop else None,
         "households": dict(active=hh.get("active"), exited=hh.get("exited"), nw=hh.get("nw"), hypo=hh.get("hypo"),
                            drawn=hh.get("drawn"), basket=hh.get("basket"), basket_mark=hh.get("basket_mark"),
                            cash=hh.get("cash"), mortgage=hh.get("mortgage")) if hh else None,

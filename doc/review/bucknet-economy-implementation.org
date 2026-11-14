@@ -4040,6 +4040,23 @@ the lifecycle decides which role a household plays and when it stops earning):
 | middle-aged (40 to 64) | saver, investor | an insured asset (saver) or savings (investor) | accumulates: a share in the BUCK basket, a share in an external USD fund (about 8% a year) |
 | retired (65 on) | investor | savings in proportion to the years worked | draws its savings down as income over its remaining years, the basket and the fund in proportion, then leaves |
 
+- [X] /Progress (2026-11-14)./ L1 to L4 built and committed (15dc8cf5, 5484849d,
+  e35bb39a), with the owner's two refinements since: a retired household earns
+  =pension_frac= (20%) of its former wages (a public pension such as Social
+  Security or the CPP) while its living costs stay, and makes up the rest from its
+  savings; and it draws the USD fund and its basket savings in proportion to their
+  values (=advance_net_drawdown=, debtors and savers; a retired investor draws a
+  month's share of both, =drawdown_share=). A working debtor or saver saves
+  =usd_fund_share= of what its wages leave after its bills in the fund. The run
+  record carries each household's age, stage, fund and fund paid out, and the
+  population's counts by stage; the dashboard shows a life-stage chart, age and
+  stage columns, and each household's savings (basket mark, fund, fund paid out).
+  =economy-lifecycle.toml= is the lifecycle world (26 households: 4 young
+  families, 4 middle-aged savers, 12 middle-aged investors, 6 retirees; young
+  families arriving at 5% of the members a year; mortgages capped at 0.5% of the
+  BUCK supply). Its 30-day run completes without faults. One-year runs of three
+  mixes (balanced, young-heavy, retiree-heavy) started on the investor-only
+  version, before the pension.
 - [ ] /L1. The lifecycle in the policy./ Settings =age= (years at arrival),
   =retire_age= (65), =drawdown_years= (25), =usd_fund_share=, =usd_fund_return=
   (0.08); a household's age on a day, its stage, and the share of its savings a

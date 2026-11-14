@@ -196,20 +196,28 @@ class HouseholdCalendar:
         self.actual._grow(self.actual.state, day)
         self.shadow._grow(self.shadow.state, day)
         if day == self.next_pay:
-            income = a.income_annual // 12
-            if getattr(a, "lifecycle", False) and a.investor:
-                # The lifecycle: the external fund grows a month; a retired household earns no wages; a
-                # working one saves usd_fund_share of them in the fund (off chain), the rest as before.
-                # Investors only, while they alone draw their savings down (a retired debtor or saver
-                # would otherwise owe its living with no income).
+            wages = a.income_annual // 12
+            income = wages
+            living = 0 if a.investor else wages * int(a.p["living_frac"] * 10**9) // 10**9
+            if getattr(a, "lifecycle", False):
+                # The lifecycle: the external fund grows a month. An investor (whose wages here are its
+                # saving) saves usd_fund_share of them in the fund while it works and nothing once
+                # retired. Any other household saves usd_fund_share of what its wages leave after its
+                # bills in the fund while it works; retired, it earns pension_frac of its wages while its
+                # living costs stay, and draws its savings down for the rest (advance_net_drawdown).
                 a.usd_fund = int(a.usd_fund * policy.fund_growth(a.p["usd_fund_return"], 30))
-                if policy.stage(a.p, a.arrive_day, day) != "working":
-                    income = 0
+                share = int(a.p["usd_fund_share"] * 10**9)
+                working = policy.stage(a.p, a.arrive_day, day) == "working"
+                if a.investor:
+                    fund = wages * share // 10**9 if working else 0
+                    income = wages - fund if working else 0
+                elif working:
+                    bills = living + (0 if a._sold else a._face0 * a.premium_rate // 10_000 // 12) + a.payment
+                    fund = max(0, wages - bills) * share // 10**9
+                    income = wages - fund
                 else:
-                    fund = income * int(a.p["usd_fund_share"] * 10**9) // 10**9
-                    a.usd_fund += fund
-                    income -= fund
-            living = 0 if a.investor else income * int(a.p["living_frac"] * 10**9) // 10**9
+                    fund, income = 0, wages * int(a.p["pension_frac"] * 10**9) // 10**9
+                a.usd_fund += fund
             full = 0 if a._sold else a._face0 * a.premium_rate // 10_000 // 12
             premium = a._external_premium_due(d, full)  # read before committing this period
             for amount in (income, living, full, premium):

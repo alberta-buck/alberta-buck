@@ -10,6 +10,8 @@ export const DEFAULTS = {
   // draws its savings down over drawdown_years, then leaves; 0 keeps it outside the lifecycle. A share
   // usd_fund_share of its saving goes to an external USD fund returning usd_fund_return a year.
   age: 0, retire_age: 65, drawdown_years: 25, usd_fund_share: 0, usd_fund_return: .08,
+  // A retired household's income: this share of its former wages (a public pension); savings make up the rest.
+  pension_frac: .2,
   // A debtor's mortgage at most this ($k; 0: no cap), its home scaled down to fit at its loan-to-value.
   mortgage_cap_k: 0,
   risk: [0, .01], switch_k: [1, 3], penalty_months: 3, term_months: 60, renew_frac: [0, 1],
@@ -198,7 +200,7 @@ export function profile(seed, member, overrides = {}) {
     "penalty_months", "term_months", "renew_frac", "buffer_k", "max_impact_bp", "decision_days",
     "invest_cash_k", "invest_income_k", "hold_years", "divest_rate", "paydown_share", "paydown_double",
     "money_months", "adopt_start", "adopt_years", "money_gain", "money_cap", "premium_fixed_usd",
-    "age", "retire_age", "drawdown_years", "usd_fund_share", "mortgage_cap_k"]) {
+    "age", "retire_age", "drawdown_years", "usd_fund_share", "mortgage_cap_k", "pension_frac"]) {
     if (!Number.isFinite(p[key]) || p[key] < 0) throw new Error(`invalid household parameter: ${key}`);
   }
   if (p.home_k <= 0 || p.max_impact_bp > 10000 || p.renew_frac > 1) throw new Error("invalid household size, impact or renewal fraction");
@@ -226,7 +228,7 @@ export function profile(seed, member, overrides = {}) {
   p.phase = Math.trunc(uniform(seed, member, "phase") * p.decision_days);
   p.term_months = Math.max(1, Math.trunc(p.term_months));
   p.renew_in = Math.trunc(p.renew_frac * p.term_months);
-  if (!(p.retire_age > 0) || !(p.drawdown_years > 0) || p.usd_fund_share > 1) {
+  if (!(p.retire_age > 0) || !(p.drawdown_years > 0) || p.usd_fund_share > 1 || p.pension_frac > 1) {
     throw new Error("invalid lifecycle: retire_age and drawdown_years positive, usd_fund_share at most 1");
   }
   if (!Number.isFinite(p.usd_fund_return) || p.usd_fund_return <= -1) {

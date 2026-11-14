@@ -59,6 +59,13 @@ export const OVERVIEW = [
     })),
   },
   {
+    id: "stages", title: "Households by life stage", unit: "count", kind: "line",
+    note: "Active households by life stage, in a world with the household lifecycle: young families (the debtors), the middle-aged saving, and the retired drawing their savings down. Empty without it.",
+    series: [["young", "Young families"], ["middle", "Middle-aged"], ["retired", "Retired"]].map(([key, label]) => ({
+      key, label, value: (f) => num(f.population?.stages?.[key]),
+    })),
+  },
+  {
     id: "health", title: "Refusals and faults", unit: "count", kind: "line",
     note: "Households whose last action was refused or failed that day, and dispatcher faults (a fault stops a household until it is reconciled).",
     series: [

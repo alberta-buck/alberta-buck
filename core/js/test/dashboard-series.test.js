@@ -95,6 +95,16 @@ test("the Agents table's columns and an event's detail", async () => {
   const v = Object.fromEntries(COLUMNS.map((c) => [c.key, c.value(row)]));
   assert.equal(v.vs, -3); assert.equal(v.drawn, 7); assert.equal(v.basket, null); assert.equal(v.state, "refused: tx reverted");
   assert.equal(format(-3, "usd"), "-$3.00");
+  assert.equal(v.stage, "") ; assert.equal(v.age, null);
+  const life = Object.fromEntries(COLUMNS.map((c) => [c.key, c.value({ ...row, age: 66.7, stage: "retired" })]));
+  assert.equal(life.stage, "retired"); assert.equal(life.age, 66);
   assert.equal(eventDetail({ seq: 4, day: 2, kind: "surplus", phase: "x", status: "confirmed", accounts: { big: 1 }, operation: "deposit", amounts: { buck: "5" } }),
     '{"operation":"deposit","amounts":{"buck":"5"}}');
+});
+
+test("the life-stage chart reads the population's stages, and is empty without them", () => {
+  const stages = OVERVIEW.find((x) => x.id === "stages");
+  const with_ = [{ day: 0, population: { roles: {}, stages: { young: 4, middle: 16, retired: 6 } } }];
+  assert.deepEqual(stages.series.map((x) => x.value(with_[0])), [4, 16, 6]);
+  assert.deepEqual(stages.series.map((x) => x.value({ day: 0, population: { roles: {}, stages: null } })), [null, null, null]);
 });
