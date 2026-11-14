@@ -143,7 +143,7 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         assertLe(basket.lien(), actualLimit);
     }
 
-    function test_existingCashCanRestoreFreeBackingAfterRepaymentWithoutIssuing() public {
+    function test_repaymentKeepsTheFreeBackingActiveAndCashBuysWithoutIssuing() public {
         _pools();
         vm.startPrank(ALICE);
         buck.approve(address(basket), type(uint256).max);
@@ -153,9 +153,11 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         vm.prank(GOV);
         b.fundForAccounting(200e6);
         basket.retireCredit(50e6, 50e6, 0);
+        (uint256 face0, uint256 active0,) = credit.creditInfo(basket.creditId());
+        assertEq(active0, face0);       // repayment re-activates the self-insured backing at once
         k.setK(0.02e18);
         b.refreshMark();
-        assertLt(basket.headroom(), 0); // Only half the backing is still active.
+        assertGt(basket.headroom(), 0);
         uint256 supply = buck.totalIssued();
         vm.prank(GOV);
         b.buyFromCashForAccounting(0, 1e6);

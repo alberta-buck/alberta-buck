@@ -27,9 +27,11 @@ transactions. See [[file:BASKET-WHEEL.org::*Implemented Carrying-basket path (20
 Price-unit vectors distinguish the nominal
 issuance reference from net liquidation and buyback costs. The desk
 has explicit canonical cash/principal, bare collateral and real Jubilee
-retirement paths. Cash/in-kind exits now require
-actual activated backing before and after payout; no exit implicitly repays
-principal. Signed-account descriptions
+retirement paths. Since 2026-11-14 exits are paid in BUCK by default (TOKEN
+sold through each pool when the wallet cannot pay, in kind only on request)
+and are never refused for being under water: an exit retires as much
+principal as keeps the K shortfall from growing (=alberta-buck-ethereum.org=,
+"Redemption"). Signed-account descriptions
 and recorded runs below explain the earlier model; they are historical evidence.
 
 Two older machines still ship beside this one: the equity basket's earlier upkeep (the Deploy /
@@ -110,8 +112,9 @@ risk against the lien they came from. Three things follow.
 - The most TOKEN the basket can come to hold is what it was, (1 + K) x equity. Counting gross
   assets as collateral, the loop of lending protocols, would allow 1/(1 - K) and is not done.
 
-Buck never calls anything back. Beyond the limit the account simply cannot spend, and an exit is
-then paid in kind. Relief accrues on the whole lien and is counted in equity as it accrues. The
+Buck never calls anything back. Beyond the limit the account simply cannot spend; an exit then
+sells its own share of the positions for BUCK and retires the principal its collateral carried
+(in kind only on request). Relief accrues on the whole lien and is counted in equity as it accrues. The
 demurrage on BUCKs held in a pool rides with them and is borne when they come back; equity does
 not deduct it until then, so a young basket's share price shows the relief first.
 

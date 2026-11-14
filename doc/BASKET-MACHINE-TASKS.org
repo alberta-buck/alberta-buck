@@ -452,7 +452,9 @@ frame for frame wherever behaviour is not meant to change. Each one invalidates 
 - [ ] The ceiling sale is capped by the step and the pool's depth, each turn. Check on a
   stressed run (a run of exits, a cut in K to its lower rail) that a large excess is sold down
   fast enough. At K of zero the mark cannot net, Buck lets the account spend nothing and exits
-  are paid in kind: say whether that is the wanted end state.
+  are paid in kind: say whether that is the wanted end state. (Answered 2026-11-14: no. Exits are
+  paid in BUCK by selling the exiter's share of the positions, retire the principal its
+  collateral carried, and go in kind only on request.)
 - [ ] Remove the shell's liquidity target and its flow average (=_targetS=, =_usableS=,
   =dayFlow=, =flowMs= and the five parameters behind them). Only the older Deploy, Fund and Trim
   facet reads them now, so they go with it (step 6).

@@ -14,6 +14,7 @@ import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {IBuckBasketPosition} from "./IBuckBasketPosition.sol";
 import {IBasketArb} from "./IBasketArb.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {BasketMarketOps} from "./BasketMarketOps.sol";
 
 
 /// @title BuckBasketEquity -- the BuckBasket as equity: shares, one pooled
@@ -26,9 +27,9 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 ///         new-credit collateral excludes it. Canonical credit opening checks
 ///         the public service identity, Carrying issuer approval where needed,
 ///         token model and matching credit NFT.
-///         Canonical spending/repayment is explicit, and exits must preserve
-///         actual activated backing. The implicit leveraged flow described
-///         below is the legacy fixture path alone.
+///         Canonical spending/repayment is explicit, and an exit may not make the
+///         K shortfall of its activated backing larger. The implicit leveraged
+///         flow described below is the legacy fixture path alone.
 ///
 ///         The canonical basket is an approved Carrying service. Nominal
 ///         ERC-20 flow is separate from net cash/ROI/collateral and payouts.
@@ -47,15 +48,25 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 ///         spending the credit.
 ///
 ///         A REDEMPTION gives the treasury 25% of the receipt's gain over its
-///         cost basis (as shares), and pays the rest in BUCK: its value at the
-///         exiter's marks (each pool at the lower of spot and TWAP), less the
-///         same charge, spent from what the account can spend once marked at
-///         the equity that remains.  An exit that cannot be paid so is paid IN
-///         KIND: its fraction of every position and of the wallet's TOKEN, by
-///         transfer, with no swap.  The BUCK its positions return repay its
-///         share of the lien; what is left of them is paid in BUCK -- or, if
-///         the basket is under water and cannot spend it, left in the receipt
-///         as shares.  Short of its lien share, it leaves TOKEN behind.
+///         cost basis (as shares), and pays the rest in BUCK (owner, 2026-11-14):
+///         its value at the exiter's marks (each pool at the lower of spot and
+///         TWAP), less the same charge, from the wallet when it can pay that and
+///         still fund the principal the exit may have to retire.  Otherwise its
+///         fraction of every position and of the wallet's TOKEN is withdrawn and
+///         the TOKEN sold through each constituent's own pool
+///         (`BasketMarketOps.exitAssets`): the exiter bears the slippage, bounded
+///         by its minimum, and the displaced price is the wheel's arbitrage for
+///         the holders who stay.  It is paid what its positions released and its
+///         TOKEN fetched less its share of the lien; sold short of that share it
+///         cannot leave (`Underwater`).  `redeemInKind` delivers the TOKEN by
+///         transfer instead, leaving TOKEN behind for its lien share.
+///
+///         An exit is never refused for being under water.  The TOKEN back the
+///         lien, so after the exit the basket retires as much principal as keeps
+///         its K shortfall from growing (none while it has room), from the debt
+///         share the exiter left as cash; the fund may refuse a retirement larger
+///         than its relief liquidity, and the exit then reverts so a smaller one
+///         may follow.
 ///
 ///         No margin calls: a K cut lowers the limit, never the lien.
 ///
@@ -368,7 +379,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
 
     /// @notice Redeem `bp` of receipt `id` (0: all of it, the pro-rata shells'
     ///         convention); revert unless at least `minBuck` is paid.
-    function redeem(uint256 id, uint256 bp, uint256 minBuck) public positionLock returns (uint256 paid) {
+    function redeem(uint256 id, uint256 bp, uint256 minBuck) public returns (uint256 paid) {
         if (receipt.ownerOf(id) != msg.sender) revert NotOwner();
         if (bp == 0) bp = 10000;
         if (bp > 10000) revert Bp10000();
@@ -377,14 +388,26 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         if (shares == 0) revert RedeemZero();
         uint256 basis = uint256(h.basis) * bp / 10000;
 
-        (paid,,) = _redeemShares(id, h, shares, basis, minBuck);
+        (paid,,) = _redeemShares(id, h, shares, basis, minBuck, false);
     }
 
     /// @notice Redeem exactly `shares`; unlike basis-point redemption, zero
     ///         never denotes a full exit. Returns zero ID only if burned.
     function redeemShares(uint256 id, uint256 shares, uint256 minBuck)
-        external override positionLock returns (uint256 positionId, uint256 paid,
-                                                uint256 sharesRetired, uint256 sharesRemaining)
+        external override returns (uint256, uint256, uint256, uint256)
+    {
+        return _redeemExact(id, shares, minBuck, false);
+    }
+
+    /// @notice The same exit, delivered in kind on the holder's request.
+    function redeemInKind(uint256 id, uint256 shares)
+        external override returns (uint256, uint256, uint256, uint256)
+    {
+        return _redeemExact(id, shares, 0, true);
+    }
+
+    function _redeemExact(uint256 id, uint256 shares, uint256 minBuck, bool inKind)
+        internal returns (uint256 positionId, uint256 paid, uint256 sharesRetired, uint256 sharesRemaining)
     {
         if (receipt.ownerOf(id) != msg.sender) revert NotOwner();
         Holding storage h = holdings[id];
@@ -392,23 +415,28 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         if (shares == 0) revert RedeemZero();
         if (shares > priorShares) revert PositionSharesExceeded();
         uint256 basis = uint256(h.basis) * shares / priorShares;
-        (paid, sharesRetired, sharesRemaining) = _redeemShares(id, h, shares, basis, minBuck);
+        (paid, sharesRetired, sharesRemaining) = _redeemShares(id, h, shares, basis, minBuck, inKind);
         positionId = sharesRemaining == 0 ? 0 : id;
         emit PositionReduced(msg.sender, id, shares, paid, sharesRetired, sharesRemaining);
     }
 
-    function _redeemShares(uint256 id, Holding storage h, uint256 shares, uint256 basis, uint256 minBuck)
-        internal returns (uint256 paid, uint256 retired, uint256 remaining)
+    /// @dev The exit runs under the position lock; the principal it must retire to hold the
+    ///      basket's K shortfall is retired after the lock is released (a credit operation, which
+    ///      the fund values against the complete, settled inventory).
+    function _redeemShares(uint256 id, Holding storage h, uint256 shares, uint256 basis, uint256 minBuck,
+                           bool inKind) internal returns (uint256 paid, uint256 retired, uint256 remaining)
     {
-        Snap memory sn = _exitSnapshot();
+        if (_positionEntered || _creditEntered) revert PositionReentrant();
+        _positionEntered = true;
+        (Snap memory sn, uint256 before) = _exitSnapshot();
         (uint256 cut, uint256 cutValue) = _treasuryCut(sn, shares, basis);
         uint256 left;
-        (paid, left) = _exit(shares - cut, sn, msg.sender);
+        (paid, left) = _exit(shares - cut, sn, msg.sender, inKind);
         uint256 remainingBp = _retire(id, h, shares, left, basis);
         if (paid < minBuck) revert MinOut();
-        // The fund's own receipt may have changed. Value its final shares and
-        // basis, not the pre-retirement holding, when checking the mutual claim.
-        if (netAccounting) _markS(_exitSnapshot());
+        _positionEntered = false;
+        // The fund's own receipt may have changed: the mark below values its final shares.
+        _holdShortfall(before);
         // The pro-rata shells' event: nothing burned, BUCK paid, the cut's value.
         emit Redeemed(msg.sender, id, 0, paid, cutValue, remainingBp);
         return (paid, shares - left, h.shares);
@@ -444,36 +472,56 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     }
 
     /// @notice The treasury's shares leave by the same door, with no cut.
-    function redeemTreasury(uint256 bp, address to) external onlyGov positionLock returns (uint256 paid) {
+    function redeemTreasury(uint256 bp, address to) external onlyGov returns (uint256 paid) {
         if (to == address(0)) revert To0();
         uint256 out = treasuryShares * bp / 10000;
         if (out == 0) revert RedeemZero();
-        Snap memory sn = _exitSnapshot();
+        if (_positionEntered || _creditEntered) revert PositionReentrant();
+        _positionEntered = true;
+        (Snap memory sn, uint256 before) = _exitSnapshot();
         treasuryShares -= out;
         uint256 left;
-        (paid, left) = _exit(out, sn, to);
+        (paid, left) = _exit(out, sn, to, false);
         treasuryShares += left;
-        if (netAccounting) _markS(_exitSnapshot());
+        _positionEntered = false;
+        _holdShortfall(before);
     }
 
-    /// @dev Pre: position lock held. Canonical exits require actual activated
-    ///      collateral to cover unchanged NFT principal both before and after
-    ///      delivery. Cash receipts and marked relief cannot waive this gate.
-    ///      Post: fresh K and complete inventory/receipt observations; no debt
-    ///      is issued or retired. Failure rolls back pool burns, payouts,
-    ///      treasury fees, receipt changes and marks together.
-    function _exitSnapshot() internal returns (Snap memory s) {
+    /// @dev Pre: position lock held. Fresh K and complete inventory; returns the
+    ///      basket's K shortfall (lien less K x bare collateral) before the exit.
+    ///      An exit is never refused for being under water: it may not make
+    ///      the shortfall larger (`_holdShortfall`).
+    function _exitSnapshot() internal returns (Snap memory s, uint256 shortfall) {
         if (netAccounting) controller.compute();
         s = _snap();
-        if (netAccounting && _shortfallS(s) != 0) revert CreditShortfallIncreased();
+        shortfall = _shortfallS(s);
     }
 
-    /// @dev Retire `out` shares, paying `to`.  In BUCK when the account can
-    ///      spend it once marked at the equity that stays; else in kind.  The
-    ///      exit fee (the stress fee's hook) retires the shares but leaves
-    ///      its fraction of the assets.  Returns the BUCK paid and the shares
-    ///      NOT retired (see `_exitInKind`).
-    function _exit(uint256 out, Snap memory sn, address to)
+    /// @dev Post-exit, outside the position lock: retire the principal by which
+    ///      the exit made the shortfall larger (from the basket's cash: the debt
+    ///      share the leaver left), then require it no larger and mark afresh.
+    ///      The fund may refuse a retirement larger than its relief liquidity:
+    ///      the exit then reverts, and a smaller one may follow.
+    function _holdShortfall(uint256 before) internal {
+        if (!netAccounting) return;
+        Snap memory s = _snap();
+        uint256 grown = _shortfallS(s);
+        if (grown > before) {
+            this.retireCredit(grown - before, type(uint256).max, 0);
+            s = _snap();
+            if (_shortfallS(s) > before) revert CreditShortfallIncreased();
+        }
+        _markS(s);
+    }
+
+    /// @dev Retire `out` shares, paying `to`.  In BUCK from cash when the
+    ///      account can spend it and still fund the principal the exit may
+    ///      have to retire (at most K x the payment); else from its share of
+    ///      the positions (`_exitInKind`): sold for BUCK, or delivered in kind
+    ///      on request.  The exit fee (the stress fee's hook) retires the
+    ///      shares but leaves its fraction of the assets.  Returns the BUCK
+    ///      paid and the shares NOT retired.
+    function _exit(uint256 out, Snap memory sn, address to, bool inKind)
         internal returns (uint256 pay, uint256 left)
     {
         uint256 S = totalShares;
@@ -487,13 +535,13 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         // mark. Canonical Buck spends cash only; its final actual collateral
         // and unchanged principal are checked after receipt retirement.
         if (!netAccounting) _markAt(_creditValueS(sn, eLow - pay));
-        if (pay <= _cashAvailable()) {
+        if (!inKind && pay + (netAccounting ? pay * sn.k / 1e18 : 0) <= _cashAvailable()) {
             totalShares = S - out;
             _payCash(to, pay);
             dayFlow -= int256(pay);
             return (pay, 0);
         }
-        (pay, left) = _exitInKind(out, fWad, sn, to);
+        (pay, left) = _exitInKind(out, fWad, sn, to, inKind || !netAccounting);
     }
 
     /// @dev The pro-rata exit, in kind: fraction `fWad` of every position and
@@ -508,43 +556,13 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     ///        * legacy: past what an under-water account can spend, the rest stays in
     ///          the receipt as shares at the price that remains -- the exit
     ///          completes, and nobody's claim moves ahead of anybody's.
-    function _exitInKind(uint256 out, uint256 fWad, Snap memory sn, address to)
+    function _exitInKind(uint256 out, uint256 fWad, Snap memory sn, address to, bool inKind)
         internal returns (uint256 pay, uint256 left)
     {
         uint256 S = totalShares;
-        uint256 n = constituents.length;
-        uint256[] memory toks = new uint256[](n);
-        int256 balance0 = netAccounting
-            ? int256(IBuckNetAccount(address(buck)).netBalanceOf(address(this)))
-            : _bk().signedBalanceOf(address(this));
-        for (uint256 i = 0; i < n; i++) {
-            uint256 tok = idleToken[i] * fWad / 1e18;
-            idleToken[i] -= tok;
-            uint128 l = uint128(uint256(liquidityOf[i]) * fWad / 1e18);
-            if (l > 0) {
-                (uint256 t,) = _venue().positionBurn(i, l);
-                liquidityOf[i] -= l;
-                tok += t;
-            }
-            toks[i] = tok;
-        }
-        // What its positions returned (net of the fee their BUCK carried),
-        // less its share of equity's BUCK -- the lien, net of relief.
-        int256 balance1 = netAccounting
-            ? int256(IBuckNetAccount(address(buck)).netBalanceOf(address(this)))
-            : _bk().signedBalanceOf(address(this));
-        int256 residue = (balance1 - balance0) + sn.buckEq * int256(fWad) / 1e18;
-        uint256 flow = 0;
-        if (residue < 0) {
-            uint256 tv = 0;
-            for (uint256 i = 0; i < n; i++) tv += toks[i] * sn.m[i].pLow / (10 ** constituents[i].decimals);
-            uint256 shortV = uint256(-residue);
-            for (uint256 i = 0; i < n; i++) {
-                uint256 keep = tv == 0 ? 0 : (shortV >= tv ? toks[i] : toks[i] * shortV / tv);
-                idleToken[i] += keep;
-                toks[i] -= keep;
-            }
-        } else if (residue > 0) {
+        (int256 residue, uint256 flow) = BasketMarketOps.exitAssets(idleToken, liquidityOf, address(buck),
+            netAccounting, fWad, sn.buckEq * int256(fWad) / 1e18, to, inKind, constituents.length);
+        if (residue > 0) {
             uint256 spend = _cashAvailable();
             pay = uint256(residue) < spend ? uint256(residue) : spend;
             uint256 unpaid = uint256(residue) - pay;
@@ -556,13 +574,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
                 left = eAfter > unpaid ? unpaid * stay / (eAfter - unpaid) : 0;
             }
             if (pay > 0) _payCash(to, pay);
-            flow = pay;
-        }
-        for (uint256 i = 0; i < n; i++) {
-            if (toks[i] == 0) continue;
-            IERC20(constituents[i].token).transfer(to, toks[i]);
-            flow += toks[i] * sn.m[i].pLow / (10 ** constituents[i].decimals);
-            emit PaidInKind(to, constituents[i].token, toks[i]);
+            flow += pay;
         }
         totalShares = S - out + left;
         dayFlow -= int256(flow);
@@ -630,6 +642,10 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         (, uint256 beforeNet) = token.accountBalancesScaled(address(this));
         token.authorizeReduction(creditId, principal, minimumReliefScaled, uint64(block.timestamp));
         (reliefScaled,) = IBasketCreditFund(token.jubilee()).reduce(creditId, principal);
+        // Settlement deactivates coverage with the principal; the basket's self-insured,
+        // zero-premium backing is all free, so it is activated again (no cash, no principal).
+        (uint256 face, uint256 active,) = credit.creditInfo(creditId);
+        if (active < face) token.issue(creditId, face - active, 0, 0, address(0));
         (, uint256 afterNet) = token.accountBalancesScaled(address(this));
         cashSpentScaled = beforeNet > afterNet ? beforeNet - afterNet : 0;
         if (Math.ceilDiv(cashSpentScaled, 1e36) > maxCashCost) revert CreditCashLimit();

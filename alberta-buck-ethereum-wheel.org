@@ -857,7 +857,8 @@ this one.
 - *Gas on an L1.*  A working tick is expensive; on an L1 only large gaps pay, and those are the ones
   searchers race for.  The case is strongest on rollups.
 - *Liveness.*  No calls, no harvest, and new deposits wait in the wallet.  Nothing already placed is
-  at risk, and exits are paid from the line or in kind.
+  at risk, and exits are paid in BUCK from the line or by selling their own share (in kind on
+  request).
 - *A desk that looks healthy.*  Every runaway of the earlier desk showed a profit while it ran.
   Watch the desk's inventory beside its P&L, always.
 

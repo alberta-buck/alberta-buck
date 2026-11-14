@@ -1370,14 +1370,29 @@ it.  Into an under-water basket (lien above its limit) the new equity first rest
 
 ** Redemption
 
-=redeem(id, bp, minBuck)=.  The treasury takes 25% of the receipt's gain over its cost basis, as
-shares.  The rest leaves at the exit marks, less the same charge as a BUCK deposit.  The shell
-first marks the credit at the equity that stays, then pays in BUCKs if Buck lets the account spend
-it.  Otherwise the exit is paid /in kind/: its fraction =f= of every position and of the wallet's
-TOKEN, by transfer, with no swap.  The BUCKs its positions return repay its share of the lien;
-what they returned beyond that share is paid in BUCKs.  Two corners: short of its lien share, it
-leaves TOKEN behind worth the shortfall at the LOW marks; owed more BUCKs than an under-water
-account can spend, the rest stays in the receipt as shares.
+=redeem(id, bp, minBuck)= / =redeemShares(id, shares, minBuck)=.  The treasury takes 25% of the
+receipt's gain over its cost basis, as shares.  The rest is paid in BUCKs (the owner's decision of
+2026-11-14: the basket's users, the Jubilee fund first, need BUCKs, not LABR):
+
+- from the wallet, at the exit marks less the same charge as a BUCK deposit, when it can pay that
+  and still fund the principal the exit may have to retire (at most K times the payment);
+- otherwise its fraction =f= of every position and of the wallet's TOKEN is withdrawn and the
+  TOKEN sold through each constituent's own pool.  The exiter is paid what its positions released
+  and its TOKEN fetched, less its share of the lien, and bears the slippage (bounded by its
+  =minBuck=); the TOKEN/BUCK pools it moves away from the USDC routes are the wheel's arbitrage,
+  and the basket's own positions absorb the sale, for the holders who stay.  Sold short of its lien
+  share, it cannot leave (=Underwater=).
+
+=redeemInKind(id, shares)= delivers the fraction of the positions and TOKEN by transfer instead,
+with no swap, leaving TOKEN behind worth its lien share at the LOW marks.
+
+An exit is never refused for being under water.  The TOKEN back the lien, so afterwards the basket
+retires as much principal as keeps its K shortfall from growing -- none while it has room under K,
+K times the collateral leaving when it is under water -- from the debt share the exiter left as
+cash.  Retiring principal deactivates coverage in proportion; the basket's self-insured backing
+is activated again at once.  The Jubilee fund may refuse a retirement larger than its relief
+liquidity (each relief at most 10% of its cash); the exit then reverts, and a smaller one may
+follow.
 
 ** The Upkeep
 
@@ -1467,9 +1482,13 @@ basket's pools and the wider market.
 - E2: what the basket has let out is within =K x equity(LOW)= of the depositors alone: the credit
   is marked before any spend, and Buck enforces the limit.
 - E3: no margin calls: a K cut changes no lien, and nothing is called back.
-- E4: an exit takes no more than its fraction: in BUCKs, at most its value at the LOW marks less
-  the charge; in kind, exactly =f= of the positions and TOKEN with its lien share repaid; the
-  remaining holders' share price is whole, to rounding.
+- E4: an exit takes no more than its fraction: from the wallet, at most its value at the LOW marks
+  less the charge; from its positions, what they released and its TOKEN fetched less its lien
+  share (in kind, exactly =f= of the positions and TOKEN with its lien share left behind); the
+  remaining holders' share price is whole, to rounding, and at TWAP marks gains what the exiter's
+  sale paid the basket's positions.
+- E7: no exit makes the K shortfall of the activated backing larger, and none is refused for one
+  that exists.
 - E5: the wallet's TOKEN is backed: =token.balanceOf(basket) >= idleToken=.
 - E6: the mark after an exit is the equity that stays, read after its positions are burned.
 

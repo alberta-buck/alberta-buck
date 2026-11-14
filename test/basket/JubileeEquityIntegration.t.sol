@@ -321,7 +321,7 @@ contract JubileeEquityIntegrationTest is JubileeEquityFixture {
         assertEq(buck.claimBook().deferredPrincipal(), 100e6);
     }
 
-    function test_realAmmInKindExitCountsOnlyNetBuckProceeds() public {
+    function test_realAmmFundSaleIsPaidInBuckWithoutARoute() public {
         _bind(address(this), false, address(this));
         _credit(ALICE, 2_000_000e6);
         vm.prank(ALICE);
@@ -347,40 +347,19 @@ contract JubileeEquityIntegrationTest is JubileeEquityFixture {
         (, uint256 cashBefore) = buck.fundBalancesScaled();
         (uint128 sharesBefore,) = basket.holdings(id);
         uint256 requestedShares = uint256(sharesBefore) / 5;
-        // The value requested exceeds the basket's spendable cash, so its
-        // existing in-kind exit path must unwind real V3 liquidity.
+        // The value requested exceeds the basket's spendable cash, so the exit
+        // unwinds real V3 liquidity and sells the TOKEN: the fund is paid BUCK.
         uint256 shareValue = basket.equity() * requestedShares / basket.totalShares();
         assertGt(shareValue * 99 / 100, walletBefore);
-        // Without a route, the separate keeper sale rejects the unconverted TOKEN.
         JubileeFund.SaleRoute[] memory noRoutes = new JubileeFund.SaleRoute[](0);
-        vm.expectRevert(JubileeFund.MissingRoute.selector);
         vm.prank(GOV);
-        fund.redeemScheduled(requestedShares, 0, noRoutes);
-        (uint128 deferredShares,) = basket.holdings(id);
-        assertEq(deferredShares, sharesBefore);
-        assertEq(asset.balanceOf(address(fund)), 0);
-
-        (,,,,,,,, bool buckIs0,,) = basket.constituents(0);
-        JubileeFund.SaleRoute[] memory routes = new JubileeFund.SaleRoute[](1);
-        routes[0] = JubileeFund.SaleRoute({
-            sqrtPriceLimitX96: buckIs0 ? MAX_SQRT - 1 : MIN_SQRT + 1,
-            minimumNetBuck: type(uint256).max
-        });
-        vm.expectRevert(JubileeFund.SwapMinOut.selector);
-        vm.prank(GOV);
-        fund.redeemScheduled(requestedShares, 0, routes);
-        (uint128 afterFailedSale,) = basket.holdings(id);
-        assertEq(afterFailedSale, sharesBefore);
-        assertEq(asset.balanceOf(address(fund)), 0);
-        routes[0].minimumNetBuck = 1;
-        vm.prank(GOV);
-        uint256 proceeds = fund.redeemScheduled(requestedShares, 0, routes);
+        uint256 proceeds = fund.redeemScheduled(requestedShares, 1, noRoutes);
         assertEq(asset.balanceOf(address(fund)), 0);
         (, uint256 cashAfter) = buck.fundBalancesScaled();
         assertGt(proceeds, 0);
         assertEq(proceeds, cashAfter - cashBefore);
         (uint128 sharesAfter,) = basket.holdings(id);
-        assertLe(sharesAfter, sharesBefore);
+        assertLt(sharesAfter, sharesBefore);
         assertEq(buck.totalIssued(), 2_000_000e6);
     }
 

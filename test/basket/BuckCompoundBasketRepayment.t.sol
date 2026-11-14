@@ -105,8 +105,10 @@ contract BuckCompoundBasketRepaymentTest is JubileeEquityFixture {
         assertEq(basket.lien(), 0);
         assertEq(buck.totalIssued(), supply - 40e6);
         assertFalse(basket.creditLive());
-        (, uint256 active,) = credit.creditInfo(id);
-        assertEq(active, 0);
+        // Settlement deactivates coverage with the principal; the self-insured backing is
+        // activated again at once (no cash, no principal, no claim age).
+        (uint256 face, uint256 active,) = credit.creditInfo(id);
+        assertEq(active, face);
         assertEq(credit.ownerOf(id), address(basket));
         uint256 beforeDraw = buck.balanceOf(address(basket));
         vm.prank(GOV);

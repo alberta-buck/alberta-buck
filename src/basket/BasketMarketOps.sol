@@ -16,6 +16,10 @@ interface IMarketCash {
     function approvedCarryingIssuer(address account) external view returns (bool);
 }
 
+interface ISignedCash {
+    function signedBalanceOf(address account) external view returns (int256);
+}
+
 interface IArbMarkets {
     function arbBuck() external view returns (address);
     function arbUsdc() external view returns (address);
@@ -93,6 +97,9 @@ library BasketMarketOps {
     error NoPortfolioGain();
     error IntermediateInventory();
     error NetCashUnavailable();
+    error Underwater();                 // the same selector as the shell's
+
+    event PaidInKind(address indexed to, address indexed token, uint256 amount);
 
     event BasketArbitrage(uint256 indexed route, uint8 direction, uint256 input,
                          int256 cashReturn, int256 lpReturn, uint256 lpFees, int256 totalReturn);
@@ -157,6 +164,76 @@ library BasketMarketOps {
         (liquidity, tokenUsed,) = IBuckBasketVenue(address(this)).positionMint(i, tokens, nominalForNet(token, netBuck));
         (, uint256 afterNet) = IMarketCash(token).accountBalancesScaled(address(this));
         netBuckUsed = Math.ceilDiv(beforeNet - afterNet, Q);
+    }
+
+    /// @notice A receipt's exit from the positions (BuckBasketEquity._exitInKind): withdraw
+    ///         fraction `fWad` of every position and of the idle TOKEN; paid in BUCK, sell that
+    ///         TOKEN through each constituent's own pool (the leaver bearing the slippage; the
+    ///         displaced price is the wheel's arbitrage), else deliver it in kind. `residue` is
+    ///         the BUCK its positions released and its TOKEN fetched, plus its share of equity's
+    ///         BUCK (`buckEqShare`: cash less lien plus relief, negative when levered). Sold short
+    ///         of its lien share it cannot leave (`Underwater`); in kind, it leaves TOKEN worth
+    ///         the shortfall at the low marks. Returns the residue and the value delivered in kind.
+    /// PRE: delegatecalled by the basket under its position lock. POST: positions and idle TOKEN
+    ///      reduced; the shell pays the residue, retires shares and books the flow.
+    function exitAssets(mapping(uint256 => uint256) storage idle, mapping(uint256 => uint128) storage liq,
+                        address token, bool net, uint256 fWad, int256 buckEqShare, address to, bool inKind,
+                        uint256 n)
+        external returns (int256 residue, uint256 flow)
+    {
+        uint256[] memory toks = new uint256[](n);
+        address[] memory tokens = new address[](n);
+        uint256[] memory units = new uint256[](n);
+        uint256[] memory pLow = new uint256[](n);
+        int256 before = _held(token, net);
+        for (uint256 i; i < n; i++) {
+            // The low marks the exit is valued at, read before this position moves.
+            pLow[i] = IBuckBasketVenue(address(this)).marks(i, liq[i]).pLow;
+            uint8 dec;
+            (tokens[i], dec,,,,,,,,,) = IArbBasket(address(this)).constituents(i);
+            units[i] = 10 ** dec;
+            uint256 tok = idle[i] * fWad / 1e18;
+            idle[i] -= tok;
+            // casting to 'uint128' is safe because fWad <= 1e18, so l <= liq[i]
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint128 l = uint128(uint256(liq[i]) * fWad / 1e18);
+            if (l > 0) {
+                (uint256 t,) = IBuckBasketVenue(address(this)).positionBurn(i, l);
+                liq[i] -= l;
+                tok += t;
+            }
+            if (!inKind && tok > 0) {
+                IBuckBasketVenue(address(this)).monetaryLeg(i, false, tok);
+                tok = 0;
+            }
+            toks[i] = tok;
+        }
+        residue = _held(token, net) - before + buckEqShare;
+        if (residue < 0) {
+            if (!inKind) revert Underwater();
+            uint256 tv;
+            for (uint256 i; i < n; i++) tv += toks[i] * pLow[i] / units[i];
+            // casting to 'uint256' is safe because residue < 0 here
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint256 shortV = uint256(-residue);
+            for (uint256 i; i < n; i++) {
+                uint256 keep = tv == 0 ? 0 : (shortV >= tv ? toks[i] : toks[i] * shortV / tv);
+                idle[i] += keep;
+                toks[i] -= keep;
+            }
+        }
+        for (uint256 i; i < n; i++) {
+            if (toks[i] == 0) continue;
+            // forge-lint: disable-next-line(erc20-unchecked-transfer)
+            IERC20(tokens[i]).transfer(to, toks[i]);
+            flow += toks[i] * pLow[i] / units[i];
+            emit PaidInKind(to, tokens[i], toks[i]);
+        }
+    }
+
+    function _held(address token, bool net) private view returns (int256) {
+        return net ? int256(IMarketCash(token).netBalanceOf(address(this)))
+                   : ISignedCash(token).signedBalanceOf(address(this));
     }
 
     /// @notice Net-valued redemption. Carrying keeps nominal transfer rules;

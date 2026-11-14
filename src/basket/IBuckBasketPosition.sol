@@ -20,12 +20,21 @@ interface IBuckBasketPosition {
     function increasePosition(uint256 id, address asset, uint256 amount, uint256 minReceived, uint256 minShares)
         external returns (uint256 positionId, uint256 received, uint256 sharesAdded);
 
-    /// @notice Redeem an exact, nonzero number of shares from an owned receipt.
+    /// @notice Redeem an exact, nonzero number of shares from an owned receipt, paid in BUCK: from
+    ///         the basket's cash when it suffices, else by selling the receipt's share of every
+    ///         position through its own pool, the caller bearing the slippage (bounded by
+    ///         `minBuck`). The exit retires as much of the basket's principal as keeps its K
+    ///         shortfall from growing; it reverts only if the receipt's assets cannot cover that.
     /// @return positionId The same ID if shares remain, or zero if it was burned.
-    /// @return paid BUCK paid; in-kind TOKEN transfers are emitted separately.
-    ///         A recipient of fee-on-transfer TOKEN must measure its own receipt.
+    /// @return paid BUCK paid.
     /// @return sharesRetired Shares actually removed, including the treasury cut.
     /// @return sharesRemaining Shares still held in the receipt after the exit.
     function redeemShares(uint256 id, uint256 shares, uint256 minBuck)
+        external returns (uint256 positionId, uint256 paid, uint256 sharesRetired, uint256 sharesRemaining);
+
+    /// @notice As `redeemShares`, but the receipt's share of the positions is delivered in kind
+    ///         (TOKEN by transfer, no sale), its share of the lien settled by TOKEN it leaves behind.
+    ///         A recipient of fee-on-transfer TOKEN must measure its own receipt.
+    function redeemInKind(uint256 id, uint256 shares)
         external returns (uint256 positionId, uint256 paid, uint256 sharesRetired, uint256 sharesRemaining);
 }

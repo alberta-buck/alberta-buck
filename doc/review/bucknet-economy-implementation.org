@@ -3643,3 +3643,84 @@ tabs are how to see that in any run, finished or live.
     tab: the persistent seller should be visible, and so whether the gap is
     conversion pressure or the arbitrage cost band (which an integral
     controller would also chase without end).
+
+** Exit milestone: basket exits always proceed, BUCK by default (contract change; Solidity done, worlds next)
+
+The owner's decisions of 2026-11-14 (the economy section, "The owner's
+decisions on exits, relief and the reserve"), implemented tests first.
+
+- [X] /The exit rule./ =BuckBasketEquity=: =redeem= / =redeemShares= pay BUCK:
+  from the wallet when it can pay and still fund the principal the exit may
+  retire (K x the payment); else =BasketMarketOps.exitAssets= (the basket's
+  linked library, run in its own context) withdraws the receipt's fraction of
+  every position and idle TOKEN and sells the TOKEN through each constituent's
+  pool (=monetaryLeg=, inside the venue's TWAP band), paying what was released
+  and fetched less the receipt's lien share; sold short of that share it
+  reverts =Underwater=; =minBuck= bounds the slippage. New =redeemInKind(id,
+  shares)= delivers TOKEN by transfer (the old behaviour). Legacy (non-net)
+  accounting keeps its old path.
+- [X] /The one gate./ =_exitSnapshot= no longer refuses an under-water basket;
+  it returns the shortfall. After the position lock is released,
+  =_holdShortfall= retires (via =this.retireCredit=) exactly the principal by
+  which the exit grew the K shortfall, then requires it no larger and marks.
+  =redeemTreasury= follows the same path.
+- [X] /Backing after retirement./ BUCK's settlement deactivates coverage in
+  proportion to principal retired; =retireCredit= now re-activates the
+  basket's free self-insured backing at once (no cash, principal or age), so a
+  retirement no longer shrinks its collateral (this also changes the wheel's
+  retirement job and explicit retirements).
+- [X] /Size./ The shell is 24,524 bytes (52 under the limit) after moving the
+  asset path into =BasketMarketOps= (now about 20.2 kB). No deployment change:
+  the shell already links the library.
+- [X] /Tests./ =test/basket/BuckCompoundBasketExit.t.sol= rewritten (15 tests:
+  under-water exits retire what holds the shortfall; an exit that would
+  create one retires the excess; a fuzz pinning the exact retirement; BUCK by
+  default with TOKEN sold; in kind on request; the conversion minimum rolls
+  everything back; a near-zero K pool exit; unpaid relief is not
+  collateral; treasury exits under water). Three others updated to the new
+  rules (=BuckCompoundBasketRepayment=, =BuckCompoundBasketFlow=,
+  =JubileeEquityIntegration=: the fund's sale is now paid BUCK and needs no
+  TOKEN route).
+- [X] /Docs./ The shell's NatSpec, =alberta-buck-ethereum.org= ("Redemption";
+  invariant E4 restated, E7 added), =doc/BASKET-MACHINE.org=,
+  =doc/BASKET-MACHINE-TASKS.org= (the in-kind question answered),
+  =alberta-buck-ethereum-wheel.org=.
+- [ ] /Next session, in order./ =make nix-sim-build= (the simulations'
+  artifacts) and the JS bundle; the twenty-file Python set; the JS policy
+  units and the eight Tevm files (households' exits now receive BUCK where
+  they received TOKEN; their "sell in-kind TOKEN" step should find nothing);
+  a 30-day and a one-year economy world, compared with
+  =economy-smoke-365=; SDK wrappers for =redeemInKind= (Python
+  =basket.py=, JS =basket.js=) if any agent wants them; then the contracts
+  release.
+
+*** Checkpoint
+
+- *Evidence so far*: the exit suite 15 of 15 (fuzz 256 runs); every basket and
+  Jubilee suite green; =make nix-test= 1,548 passed, 0 failed, 1 skipped
+  (=build/test/c7-nixtest.log=); =make nix-contracts-dist-check= passes (its
+  lint warnings are the existing style set; the library's new casts carry
+  their safety notes). Not yet run on this revision: the Python set, the JS
+  Tevm files, the worlds.
+
+*** Observations and recommendations (exits)
+
+**** Measured
+
+| # | Fixture | Observation |
+|---+---------+-------------|
+| 61 | the centre year with the basket's retirement job on (=deploy.basket_retirement_cap_m=0.1=, =build/runs/economy-365-retire=) | Identical to the default year (K 0.4451, the same supply and holders): the job never ran. It retires only from cash above the liquidity target, and the wheel deploys every spare BUCK before any accumulates. |
+| 62 | the exit tests | Retiring principal through BUCK's settlement deactivates coverage in proportion, so the first implementation's retirement left the shortfall larger than before; re-activating the free backing in =retireCredit= fixed it, and the fuzz now pins the exact retirement: max(0, lien - K x (equity after paying) - before). |
+
+**** Recommendations
+
+70. /Give the retirement job a trigger that can fire./ "Cash above the
+    liquidity target" never happens in a deployed basket (observation 61).
+    If the owner wants the basket to pull BUCK out of circulation as K falls
+    (H3), the job needs a different trigger: retire when the basket is under
+    water, or when it is net long BUCK beyond its target, from the BUCK side
+    of its positions.
+71. /Exits move prices: measure them./ A forced sale is bounded by the venue's
+    TWAP band per call, and the leaver's =minBuck=. In the worlds, record each
+    exit's slippage and the wheel's capture afterwards (the owner's expected
+    transfer to the remaining holders), on the BuckBasket tab.
