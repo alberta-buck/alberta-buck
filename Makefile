@@ -40,6 +40,7 @@ help:
 	  '  make nix-match-BasketPublicLifecycleTest  # public issuance, retirement and real V3 exits' \
 	  '  make nix-match-BasketMachineIdentityTest  # certified wheel, private keepers and nominal rewards' \
 	  '  make nix-wallet-sandbox-test       # build and test canonical wallet UI, trades and restore' \
+	  '  make nix-sandbox-local             # serve the sandbox locally; its Savings world runs in the tab' \
 	  '  make nix-match-BuckNetMintMathTest # bounded issuance inversion and integer fuzzing' \
 	  '  make nix-match-BuckNetMintCompatibilityTest  # the BuckNet facade (legacy): mint and batch quotes' \
 	  '  make nix-match-BuckNetBurnMathTest # proposed retirement calculation and fuzzing' \
@@ -2009,7 +2010,8 @@ sandbox-build:	sandbox-artifacts core-build-wasm-web
 # static server; the Python savings backend and five-year economy are separate.
 .PHONY: wallet-sandbox-test
 wallet-sandbox-test: sandbox-build
-	cd core/js && node --test test/sandbox.app.webevm.test.js test/sandbox.browser.test.js
+	cd core/js && node --test test/sandbox.app.webevm.test.js test/sandbox.browser.test.js \
+		test/savings-world.webevm.test.js test/savings-local.browser.test.js
 
 # ── Licences and third-party notices in what we publish ───────────────
 #
@@ -2052,6 +2054,17 @@ SANDBOX_PORT ?= 8000
 sandbox:	sandbox-build
 	@echo "sandbox: http://localhost:$(SANDBOX_PORT)/   (Ctrl-C stops it)"
 	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 $(SANDBOX_PORT)
+
+# The sandbox with the Savings tab's world in the tab (no sim server: a Web Worker on webevm), built
+# and served on 127.0.0.1:$(SANDBOX_LOCAL_PORT), the Savings tab open (Ctrl-C stops it). Not 8000,
+# 8797 or 8798: the tunnels' origins.
+#   make nix-sandbox-local                          # then open the URL it prints
+#   make nix-sandbox-local SANDBOX_LOCAL_PORT=9000
+SANDBOX_LOCAL_PORT ?= 8988
+.PHONY: sandbox-local
+sandbox-local:	sandbox-build
+	@echo "sandbox: http://127.0.0.1:$(SANDBOX_LOCAL_PORT)/?tab=savings   (the Savings world runs in the tab; Ctrl-C stops it)"
+	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 $(SANDBOX_LOCAL_PORT)
 
 # The HOSTED savings sandbox (https://savings-sandbox.albertabuck.ca/), served
 # from its OWN worktree on the savings-sandbox branch, so work in any other
