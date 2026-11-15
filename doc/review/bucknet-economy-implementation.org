@@ -4743,9 +4743,60 @@ five. Against BVIB's excess:
   (=market.dollar_pool_net=); the Overview draws the quoted BVIB beside BVIB, the Market tab each
   pool's BUCK net of its carried fee, and the Compare tab both BVIBs. The machine setting
   =machine.nominal_reference= (default false) deploys the nominal measure, for comparison.
-- [-] /A comparison/ (=comparisons/carry.toml=): reference (net, nominal) x leak (a year, none) on
+- [X] /A comparison/ (=comparisons/carry.toml=): reference (net, nominal) x leak (a year, none) on
   =economy= for two years: does K hold near its net equilibrium, and how much of the wind-down was the
-  measure?
+  measure? Results below.
+
+*** Result: the measure moves the market, not K (=build/runs/carry.*=, 2026-11-15)
+
+Four runs of =economy=, 730 days each, at 614348c8 (before N1/N2, which do not change the question).
+For the quoted runs the net BVIB is estimated as the quoted BVIB times the held-weighted mean of the
+pools' net/gross; the same estimate reproduces the net runs' recorded BVIB to 1e-4.
+
+| reference, leak | K at 364 | K at 729 | net BVIB - 1, y1 / y2 | quoted BVIB - 1, y1 / y2 | net < 1 | BUCK/USD end |
+|-----------------+----------+----------+-----------------------+--------------------------+---------+--------------|
+| net, a year     |    0.563 |    0.482 | +1.44% / +1.67%       | +2.25% / +3.61%          | 2%      |        1.162 |
+| quoted, a year  |    0.551 |    0.486 | +0.87% / -0.51%       | +1.66% / +1.40%          | 43%     |        1.204 |
+| net, none       |    0.468 |    0.171 | +1.35% / +1.61%       | +2.16% / +3.56%          | 2%      |        1.171 |
+| quoted, none    |    0.464 |    0.148 | +0.61% / -0.26%       | +1.41% / +1.66%          | 44%     |        1.206 |
+
+The pools' hollowness reaches 2.2% at two years (the dollar pool's 2.7-2.9%), as in the five-year
+economy.
+
+**** Measured
+
+- /K falls at the same rate under either measure/: 0.75 to 0.48 in two years with the one-year
+  leak (net 0.482, quoted 0.486), to 0.15-0.17 without it. The leak, not the measure, decides where
+  K stands at two years; with it K is flattening (-0.009 over the last quarter on the net
+  reference; the quoted run ticked up as its reading fell below 1).
+- /The closed loop settles whatever K reads about 1.5% above parity/. On the quoted reference the
+  quoted BVIB runs +1.4-1.7% while the net BVIB falls to parity and below in year two (-0.5%; below
+  1 on 43% of days): the controller was holding the BUCK about 2% dearer in net terms than it meant
+  to, as the five-year evidence suggested. On the net reference the net BVIB runs +1.4-1.7% both
+  years (below 1 on 2% of days) and the quoted reading carries the hollowness on top (+3.6% in year
+  two). The BUCK ends about 3.5% cheaper in USD on the net reference (1.162 against 1.204).
+- /So the wind-down over these two years is the issuance phase/, the owner's alternative: in net
+  BUCK the basket is genuinely about 1.5% rich against the BUCK, because the basket's lien keeps
+  issuing (6.0M to 18.3M of the 39.7M supply, against households' 3.4M) as investors keep arriving
+  (251 in two years). The measure was wrong and is now right, but correcting it does not stop K
+  falling while issuance runs ahead of retirement.
+- Fewer refused operations on the net reference (=health.errors= on 72 days against 90 with the
+  leak; 62 against 80 without); supply and households' principal within 1-3%.
+
+**** Recommendations
+
+- /Five-year runs/: the datasim suite runs the quoted reference (old contracts), the baseline. Rerun
+  =econ-F= (the economy with the one-year leak) on the net reference after N4, five years, to see
+  whether K holds once the investors' arrivals level off and the hollowness reaches 4-5%: the
+  quoted reference's net BVIB fell to -3.6% by year five, so that is where the two references
+  should part.
+- /Sandbox and savings sandbox/: show the net and the quoted BVIB side by side (the Overview
+  already does), and K's reading labelled as net; a viewer comparing BVIB with the BUCK's USD price
+  should see the carry, not infer a cheap BUCK from the quoted reading.
+- /K's equilibrium/: with the leak, a standing 1.5% error holds K near 0.48. If the owner wants K
+  near K0 through the issuance phase, the question is the target (parity in net BUCK) and the
+  basket's issuance (K x equity on every arrival), not the measure; leave it for the five-year
+  result.
 
 ** Net BUCK throughout: the review, and one way to handle carried fees (2026-11-15)
 
@@ -5040,13 +5091,13 @@ into the pools; each against the commit before, on =economy= and =economy-lifecy
   clean at 7cd34241 plus this note.
 - *Next*: N4, the price book, as designed above ("The price book, and the rest of net BUCK"); then
   the households read it; N5; N3; N6.
-- *Running here*: =comparisons/carry.toml= (net against quoted BVIB x leak, 730 days; runs
-  =build/runs/carry.*=, log =build/test/compare-carry.log=, ~700 days at writing; frozen at 614348c8,
-  before N1/N2, which does not change its question). When done: =make nix-venv-compare-report
-  COMPARE=carry= and the dashboard's Compare tab; record where K settles under each.
+- *Done*: =comparisons/carry.toml=, digested above ("Result: the measure moves the market, not K"):
+  K falls alike under either measure (0.48 at two years with the leak); the net reference moves the
+  market by the carry, and the wind-down is the issuance phase. Runs =build/runs/carry.*=.
 - *Running on datasim*: the five-year lifecycle suite in =~/src/alberta-buck-lifecycle= (old
-  contracts: the quoted-BVIB baseline): life-A, A2, C, E complete; B, D at day 1,720; econ-F at
-  1,120. Digest by mix (L5). Memory: 46 of 94 GB used.
+  contracts: the quoted-BVIB baseline): life-A, A2, C, E complete; B, D at day 1,740 (06:30
+  2026-11-15); econ-F at 1,120. Digest by mix (L5). Memory: 47 of 94 GB used. After N4, rerun
+  econ-F on the net reference for five years (recommendation above).
 - *Done today, besides*: =alberta-buck-webevm= published and depended on by alias (8369c3e9); the
   comparison runner and the dashboard's Compare tab; the control lab as =comparisons/shocks.toml=
   (48 runs complete, =build/runs/shocks.*=; C5 retires the lab); the V2 adapter removed; the Python
