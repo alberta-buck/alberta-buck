@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { decodeFunctionData, encodeFunctionData } from "viem";
 import { loadAnyArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../../src/nodefs.js";
-import { CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent, HouseholdPopulationAgent }
+import { CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent }
   from "../../src/agents/credit-household.js";
 import { issuance } from "../../src/agents/household-policy.js";
 import { buildEquilibriumWorld } from "../../src/scenarios/eqworld.js";
@@ -36,6 +36,10 @@ test("machine bootstrap distributes its capital by declared token weights", { sk
   assert.equal(s.mismatches.length, 0);
 });
 
+// TODO(S3): port to the world's calendar (a DayClock each day, and every payday of the year acted
+// rather than one 365-day jump: the net calendar refuses to skip one). It pins what
+// net-household-exit does not: a partial redemption keeping its claim, a release refused after K
+// moves, a failed release verification, a broke household's shortfall.
 test("household exit retains partial claims, retries release and never sells credit", { skip }, async () => {
   const s = await nodeWebevmSession();
   const w = await buildEquilibriumWorld(s, loadAnyArtifact, { identity, basket: "machine",
@@ -124,7 +128,9 @@ test("household exit retains partial claims, retries release and never sells cre
   assert.equal(s.mismatches.length, 0);
 });
 
-for (const basket of ["prorata", "machine"]) test(`households: live ${basket} accounting and reusable credit`, { skip }, async () => {
+// Legacy accounting only: the canonical household's credit, wallet and surplus are pinned by
+// net-household-{invest,wallet,surplus,programme}.webevm.test.js.
+for (const basket of ["prorata"]) test(`households: live ${basket} accounting and reusable credit`, { skip }, async () => {
   const session = await nodeWebevmSession();
   const w = await buildEquilibriumWorld(session, loadAnyArtifact, { identity, basket,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
@@ -274,7 +280,10 @@ for (const basket of ["prorata", "machine"]) test(`households: live ${basket} ac
   assert.equal(session.mismatches.length, 0);
 });
 
-for (const basket of ["prorata", "machine"]) test(`households: ${basket} investors and a live population`, { skip }, async () => {
+// Legacy accounting only: the canonical investor buys within its BVIB tolerance
+// (net-household-exit.webevm.test.js), and the population on the canonical world is
+// net-household-population.webevm.test.js.
+for (const basket of ["prorata"]) test(`households: ${basket} investors`, { skip }, async () => {
   const session = await nodeWebevmSession();
   const w = await buildEquilibriumWorld(session, loadAnyArtifact, { identity, basket,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
@@ -347,17 +356,5 @@ for (const basket of ["prorata", "machine"]) test(`households: ${basket} investo
   assert.ok(seller.exited && seller.mortgage === 0n && seller.hypoMortgage === 0n);
   assert.ok(sold.signed >= 0n && sold.limit <= E6, "lien cleared and coverage released");
 
-  // A population adds its opening members and its arrivals while the world runs.
-  const pop = new HouseholdPopulationAgent({ makeAccount: () => privateKeyToAccount(generatePrivateKey()),
-    seed: 0xA1BC, days: 365, initial_debtors: 1, initial_savers: 1, initial_investors: 1,
-    debtor_rate: 0, saver_rate: 0, investor_rate: 200, settings: { decision_days: 1 } });
-  await pop.setup(w);
-  for (let day = 0; day < 6; day++) await pop.act(w, day, 0);
-  const roles = pop.members.map((a) => a.p.role);
-  assert.deepEqual(roles.slice(0, 3), ["debtor", "saver", "investor"]);
-  assert.ok(roles.length > 3 && roles.slice(3).every((r) => r === "investor"));
-  assert.equal(pop.members[3].member, "0/investor/1");
-  assert.equal(pop.summary.investor.arrived, roles.length - 2);
-  for (const a of pop.members) assert.equal(a.lastError, "", a.member);
   assert.equal(session.mismatches.length, 0);
 });

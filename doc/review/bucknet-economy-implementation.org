@@ -3883,10 +3883,12 @@ cause, and whether anyone else has an EVM that runs entirely in a browser.
   until the vector retires). The run record is appended daily and survives a
   kill.
 - [X] /The wheel keeper's gas./ =eqworld.js= takes =world.tickGas=
-  (=eqsim.mjs --tick-gas=); the default stays 12M.
-- [ ] /Running./ The first Python five-year economy world
-  (=build/sim/economy-5y.json=, run record =build/runs/economy-5y=; about four
-  hours at the one-year world's 39 minutes a year).
+  (=eqsim.mjs --tick-gas=); the default stays 12M (since raised to 25M,
+  =eqworld.js= =TICK_GAS=).
+- [X] /The first Python five-year economy world/ (=build/runs/economy-5y=; the
+  defaults before the leak: K0 0.75, no leak). Complete, 1,825 days in 8 h 43 min
+  (17 s a day; 19.8 GB resident, 33.6 GB peak footprint), no errors or faults.
+  Recorded below under "Python five-year economy, before the leak".
 
 *** Checkpoint
 
@@ -4110,7 +4112,8 @@ half a minute (observation 66).
   the eight JS world files of the qualified set pass 132 of 132 on webevm. But:
   - its population test (=core/js/test/legacy/credit-household.webevm.test.js=)
     fails three cases on a calendar-day-against-chain-clock check that the
-    earlier Permit2 failure had hidden;
+    earlier Permit2 failure had hidden (corrected by S1 below: one fails on the
+    clock, two first on legacy behaviour the canonical household replaced);
   - the lifecycle (age, pension, USD fund, drawdown, stages, young-family
     arrivals, the mortgage cap) is Python only; the JS policy has its functions
     (=ageOn=, =stage=, =drawdownShare=, =fundGrowth=, the population keys), not
@@ -4146,7 +4149,7 @@ half a minute (observation 66).
 
 *** Steps, in order
 
-- [ ] /S1. Parity inventory./ Python against JS, function by function: the
+- [X] /S1. Parity inventory./ (Done: "S1. Parity inventory" below.) Python against JS, function by function: the
   household agent (=credit_households.py= / =credit-household.js=), the state
   machine (=net_household.py= / =net-household.js=), the calendar, the
   population, the world (=deploy.py=, =basket_machine.py=, the agents in
@@ -4178,6 +4181,298 @@ half a minute (observation 66).
 Acceptance: the savings page runs =economy.toml= (or a smaller default) wholly in
 a tab, a visitor's wallet trades in it, and the same page still attaches to a
 Python server world; the parity harness passes 30 days of both worlds.
+
+*** S1. Parity inventory (2026-11-14)
+
+Python against JS, function by function, on a567669a. In short: for a household outside the
+lifecycle, the canonical (net) household is at line-for-line parity: its state machine, its exits
+in BUCK, its calendar and the shared policy agree. The gaps are four:
+- the lifecycle, which JS has only as policy helpers;
+- the population's lifecycle and interventions;
+- the world: JS has no world built from an experiment, and =eqworld.js= differs from
+  =economy.toml='s world in cast, bootstrap, clock, price path, keepers, desk and arbitrageurs;
+- the run record, which JS does not write.
+
+/Legend./
+- Python, in =alberta_buck/sim/=:
+  - ch = =credit_households.py=, nh = =net_household.py=, hc = =household_calendar.py=, hp =
+    =household_policy.py=;
+  - bm = =basket_machine.py=, bwa = =basket_wheel_agent.py=, exp = =experiment.py=, scen =
+    =scenario.py=, dm = =direct_mint.py=;
+  - snap = =snapshot.py=, nsnap = =net_snapshot.py=, rr = =runrecord.py=;
+  - other modules by name.
+- JS, in =core/js/src/=:
+  - ch.js, nh.js, hc.js, hp.js, ops.js, rep.js = =agents/credit-household=, =net-household=,
+    =household-calendar=, =household-policy=, =household-ops=, =net-repayment=;
+  - eqw.js = =scenarios/eqworld.js=, bw.js = =buckworld.js=;
+  - eqsim = =core/js/bin/eqsim.mjs=.
+- Python tests, in =alberta_buck/test/=:
+  - setup, exit, inv = =test_net_household_{setup,exit,invest}.py=;
+  - cal = =test_household_calendar.py=, pol = =test_household_policy.py=, rt =
+    =test_net_repayment_target.py=, mkt = =test_net_market.py=;
+  - nboot = =test_net_economy_bootstrap.py=, econ = =test_economy.py=, bmc =
+    =test_basket_machine_chain.py=;
+  - rrt = =test_runrecord.py=, srv = =test_sim_server.py=, lch.py =
+    =legacy/test_credit_households.py=.
+- JS tests, in =core/js/test/=:
+  - jboot = =net-equilibrium-bootstrap=;
+  - jprog, jres, jsur, jwal, jinv, jexit = =net-household-{programme,resume,surplus,wallet,invest,
+    exit}=;
+  - jarb = =net-equilibrium-arb=, jeqsim = =eqsim=;
+  - all of the above are =.webevm.test.js=;
+  - jrt = =net-repayment-target.test.js=, jmkt = =net-market.webevm.test.js=, jcal =
+    =household-calendar.test.js=, jpol = =household-policy.test.js=, lch.js =
+    =legacy/credit-household.webevm.test.js=.
+
+**** The inventory
+
+| area | behaviour | Python (file:function) | JS (file:function) | status | tests (py / js) |
+|------+-----------+------------------------+--------------------+--------+-----------------|
+| 1 household agent | profile, books, 300-month annuity, buffer, keyed divest day, token index | ch:setup:27-156 | ch.js:constructor:19-97, setup:109-110 | same | setup:58,264 / jboot:27 |
+| | insured asset pledged, one facility per asset | ch:setup:163-174 (createCredit, setCreditIssuer) | ch.js:setup:115-119 (world.pledgeInsured) | same (another call path) | setup:264 / jboot:27 |
+| | lifecycle state: age > 0; investor leaves at arrive + 365.25 (retire_age + drawdown_years - age); usd_fund, usd_fund_paid, drawdown cursors | ch:setup:69-78 | none (exit day from hold_years only, ch.js:33) | Python only | exit:210 / none |
+| | external premium on unactivated coverage | ch:_external_premium_due:179 | ch.js:externalPremiumDue:122 | same | setup:782,1110 / jboot:265,630 |
+| | state for the policy (activated capacity, issuance limit, maturity backlog) | ch:_state:263 | ch.js:state:184 | same | setup:695,749 / jboot:294,352 |
+| | daily dispatch: recover, calendar, exit first, credit, wallet, surplus, 6 turns | ch:_act_net:1998, act:2059 | ch.js:actNet:1288, act:1325 | differs: drawdown idle gate (ch:2020) and step (ch:2036) Python only; JS recovers twice (1329, 1289; harmless); JS migration gates throw Error, not NotImplementedError, so actNet swallows them (ch.js:1036,1316) | setup:968,1850 / jprog:18 |
+| | debtor refinancing dispatcher | ch:advance_net_refinancing:1032 | ch.js:advanceNetRefinancing:676 | same | setup:1850 / jprog:18 |
+| | mortgage-free credit investment dispatcher | ch:advance_net_investment:971 | ch.js:advanceNetInvestment:404 | same | inv:53,107 / jinv:24 |
+| | working-balance dispatcher (once per pay period) | ch:advance_net_wallet:443 | ch.js:advanceNetWallet:305 | same | setup:1575 / jwal:23 |
+| | surplus dispatcher, then a funded buyback target | ch:advance_net_surplus:508, start_net_surplus:497 | ch.js:advanceNetSurplus:349, startNetSurplus:337 | same | setup:1293 / jsur:26 |
+| | investor dispatcher (BVIB tolerance) | ch:advance_net_investor:689 | ch.js:advanceNetInvestor:449 | differs: retired investor's drawdown branch (ch:716-717) Python only | exit:157,210 / jexit:267 |
+| | exit: sale, settlement, wallet, receipts home in BUCK (whole, else 1/2, 1/4, 1/8), lien, release, owned BUCK, tokens; one capped bite a day | ch:advance_net_exit:751, _exit_step:790-941, _exit_sent:943 | ch.js:advanceNetExit:493, exitStep:514-662, exitSent:664 | same (JS dust check also guards an empty pool, ch.js:647) | exit:84,125,306,330 / jexit:84 |
+| | retirement drawdown: retired debtor or saver raises bills - pension - cash from fund and basket in proportion; investor draws drawdown_share a month; redeem home in BUCK, then a capped sale a day | ch:_drawdown_pending:627, advance_net_drawdown:633, _drawdown_step:564, _drawdown_redeem:582, _drawdown_sell:606 | none (hp.js helpers only) | Python only | exit:210,259 / none |
+| | recovery dispatcher | ch:_recover_pending_operations:1097 | ch.js:recoverPendingOperations:719 | same order; JS catch sets no ctr.household_err (ch.js:754 against ch:1154) | setup:1139 / jboot:700 |
+| | repayment gate, guarded buyback, cancel, reconcile | ch:_pending_repayment:346, _buy_cash:291, 1157-1325 | ch.js:pendingRepayment:205, buyForRepayment:761, 796-913; rep.js | same, except JS lastError omits the facility id (ch.js:220,228) and JS reconcile books no bcdRetired or hhPaidDown (ch:1317-1319) | rt:11,34,75; mkt / jrt:6,28,56; jmkt |
+| | resume a saved buyback target | ch:_resume_net_repayment:1370 (household().issued, 1382) | ch.js:resumeNetRepayment:948 (world.households.read, 956; the net override ops.js:440 marks the whole household without relief tolerance) | differs: JS can fail where Python proceeds | rt:34 / jrt:28 |
+| | counters | the world's ctr (ch:2059): hhDrawdowns 601, hhDivestments 828, hhDivestShort 891, invExits and hhDivested 936, bcdRetired and hhPaidDown 1317,1394, household_err and household_faults 2055 | a per-household object, refinanceMachine.counters (ch.js:1330); BigInt values | differs: JS lacks hhDrawdowns, bcdRetired, hhPaidDown and the shared ctr that snap:946-966 reads | none / none |
+| | books each day | ch:octl_state:2116 (daily on net, snap:731), exit_state:2172; age, stage, usd_fund, usd_fund_paid 2161-2166 | ch.js:record:1236 (camelCase row in memory) | differs: shape; lifecycle fields Python only | rrt:19 / lch.js (legacy) |
+| | live settings of a present household | ch:apply_live_settings:2213, LIVE_SETTINGS:2206 | none | Python only | srv / none |
+| | legacy accounting (prorata world): advance, monthly, issue, surplus, invest, divest | ch:_advance:249, _monthly:186, _issue:1477, _surplus:1711, _divest:1751 | ch.js:advance:172, monthly:134, issue:1035, surplus:1077, divest:1213 | same (legacy only; both refuse on net) | lch.py:617 (ledger equals JS) / lch.js:127,277 (prorata) |
+| | event cursor | none | ch.js:householdEventsSince:102 | JS only | none / jboot |
+|------+-----------+------------------------+--------------------+--------+-----------------|
+| 2 state machine | plan shapes; exportable, reserve, bank terms | nh:29-119 | nh.js:17-29; plans filled in start* | same | setup:1820 / jboot:294 |
+| | refinance forecasts (observed relief, idle growth) | nh:observe_refinance_forecasts:128 | nh.js:observeRefinanceForecasts:47 | same (cache key tuple vs JSON string) | setup:695 / jpol:58 |
+| | refinance assessment, credit cash floor | nh:assess_refinance:146-361, credit_cash_floor:774 | nh.js:assessRefinance:60-216, creditCashFloor:498 | same (K and BVIB wad to float may differ by 1 ulp) | setup:695,749,1736,1754 / jboot:294,352; jsur:26 |
+| | remainder after a refusal | nh:assess_remainder:364 | nh.js:assessRemainder:223 | same | setup:514 / jres:21 |
+| | refinance flow: fund, issue, export, mortgage; retry, resume, refuse, recover | nh:HouseholdRefinance:1415-1788 | nh.js:HouseholdRefinance:1034-1314 | same | setup:353,514,812 / jboot:386; jres:21 |
+| | wallet: money_months target ramped from adopt_start over adopt_years, more when cheap; one capped bite | nh:assess_wallet:792, 1026-1082; hp:money_target:438 | nh.js:assessWallet:513, 711-757; hp.js:moneyTarget:366 | same | setup:1575,1666; pol:391,688 / jwal:23; jpol:276 |
+| | adaptive surplus: save in BUCK deposits, pay down at a discount | nh:assess_surplus:463, 1304-1413; hp:net_surplus_purchase:336 | nh.js:assessSurplus:541, 760-842; hp.js:65 | same (JS context.exit a subset, nh.js:577; JS also counts world.receipts, nh.js:865) | setup:1293,1389 / jsur:26; jpol:251 |
+| | credit investment flow | nh:assess_investment:537, start_investment:1157, _apply_invest:1273 | nh.js:assessInvestment:310, 951, 1004 | same | inv:53,107,145 / jinv:24 |
+| | investor assessment (BVIB tolerance) | nh:assess_investor:724 | nh.js:assessInvestor:458 | same | exit:157; pol:594 / jexit:267 |
+| | exit flow: redeem (paid in BUCK, shortfall held), sell, release; abandon a remainder | nh:start_exit:1084, _apply_exit:1125, abandon:890 | nh.js:892, 920, abandon:609 | same | setup:121,186; exit:330 / jexit:84 |
+| | events, accounts, market, status | nh:_event:1013, _accounts:934, _market:986, status:902 | nh.js:event:701, accounts:639, market:679, status:618 | same (retirement-event fallback shape: ch.js:922 against ch:1343) | setup:968 / jboot:386 |
+| | household mark (net worth) | nsnap:household_mark:134 | ops.js:netMark:170 | same (both leave out the USD fund, nsnap:207) | setup:842 / jboot |
+|------+-----------+------------------------+--------------------+--------+-----------------|
+| 3 calendar | dated mortgage book (ppb APR, daily floor, dated receipts, replay) | hc:MortgageBook:39-117 | hc.js:MortgageBook:22-81 | same | cal:14,30,48,68 / jcal:8,20,33,47 |
+| | bind on arrival: epoch, opening cash, actual and shadow books | hc:bind:159 | hc.js:bind:109 | same | setup:1173 / jboot:733 |
+| | calendar day against chain clock | hc:bind:165-168, prepare:191-192 | hc.js:bind:115-119, prepare:136-138 | same, except JS prepare truncates a negative difference to 0 (no stamp < epoch guard there) | setup:1124,1173 / jboot:689,733 |
+| | paydays: keyed day of the 30-day month from sim day 0; first 1 to 30 days after arrival; a missed payday refused, not caught up | hp:first_payday:79; hc:prepare:189,198 | hp.js:firstPayday:166; hc.js:prepare:135,142 | same | pol:664; setup:1124 / jpol:313; jboot:689 |
+| | wages, living (ppb), premium (full, external due), arrears, counterfactual | hc:prepare:199-244 | hc.js:prepare:143-157 | same | setup:1001,1110 / jboot:535,630 |
+| | premium_fixed_usd folded into premium_bp | hp:profile:178 | hp.js:profile:238 | same | pol:72 / jpol:331 |
+| | fund grows a month at usd_fund_return | hc:prepare:208 | none (hp.js:fundGrowth:406 unused) | Python only | exit:210 / none |
+| | fund saving: an investor's wages while it works; a debtor's or saver's wages less bills | hc:prepare:209-217,220 | none | Python only | exit:210,259 / none |
+| | pension_frac of wages once retired | hc:prepare:218-219 | none | Python only | exit:259 / none |
+| | asset sale and settlement | hc:schedule_sale:252, schedule_settlement:274 | hc.js:scheduleSale:167, scheduleSettlement:179 | same | exit:125 / jexit:225 |
+| | period loop: income mint evidence, phases, zero skips, pending and refused, receipt-dated mortgage | hc:advance:372-441, record_mortgage:291 | hc.js:advance:254-310, recordMortgage:187 | same | setup:1001,1196 / jboot:535,644 |
+| | who keeps day = chain day | loop.py:191-200 (epoch latest + 10 + 43200; warp each tick, timeline.py:6), driver.py:134 | eqw.js:DayClock:886-899 (epoch first now + 1 day; tick 0 only); tests set world.householdEpoch | differs | cal:89 / jcal:58 |
+|------+-----------+------------------------+--------------------+--------+-----------------|
+| 4 policy | DEFAULTS, POPULATION, LEGACY keys and values | hp:8-76 | hp.js:3-59 | same | pol:417 / jpol |
+| | keyed uniform (FNV-1a, fmix32), normal (12 uniforms), first_payday | hp:uniform:90, normal:103, first_payday:79 | hp.js:154, 176, 166 | same | pol:417,566,664 / jpol:313 |
+| | profile: ranges, normals, checks, phase, mortgage cap shrinks the home, premium_fixed_usd | hp:profile:118-179 | hp.js:profile:183-239 | same (checks in another order; Python also takes a whole float asset_count) | pol:72,351,364,748 / jpol:29,331,363 |
+| | population settings (legacy and lifecycle keys) | hp:population:188 | hp.js:population:249 | same | pol:331,748 / jpol:363 |
+| | arrivals: growth, averaged BVIB, gap, K pace, exponential thresholds | hp:growth_factor:240, arrival_state:250, k_factor:256, arrivals_step:263 | hp.js:294, 302, 309, 316 | same | pol:309,417 / jpol:238 |
+| | discount, premium, paydown, saving, money targets, divest_day | hp:309-463 | hp.js:147, 350-375 | same | pol:376,386,391,403 / jpol:217,223 |
+| | raw-unit choices: net_surplus_purchase, net_wallet_adjustment, external_premium_due | hp:336, 397, 294 | hp.js:65, 120, 343 | same | pol:50,633,688 / jpol:110,251,276 |
+| | investor_action, net_investor_action | hp:506, 513 | hp.js:379, 414 | same | pol:347,594 / jpol:220 |
+| | lifecycle helpers: age_on, stage, drawdown_share, fund_growth | hp:470-503 | hp.js:384-409 | same (no JS agent calls them) | pol:726 / jpol:341 |
+| | scoring: terms, investment_want and programme, issuance, surplus_action, premium_sale; carry.py refinance, quoted, staged, best, discounted_buyback, usdc_out, buck_in | hp:524-617; carry.py:72-445 | hp.js:421-722 | same | pol:28,182,201,231,529,549,605 / jpol:15,135,149,164,172 |
+|------+-----------+------------------------+--------------------+--------+-----------------|
+| 5 population | settings: population and member settings from one table | ch:HouseholdPopulationAgent.setup:2251 | ch.js:constructor:1382 (population keys as options, member settings apart) | differs (a builder must split them) | econ:35 / none |
+| | opening cohorts by role | ch:day_start:2304-2308 | ch.js:morning:1399-1402 | same | lch.py:567 / lch.js:351 |
+| | initial retirees (investors aged retired_age, retiree_cash_k, no income, named r<k>) | ch:day_start:2309-2310, _lifecycle_settings:2349-2350 | none | Python only | none / none |
+| | daily arrivals from BVIB and K | ch:day_start:2311-2328 | ch.js:morning:1403-1407 | differs: Python treats an unreadable BVIB or K as None; JS reads them unguarded | lch.py:567; pol:309 / lch.js:351; jpol:238 |
+| | young families: debtor_rate + young_rate x members present | ch:day_start:2322-2325 | none | Python only | none / none |
+| | age by stage (young debtors; middle-aged savers and investors) | ch:_lifecycle_settings:2343-2348 | none | Python only | none / none |
+| | mortgage cap: max(mortgage_floor_k, mortgage_supply_share x Buck.totalIssued) | ch:_lifecycle_settings:2351-2353 | none (hp.js applies mortgage_cap_k when given) | Python only | pol:748 (policy only) / jpol:363 (policy only) |
+| | members: names <pop>/<role>/<k>; accounts; place in the day | ch:_arrive:2331 (idx max+1, keyed EOA; members join agents and arbs and act each tick in keyed order; morning before the ticks, loop.py:225-235) | ch.js:arrive:1390 (makeAccount); act:1409 (morning at tick 0; members in sequence inside the population) | differs | lch.py:567 / lch.js:351 |
+| | interventions: rates, gain, APR shift, income scale with restore, exit_now; add one household | ch:disturb:2262, add_member:2356, day_start:2301-2303 | none | Python only | lch.py:591; srv / none |
+| | summary: arrived, active, exited; k_factor; stages; ctr["pop"] daily | ch:summary:2378, day_start:2329 | ch.js:summary:1413 (no k_factor or stages; not recorded) | differs | lch.py:567 / lch.js:360 |
+|------+-----------+------------------------+--------------------+--------+-----------------|
+| 6 world | entry point | __main__.py:main:93-160 (--experiment, --backend pyrevm, --days, --set, --record); Makefile:104-109 runs both worlds 30 days | eqsim:32-114 (fixed cast, flags) | differs | econ:35 / jeqsim:128,148 |
+| | experiment: defaults, TOML, --set, resolved | exp:DEFAULTS:110, load:324, build:340, resolved:277 | none (no TOML or experiment reader in core/js) | Python only | test_dashboard_live.py:34 / none |
+| | cast (idx): whale 0, arbs 1-3, accumulators 4-8, bootstrap depositors 9-32, PID 33, director 34, monetary 35, wheel 36, population 37, members from 38 | scen:build_rebalancing_eq:341, keep_tokens:50-78; exp:371-372 | eqsim:92-103 (DayClock, PinWhale per token, ParityArb, WheelKeeper, PidKeeper, BasketSaver, one debtor) | differs | bmc:91 / jeqsim:128 |
+| | tokens LABR, CNST, FOOD, NRGC, PAXG; weights 2553/2340/2128/2128/851; day-0 prices = historical close / 100 | scen:keep_tokens:50-78; deploy.py:519-525; prices.py:21,46 | eqw.js:75-82 (two tokens, unweighted); opts.tokens with weightBp supported (143-147, 243-246) | differs (configurable) | bmc:91 / lch.js:24; jboot:27 |
+| | BuckKControllerDirect: Kp 1e11, Ki 643004, Kd 0, dT 1800, KMAX 0.95, K0 0.75 | deploy.py:267-270; exp:141-225 | bw.js:DEPLOY_DEFAULTS:66-75, 186-188 | same | test_kdesign.py:102 / none |
+| | leak 365 days | deploy.py:273-274; exp:160,221 | bw.js:189-191 | same | test/BuckKControllerDirect.t.sol:208-292 / none |
+| | dTMax = max(2 x 1800, dT, 43200) after activation | bm:activate:229-233 | none (unclamped) | Python only | bmc:37,52 / none |
+| | pools $10M a side; fees 3000/3000/500; funding credit; TOKEN/BUCK seeds target / 10; TWAP aged 601 s | deploy.py:33-44, 615-725; bm:206-207 | eqw.js:51-52, 148, 236-325 | same in the builder (eqsim --target defaults to $100M) | nboot:27 / jboot:27 |
+| | basket shell and machine policy (observer, sizing, reference, parity gains, response, net mark, credit) | loop.py:85-90; deploy.py:330-357; bm:19-79, activate:208-258 | net-world.js:131-149; eqw.js:MACHINE:86-103, 326-372 | same | nboot:27; bmc:79 / jboot:27 |
+| | wheel kappa 200 bp, reserve cap 100 BUCK | deploy.py:858-861; bwa:217-219 | eqw.js:350-351 (0, 0) | differs, inert (the wheel's _distribute is empty) | none / none |
+| | wheel sample | bm:283-292 (OuterBandDeskPolicy) | eqw.js:374 (BasketReference) | differs | bmc:37 / none |
+| | desk: BasketDesk, $400k a constituent, ops params, risk budget, OuterBandDeskPolicy, setOps; MonetaryKeeper cast but inert | deploy.py:374-397; bm:261-290; director_agent.py:170-176 | none | Python only | bmc:37; nboot:27 / none |
+| | wheel arb: setArb cap 200 bp, edge 1 bp, set before the bootstrap; triangles | bwa:_setup_solidity:233-245 | eqw.js:439-445 (cap 100, edge 0, after the bootstrap) | differs | nboot:27 / jarb:14 |
+| | wheel keeper: own proxy, each tick in keyed order, max_work 12, scan 4, 1 round; unmetered gas on pyrevm | bwa:_act_solidity:302-338; bm:106-148,308-322 | eqw.js:WheelKeeper:910-920 (deployer; +601 s first; then an arb pass), turnWheel:393-422, TICK_GAS 25M (392) | differs | test_net_economy_report.py:21 / jarb:14 |
+| | basket opening deposits | dm:bootstrap_tickets:342-362, BootstrapDMAgent:365-403 (24 depositors, $6M by weight); 2 wheel rounds at one timestamp (loop.py:127-151) | eqw.js:258-262, 427-438 (the deployer, $50M; up to 8 turns 1801 s apart) | differs | nboot:27; econ:35 / lch.js:24 |
+| | price path | historical closes 2020-09-01 to 2025-09-01 / 100, generated, not in git (gen_historical.py:50-160); overlays (exp:415-447) | prices.js:seededWalk:26-38 (LCG, +-80 bp a day) | differs | test_revert_prices.py:32 / none |
+| | whale pins TOKEN/USDC to ref(day) | agents.py:MarketMakerWhale.snap:277-294; keyed tick and token order (loop.py:249-272) | whale.js:12-45 (one per token, tick 0, token order) | differs (timing, order) | none / onepool.webevm.test.js:21 |
+| | arbitrageurs: 3 cycle arbs ($2M, 0.25% bites, exact quotes, 60 bp); 5 accumulators | agents.py:190-362; router.py:quote_path:65 | arb.js:ParityArb:20-91 (deployer, gap > 100 bp, closes 80%) | differs; accumulators Python only | none / jeqsim:128 |
+| | PID keeper | equilibrium_agents.py:1620-1633 (each tick, 2 a day); loop.py:309-312 (end of day) | eqw.js:PidKeeper:924-929 (each tick, 1 a day) | differs | none / none |
+| | clock: 2 ticks a day, ts = epoch + day x 86400 + tick x 43200, one timestamp per tick | loop.py:191-200,260-261; timeline.py:6-18; pyrevm_backend.py:338-341 | world.js:runDays:8-21 (1 tick a day by default); webevm.js:50 (+1 s a block); DayClock tick 0 only | differs | cal:89 / jcal:58 |
+| | order within a day: interventions, population, ticks (warp, whale, agents keyed), compute, snapshot, record | loop.py:222-318 | the cast array each tick, then onDay (eqsim:92-114) | differs | none / none |
+| | keyed loop draws: whale tick, whale order, act order | rng.py:keyed_u:101-117; loop.py:249-279 | none | Python only | none / none |
+| | deterministic EOA keys from seed, class, idx | identity.py:109-115 | random keys (eqsim:77-79; bw.js:130) | differs | none / none |
+| | interventions and live control | exp:415-684; loop.py:161-168,225-235 | none | Python only | test_dashboard_live.py:56; srv:79 / none |
+| | snapshot frames | snap:capture:557; nsnap:observe:54 | eqw.js:record:870-878 (K, BVIB, spot, ff, spots, refs) | differs | bmc:37 / jeqsim:128 |
+| | run record (buck-run/1: frames, events, agents, interventions) | rr:183-316, frame_record:114-169 | none (readers only: core/js/dashboard/src/series.js, sources.js) | Python only | rrt:19,37 (test/fixtures/run-record.json) / dashboard-series.test.js |
+
+**** Tests that pin parity across the languages
+
+- *Shared fixtures* in =test/fixtures/=: =household-policy.json=, =household-insurance.json=,
+  =household-invest.json=, =household-exit.json= (fault vectors), =run-record.json=.
+- *Node runs inside Python tests*:
+  - pol:417: profiles, arrivals, decisions, quoted scores;
+  - pol:566: the investor tolerance draw;
+  - pol:605: the investment programme;
+  - lch.py:617: the legacy cash-flow ledger.
+- *Journal parity*: =test_mini_parity.py:71=, =test_js_join_web3.py:37=.
+- *Pinned nowhere*:
+  - the lifecycle population (initial retirees, young_rate, the mortgage cap read from the supply)
+    as an agent, in either language; only the policy helpers are pinned;
+  - the keyed loop draws (=keyed_u=, =KeyedRandom=), in either language;
+  - the JS population on the canonical world.
+
+**** Gaps to close in S3, smallest first
+
+Toward a 30-day harness of =economy.toml=:
+
+1. /The legacy population test/ (below): JS gets its only passing test of
+   =HouseholdPopulationAgent= on the canonical world.
+2. /Four one-line household fixes./
+   - Guard the population's BVIB and K reads as Python does (ch.js:1403-1404 against
+     ch:2313-2320).
+   - Read the principal in =resumeNetRepayment= from =netCreditOps.household(...).issued=
+     (ch.js:956 against ch:1382).
+   - Add the stamp < epoch guard to prepare (hc.js:136).
+   - Set =ctr.household_err= in the recovery catch (ch.js:754).
+3. /Counters./
+   - Pass the world's ctr through act, actNet, recovery and repayment instead of a per-household
+     object (ch.js:1330).
+   - Add =bcdRetired= and =hhPaidDown= (ch:1317-1319, 1394-1396).
+   - Use numbers, not BigInt, where snap:946-966 reads them.
+4. /World constants./
+   - =setDTMax(43200)= after activation (bm:229-233).
+   - Wheel arb cap 200 bp and edge 1 bp, set before the bootstrap. =opts.arbCapBp= and
+     =opts.arbMinEdgeBp= exist already.
+   - =targetBuck= of $10M.
+   - The five tokens, with their weights and day-0 prices, through =opts.tokens=.
+5. /Price path./ Python's loader writes the five series (closes / 100, overlays applied) to JSON,
+   and =PinWhale.refPrice= reads it. =seededWalk= stays for eqsim.
+6. /Deterministic accounts./ Port the EOA key derivation (identity.py:109-115). Addresses then
+   match, and so do each pool's token order and rounding, so journals can be compared (as in
+   mini_parity and js_join).
+7. /Keyed loop draws./
+   - Port =keyed_u= (blake2b from =@noble/hashes=, today only a transitive dependency; declare
+     it). A scratch port matched Python bit for bit.
+   - A =runDays= that draws the whale tick and order, and orders each tick's agents by
+     =keyed_u(seed, "order", day, tick, class, idx)= with Python's class names and idx.
+8. /Clock and day order./
+   - Two ticks a day at epoch + day x 86400 + tick x 43200, one timestamp per tick (webevm
+     interval 0).
+   - No 601 s settle and no second arb pass.
+   - =compute()= at the end of the day.
+   - The day in Python's order.
+9. /Population hook-up./ Its morning before the ticks; its members as cast agents in the keyed
+   order; its settings split from the resolved experiment's one table.
+10. /Bootstrap./ 24 depositors on =bootstrap_tickets= ($6M by weight) instead of the deployer's
+    $50M; the arb configured first; two wheel rounds at one timestamp.
+11. /Keepers./
+    - The wheel turned through its own account with =tick_receipts= semantics: max_work 12, scan
+      4, one round, refreshValuation per batch.
+    - PID compute each tick.
+    - Inert MonetaryKeeper and DirectorKeeper slots, kept for the idx numbering.
+12. /The desk./ BasketDesk, OuterBandDeskPolicy, $400k a constituent, =setOps= and
+    =setSample(desk policy)=, following bm:activate:261-292.
+13. /Arbitrageurs./ Three cycle arbitrageurs and five accumulators, which need a JS
+    =router.quote_path=. =ParityArb= stays for eqsim.
+14. /Frames./ =frame_record= frames from the JS world, so the harness compares K, BVIB, supply,
+    holders and books in one shape. This is where S3 meets S4.
+
+Then =economy-lifecycle.toml=:
+
+15. /Lifecycle state./ ch:69-78, plus age, stage, =usd_fund= and =usd_fund_paid= in =record=.
+16. /Calendar branch./ Port hc:202-220 into hc.js:prepare:142-158, keeping Python's ppb integer
+    order and its float order for growth: =(1 + r) ** (30 / 365.25)=, then truncate.
+17. /Drawdown./
+    - Port ch:564-684 with =hhDrawdowns= and its waiting event.
+    - Wire it in: the idle gate (ch:2020), drawdown first among a lifecycle household's steps
+      (ch:2036), and the investor's branch (ch:716-717).
+18. /Population lifecycle./ Initial retirees; young_rate x members present; age by stage; a
+    retiree's cash and no income; the mortgage cap read from =Buck.totalIssued= at arrival;
+    stages in the summary.
+19. /Tests/ for the three gaps under "Pinned nowhere" above, in both languages.
+
+/For S2./ Arrivals depend on chain observables (gain 200 on the averaged BVIB, and the K pace).
+Closed-loop arrivals therefore diverge as soon as BVIB or K differ by enough to cross a threshold.
+First drive the JS population open loop on Python's recorded BVIB and K: arrivals and profiles must
+then be identical. Then close the loop, with tolerances.
+
+/Python observations found on the way (for the owner)./
+- Net worth and the counterfactual both leave out the USD fund: nsnap:207, and the counterfactual's
+  cash is credited wages less the fund share (hc:229). A retiree's fund payouts arrive as dollars
+  in net worth only (ch:676), so net worth minus the counterfactual counts fund drawdowns as gains.
+- A retired investor's normal cadence still runs on days with no drawdown work (ch:718-735). With
+  no buffer, it may buy BUCK with dollars its drawdown has just raised. Confirm before porting.
+
+/Plan corrections./
+- The legacy test failures are not all on the clock check (below).
+- The keeper's default tick gas is now 25M (eqw.js:392), not the 12M noted under "Sandbox on
+  webevm".
+- =TELEMETRY.md:204-205= still says the whale is not keyed; loop.py:249-279 keys it.
+
+**** The calendar-against-clock failure: root cause and fix
+
+/Root cause./ Two commits changed what the machine cases of
+=core/js/test/legacy/credit-household.webevm.test.js= run. The file was last revised 2026-10-26,
+before both.
+- e9b35549 (2026-11-06) builds the machine basket only on canonical "net" accounting
+  (eqw.js:156).
+- 6bf53283 (2026-11-07) anchors a net household's calendar to absolute time:
+  - bind and prepare require floor((block.timestamp - epoch) / 86400) == day (hc.js:117,136,
+    exactly as hc:167,191);
+  - prepare refuses to skip a payday (hc.js:135).
+
+The world keeps that clock. Python's loop sets =d.household_epoch= and warps each tick
+(loop.py:191-200). In JS it is the =DayClock= agent, first in the cast (eqw.js:886-899;
+eqsim:93). The legacy file drives households with a bare day index and has neither a =DayClock=
+nor =world.householdEpoch=. Its prorata cases still run legacy accounting, which has no calendar,
+and pass. Its three machine cases fail:
+- /l.39, exit./ It binds on day 0, jumps the chain 365 days (l.52), then acts on day 1 (l.87).
+  That gives "household calendar day does not match chain clock" (hc.js:137, via ch.js:721,1329).
+- /l.127, machine accounting./ It first fails at l.144: =fundingPending= and "fund-issue" are
+  legacy behaviour. Next, act(day 30) (l.140) would fail "must observe each payday" (hc.js:135),
+  and =a.issue= (l.195) refuses on net (ch.js:1036).
+- /l.277, machine investors./ It first fails at l.291, 'save' not 'buy': the canonical investor
+  buys the basket within its BVIB tolerance (jexit:267). Next, act(w, 1, 0) (l.303) fails the
+  clock check. Its population block (l.351-362) fails the clock on day 1 too.
+
+So one case fails on the clock today and all three would. Two of them also pin legacy behaviour
+that the canonical household replaced. The calendar is right and matches Python. The fix belongs in
+the test.
+
+/Smallest fix./
+1. /Population./ Import =DayClock= and add =const clock = new DayClock();= with =await
+   clock.act(w, day, 0);= before each =pop.act(w, day, 0)=: two lines. Move the block into its own
+   machine test, so it is not stuck behind the legacy investor assertions. Checked on a copy
+   outside the repository: without the clock it fails on day 1; with it, all six days pass, with
+   four members, no errors and no mismatches.
+2. /Legacy loops./ Run the l.127 and l.277 loops on =["prorata"]= only. Their canonical
+   counterparts are jinv, jsur, jwal, jprog and jexit:267.
+3. /Exit test (l.39)./ It is machine-only: on prorata it fails at l.49, because a prorata ledger
+   has no basket mark (also checked on a copy). Port it to the clock rather than delete it. Drive
+   each day through a =DayClock= and replace the 365-day jump with acting through every payday of
+   the year, since the calendar refuses to skip one. It covers what jexit:84 does not: a partial
+   redemption keeping its claim, a release refused after K moves, a failed release verification,
+   and the broke household's shortfall.
 
 ** The owner's word on the open decisions, and the sandboxes' worlds in the dashboard (2026-11-14, evening)
 
@@ -4314,6 +4609,37 @@ its own maps onto what the standard system has or nearly has:
   (K moving against K fixed; households against none) on the economy world:
   remove =control_lab/=, its configs, targets and tests; its rendered page and
   datasets are outputs, not kept.
+
+** Python five-year economy, before the leak (2026-11-14, evening)
+
+=economy.toml= on pyrevm for five years with K0 0.75 and no leak (=build/runs/economy-5y=),
+the Python counterpart of the JS five-year world of observation 69:
+
+| day | K | BVIB | BUCK/USD | supply (M BUCK) | basket lien (M) | household principal (M) | debtors / savers / investors arrived |
+|-----+---+------+----------+-----------------+-----------------+-------------------------+--------------------------------------|
+| 0 | 0.752 | 0.981 | 1.016 | 24.0 | 6.0 | 0.0 | 6 / 6 / 30 |
+| 182 | 0.610 | 1.010 | 1.031 | 28.4 | 8.7 | 1.7 | 7 / 6 / 74 |
+| 365 | 0.464 | 1.022 | 1.107 | 31.1 | 11.2 | 1.9 | 8 / 7 / 125 |
+| 730 | 0.146 | 1.025 | 1.197 | 38.7 | 18.2 | 2.5 | 12 / 9 / 247 |
+| 1095 | 0.000 | 1.006 | 1.244 | 46.7 | 26.3 | 2.4 | 14 / 11 / 345 |
+| 1460 | 0.000 | 1.004 | 1.287 | 52.1 | 32.1 | 2.0 | 15 / 14 / 415 |
+| 1824 | 0.000 | 1.003 | 1.393 | 55.0 | 35.0 | 2.0 | 15 / 17 / 474 |
+
+- /K winds down to zero in Python too/, as in JS (observation 69): from 0.75 to 0.46
+  in the first year and 0.15 in the second, at 0 from about day 1,000 to the end.
+  BVIB stays above 1 on 97 to 99% of days each year. The integrator, without a
+  leak, accumulates the small persistent error the world cannot correct.
+- /The price gap draws investors, not debtors/: 474 investors arrived against 15
+  debtors and 17 savers. Demand outruns supply, which is the persistent BVIB > 1
+  that winds K down: the minimal economy has no actor that brings it back.
+- /Supply grows anyway/ (24.0M to 55.0M), almost all of it the basket's lien (6.0M
+  to 35.0M); household principal stays near 2M. BUCK/USD follows the basket's
+  dollar value up the historical path (1.02 to 1.39).
+- /Exits begin in year four/ (3 debtors, 3 savers and 24 investors by the end):
+  the full-exit path now runs in a long world.
+- /Next/: econ-F on datasim is this world with the one-year leak, and the
+  lifecycle mixes add retirees' drawdown and young families. Together they answer
+  whether the leak alone holds K, or the mix must (L5).
 
 ** The Python tier passes (2026-11-14, evening)
 
