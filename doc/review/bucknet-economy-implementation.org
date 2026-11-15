@@ -4839,28 +4839,42 @@ Sizes: the venue has 2,127 bytes (an estimated 1-1.5 KB is needed); the shell (5
 facet (408) gain room as their re-netting goes; the shell's net wrappers stay public in the linked
 =BasketMarketOps= (4,398 free).
 
-*** Questions for the owner
+*** Questions for the owner, and the owner's answers (2026-11-15)
 
-1. /A net price is a bid./ A TOKEN sold into pool i fetches P r_i; bought it costs P (full value) or
-   P r_b (the basket). The marks use the sell side. Should the entry side (HIGH) or the targets'
-   tilt use the buy side, a mid, or the USDC route?
-2. /A household's fair value/: the dollar pool's net price (BVIB_net x P / r_ub; the household's
-   signal is then exactly K's), or the basket's dollar value (sum of amount x TOKEN/USDC price)? They
-   differ by r_tok / r_ub, ~0.2%.
-3. /A household's mark/: everything at the net price, or assets at their nominal exit (bid) and
-   liabilities at the net buy cost (ask)?
-4. /Carry on the basket's own buys and pairing/: paying wallet BUCK into a hollower pool gives
-   (r_b - r_i)(1 - s_i) to its other LPs; the deposit charges ignore it. A guard, or a preference
-   for fresher pools?
-5. /The pair observer/: net BUCK route (carry ticks, recording the basket's own refresh of r), or
-   separation on the USDC route alone?
-6. /A sponsored redeemer/: should Buck offer approved Carrying services a full-value transfer, so the
-   sponsor does not pay the carry twice?
-7. /The Jubilee retirement job/ (from surplus cash): dormant for the Carrying machine basket by
-   intent?
-8. /referencePrice/: a net price (as the basket marks)? The comments say "as the venue quotes it".
-9. /Nominal arbitrage/ leaves standing net gaps r_i / r_ub between pools that no ordinary account
-   can close: accept as how Carrying pools trade, or model carry-aware arbitrage?
+The owner's principle: /a holding is worth what selling it fetches, in full-value net BUCK or USDC,
+over the best route; a purchase costs what we push in, and we push the most fee-carrying BUCK we
+have/. A route through the pools is priced and executed in nominal BUCK; the carried fees ride
+along pool to pool without changing the amounts; only the BUCK pushed in (at its source's ratio)
+and what lands in our account (net) are converted. And the work wheel, whose job is to price routes
+and find arbitrage, can publish the best route's price for anything that does not need an
+exact-this-moment valuation.
+
+- /1. A net price is a bid/: *answered*. Value is the net proceeds of the best route, TOKEN to BUCK
+  directly or through USDC (whose last leg carries the dollar pool's fee). Marks, BVIB and the
+  targets use it; purchases are costed when they execute.
+- /2, 3. A household's fair value and mark/: *answered by the principle*. A household's BUCK,
+  TOKENs and receipts are worth what selling them fetches; its debt costs what buying the BUCK to
+  retire it costs (the dollar pool's net ask); the basket's fair dollar value is the sum of its
+  best-route net bids in USDC.
+- /4. Carry on the basket's own buys and pairing/: *answered*. Push the hollowest BUCK available,
+  never the fresh BUCK a client deposit brings (decision 1 below: how, given one wallet).
+- /5. The pair observer/: *answered*. Levels at the same net best-route prices.
+- /6. A sponsored redeemer/: open (decision 3 below).
+- /7. The Jubilee retirement job/: dormant for the Carrying machine basket; left so, recorded.
+- /8. referencePrice/: *answered*: a net price (a comment fix).
+- /9. Nominal arbitrage/: *answered*. Carry-aware at a route's two ends, nominal in between. The
+  basket's planner already does so; the simulated arbitrageurs whose routes end in BUCK in their own
+  wallet must too.
+
+*** The wheel as the price book
+
+The wheel's first slot each turn already samples the market before anything trades (=SampleKind=,
+reading =BasketReference=). That sample publishes a /price book/: for each constituent, the best
+route's net bid in BUCK and which route, from TWAPs, with its time. K's reference, the parity
+signal, the pair observer, the marks' TWAP anchor, the desk and the simulation read the book; only
+execution (amounts and slippage against the book) and the manipulation-sensitive deposit and exit
+bounds (LOW and HIGH: the book against the live spot) read live. One producer of "what a TOKEN is
+worth"; everything else consults it.
 
 *** Work, in order
 
