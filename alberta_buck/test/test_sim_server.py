@@ -7,6 +7,8 @@ import threading
 import time
 from queue import Queue
 
+import pytest
+
 from alberta_buck.sim.server import Session
 
 
@@ -20,6 +22,7 @@ def session():
     s._last_day_ts = s._idle_since = time.monotonic()
     s.history, s.rpc_clients, s.rpc_waiting = [], 0, 0
     s._rpc_count, s._rpc_ts, s._sv, s.scenario = threading.Lock(), 0.0, None, None
+    s.record_root, s.keep, s.control_url, s.recorder, s.records = None, False, None, None, []
     return s
 
 
@@ -73,13 +76,27 @@ def test_a_step_begun_in_a_pause_runs_exactly_its_days():
     assert s.paused
 
 
-def test_shock_arms_the_shock_agent_and_chain_toggles_the_wheel():
+def test_shock_and_chain_are_interventions_applied_by_the_world():
+    """An operator's shock and chain switch change the world, so they go through its intervention
+    engine (experiment.Interventions.apply_now), recorded and replayable like a scenario's own."""
+    from types import SimpleNamespace
     s = session()
-    shock, wheel = ShockAgent(), Wheel()
-    s._apply({"op": "shock", "side": "buy", "usd": 5e6, "days": 2}, 0, [wheel, shock])
-    s._apply({"op": "chain", "name": "l1"}, 0, [wheel, shock])
-    assert shock.armed == [("buy", 5e6, 2)]
-    assert wheel.chain == "l1"
+    applied = []
+
+    class Engine:
+        def apply_now(self, iv, day):
+            applied.append((iv, day))
+            return dict(ok=True, note="applied")
+
+    s.d = SimpleNamespace(interventions=Engine())
+    s._apply({"op": "shock", "side": "buy", "usd": 5e6, "days": 2}, 0, [])
+    s._apply({"op": "chain", "name": "l1"}, 3, [])
+    assert applied == [({"action": "arm_shock", "side": "buy", "usd": 5e6, "days": 2}, 0),
+                       ({"action": "set_chain", "name": "l1"}, 3)]
+    assert s.last_result == {"op": "chain", "ok": True, "note": "applied", "day": 3}
+    s.d = SimpleNamespace()
+    with pytest.raises(ValueError, match="intervention engine"):
+        s._apply({"op": "shock", "side": "sell", "usd": 1, "days": 1}, 4, [])
 
 
 def test_lite_frames_drop_the_per_agent_telemetry():
