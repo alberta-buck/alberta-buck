@@ -5398,7 +5398,48 @@ N2.
 The book (K at the best route against the direct net reference), the households' basis, fresh BUCK
 into the pools; each against the commit before, on =economy= and =economy-lifecycle=, two years.
 
-** Resume here (2026-11-15, evening)
+** Resume here (2026-11-15, late evening)
+
+- *Branch*: =feature/household-minimal-ecosystem=, pushed at af1e034d; worktree
+  =.claude/worktrees/buck-compound= (untracked leftovers only: generated price windows, =eq-economy.json=).
+- *Done since the evening notes*:
+  - /C5/: the control lab deleted (ef31449a; owner: its comparisons run in the dashboard).
+  - /The savings sandbox's world in the tab/ (46c30c32, af1e034d; "The savings world in the tab:
+    the port, concretely" and "Built: steps 1 to 5"): =SavingsWorld= on webevm in a Web Worker,
+    =LocalLink=, the page choosing its link, the static sandbox keeping its Savings tab. Bring it up:
+    =make nix-sandbox-local= (http://127.0.0.1:8988/?tab=savings). Tests: Node and Chromium (7 s),
+    the server-backed savings test still passing.
+  - /The hosted sandboxes/: the wallet sandbox's preview of this branch, now with the in-tab Savings
+    world, at https://feature-household-minimal-ec.alberta-buck-sandbox.pages.dev/ (the
+    =sandbox-pages= workflow fixed: =make install=, =ubuntu-24.04=). Production
+    (sandbox.albertabuck.ca) updates with the merge to master. savings-sandbox.albertabuck.ca is
+    still the old datasim server (owner: leave it until the static page replaces it).
+- *Next on the savings sandbox* (owner chose "port next"; steps 1-5 built):
+  1. Step 6: serve savings-sandbox.albertabuck.ca statically from the Pages build (the Savings tab
+     alone, as =ctx.savingsOnly= does for a server page: a build flag or a second Pages project),
+     then stop the datasim server; the owner removes its tunnel route.
+  2. The gaps the built notes list: a reload keeps the world (webevm snapshot in IndexedDB), the
+     real commodity paths (plan gap 5), the desk's and the wheel's counters for their charts.
+  3. Then S2/S3 (the parity harness) and S7 (the dashboard's local source).
+- *Running here*: =comparisons/book.toml= (best routes against direct only, 730 days, two cores;
+  at day ~425 and ~403 at writing; =build/runs/book.*=, log =build/test/compare-book.log=). When
+  done: =make nix-venv-compare-report COMPARE=book= and record it under "N4 as built" (the USDC route
+  won on 12% of TOKEN-days by a median 0.1% in its first 134 days).
+- *Running on datasim*: the five-year suite on the net-BUCK contracts in =~/src/alberta-buck-net=
+  (3dee6d85; =build/net-suite.sh=; logs and markers in =build/logs=; day ~120-240 at writing; many
+  hours more), against the quoted-BVIB baseline digested in "L5, the baseline". Digest with
+  =build/life_digest.py= (copied there; =python3 build/life_digest.py life-A ... econ-F=). The
+  baseline worktree's econ-F (=~/src/alberta-buck-lifecycle=) is still running.
+- *Owner's calls*: N5 and the marks' anchor (set aside with evidence); the shadow controller (its
+  position integrator does not leak).
+- *Next (owner)*: after net quoting, cast the persistent BUCK demand: every agent's short-term BUCK
+  balances, BUCK payroll. Do not tune K against its slide meanwhile.
+- *Core budget*: four cores on the Mac (forge =-j 4= in =FORGE_OPTS=, =COMPARE_JOBS= at most 4,
+  =--test-concurrency=); datasim unlimited.
+- *Still open from before*: S3's remaining parity gaps (counters, world constants, the lifecycle in
+  JS); consolidation waves 2 and 3; the catalogue's stress arms (owner).
+
+** Resume here (superseded: 2026-11-15, evening)
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed; worktree =.claude/worktrees/buck-compound=.
 - *Net BUCK, done today*: N1, N2, N4 (the price book; K reads its sample), the households at the
