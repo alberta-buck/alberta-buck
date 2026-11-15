@@ -5,6 +5,7 @@ import pytest
 
 from alberta_buck.sim.control_lab.event_view import execution_counts, execution_log, price_markers
 from alberta_buck.sim.control_lab.model import DEFAULTS, load_config
+from alberta_buck.test.unported import CONTROL_LAB_WORLD
 
 
 def test_markers_use_volume_weighted_fills_and_pairing_is_not_a_buy():
@@ -39,6 +40,7 @@ def test_arb_marker_uses_internal_leg_but_log_retains_both_venues():
     assert not price_markers(r)
 
 
+@CONTROL_LAB_WORLD
 def test_receipts_record_desk_basket_and_both_arb_legs():
     pytest.importorskip("pyrevm")
     from alberta_buck.sim.control_lab.block_pairs import simulate_observed as simulate

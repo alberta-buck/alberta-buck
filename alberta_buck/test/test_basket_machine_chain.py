@@ -16,8 +16,8 @@ from alberta_buck.sim.scenario import ROUTING, Scenario, keep_tokens
 
 
 @contextmanager
-def simulated(tmp_path, basket_impl, machine=None):
-    scenario = replace(ROUTING, days=2, ticks_per_day=4)
+def simulated(tmp_path, basket_impl, machine=None, days=2):
+    scenario = replace(ROUTING, days=days, ticks_per_day=4)
     if machine is not None:
         scenario.experiment = expmod.load(None, sets=[f"machine.{key}={value}" for key, value in machine.items()])
     frames, deployment = [], []
@@ -28,10 +28,16 @@ def simulated(tmp_path, basket_impl, machine=None):
         yield deployment[-1], frames
 
 
+def assert_response_wheel(d):
+    """The machine's wheel is BasketMachineWheel: response components only (no responseMode switch)."""
+    assert "setResponseMode" not in {item.get("name") for item in d.wheel.abi}
+    assert d.wheel.functions.equityBasket().call() == d.basket.address
+
+
 def test_replacement_publishes_and_runs_through_the_simulator(monkeypatch, tmp_path):
     monkeypatch.setenv("SIM_EQUITY_MACHINE", "1")
     with simulated(tmp_path, "equity-ops") as (d, frames):
-        assert d.wheel.functions.responseMode().call()
+        assert_response_wheel(d)
         assert d.wheel.functions.opsBasket().call() == d.desk.address
         assert d.wheel.functions.sampleSource().call() == d.monetary_policy.address
         assert d.desk.functions.executionGuard().call() == d.monetary_policy.address
@@ -44,9 +50,12 @@ def test_replacement_publishes_and_runs_through_the_simulator(monkeypatch, tmp_p
 
 
 def test_an_experiment_selects_and_sizes_the_machine(tmp_path):
-    with simulated(tmp_path, "equity-machine", {"tilt": .25, "lean_cap_bp": 1000, "interval": 900}) as (d, frames):
+    # Four days: on the canonical (net) Buck no TOKEN waits to be placed in this world, so the
+    # facet's first booked responses are the leash's sells and buys, from the third day.
+    with simulated(tmp_path, "equity-machine", {"tilt": .25, "lean_cap_bp": 1000, "interval": 900},
+                   days=4) as (d, frames):
         assert d.equity_machine and d.basket_impl == "equity-ops"
-        assert d.wheel.functions.responseMode().call()
+        assert_response_wheel(d)
         assert tuple(d.basket.functions.response().call()) == (3000, 900, 2500, 1000)
         assert d.kctrl.functions.dTMax().call() == 21600
         last = frames[-1]
@@ -59,7 +68,7 @@ def test_an_experiment_selects_and_sizes_the_machine(tmp_path):
         # Each response is booked by what it did, with the BUCKs it moved.
         booked = {k: v for k, v in last.items() if k.startswith("wh_eq_") and "response" not in k}
         names = {name for name, _ in basket_machine.ACTIONS.values()}
-        assert last.get("wh_eq_place_n", 0) > 0, booked
+        assert any(last.get(f"wh_eq_{name}_n", 0) > 0 for name in names), booked
         assert all(last.get(f"wh_eq_{name}", 0) > 0 for name in names if last.get(f"wh_eq_{name}_n", 0))
         # The credit is marked net: every TOKEN is paired, and the line is still there.
         assert d.basket.functions.netMark().call()

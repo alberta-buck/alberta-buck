@@ -376,10 +376,12 @@ class NotesStack:
         self.reg = ch.deploy("IdentityRegistry", gov)
         ch.send(self.reg.functions.setIdentityPoseidon(self._deploy_poseidon()))
 
-        # Buck stack (harnessed credit so the issuer can be funded).
+        # Buck stack (harnessed credit so the issuer can be funded).  The
+        # legacy-accounting Buck, as test/NotesE2E.t.sol uses since 297116d9:
+        # the canonical Buck links libraries and takes a Jubilee fund.
         self.credit = ch.deploy("BuckCreditHarness", sol_file="BuckCreditHarness")
         self.kctrl  = ch.deploy("BuckKControllerStatic", 10**18, gov)
-        self.buck   = ch.deploy("Buck", self.credit.address, self.kctrl.address,
+        self.buck   = ch.deploy("BuckLinear", self.credit.address, self.kctrl.address,
                                 self.reg.address, self._addr(0xB00C))
         ch.send(self.reg.functions.setBuck(self.buck.address))
         ch.send(self.credit.functions.setBuck(self.buck.address))

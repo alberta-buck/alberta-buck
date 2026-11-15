@@ -646,7 +646,7 @@ for (const day of [0, 17, 30, 60, 90, 365]) {
 }
 console.log(JSON.stringify(rows, (_, v) => typeof v === 'bigint' ? Number(v) : v));
 """
-    root                        = Path(__file__).resolve().parents[2]
+    root                        = Path(__file__).resolve().parents[3]
     js                          = json.loads(subprocess.run(["node", "--input-type=module", "-e", script,
                                                             json.dumps(a.p)], cwd=root, check=True,
                                                            text=True, capture_output=True).stdout)

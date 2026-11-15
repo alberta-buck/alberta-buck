@@ -87,9 +87,11 @@
 - *To decide:* the catalogue's excursion and attack arms. The plan kept them
   until their stress actors are ported to the economy world. Port them as
   =economy= interventions, then delete the catalogue.
-- Python tests that run only on the legacy baskets (=test_credit_households=,
-  =test_debtor_policy=) move to the machine basket or go;
-  =test_debtor_ledger= keeps =isolation.toml= until then.
+- Python tests that run only on the legacy baskets are in
+  =alberta_buck/test/legacy/= (2026-11-14: =test_credit_households=,
+  =test_debtor_policy=, =test_mature_worlds=, =test_debtor_ledger=,
+  =test_routing_sim_web3=), not collected by default; they go with the legacy
+  worlds (=test_debtor_ledger= keeps =isolation.toml= until then).
 
 ** Wave 3: contracts (each family after its last current user moves)
 
@@ -101,7 +103,7 @@
 | shadow controller | BuckKControllerShadow, ShadowObserver, IShadowObserver, SimStabilizer | owner's call (explained in the plan, 2026-11-14 evening): keep as the research path for stabilizers on the machine basket? | delete or keep |
 | USD controller | BuckKController (Chainlink), the legacy =Deploy.s.sol= and =deploy-*= targets | a canonical deploy script (Buck, BuckCredit, BuckKControllerDirect, JubileeFund, the machine) | delete |
 | BuckNet facade | BuckNet, BuckLedger, BuckNetMaturity, BuckNetTokenOps | BuckNetQuote.t.sol is the only test of the published BuckNetQuoter and runs on BuckNet: port it to Buck | delete |
-| signed Buck | BuckLinear | 21 legacy fixture suites (the "LEGACY ACCOUNTING FIXTURE" header) | migrate the suites worth keeping, delete the rest |
+| signed Buck | BuckLinear | 21 legacy fixture suites (the "LEGACY ACCOUNTING FIXTURE" header); =alberta_buck/sim/notes_stack.py= (the privacy world and the receipt end-to-end, the executable papers' world) | migrate the suites worth keeping and the notes stack, delete the rest |
 | V2 adapter | UniswapV2BindingAdapter | -- | *deleted* (owner, 2026-11-14: no V2 pools); the adapter suite tests V3 only |
 | V2 integration | UniswapV2Integration (legacy fixture), the staged V2 factory, pair and router, the =@uniswap/v2-core= pin | its identity cases (verified LP, swaps both ways, unverified recipient refused) on canonical Buck and a V3 pool | delete with the V2 staging (WETH9 stays: v2-periphery publishes it) |
 

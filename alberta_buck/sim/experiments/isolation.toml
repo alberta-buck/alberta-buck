@@ -15,7 +15,7 @@
 # Run + audit:
 #   make nix-venv-sim-isolation
 #   (python -m alberta_buck.sim --experiment .../isolation.toml --backend pyrevm
-#    then pytest alberta_buck/test/test_debtor_ledger.py)
+#    then pytest alberta_buck/test/legacy/test_debtor_ledger.py)
 
 name = "eq-isolation"
 

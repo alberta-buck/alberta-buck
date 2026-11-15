@@ -62,7 +62,7 @@ def test_a_short_economy_runs_to_its_closing_summary(monkeypatch, tmp_path):
     meta                        = json.loads(vector.read_text())["meta"]
     assert meta["run"]["scenario"] == scenario.name and meta["run"]["seed"] == scenario.seed
     contract                    = meta["buck_contract"]
-    assert contract["artifact"] == "Buck" and contract["accounting"] == "legacy-signed"
+    assert contract["artifact"] == "Buck" and contract["accounting"] == "net"   # the basket machine is a credit holder
     assert contract["address"].startswith("0x")
     assert all(abs(actual - declared) < 200 for actual, declared in zip(frames[0]["eq_w"], frames[0]["eq_decl"])), \
         "the economy opens near its declared basket allocation"

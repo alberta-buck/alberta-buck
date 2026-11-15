@@ -8,6 +8,7 @@ import pytest
 from alberta_buck.sim.control_lab.cli import worker
 from alberta_buck.sim.control_lab.interactive import plot_data
 from alberta_buck.sim.control_lab.model import STAGES, load_config
+from alberta_buck.test.unported import CONTROL_LAB_WORLD
 
 CONFIG = Path(__file__).resolve().parents[2] / "doc/control-lab.toml"
 
@@ -32,6 +33,7 @@ def opening_runs(tmp_path_factory):
     return results
 
 
+@CONTROL_LAB_WORLD
 def test_funded_bootstrap_restores_both_routes_before_arbitrage(opening_runs):
     for result in opening_runs.values():
         boot, first = result["bootstrap"], result["frames"][0]
@@ -50,6 +52,7 @@ def test_funded_bootstrap_restores_both_routes_before_arbitrage(opening_runs):
     assert opening_runs["shock"]["bootstrap"]["opening_target_usd"][0] == 112
 
 
+@CONTROL_LAB_WORLD
 def test_prelude_does_not_seed_a_fictitious_pair_velocity(opening_runs):
     for result in opening_runs.values():
         frames = result["frames"]
@@ -63,6 +66,7 @@ def test_prelude_does_not_seed_a_fictitious_pair_velocity(opening_runs):
         assert frames[-1]["pair_signal"]["ready_mask"] == 3
 
 
+@CONTROL_LAB_WORLD
 def test_walkthrough_uses_pair_response_and_collapses_new_sensor_panes(opening_runs):
     stages = list(STAGES)
     assert stages[stages.index("linked") + 1] == "basket"

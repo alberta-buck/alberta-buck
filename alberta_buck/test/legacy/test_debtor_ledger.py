@@ -41,7 +41,7 @@ Workflow:
 or manually:
     python -m alberta_buck.sim --experiment \
         alberta_buck/sim/experiments/isolation.toml --backend pyrevm
-    python -m pytest alberta_buck/test/test_debtor_ledger.py -v -s
+    python -m pytest alberta_buck/test/legacy/test_debtor_ledger.py -v -s
 """
 
 import json
@@ -49,7 +49,7 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 DATA = REPO / "test" / "vectors" / "eq-eq-isolation.json"
 OUT = REPO / "build" / "sim" / "equilibrium-isolation.png"
 

@@ -886,7 +886,7 @@ SIM_BACKEND	?= pyrevm        # pyrevm (default: in-process, fast) | anvil
 SIM_DIRECTOR	?= pairs         # pairs: the one signal engine left
 SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
-SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
+SIM_TEST	= alberta_buck/test/legacy/test_routing_sim_web3.py
 
 # ── Supported household economy ─────────────────────────────────────
 # One baseline, parameterized policy comparisons and explicit stress arms. Long runs
@@ -953,7 +953,7 @@ dashboard-live-check:
 # action cases. Use economy-accounting-test for completed migration blocks;
 # its passing component checks do not imply this full lifecycle is enabled.
 economy-test: sim-build core-build-py core-build-wasm
-	python -m pytest alberta_buck/test/test_carry.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_credit_households.py \
+	python -m pytest alberta_buck/test/test_carry.py alberta_buck/test/test_household_policy.py alberta_buck/test/legacy/test_credit_households.py \
 		alberta_buck/test/test_economy.py alberta_buck/test/test_sim_report.py $(PYTEST_ARGS)
 	cd core/js && node --test test/household-policy.test.js test/legacy/credit-household.webevm.test.js
 
@@ -1589,7 +1589,7 @@ sim-debtors:	sim-run-debtors sim-plot-debtors
 sim-isolation:	sim-build
 	python -m $(SIM_PKG) --backend $(SIM_BACKEND) \
 		--experiment alberta_buck/sim/experiments/isolation.toml
-	python -m pytest alberta_buck/test/test_debtor_ledger.py -v -s
+	python -m pytest alberta_buck/test/legacy/test_debtor_ledger.py -v -s
 
 # The LIVE simulation server: pyrevm worlds (one per client session) with
 # WS /s/<sid>/{frames,control,rpc} on SIM_SERVER_PORT and a viem-ready

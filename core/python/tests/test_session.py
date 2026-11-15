@@ -3,8 +3,8 @@
 StubSession overrides the two backend-touching methods (_execute_tx,
 _revert_reason), so these tests exercise exactly the layer buck_core adds
 over the original sim Chain: expectation semantics, mismatch accounting,
-and JSONL journaling.  The live-EVM path is covered by the sim smoke tests
-(alberta_buck/test/test_routing_sim_web3.py) through the Chain subclass.
+and JSONL journaling.  The live-EVM path is covered by the sim's chain tests
+(e.g. alberta_buck/test/test_basket_machine_chain.py) through the Chain subclass.
 """
 
 import logging

@@ -4269,6 +4269,14 @@ an offline page with a note per stage. Its value is the /paired/ comparison: the
 same feed, liquidity, seed and starting K in every arm, so the difference between
 two stages is the effect of the actor added.
 
+/It no longer runs./ Since 9e0364d3 its arbitrage actor (a =BasketMachineWheel=)
+reverts at =setStartMode=, and its books read the legacy signed Buck
+(=signedBalanceOf=, =reliefOf=, =mint(uint256)=), which its =equity-ops= world no
+longer deploys. Its 14 chain tests are now strict expected failures
+(=alberta_buck/test/unported.py=) until C5 removes them. Repairing it in place
+would mean redefining every actor's account on the net Buck: the port's work,
+done on a world nobody else uses.
+
 /Portable; not too unique./ It runs the same contracts (the basket machine with
 its upkeep facet, the Direct controller) on the same pyrevm and day loop. What is
 its own maps onto what the standard system has or nearly has:
@@ -4307,7 +4315,53 @@ its own maps onto what the standard system has or nearly has:
   remove =control_lab/=, its configs, targets and tests; its rendered page and
   datasets are outputs, not kept.
 
-** Resume here (2026-11-14, before a compaction)
+** The Python tier passes (2026-11-14, evening)
+
+=make nix-venv-test-python=: 1,377 passed, 5 skipped, 14 expected failures, none
+failed (it was 61 failed and 11 errors), in 4 min 43 s serially.
+- /Legacy, moved/ to =alberta_buck/test/legacy/= (not collected by default;
+  =alberta_buck/test/conftest.py=; run by naming the file or directory):
+  =test_credit_households=, =test_mature_worlds=, =test_debtor_ledger=,
+  =test_routing_sim_web3=, and =test_debtor_policy= (five of the errors: its
+  =equity-ops= cases run the old debtor agents, reading =signedBalanceOf=, on the
+  net Buck). Run there they fail as before (47 failed, 51 passed, 5 errors): the
+  move broke nothing. The Makefile's =economy-test=, =sim-isolation= and
+  =SIM_TEST= name the new paths.
+- /Stale tests, brought up to the code/: =test_basket_machine_chain= (the
+  machine's wheel is the response-only =BasketMachineWheel=, with no mode switch;
+  the sizing world runs four days and asserts a booked response, since this
+  world books leash sells and buys from day 3 and no =place=), =test_economy=
+  (=equity-machine= worlds deploy the net Buck).
+- /The control lab's 14 chain tests/: strict expected failures, above.
+- /=notes_stack.py= deploys =BuckLinear=/ (the legacy signed Buck), as
+  =NotesE2E.t.sol= has since 297116d9: the canonical Buck links libraries and
+  takes a Jubilee fund, which that commit's port missed here. The privacy world
+  and the receipt end-to-end (25 tests) pass again. They join the signed-Buck
+  family of wave 3: port them to the canonical Buck before =BuckLinear= goes.
+- /Noted, not investigated/: every =equity-ops= world logs =BootstrapDMAgent
+  _enter failed: depositToken :: NoValue=.
+
+** Resume here (2026-11-14, evening)
+
+- *Branch*: =feature/household-minimal-ecosystem=, pushed to GitHub (owner's
+  word); worktree =.claude/worktrees/buck-compound=.
+- *Running on datasim.local*: the five-year suite in
+  =~/src/alberta-buck-lifecycle= (life-A, A2, B, C, D, E and econ-F; run records
+  in =build/runs/=, logs and done/failed markers in =build/logs/=); at day 500 to
+  860 of 1,825 at 20:05. Check with =ssh datasim.local 'tail -1
+  ~/src/alberta-buck-lifecycle/build/logs/*.log'=; view with =make
+  nix-venv-dashboard-lan= there. When done: digest each, compare where K settles
+  by mix (L5), and record it here.
+- *Running locally*: the five-year economy world on the old defaults
+  (=build/runs/economy-5y=), at day 1,790 of 1,825 after 507 minutes.
+- *Owner's to do*: =npm login= and =make nix-webevm-fork-publish= (then core
+  depends on =alberta-buck-webevm= by alias); decide the shadow controller and
+  the catalogue's stress arms.
+- *Next work, in order*: S1's inventory into this plan, then S2 and S3 (JS
+  household parity); the lifecycle suite's results; C1 to C4 (the shock
+  campaign and Compare); wave 2 and 3 retirements as decided; then S4 to S7 and
+  C5.
+** Resume here (superseded: 2026-11-14, before a compaction)
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed to GitHub (owner's
   word); worktree =.claude/worktrees/buck-compound=.

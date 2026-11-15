@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from alberta_buck.sim.control_lab.model import DEFAULTS, dependencies, digest, feed_rows, load_config
+from alberta_buck.test.unported import CONTROL_LAB_WORLD
 
 
 CONFIG = Path(__file__).resolve().parents[2] / "doc/control-lab.toml"
@@ -68,6 +69,7 @@ def evm_controls():
     return {stage: simulate_observed(cfg, profile, stage) for stage in ("monitor", "monitor-k", "linked", "k", "all")}
 
 
+@CONTROL_LAB_WORLD
 def test_sensor_replay_has_no_arbitrage_or_policy(evm_controls):
     r = evm_controls["monitor"]
     assert r["summary"]["arb_cycles"] == r["summary"]["desk_ops"] == 0
@@ -79,6 +81,7 @@ def test_sensor_replay_has_no_arbitrage_or_policy(evm_controls):
     assert r["frames"][0]["signal"]["consecutive_days"] == 1
 
 
+@CONTROL_LAB_WORLD
 @pytest.mark.parametrize("venue", ["token_buck", "token_usdc"])
 def test_spot_dislocation_does_not_disable_profitable_arbitrage(venue):
     pytest.importorskip("pyrevm")
@@ -110,6 +113,7 @@ def test_spot_dislocation_does_not_disable_profitable_arbitrage(venue):
             world.close()
 
 
+@CONTROL_LAB_WORLD
 def test_k_without_actuators_does_not_move_pool_prices(evm_controls):
     a, b = evm_controls["monitor"], evm_controls["monitor-k"]
     assert a["summary"]["arb_cycles"] == b["summary"]["arb_cycles"] == 0
@@ -119,6 +123,7 @@ def test_k_without_actuators_does_not_move_pool_prices(evm_controls):
             assert fa[key] == fb[key]
 
 
+@CONTROL_LAB_WORLD
 @pytest.mark.parametrize("amplitude", [0., .12])
 def test_unperturbed_replay_has_only_bounded_oracle_precision_error(amplitude):
     pytest.importorskip("pyrevm")
@@ -138,6 +143,7 @@ def test_unperturbed_replay_has_only_bounded_oracle_precision_error(amplitude):
         assert f["buck_usdc"] == 1.
 
 
+@CONTROL_LAB_WORLD
 def test_phase_ready_start_has_no_fabricated_arbitrage_and_reconciles_custody():
     pytest.importorskip("pyrevm")
     from alberta_buck.sim.control_lab.engine import simulate
@@ -155,6 +161,7 @@ def test_phase_ready_start_has_no_fabricated_arbitrage_and_reconciles_custody():
         assert f["market"]["pool_buck"] + f["market"]["arb_held_buck"] == pytest.approx(initial, abs=1e-5)
 
 
+@CONTROL_LAB_WORLD
 @pytest.mark.parametrize("stage,quote", [("demand", 1.01), ("supply", .99)])
 def test_private_intent_trades_through_a_modestly_adverse_price(stage, quote):
     pytest.importorskip("pyrevm")
@@ -178,6 +185,7 @@ def test_private_intent_trades_through_a_modestly_adverse_price(stage, quote):
             w.close()
 
 
+@CONTROL_LAB_WORLD
 def test_private_response_and_desk_accounting_are_real(evm_controls):
     r = evm_controls["all"]
     assert r["summary"]["demand_usdc"] > 0
