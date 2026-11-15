@@ -37,7 +37,9 @@ def household_world(monkeypatch):
     scenario.experiment = expmod.load(None, sets=["deploy.target_buck_m=1", "deploy.target_buck_lp_m=1",
                                                  "machine.desk_capital_usd=1000"])
     rng = idmod.seeded_rng(scenario.seed)
-    with PyrevmAnvil(port=0) as evm:
+    # Pinned to vectors computed on the clock before 2026-11-15 night (one timestamp a tick on pyrevm, about
+    # a second a block on anvil); these EVMs keep it until the vectors are regenerated at 12 s a block.
+    with PyrevmAnvil(port=0, block_seconds=0) as evm:
         chain = Chain(evm.w3, evm.w3.eth.accounts[0])
         d = deploy(chain, evm, scenario, rng, verbose=False, basket_impl="equity-ops", equity_machine=True)
         def make(i, cls, *, assets=1, settings=None, arrive_day=None, member=None):

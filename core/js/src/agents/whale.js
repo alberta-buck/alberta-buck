@@ -42,6 +42,7 @@ export class PinWhale {
     await world.session.send(this.simlp, "swap",
       [this.pool.address, this.simlp.address, targ < cur, HUGE, targ,
        this.t0, this.t1],
-      { tag: `whale:snap:d${day}t${tick}` });
+      // A day's one snap keeps the Python journal's tag (test_mini_parity); every tick names its tick.
+      { tag: this.everyTick ? `whale:snap:d${day}t${tick}` : `whale:snap:d${day}` });
   }
 }

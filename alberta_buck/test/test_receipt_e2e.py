@@ -143,7 +143,9 @@ def test_anvil_lifecycle_and_receipts():
     from alberta_buck.sim.notes_stack import NotesStack
 
     rng = _rng(0xC4A1)
-    with Anvil(chain_id=1, auto_impersonate=True) as anvil:
+    # The payout is read a block after the spend: on anvil's own clock (about a second) no demurrage
+    # shows; at 12 s a block a raw unit would. Fixture-pinned, as test_net_demurrage_smoke.
+    with Anvil(chain_id=1, auto_impersonate=True, block_seconds=None) as anvil:
         for flavor in FLAVORS:
             fixture = E2EFixture.load(flavor)
             stack = NotesStack(anvil, fixture, rng=rng)

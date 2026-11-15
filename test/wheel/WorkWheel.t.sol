@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {Test}  from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-import {WorkWheel} from "../../src/wheel/WorkWheel.sol";
+import {WorkWheel, CompletionMemo} from "../../src/wheel/WorkWheel.sol";
 
 /// The chassis (doc/BASKET-WHEEL.org 8): two mock kinds composed the way the
 /// real ones are -- each claims the slots after its bases' and hands the rest
@@ -103,6 +103,42 @@ contract TestWheel is WorkWheel, KindA, KindB {
     }
 }
 
+/// @dev Slots due on the view that may do nothing when run (a cycle that lost its edge, a desk
+///      that declines), over settable inputs: the completion view's subject.
+contract IdleWheel is WorkWheel, CompletionMemo {
+    uint256 public slots;
+    mapping(uint256 => bool) public due;
+    mapping(uint256 => uint256) public works;      // runs left that do work; then idle
+    uint256 public runs;
+    bytes32 public inputs = bytes32(uint256(1));
+    bool public clockInputs;
+
+    constructor(address pay, address gov) WorkWheel(pay, gov, 1000, 1_000e18) {}
+
+    function set(uint256 n) external { slots = n; }
+    function setDue(uint256 i, bool d, uint256 w) external { due[i] = d; works[i] = w; }
+    function setInputs(bytes32 x) external { inputs = x; }
+    function useClock() external { clockInputs = true; }
+
+    function _slotCount() internal view override returns (uint256) { return slots; }
+    function _due(uint256 s) internal view override returns (bool) { return due[s]; }
+    function _run(uint256 s) internal override returns (uint256) {
+        runs++;
+        if (works[s] == 0) return 0;
+        works[s]--;
+        if (works[s] == 0) due[s] = false;
+        return 1;
+    }
+    function _settled(uint256 s) internal view override(WorkWheel, CompletionMemo) returns (bool) {
+        return super._settled(s);
+    }
+    function _ranIdle(uint256 s) internal override(WorkWheel, CompletionMemo) { super._ranIdle(s); }
+    function _moved() internal override(WorkWheel, CompletionMemo) { super._moved(); }
+    function _inputs() internal view override returns (bytes32) {
+        return clockInputs ? super._inputs() : inputs;
+    }
+}
+
 /// @dev A market/funding callback inside a work job tries another scan and
 ///      reserve pull. Only the independent valuation publication may proceed.
 contract CallbackWheel is WorkWheel {
@@ -151,7 +187,7 @@ contract WorkWheelTest is Test {
         assertEq(w.slotCount(), 5);
         w.setAPending(1, 1);          // slot 1
         w.setBPending(0, 1);          // slot 2 (after A's two)
-        assertEq(w.pending(), 2);
+        assertTrue(_pend(w));
         (uint256 work,) = w.tick(10, 0);
         assertEq(work, 2);
         assertEq(w.aRan(0), 1);
@@ -197,6 +233,91 @@ contract WorkWheelTest is Test {
         vm.roll(block.number + 1);                  // a new block: scanned afresh
         (uint256 work,) = w.tick(1, 0);
         assertEq(work, 1);
+    }
+
+    // --- Completion: pending() says exactly whether, and where, a tick would work ------------ //
+
+    function _pend(WorkWheel x) internal view returns (bool due) { (due,) = x.pending(); }
+
+    function _next(WorkWheel x) internal view returns (bool found, uint256 steps) { return x.pending(); }
+
+    function test_a_slot_that_ran_idle_is_settled_until_its_inputs_move() public {
+        IdleWheel iw = new IdleWheel(address(pay), GOV);
+        iw.set(3);
+        iw.setDue(1, true, 0);                       // due on the view, nothing on the run
+        assertTrue(_pend(iw));
+        (bool found, uint256 steps) = _next(iw);
+        assertTrue(found);
+        assertEq(steps, 1);
+        (uint256 work,) = iw.tick(1, steps + 1);
+        assertEq(work, 0);
+        assertEq(iw.runs(), 1);
+        assertFalse(_pend(iw), "settled: a tick now finds nothing");
+        (found,) = _next(iw);
+        assertFalse(found);
+        vm.roll(200);                                // later blocks, unchanged inputs: still settled
+        vm.warp(block.timestamp + 1 days);
+        assertFalse(_pend(iw));
+        iw.tick(10, 0);
+        assertEq(iw.runs(), 1, "not run again in the same state");
+        vm.roll(300);                                // (the whole wheel was found idle in that block)
+        iw.setInputs(bytes32(uint256(2)));           // a trade on a market it reads
+        assertTrue(_pend(iw));
+        iw.tick(10, 0);
+        assertEq(iw.runs(), 2);
+        assertFalse(_pend(iw));
+        iw.rearm();                                  // a re-arm: tried again
+        assertTrue(_pend(iw));
+    }
+
+    function test_work_reopens_the_slots_found_idle() public {
+        IdleWheel iw = new IdleWheel(address(pay), GOV);
+        iw.set(2);
+        iw.setDue(0, true, 0);                       // idle on the run
+        iw.setDue(1, true, 2);                       // two runs of work
+        (uint256 work,) = iw.tick(10, 0);            // 0 idle, 1 works: the state moved
+        assertEq(work, 1);
+        assertTrue(_pend(iw), "the idle slot is tried again after work");
+        uint256 turns;
+        for (; turns < 10; turns++) {               // the keeper: tick toward each ready slot
+            (bool found, uint256 steps) = _next(iw);
+            if (!found) break;
+            iw.tick(1, steps + 1);
+            vm.roll(200 + turns);
+        }
+        assertFalse(_pend(iw));
+        assertEq(iw.works(1), 0, "all the work done");
+        assertLt(turns, 10, "and it settles");
+    }
+
+    function test_by_default_an_idle_slot_waits_for_the_next_block() public {
+        IdleWheel iw = new IdleWheel(address(pay), GOV);
+        iw.useClock();
+        iw.set(1);
+        iw.setDue(0, true, 0);
+        iw.tick(1, 0);
+        assertFalse(_pend(iw));
+        vm.roll(200);
+        assertTrue(_pend(iw));
+    }
+
+    function test_next_due_points_a_one_slot_tick_at_the_next_ready_slot() public {
+        w.setA(4);
+        w.setAPending(2, 1);
+        w.setAPending(3, 1);
+        (bool found, uint256 steps) = _next(w);
+        assertTrue(found);
+        assertEq(steps, 2);
+        (uint256 work,) = w.tick(1, steps + 1);
+        assertEq(work, 1);
+        assertEq(w.aRan(0), 2);
+        assertEq(w.cursor(), 3);
+        (found, steps) = _next(w);
+        assertEq(steps, 0);
+        w.tick(1, steps + 1);
+        (found,) = _next(w);
+        assertFalse(found);
+        assertFalse(_pend(w));
     }
 
     function test_reserve_pays_kappa_to_working_ticks_only() public {

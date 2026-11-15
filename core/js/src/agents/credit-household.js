@@ -956,8 +956,10 @@ export class CreditHouseholdAgent {
     }
     // The facilities' own principal, as Python reads it (_resume_net_repayment): the household view's
     // drawn figure marks the whole household and has no relief tolerance.
-    const ids = world._credits.get(this.account.address) ?? [];
-    const issued = ids.length ? (await world.netCreditOps.household(world.holderAddress(this.account), ids)).issued : 0n;
+    // (A world without the credit registry -- a bare market world -- has only the household view.)
+    const ids = world._credits?.get(this.account.address);
+    const issued = ids === undefined ? (await world.households.read(this.account)).drawn
+      : ids.length ? (await world.netCreditOps.household(world.holderAddress(this.account), ids)).issued : 0n;
     if (typeof issued !== "bigint" || issued < 0n) throw new Error("invalid current household principal");
     this.netRepaymentTarget = min(this.netRepaymentTarget, issued);
     if (!this.netRepaymentTarget) {

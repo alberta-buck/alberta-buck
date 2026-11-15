@@ -28,7 +28,7 @@ class Anvil:
 
     def __init__(self, port: Optional[int] = None, gas_limit: int = 0,
                  chain_id: Optional[int] = None, auto_impersonate: bool = False,
-                 timestamp: Optional[int] = None):
+                 timestamp: Optional[int] = None, block_seconds: Optional[int] = -1):
         self.port = port or _free_port()
         # gas_limit 0 -> anvil default (30M); we deploy big contracts so bump.
         self._gas = gas_limit or 60_000_000
@@ -41,6 +41,9 @@ class Anvil:
         self.chain_id = chain_id
         self.auto_impersonate = auto_impersonate
         self.timestamp = timestamp
+        # Between auto-mined blocks: -1 -> BLOCK_SECONDS (Ethereum's 12 s); None -> anvil's own
+        # (wall clock); else that many seconds (a fixture pinned to an older clock).
+        self.block_seconds = block_seconds
         self.proc: Optional[subprocess.Popen] = None
         self.w3: Optional[Web3] = None
 
@@ -82,6 +85,12 @@ class Anvil:
             try:
                 if w3.is_connected():
                     self.w3 = w3
+                    # Ethereum's 12 s slots between the auto-mined blocks (the pyrevm backend's
+                    # block_seconds); warps still set a block's timestamp exactly.
+                    from alberta_buck.sim.timeline import BLOCK_SECONDS
+                    secs = BLOCK_SECONDS if self.block_seconds == -1 else self.block_seconds
+                    if secs is not None:
+                        w3.provider.make_request("anvil_setBlockTimestampInterval", [secs])
                     return self
             except Exception:
                 pass

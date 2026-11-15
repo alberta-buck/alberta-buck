@@ -26,6 +26,8 @@ RAW = 10**6
 Q = 10**36
 ZERO = "0x" + "00" * 20
 ROOT = Path(__file__).resolve().parents[2]
+# CLOCK: pinned to vectors computed on the clock before 2026-11-15 night (one timestamp a tick on pyrevm, about
+# a second a block on anvil); these EVMs keep it until the vectors are regenerated at 12 s a block.
 VECTOR = json.loads((ROOT / "test/fixtures/bucknet-credit-operations.json").read_text())
 REQUIRED = ("Buck", "BuckCash", "BuckTransfer", "BuckFacilities", "BuckRenewalOps", "BuckNetQuoter", "JubileeFund",
             "IdentityRegistryHarness", "BuckCredit", "BuckKControllerStatic", "UniswapV3Factory",
@@ -67,7 +69,7 @@ def test_coverage_candidates_are_bounded_and_include_repair_estimates():
     reason="requires anvil and built net/simulation artifacts; run make nix-sim-build",
 )
 def test_linked_net_issuance_and_reduction_match_reference():
-    with Anvil(timestamp=1_900_000_000) as anvil:
+    with Anvil(timestamp=1_900_000_000, block_seconds=None) as anvil:   # the pinned clock (CLOCK)
         chain = Chain(anvil.w3, anvil.w3.eth.accounts[0])
         gov = chain.deployer
         registry = chain.deploy("IdentityRegistryHarness", gov)
@@ -205,7 +207,7 @@ def test_net_credit_ops_premium_reserve_and_explicit_reduction():
     No market or household behavior is modeled here. SimLP identities and a
     no-strategy insurer pool are test infrastructure, not production actors.
     """
-    with Anvil(timestamp=1_900_000_000) as anvil:
+    with Anvil(timestamp=1_900_000_000, block_seconds=None) as anvil:   # the pinned clock (CLOCK)
         chain = Chain(anvil.w3, anvil.w3.eth.accounts[0])
         gov = chain.deployer
         registry = chain.deploy("IdentityRegistryHarness", gov)

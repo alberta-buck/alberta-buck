@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {WorkWheel} from "./WorkWheel.sol";
+import {WorkWheel, CompletionMemo} from "./WorkWheel.sol";
 import {ComputeKind, OpsKind} from "./UpkeepKinds.sol";
 import {IBasketUpkeep} from "../basket/IBasketUpkeep.sol";
 import {IBasketView} from "../basket/IBasketView.sol";
@@ -93,7 +93,7 @@ abstract contract SampleKind is WorkWheel {
 /// @notice The machine's wheel: Sample, Jubilee, Compute, Arb, Ops, N+2 basket
 ///         components. Arb precedes capital deployment. Unconfigured kinds add no slots. The initial
 ///         observation precedes all portfolio work; Ops also refreshes it.
-contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, ArbKind, OpsKind, ResponseKind {
+contract BasketMachineWheel is WorkWheel, CompletionMemo, SampleKind, JubileeKind, ComputeKind, ArbKind, OpsKind, ResponseKind {
     constructor(address buck, address stable, address gov, uint16 kappa, uint256 reserveCap)
         WorkWheel(buck, gov, kappa, reserveCap) ArbKind(buck, stable) {}
 
@@ -158,9 +158,48 @@ contract BasketMachineWheel is WorkWheel, SampleKind, JubileeKind, ComputeKind, 
         IBuckJubilee(address(payToken)).identity().revokeContractBindingAuthorization();
     }
 
+    /// @notice A slot that ran idle is retried at most this often while nothing else moves.
+    uint256 public constant RETRY_SPAN = 1 hours;
+
+    /// @dev What turns an idle slot into work: a trade on any pool the wheel reads (its price or
+    ///      active liquidity), a change in what the basket holds (a deposit or an exit), Buck's
+    ///      relief budget running out or refilling (a retirement it refused may then fit), or the hour turning
+    ///      (the sample's interval, the desk's epoch and the jubilee's budget move with the clock).
+    ///      With no trades and no flows `pending()` stays settled within the hour.
+    function _inputs() internal view override returns (bytes32 h) {
+        bytes memory held = abi.encodeWithSignature("balanceOf(address)", equityBasket);
+        address buck = address(payToken);
+        // Relief accrues every second: only whether it is spent says a refused retirement may now fit.
+        (bool ok, bytes memory relief) = buck.staticcall(abi.encodeWithSignature("availableReliefScaled()"));
+        h = keccak256(abi.encode(block.timestamp / RETRY_SPAN, _pool(poolUb), _peek(buck, held),
+                                 ok && relief.length == 32 && abi.decode(relief, (uint256)) == 0));
+        uint256 k = triangles.length;
+        for (uint256 j; j < k; ++j) {
+            Triangle storage t = triangles[j];
+            h = keccak256(abi.encode(h, _pool(t.poolOwn), _pool(t.poolUsdc), _peek(t.token, held)));
+        }
+    }
+
+    function _pool(address pool) private view returns (bytes32) {
+        return _peek(pool, abi.encodeWithSignature("slot0()")) ^ _peek(pool, abi.encodeWithSignature("liquidity()"));
+    }
+
+    /// @dev The hash of what a view returns; 0 when the target has no code or refuses.
+    function _peek(address target, bytes memory data) private view returns (bytes32) {
+        if (target.code.length == 0) return 0;
+        (bool ok, bytes memory ret) = target.staticcall(data);
+        return ok ? keccak256(ret) : bytes32(0);
+    }
+
     function _prepareOps() internal override {
         if (sampleSource != address(0)) { try IWheelSample(sampleSource).observe() {} catch {} }
     }
+
+    function _settled(uint256 s) internal view override(WorkWheel, CompletionMemo) returns (bool) {
+        return super._settled(s);
+    }
+    function _ranIdle(uint256 s) internal override(WorkWheel, CompletionMemo) { super._ranIdle(s); }
+    function _moved() internal override(WorkWheel, CompletionMemo) { super._moved(); }
 
     function _slotCount() internal view
         override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (uint256)

@@ -38,7 +38,7 @@ test("the savings world runs days, frames them for the page, and serves the page
   const dayMs = (performance.now() - t) / 3;
   console.log(JSON.stringify({ bootMs: Math.round(bootMs), dayMs: Math.round(dayMs),
                                members: world.pop.members.length,
-                               wheel: frames.map((f) => [f.wh_turns, f.wh_work]) }));
+                               wheel: frames.map((f) => [f.wh_turns, f.wh_work, f.wh_settled]) }));
   const f = frames.at(-1);
   assert.equal(f.day, 2);
   // The clock: four ticks a day, each a quarter of a day in, the day still its own.
@@ -60,8 +60,8 @@ test("the savings world runs days, frames them for the page, and serves the page
   assert.ok(r.sp > 0n || Number(f.sv.sp) > 0, "a share price");
   assert.ok(f.households && f.households.active >= 2, "the households' aggregate");
   assert.equal(r.weights.length, world.world.tokens.length, "held and target weights");
-  // The wheel turned to completion: its last turn of the tick found no work, or it hit its cap.
-  assert.ok(f.wh_turns >= 1 && (f.wh_turns < world.keeper.maxTurns || f.wh_work > 0), `wheel ${f.wh_turns}`);
+  // The wheel turned to completion: its pending() view read no work, or the settle hit its cap.
+  assert.ok(f.wh_settled || f.wh_turns === world.keeper.maxTicks, `wheel ${f.wh_turns} ${f.wh_settled}`);
 
   // The page's wallet, through the world's JSON-RPC, exactly as through the Python server's.
   const link = {

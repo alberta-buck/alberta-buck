@@ -13,9 +13,12 @@ runs unmodified: web3.py does its usual ABI encode/decode and the provider
 answers the ~15 RPC methods the sims actually use.
 
 Fidelity notes (vs anvil):
-  * one block per transaction, timestamp constant between `warp_to` calls
-    (anvil bumps +1s per auto-mined block; the sims own the clock explicitly
-    via warp_to, so this is deterministic rather than lossy);
+  * one block per transaction, each `block_seconds` (12, Ethereum's slot;
+    SIM_BLOCK_SECONDS overrides) after the one before, unless `warp_to` /
+    anvil_setNextBlockTimestamp set it (anvil's semantics, with its interval
+    set to 12): the sims own the clock with warp_to, and the transactions
+    between two warps follow it 12 s apart, so a pool's oracle sees at most
+    one observation per block, as on Ethereum;
   * `eth_call` executes non-static inside a snapshot/revert bracket (matches
     anvil semantics: writes allowed, never persisted);
   * unlike anvil, an `eth_call` whose `from` has code is refused before it
@@ -38,6 +41,8 @@ from eth_account import Account
 from eth_account._utils.legacy_transactions import Transaction as LegacyTx
 from eth_utils import keccak, to_checksum_address
 from web3 import Web3
+
+from alberta_buck.sim.timeline import BLOCK_SECONDS
 from web3.providers import BaseProvider
 
 # anvil's well-known dev accounts (index 0..9), unlocked in this backend.
@@ -245,7 +250,7 @@ class PyrevmAnvil:
 
     def __init__(self, port: Optional[int] = None, gas_limit: int = 0,
                  chain_id: Optional[int] = None, auto_impersonate: bool = False,
-                 timestamp: Optional[int] = None):
+                 timestamp: Optional[int] = None, block_seconds: Optional[int] = None):
         self.port = port or 0                       # no socket; kept for parity
         self.chain_id = chain_id or 31337
         # The EVM's block.chainid must be the chain id eth_chainId reports:
@@ -254,6 +259,9 @@ class PyrevmAnvil:
                               gas_limit=gas_limit or 3_000_000_000)
         self.block = 0
         self.ts = timestamp or GENESIS_TS
+        self.block_seconds = block_seconds if block_seconds is not None else BLOCK_SECONDS
+        self._next_ts: Optional[int] = None         # a timestamp set for the next block
+        self.late = 0                               # warps that found the clock already past them
         self.block_times: dict[int, int] = {}
         self.block_hashes: dict[str, int] = {}
         self.nonces: dict[str, int] = {}
@@ -318,10 +326,18 @@ class PyrevmAnvil:
         raise NotImplementedError(f"PyrevmAnvil._rpc: {method}")
 
     def set_next_block_timestamp(self, ts: int) -> None:
-        self.ts = max(ts, self.ts)
+        if ts < self.ts:
+            self.late += 1                          # a tick's transactions ran past the next tick
+        self._next_ts = max(ts, self.ts)
 
     def mine(self) -> None:
+        self._next_block()
+
+    def _next_block(self) -> None:
+        """A new block: at the timestamp set for it, else block_seconds after the last."""
         self.block += 1
+        self.ts = self._next_ts if self._next_ts is not None else self.ts + self.block_seconds
+        self._next_ts = None
         self._push_block_env()
 
     def warp_to(self, ts: int) -> None:
@@ -338,8 +354,7 @@ class PyrevmAnvil:
 
     def execute(self, frm: str, to: Optional[str], data: bytes,
                 value: int, txh: Optional[str] = None) -> str:
-        self.block += 1
-        self._push_block_env()
+        self._next_block()
         nonce = self.nonces.get(frm, 0)
         self.nonces[frm] = nonce + 1
         txh = txh or _h32(frm.encode() + nonce.to_bytes(8, "big")

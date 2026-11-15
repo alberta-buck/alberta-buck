@@ -154,12 +154,22 @@ abstract contract WorkWheel {
 
     function slotCount() external view returns (uint256) { return _slotCount(); }
 
-    /// @notice How many slots are due now (what a caller simulates first).
-    function pending() external view returns (uint256 n) {
+    /// @notice Whether a tick now would run a slot (false: the wheel is settled, a tick finds
+    ///         nothing), and `steps`, how far from the cursor the first is: `tick(1, steps + 1)`
+    ///         runs it and no other.
+    /// @dev The keeper's completion test: a view, read by eth_call at no gas; the keeper ticks
+    ///      until it reads false. Exact on a wheel that remembers what it found idle
+    ///      (`CompletionMemo`); otherwise it reads the slots' views alone. (It reads the slots,
+    ///      not the block's idle memo: a keeper's next tick lands in a later block.) It stops at
+    ///      the first ready slot, so only a settled wheel costs a full scan.
+    function pending() external view returns (bool due, uint256 steps) {
         uint256 s = _slotCount();
-        for (uint256 i = 0; i < s; i++) {
-            if (_due(i)) n++;
+        uint256 c = cursor;
+        for (; steps < s; steps++) {
+            uint256 slot = (c + steps) % s;
+            if (!_settled(slot) && _due(slot)) return (true, steps);
         }
+        return (false, 0);
     }
 
     /// @notice Advance up to `maxWork` due slots, examining at most `maxScan`
@@ -181,17 +191,19 @@ abstract contract WorkWheel {
         uint256 steps = 0;
         for (; steps < limit && work < maxWork; steps++) {
             uint256 slot = (start + steps) % n;
-            if (!_due(slot)) {
+            if (_settled(slot) || !_due(slot)) {
                 idle++;
                 continue;
             }
             uint256 w = _run(slot);
             if (w == 0) {                  // due on the view, nothing on the run
+                _ranIdle(slot);
                 idle++;
                 continue;
             }
             idle = 0;
             work += w;
+            _moved();
         }
         cursor = (start + steps) % n;
         scannedIdle = idle;
@@ -216,7 +228,17 @@ abstract contract WorkWheel {
     function _markDirty() internal {
         idleClock = 0;
         scannedIdle = 0;
+        _moved();
     }
+
+    // --- Completion: what a wheel remembers of the slots it found idle (CompletionMemo) ---- //
+
+    /// @dev The slot ran without work and nothing it depends on has moved since.
+    function _settled(uint256) internal view virtual returns (bool) { return false; }
+    /// @dev A due slot ran without work.
+    function _ranIdle(uint256) internal virtual {}
+    /// @dev The wheel worked or was re-armed: what it found idle may be due again.
+    function _moved() internal virtual {}
 
     // --- The kind seam: the slot table is the concatenation of the kinds' ------ //
 
@@ -224,4 +246,37 @@ abstract contract WorkWheel {
     function _due(uint256) internal view virtual returns (bool) { return false; }
     /// @dev Run one slot; return the work units done (0: nothing after all).
     function _run(uint256) internal virtual returns (uint256) { return 0; }
+}
+
+
+/// @title CompletionMemo -- a wheel that knows when it is done.
+///
+/// @notice A slot can be due on its view yet do nothing when run: a cycle that lost its edge, an
+///         operation the desk declines, a trade its minimum refuses. Without memory such a slot
+///         is due again in every block, so `pending()` never reads zero and no keeper can tell a
+///         settled wheel from a busy one. This one remembers, per slot, the state it ran idle in,
+///         and does not count or run the slot again until that state moves: the wheel works,
+///         someone re-arms, or `_inputs` changes. `pending()` is then exact -- zero exactly when a
+///         tick would find nothing -- and a keeper turns the wheel to completion by reading it.
+abstract contract CompletionMemo is WorkWheel {
+    uint256 internal _generation;                   // bumped by every work and every re-arm
+    mapping(uint256 => bytes32) internal _idleUnder; // slot => the state it ran idle in; 0: none
+
+    function _settled(uint256 s) internal view virtual override returns (bool) {
+        bytes32 memo = _idleUnder[s];
+        return memo != 0 && memo == _stateKey();
+    }
+
+    function _ranIdle(uint256 s) internal virtual override { _idleUnder[s] = _stateKey(); }
+
+    function _moved() internal virtual override { _generation++; }
+
+    function _stateKey() internal view returns (bytes32) {
+        return keccak256(abi.encode(_generation, _inputs()));
+    }
+
+    /// @dev Beyond the wheel's own work and re-arms, what can turn an idle slot into work. By
+    ///      default the clock: an idle slot is tried again in the next block. A wheel over markets
+    ///      returns their state, so an idle slot waits for a trade (or its own retry clock).
+    function _inputs() internal view virtual returns (bytes32) { return bytes32(_clock()); }
 }

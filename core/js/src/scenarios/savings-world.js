@@ -227,7 +227,7 @@ export class SavingsWorld {
       day, buckK: String(K), basketVal: String(bvib), buck_usd: Number(spotUB),
       supply: String(supply), refUsd, spotUsdc: spotUsdc.map(Number), spotBuck: spotBuck.map(Number),
       shk_bought_usd: this.shock.boughtUsd, shk_sold_usd: this.shock.soldUsd, shk_active: this.shock.active,
-      wh_turns: this.keeper.turns, wh_work: Number(this.keeper.work),
+      wh_turns: this.keeper.turns, wh_work: Number(this.keeper.work), wh_settled: this.keeper.settled,
     };
     try { frame.eq_signal_raw = String(await s.call(w.machine.parity, "rawValue")); } catch { /* no sample yet */ }
     try {

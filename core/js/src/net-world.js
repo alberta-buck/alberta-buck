@@ -12,6 +12,9 @@ const YEAR = 365n * 86400n + 6n * 3600n;
 const MAX_BALANCE = 2n ** 79n - 1n; // BuckTypes.MAX_BALANCE, raw BUCK
 const MAX_UINT256 = 2n ** 256n - 1n;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+/** Each basket and route pool's oracle history (observation slots): at 12 s blocks, 2.5x the 600 s
+ *  TWAP window even if every block trades. */
+export const OBSERVATIONS = 128;
 const min = (...values) => values.reduce((a, b) => a < b ? a : b);
 const validId = (id) => (typeof id === "bigint" && id >= 0n) || (Number.isSafeInteger(id) && id >= 0);
 
@@ -129,7 +132,7 @@ export async function deployNetStack(session, artifacts, { registry, credit, con
 /** Link one basket and its existing upkeep facets with the same valuation
  * library. Identity, fund, venues and leverage/policy choices remain explicit. */
 export async function deployNetBasket(session, artifacts, stack, { factory, governance,
-  feeTier = 3000, twapWindow = 600, observationCardinality = 64,
+  feeTier = 3000, twapWindow = 600, observationCardinality = OBSERVATIONS,
   maxDeviationBp = 500n, minSeedLiquidity = 1000n, gas } = {}) {
   const valuationLibrary = await session.deploy(artifacts("BasketJubileeMath"), [], { name: "BasketJubileeMath", gas });
   const marketLibrary = await session.deploy(artifacts("BasketMarketOps"), [], { name: "BasketMarketOps", gas });

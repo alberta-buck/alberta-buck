@@ -9,6 +9,9 @@ import { boundActivatedCapacity, deployNetBasket, deployNetStack, issueCoverageC
 import { TransactionReceiptPending } from "../src/session.js";
 import { advanceTime } from "../src/buckworld.js";
 import { bestQuotedRefinance, refinance, refinanceQuoted } from "../src/agents/household-policy.js";
+// Pinned to vectors and fixtures computed at one second a block (the clock before 2026-11-15 night):
+// these sessions keep it until the vectors are regenerated at Ethereum's 12 s (BLOCK_SECONDS).
+const PINNED_CLOCK = { blockSeconds: 1 };
 
 const RAW = 1_000_000n;
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -49,7 +52,7 @@ test("coverage candidates are bounded and include repair estimates", () => {
 
 test("linked Buck issues, accrues and retires cash-only credit", { skip }, async () => {
   // Quotes are re-read at the block they were taken: webevm serves past blocks only within a window.
-  const s = await nodeWebevmSession({ nodeOptions: { stateHistory: { blocks: 256 } } });
+  const s = await nodeWebevmSession({ ...PINNED_CLOCK, nodeOptions: { stateHistory: { blocks: 256 } } });
   const gov = s.account.address;
   const deploy = (name, args = []) => s.deploy(loadArtifact(name), args, { name });
   const registry = await deploy("IdentityRegistryHarness", [gov]);
@@ -174,7 +177,7 @@ test("linked Buck issues, accrues and retires cash-only credit", { skip }, async
 test("per-NFT operations honor the premium reserve and repay explicitly", { skip }, async () => {
   // The PID controller is real, but has no basket reference in this fixture:
   // this tests its neutral funding gate, not market-driven K or a household.
-  const s = await nodeWebevmSession();
+  const s = await nodeWebevmSession(PINNED_CLOCK);
   const gov = s.account.address;
   const deploy = (name, args = []) => s.deploy(loadArtifact(name), args, { name });
   const registry = await deploy("IdentityRegistryHarness", [gov]);
@@ -552,7 +555,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
 test("burn(0) releases coverage no principal needs and refunds its deposit share", { skip }, async () => {
   // Static K, one insurer pool and a contract-held owner: the SDK quotes as
   // the owner, releases, and authenticates each facility's event.
-  const s = await nodeWebevmSession();
+  const s = await nodeWebevmSession(PINNED_CLOCK);
   const gov = s.account.address;
   const deploy = (name, args = []) => s.deploy(loadArtifact(name), args, { name });
   const registry = await deploy("IdentityRegistryHarness", [gov]);

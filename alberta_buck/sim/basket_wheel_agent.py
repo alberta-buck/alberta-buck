@@ -200,6 +200,8 @@ class BasketWheelAgent(_ProxyAgent):
                                eth_usd=float(sp("eth_usd", self.profile.eth_usd)))
         self.call_mode = str(sp("call", "profitable"))
         self.max_work = int(sp("max_work", 12))
+        from alberta_buck.sim.basket_machine import SETTLE_TICKS
+        self.max_ticks = int(sp("max_ticks", SETTLE_TICKS))  # canonical: a settle's cap
         ms = sp("max_scan", None)
         self.max_scan = 0 if ms is None else int(ms)
         # Historical start/caller-share comparisons belong to the older
@@ -309,7 +311,7 @@ class BasketWheelAgent(_ProxyAgent):
         elif getattr(self, "equity", False):
             # pending() checks due slots directly; a simulated rearm would
             # not persist and does not affect this view.
-            upkeep = int(self.sol.functions.pending().call()) > 0
+            upkeep = bool(self.sol.functions.pending().call()[0])
         if self.call_mode == "profitable" and not upkeep:
             pay = self._quote_pay_usd(d)
             if pay < self.profile.usd(self.profile.tx_base + 700_000):
@@ -320,10 +322,15 @@ class BasketWheelAgent(_ProxyAgent):
         receipts, publications = [], []
         try:
             if self.canonical:
-                from alberta_buck.sim.basket_machine import tick_receipts
-                tick_receipts(d, max_work=self.max_work, max_scan=self.max_scan, proxy=self.proxy,
-                    dispatch=lambda name, args: self._proxy_exec(d, self.sol.address, self.sol.encode_abi(name, args=args)),
-                    receipts=receipts, publications=publications)
+                # To completion: tick while the wheel's pending() view reads work (no gas to ask).
+                from alberta_buck.sim.basket_machine import book_settle, settle_receipts
+                settled = False
+                try:
+                    _, _, settled = settle_receipts(d, max_ticks=self.max_ticks, proxy=self.proxy,
+                        dispatch=lambda name, args: self._proxy_exec(d, self.sol.address, self.sol.encode_abi(name, args=args)),
+                        receipts=receipts, publications=publications)
+                finally:
+                    book_settle(d, receipts, settled, ctr)
             else:
                 receipts.append(self._proxy_exec(d, self.sol.address, self.sol.encode_abi(
                     "tick", args=[self.max_work, self.max_scan])))

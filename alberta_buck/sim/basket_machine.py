@@ -156,6 +156,52 @@ def tick_receipts(d, *, rounds=1, max_work=12, max_scan=0, dispatch=None,
     return receipts, publications
 
 
+SETTLE_TICKS = 96   # a settle's cap: wheel ticks after one forcing (a run past it is counted)
+SETTLE_SCAN = 4     # slots one settling tick may pass (each costs its due view's gas on-chain)
+
+
+def settle_receipts(d, *, max_ticks=SETTLE_TICKS, dispatch=None, proxy=None, receipts=None,
+                    publications=None):
+    """Turn the wheel to completion: while its pending() view reads work, tick toward the slot it
+    names (tick(1, steps + 1), at most SETTLE_SCAN slots a transaction) and publish the valuation
+    after each.
+
+    pending() is an eth_call -- no gas, no transaction -- and exact on the machine's wheel
+    (CompletionMemo): a slot that ran without work is not counted again until the wheel works,
+    a pool it reads trades, the basket's holdings or Buck's relief budget change, or the hour
+    turns. So the wheel stops exactly when a tick would find nothing. Returns (receipts,
+    publications, settled); settled is False only when max_ticks ran out first.
+    """
+    receipts = [] if receipts is None else receipts
+    publications = [] if publications is None else publications
+    d.last_wheel_receipts = receipts
+    send = dispatch or (lambda name, args: d.chain.send(getattr(d.wheel.functions, name)(*args)))
+    pending = d.wheel.functions.pending()
+    for _ in range(max_ticks):
+        due, steps = pending.call()
+        if not due:
+            return receipts, publications, True
+        # Toward the slot it names, at most SETTLE_SCAN slots a transaction: each slot the tick
+        # passes evaluates its view on-chain (an arbitrage route's plan is costly), as the bounded
+        # rotation does. Passing them moves the cursor; the slot named runs when it is reached.
+        receipts.append(send("tick", [1, min(steps + 1, SETTLE_SCAN)]))
+        publication = publish_jubilee_valuation(d, proxy=proxy)
+        if publication is not None:
+            publications.append(publication)
+    return receipts, publications, not pending.call()[0]
+
+
+def book_settle(d, receipts, settled, ctr) -> None:
+    """A settle's counters: how many settles, their ticks, and any that hit the cap."""
+    if ctr is None:
+        return
+    ctr["wh_settles"] = int(ctr.get("wh_settles", 0)) + 1
+    ctr["wh_settle_ticks"] = int(ctr.get("wh_settle_ticks", 0)) + len(receipts)
+    ctr["wh_settle_max"] = max(int(ctr.get("wh_settle_max", 0)), len(receipts))
+    if not settled:
+        ctr["wh_settle_capped"] = int(ctr.get("wh_settle_capped", 0)) + 1
+
+
 def book_receipt(d, receipt, ctr) -> None:
     """Wheel-driven desk actions use the same counters as keeper actions."""
     if not getattr(d, "equity_machine", False):

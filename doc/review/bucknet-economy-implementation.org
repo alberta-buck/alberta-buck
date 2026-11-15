@@ -4328,11 +4328,9 @@ economy, not Python's exact one: exact parity is the harness's (S2, S3), after.
   so the arbitrage and rebalancing it opens are reaped): =WheelKeeper({complete: true})= turns the
   wheel again while a turn found work (up to 8 a tick), after the whales and the parity arbitrageur;
   the frames carry =wh_turns= and =wh_work=. It takes 2 to 3 turns a tick (the extra turns find 2 to
-  10 units of work the first left). =WorkWheel.pending= is no guide: on the machine one slot's due
-  check reverts as a view, and simulating every slot cost more than a turn (it had made a day 7 s).
-  A day of five TOKENs at four ticks now takes 1.6 s in Node (0.95 s with one turn a tick). The
-  Python world turns once a tick (=loop.turn_wheel(rounds=1)=, at most 12 units): not necessarily
-  to completion; the same change there is a behaviour change to measure as a comparison first.
+  10 units of work the first left). A day of five TOKENs at four ticks took 1.6 s in Node (0.95 s
+  with one turn a tick). /Superseded/ the same night by the wheel's completion view and settles in
+  both worlds ("The wheel to completion, Ethereum's block clock and the book's routes").
 - /Tests/: =savings-world.webevm.test.js= (Node: days, the frame through =model.row=, the page's own
   =Saver= enrolling and depositing through =rpc()=); =savings-local.browser.test.js= (Chromium, the
   static page: watch, save $10,000, pause, step one day, shock, redeem in BUCK, no console errors);
@@ -4478,7 +4476,7 @@ in BUCK, its calendar and the shared policy agree. The gaps are four:
 | | whale pins TOKEN/USDC to ref(day) | agents.py:MarketMakerWhale.snap:277-294; keyed tick and token order (loop.py:249-272) | whale.js:12-45 (one per token, tick 0, token order) | differs (timing, order) | none / onepool.webevm.test.js:21 |
 | | arbitrageurs: 3 cycle arbs ($2M, 0.25% bites, exact quotes, 60 bp); 5 accumulators | agents.py:190-362; router.py:quote_path:65 | arb.js:ParityArb:20-91 (deployer, gap > 100 bp, closes 80%) | differs; accumulators Python only | none / jeqsim:128 |
 | | PID keeper | equilibrium_agents.py:1620-1633 (each tick, 2 a day); loop.py:309-312 (end of day) | eqw.js:PidKeeper:924-929 (each tick, 1 a day) | differs | none / none |
-| | clock: 2 ticks a day, ts = epoch + day x 86400 + tick x 43200, one timestamp per tick | loop.py:191-200,260-261; timeline.py:6-18; pyrevm_backend.py:338-341 | world.js:runDays:8-21 (1 tick a day by default); webevm.js:50 (+1 s a block); DayClock tick 0 only | differs | cal:89 / jcal:58 |
+| | clock: 2 ticks a day, ts = epoch + day x 86400 + tick x 43200, one timestamp per tick (since 2026-11-15 night: +12 s a block after it, both worlds) | loop.py:191-200,260-261; timeline.py:6-18; pyrevm_backend.py:338-341 | world.js:runDays:8-21 (1 tick a day by default); webevm.js:50 (+1 s a block; now 12 s); DayClock tick 0 only | differs | cal:89 / jcal:58 |
 | | order within a day: interventions, population, ticks (warp, whale, agents keyed), compute, snapshot, record | loop.py:222-318 | the cast array each tick, then onDay (eqsim:92-114) | differs | none / none |
 | | keyed loop draws: whale tick, whale order, act order | rng.py:keyed_u:101-117; loop.py:249-279 | none | Python only | none / none |
 | | deterministic EOA keys from seed, class, idx | identity.py:109-115 | random keys (eqsim:77-79; bw.js:130) | differs | none / none |
@@ -4540,7 +4538,7 @@ Toward a 30-day harness of =economy.toml=:
      =keyed_u(seed, "order", day, tick, class, idx)= with Python's class names and idx.
 8. /Clock and day order./
    - Two ticks a day at epoch + day x 86400 + tick x 43200, one timestamp per tick (webevm
-     interval 0).
+     interval 0). (Since 2026-11-15 night both worlds space blocks 12 s: =BLOCK_SECONDS=.)
    - No 601 s settle and no second arb pass.
    - =compute()= at the end of the day.
    - The day in Python's order.
@@ -5300,11 +5298,11 @@ K reads the sample.
   nothing. /But/ the book's USDC value was unavailable on 333 of 728 days (46%): on those samples
   the dollar pool's reading failed (no BUCK bid), so every USDC bid through BUCK fell away and the
   households valued at their fallback (BVIB x the dollar pool's price). The TOKEN/USDC pools fail
-  alike (275-300 days each). Likely the oracle history: 64 observations cover fewer than the TWAP
-  window's 600 s when every transaction is its own block a second apart (an arbitrage-busy tick
-  writes more than 64 in 600 s), so =consult= reverts "OLD". To fix before the households lean on
-  the book: a deeper cardinality for the route pools (=widen= to more), or a TOKEN's USDC bid through
-  BUCK at the dollar pool's last good reading.
+  alike (275-300 days each). /Corrected the same night/: not the history's depth -- the economy's
+  route pools had never been widened and kept one observation, so a pool traded in the current tick
+  read "OLD" (pyrevm gives a tick's transactions one timestamp; there was no second-apart clock).
+  Fixed, with 128 observations and 12 s blocks: "The wheel to completion, Ethereum's block clock and
+  the book's routes". This comparison is to be re-run.
 - /Found on the way: the JS bundle was stale since the net reference/ (a5467eb6). Rebuilding it
   (=make nix-core-js-artifacts=) failed nine refinance vectors in
   =net-equilibrium-bootstrap.webevm.test.js=; they pass under the nominal reference, so the
@@ -5434,7 +5432,143 @@ N2.
 The book (K at the best route against the direct net reference), the households' basis, fresh BUCK
 into the pools; each against the commit before, on =economy= and =economy-lifecycle=, two years.
 
-** Resume here (2026-11-15, late evening)
+** The wheel to completion, Ethereum's block clock and the book's routes (2026-11-15, night)
+
+The owner (2026-11-15): fix the book's USDC availability with deeper route oracles; emulate
+Ethereum's block spacing instead of the sims' degenerate one; deepen the pools' history anyway;
+and turn the Python world's wheel to completion after every external price forcing ("a
+fundamental feature of the buck basket ecosystem"). Then: give the work wheel a deterministic
+interface that says whether more work remains, run off-chain at no gas.
+
+*** What was wrong with the book's USDC value
+
+Not the block spacing. On pyrevm every transaction of a tick shares the tick's timestamp, so a
+pool writes one observation a tick. The route pools of the economy world (the dollar pool and the
+five TOKEN/USDC pools) had never been widened: a cast =BasketWheelAgent= sets the wheel's triangles
+before =deploy.equity_arb_on= runs, and that returned early (triangles present) before its
+=widen()=. With one observation, any tick that traded a pool left its only observation at "now",
+and the 600 s TWAP reverted "OLD": the 46% of days without a USDC value in the book comparison.
+The routing world (which sets its triangles in =equity_arb_on=) had 64 everywhere and no gap.
+So the comparison's "the route through USDC changes almost nothing" was measured with the route
+missing on almost half its days: to re-run.
+
+*** As built
+
+- /The completion view/ (=src/wheel/WorkWheel.sol=). =pending() returns (bool due, uint256 steps)=:
+  whether a tick now would run a slot, and how far from the cursor the first is (=tick(1, steps +
+  1)= runs it and no other). A view: a keeper reads it by =eth_call= at no gas and ticks until it
+  reads false. It stops at the first ready slot, so only a settled wheel costs a full scan.
+- /What made it exact/: the chassis gained three hooks (=_settled=, =_ranIdle=, =_moved=), no-ops by
+  default; =CompletionMemo= implements them. A slot due on its view that does nothing when run (a
+  cycle that lost its edge, the desk declining with NoAdvice, the jubilee's reserve trade refused
+  =MinOut=, a response step with nothing to do) is remembered with the state it ran in, and neither
+  counted nor run again until that state moves: the wheel works (any slot), someone re-arms, or
+  =_inputs()= changes. Without it, those slots were due again in every block (the sims mine one
+  block a transaction), so =pending()= never read zero and no keeper could tell settled from busy.
+- /The machine's inputs/ (=BasketMachineWheel._inputs=): every pool it reads (each one's =slot0= and
+  active =liquidity=: any swap, and any in-range mint or burn), what the basket holds (its BUCK and
+  each TOKEN), whether Buck's relief budget is spent (a refused retirement may fit once it refills;
+  its value accrues every second, so the value itself would expire every memo every block), and the
+  hour (=RETRY_SPAN=: the sample's interval, the desk's epoch and the jubilee's budget move with the
+  clock). Read by raw =staticcall=s, so a target without code or that refuses reads as zero. So:
+  with no trades and no flows nothing comes due within the hour except the clock's own work.
+- /Bytecode/: the older comparison =BasketWheel= carries every kind and sits 16 bytes under the
+  24,576-byte limit, so it takes the hooks but not the memory (its =pending()= reads the slots' views
+  alone). The machine: 19,437 bytes.
+- /The keepers/ settle: Python =basket_machine.settle_receipts= (and =loop.settle_wheel=, the
+  built-in wheel), JS =world.settleWheel=. While =pending()= reads work: =tick(1, min(steps + 1,
+  4))= (a tick that passes a slot evaluates its view on-chain, and an arbitrage plan is costly: at
+  most four, as the bounded rotation scanned), then publish the valuation. Capped at =SETTLE_TICKS=
+  (96) a settle, counted (=wh_settles=, =wh_settle_ticks=, =wh_settle_max=, =wh_settle_capped=).
+- /When/: in Python right after the whales' forcing (the cast =BasketWheelAgent=, or the built-in
+  wheel when none is cast) and again in the agent's turn each tick (or at the tick's end, built-in);
+  the agent's canonical path settles instead of one rotation (=max_ticks= knob). In JS
+  =WheelKeeper({complete: true})= settles after the whales and the parity arbitrageur each tick.
+  The bootstrap's opening turns are unchanged (the pools' first pairings must not run to rest).
+- /Ethereum's block clock/: 12 s between blocks (=timeline.BLOCK_SECONDS=, =SIM_BLOCK_SECONDS=
+  overrides): pyrevm mines each transaction's block 12 s after the last unless a warp set it
+  (anvil's semantics), anvil is started with that interval, and =webevmSession= sets it (was 1 s).
+  The ticks still own the clock: a tick's transactions follow it 12 s apart. A busy economy tick
+  (25 to 70 transactions) uses 5 to 15 minutes of its 12 hours; pyrevm counts any warp that finds
+  the clock already past it (=late=, 0 in the runs below).
+- /Deeper history/: 128 observations (=OBSERVATIONS= in =buck_core.net_world= and =net-world.js=, the
+  basket's =observationCardinality=): 25 minutes at 12 s blocks even if every block trades, 2.5x the
+  TWAP window. The book's =widen()= takes the route pools to the same; =equity_arb_on= now widens
+  whoever set the triangles; the JS world's widen has 30M gas (six pools x 128 slots).
+
+*** Measured
+
+- /The book/ (economy world, eight days): every pool at 128, a USDC value and a BUCK bid on every
+  day (before: missing from day 1).
+- /Python settles/: from day 2 a settle takes 20 to 25 ticks and ends with no arbitrage plan left
+  (traced: 76 ticks after a day's drift, "plans at rest []"); only the opening's two settles hit
+  the cap. Three settles a day (two ticks and the forcing); a day costs 3 to 6 s (it was 2 to 3 s
+  with one rotation a tick). Before the relief input was narrowed to "spent or not", every memo
+  expired each block and every settle ran to its cap (16 to 20 s a day).
+- /JS savings world/ (four ticks a day): 15 to 20 ticks a settle, every settle complete, 3.2 s a day
+  in Node (1.6 s with the turns-while-work keeper, 0.95 s with one turn).
+- /Why the old JS note said pending() reverts/: gas. A settled wheel evaluates every slot (fifteen
+  arbitrage plans); at the default call gas it ran out. The keeper's view call now carries 200M.
+
+*** Tests
+
+- /Solidity/: =WorkWheel.t.sol= adds four (a slot that ran idle is settled until its inputs move,
+  across blocks and a day; work reopens it, and a keeper loop settles; by default an idle slot
+  waits only for the next block; =pending()= points a one-slot tick at the next ready slot); the
+  wheel, jubilee, retirement, arbitrage and machine suites pass; both wheels fit the runtime limit.
+- /Pinned clocks/: tests whose fixtures and vectors were computed on the old clock keep it, named in
+  each, until the vectors are regenerated at 12 s: the household world of
+  =test_net_household_setup= (and =test_net_household_exit=, which shares it) on pyrevm at
+  =block_seconds=0=; =test_net_demurrage_smoke= and =test_receipt_e2e= on anvil's own clock
+  (=block_seconds=None=); in JS =net-demurrage=, =net-household-invest= and =net-household-programme=
+  (=PINNED_CLOCK=, one second). =test_net_economy_report='s refused publication now reads before and
+  after with no time between (=evm.block_seconds = 0=): at 12 s the publication's own block let
+  accrual into the second reading.
+- /Full suites/: Solidity 1557 passed (120 suites); Python 1342 passed, 5 skipped; JS 333 passed with
+  the 8 legacy failures of the 2026-11-14 baseline, the pinned files then passing; the browser tests
+  (savings world in the tab, sandbox) pass, the savings one in 62 s (was 7 s: its days now settle).
+- /Two older regressions found on the way/ (from this branch's earlier commits): the JS whale tagged
+  a day's one snap with its tick (=whale:snap:d0t0=), so =test_mini_parity= saw Python and JS
+  journals differ; and the JS household's resumed buyback read a credit registry that a bare market
+  world does not have (=net-market.webevm.test.js=). Both fixed.
+
+*** Observations and recommendations
+
+- /Five-year runs/: re-run the book comparison (=comparisons/book.toml=) and the datasim net suite on
+  this commit: the USDC route is now present every day, the wheel reaps each forcing to completion,
+  and the clock is 12 s a block, so none of the earlier two-year or five-year numbers carry over.
+  Expect more arbitrage income retained by the basket and the TOKEN/BUCK pools tracking the
+  TOKEN/USDC pools within a tick.
+- /Savings sandbox/: a day now costs about 3 s at four ticks, so the default pace (1 s a day) runs
+  at the world's own speed. If that is too slow: two ticks a day by default, or a lower settle cap
+  in the tab (=WheelKeeper({maxTicks})=), each trading completeness for speed.
+- /A direct entry for keepers/ (owner's call): =tickAt(slot)= would let a keeper run the slot
+  =pending()= names without passing scans (a settle spends about a quarter of its ticks passing).
+  It needs bytecode room in the older wheel, or that wheel's retirement.
+- /Views that over-report/ (owner's call): the desk's operation, the jubilee's reserve trade and one
+  response step are due on their views far more often than they act. The memory now absorbs it,
+  but each arbitrage cycle (which moves the pools they key on) reopens them once a rotation: a
+  narrower key per kind, or truthful views, would save those ticks.
+- /The arbitrage's size/: a cycle is funded by the basket's BUCK wallet (=c.budget=), a few hundred
+  BUCK, so a large gap takes many cycles (the opening's two settles hit 96). A flash-style first
+  leg (the older =ArbKind='s), or a float for it, would close a gap in one or two (owner's call).
+
+** Resume here (2026-11-15, night)
+
+- *Branch*: =feature/household-minimal-ecosystem=; worktree =.claude/worktrees/buck-compound=.
+- *Done tonight*: the work wheel's completion view and settles in both worlds, Ethereum's 12 s block
+  clock in every EVM backend, 128 observations on every basket and route pool, and the book's route
+  pools widened whoever sets the triangles ("The wheel to completion, Ethereum's block clock and the
+  book's routes"). Before that: several ticks a day and a live pace, the economy's TOKENs and prices
+  in the tab (e49a2989, 63f4cbc2).
+- *Next*: re-run =comparisons/book.toml= and the datasim net suite on this commit (none of the earlier
+  numbers carry over); regenerate the pinned vectors at 12 s and drop the pins; the owner's calls on
+  =tickAt=, narrower memo keys, and the arbitrage's funding (recommendations there).
+- *Unchanged from the late-evening notes below*: the savings sandbox's step 6 and its gaps; S2/S3 and
+  S7; the owner's calls on N5, the marks' anchor and the shadow controller; the persistent BUCK
+  demand cast; the core budget.
+
+** Resume here (superseded: 2026-11-15, late evening)
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed at af1e034d; worktree
   =.claude/worktrees/buck-compound= (untracked leftovers only: generated price windows, =eq-economy.json=).

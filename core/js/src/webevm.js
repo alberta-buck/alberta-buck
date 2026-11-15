@@ -22,6 +22,9 @@ import { DEV_KEYS, devAccount } from "./dev-keys.js";
 import { Session } from "./session.js";
 
 export const WEBEVM_CHAIN_ID = 31337;
+/** Between two blocks, as on Ethereum (its 12 s slot): a tick's transactions follow its clock 12 s
+ *  apart, so a pool's oracle sees one observation per block (the Python worlds' BLOCK_SECONDS). */
+export const BLOCK_SECONDS = Number(globalThis.process?.env?.SIM_BLOCK_SECONDS ?? 12);
 const DEV_BALANCE = 10n ** 24n;
 
 /**
@@ -31,9 +34,11 @@ const DEV_BALANCE = 10n ** 24n;
  * @param opts.wasm   revm's module for "revm": a URL (string or URL), bytes, a Response, or a
  *                    compiled WebAssembly.Module (Node: nodefs.js revmWasm())
  * @param opts.nodeOptions passed to webevm's createNode (e.g. a block gas limit)
+ * @param opts.blockSeconds between two auto-mined blocks (BLOCK_SECONDS, Ethereum's 12 s slot); a
+ *        time warp still sets a block's timestamp exactly
  */
 export async function webevmSession({ accountIndex = 0, journal = null, engine = "revm", wasm,
-                                      nodeOptions = {} } = {}) {
+                                      nodeOptions = {}, blockSeconds = BLOCK_SECONDS } = {}) {
   const { createNode } = await import("webevm");
   let eng;
   if (engine === "revm") {
@@ -47,7 +52,7 @@ export async function webevmSession({ accountIndex = 0, journal = null, engine =
     DEV_KEYS.map((k) => [privateKeyToAccount(k).address, DEV_BALANCE]));
   const node = await createNode({ chainId: WEBEVM_CHAIN_ID, miningConfig: { type: "auto" }, initialBalances,
                                   ...(eng ? { engine: eng } : {}), ...nodeOptions });
-  await node.request({ method: "anvil_setBlockTimestampInterval", params: [1] });
+  await node.request({ method: "anvil_setBlockTimestampInterval", params: [blockSeconds] });
   // node.request is looked up at each call, so a layer may wrap it later (savings-world.js acts
   // as a visitor it enrolls by routing that visitor's sends to evm_sendRawTransactionAs).
   const client = createWalletClient({ transport: custom({ request: (args) => node.request(args) }) })

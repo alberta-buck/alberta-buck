@@ -18,6 +18,7 @@ from typing import Any
 
 from web3 import Web3
 from buck_core import NetCreditOps, NetMarketOps, SettlementOps, deploy_net_basket, deploy_net_stack
+from buck_core.net_world import OBSERVATIONS
 
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.chain import Chain, Expect, load_artifact
@@ -85,10 +86,20 @@ def wheel_arb_enabled(d=None) -> bool:
 
 def equity_arb_on(d) -> None:
     """Give the equity basket's wheel its arbitrage: one triangle per
-    constituent (its TOKEN/BUCK pool, TOKEN/USDC, BUCK/USDC)."""
-    if d.wheel is None or not wheel_arb_enabled(d) \
-            or int(d.wheel.functions.triangleCount().call()) > 0:
+    constituent (its TOKEN/BUCK pool, TOKEN/USDC, BUCK/USDC); then deepen the
+    oracles of the routes the price book reads through them."""
+    if d.wheel is None or not wheel_arb_enabled(d):
         return
+    if int(d.wheel.functions.triangleCount().call()) == 0:
+        _equity_triangles(d)
+    if getattr(d, "signals", None) is not None and int(d.signals.functions.markets().call(), 16):
+        # The price book reads these routes' TWAPs: their pools keep the basket's observations.
+        # Whoever set the triangles (this, the deploy, a cast BasketWheelAgent), widen once they
+        # exist: a route pool left at one observation reads "OLD" whenever it traded this block.
+        d.chain.send(d.signals.functions.widen())
+
+
+def _equity_triangles(d) -> None:
     if getattr(d, "buck_accounting", "") == "net":
         if not d.reg.functions.isCarrying(d.basket.address).call() \
                 or not d.buck.functions.approvedCarryingIssuer(d.basket.address).call():
@@ -99,9 +110,6 @@ def equity_arb_on(d) -> None:
     for k, t in enumerate(d.tokens):
         d.chain.send(d.wheel.functions.setTriangle(
             k, (t.address, d.pool_buck[k], d.pool_usdc[k], k)), sender=d.gov)
-    if getattr(d, "signals", None) is not None and int(d.signals.functions.markets().call(), 16):
-        # The price book reads these routes' TWAPs: their pools keep the basket's observations.
-        d.chain.send(d.signals.functions.widen())
 
 
 def parse_redeem(d, rcpt, holder) -> tuple[int, int]:
@@ -309,7 +317,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     # guard tolerance is 5% (500 bp), for BUCK deposits and the redeem value
     # read; 5% keeps ordinary inter-tick commodity moves (6h ticks vs 600s
     # TWAP) from tripping it.
-    ctor = (buck.address, kctrl.address, v3f.address, gov, FEE_BUCK, 600, 64, 500, 1000)
+    # The pools keep OBSERVATIONS of oracle history: at 12 s blocks, 2.5x the 600 s TWAP window even
+    # if every block trades (the price book's route pools are widened to match).
+    ctor = (buck.address, kctrl.address, v3f.address, gov, FEE_BUCK, 600, OBSERVATIONS, 500, 1000)
     venue = None
     if basket_impl in ("prorata", "ops"):
         # "ops" is BuckBasketProRata plus the monetary-operations desk on the

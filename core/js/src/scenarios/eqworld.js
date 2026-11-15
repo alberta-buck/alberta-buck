@@ -39,7 +39,7 @@
 import { encodeFunctionData, keccak256, toBytes, parseEventLogs } from "viem";
 import { installHouseholdOps } from "../agents/household-ops.js";
 import { linkArtifact } from "../artifacts.js";
-import { netCreditOps } from "../net-world.js";
+import { netCreditOps, OBSERVATIONS } from "../net-world.js";
 import { settlementOps } from "../settlement.js";
 
 import { advanceTime, buildBuckWorld, DAY, identityApprove, identityOf, onboard }
@@ -85,6 +85,12 @@ const MACHINE_TOKENS = [
 // (alberta_buck/sim/basket_machine.py DEFAULTS and OBSERVER).
 const LOG_TICK = Math.log(1.0001);
 const RATE = BigInt(Math.round(Math.LN2 * 1e18));          // half a gap a day
+/** A settle's cap: wheel ticks after one forcing (Python: basket_machine.SETTLE_TICKS). */
+export const SETTLE_TICKS = 96;
+/** Slots one settling tick may pass on its way to the slot pending() names. */
+const SETTLE_SCAN = 4n;
+/** Gas for the wheel's pending() view: a settled wheel evaluates every slot, the arbitrage plans too. */
+const VIEW_GAS = 200_000_000n;
 export const MACHINE = {
   interval: 1800,              // seconds between responses, and between samples
   maxAge: 3600,                // seconds a parity sample stays fresh
@@ -179,7 +185,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   // Reuse the canonical stack's one linked basket and fund graph. Do not
   // deploy a second basket beside the one already configured in Jubilee.
   const basketShell = machine ? world.net.basket : await session.deploy(basketArt,
-    [buck.address, kctrl.address, v3f.address, me, FEES.buck, 600, 64, 500, 1000],
+    [buck.address, kctrl.address, v3f.address, me, FEES.buck, 600, OBSERVATIONS, 500, 1000],
     { name: shellName, gas });
   const venue = await session.deploy(artifacts(venueName), [], { name: venueName, gas });
   await session.send(basketShell, "setVenue", [venue.address], { tag: "eq:setVenue" });
@@ -425,6 +431,28 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       } while (remaining > 0n && budget > 0n);
       return receipts.at(-1);
     };
+    /** Turns the wheel to completion: while its pending() view reads work, a tick toward the slot it
+     *  names (tick(1, steps + 1), at most SETTLE_SCAN slots a transaction), the valuation published
+     *  after each. pending() is an eth_call --
+     *  no gas -- and exact on the machine's wheel (CompletionMemo): it reads false exactly when a
+     *  tick would find nothing. Returns { receipts, settled }; settled is false only when maxTicks
+     *  ran out first (Python: basket_machine.settle_receipts). */
+    world.settleWheel = async ({ tag, maxTicks = SETTLE_TICKS } = {}) => {
+      const base = tag ?? "eq:wheel";
+      const receipts = [];
+      world.lastWheelReceipts = receipts;
+      for (let i = 0; i < maxTicks; i++) {
+        const [due, steps] = await session.call(wheel, "pending", [], { gas: VIEW_GAS });
+        if (!due) return { receipts, settled: true };
+        // Toward the slot it names, at most SETTLE_SCAN slots a transaction (each slot passed
+        // evaluates its view on-chain; an arbitrage plan is costly): the bounded rotation's rule.
+        receipts.push(await session.send(wheel, "tick", [1n, steps + 1n < SETTLE_SCAN ? steps + 1n : SETTLE_SCAN],
+          { tag: `${base}:tick:${i}`, gas: world.tickGas ?? TICK_GAS }));
+        await session.send(wheel, "refreshValuation", [], { tag: `${base}:valuation:${i}`, expect: "either" });
+      }
+      const [due] = await session.call(wheel, "pending", [], { gas: VIEW_GAS });
+      return { receipts, settled: !due };
+    };
 
     // Bootstrap the basket's pools to real depth: a targetBuck-sized
     // deposit of each TOKEN from the deployer, which the wheel pairs with
@@ -448,7 +476,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
         [BigInt(i), [t.erc20.address, t.poolBuck.address, t.poolUsdc.address, BigInt(i)]],
         { tag: `eq:arb.register:${t.sym}` });
       // The book reads these routes' TWAPs: their pools keep the basket's observations.
-      await session.send(parity, "widen", [], { tag: "eq:book.widen", gas: 12_000_000n });
+      await session.send(parity, "widen", [], { tag: "eq:book.widen", gas: 30_000_000n });
     }
   }
 
@@ -930,32 +958,27 @@ export class DayClock {
  *  wheel, arbitrage).  Does nothing on the pro-rata basket, which has no
  *  wheel. */
 export class WheelKeeper {
-  /** opts.complete: keep turning until a turn finds no work, up to opts.maxTurns a tick: every
-   *  arbitrage the forcing opened and every response the basket owes is taken before the tick ends.
-   *  Its last tick's turns and the work they did are in .turns and .work. (WorkWheel.pending is no
-   *  guide here: the machine's due checks do not all run as a view, and simulating them all costs
-   *  more than a turn.) */
-  constructor({ arb = null, complete = false, maxTurns = 8 } = {}) {
-    Object.assign(this, { arb, complete, maxTurns });
+  /** opts.complete: turn the wheel to completion (world.settleWheel): tick while its pending() view
+   *  reads work, up to opts.maxTicks a tick -- every arbitrage the forcing opened and every response
+   *  the basket owes is taken before the tick ends. Otherwise one bounded rotation (turnWheel).
+   *  Its last tick's ticks, the work they did and whether the wheel settled are in .turns, .work
+   *  and .settled. */
+  constructor({ arb = null, complete = false, maxTicks = SETTLE_TICKS } = {}) {
+    Object.assign(this, { arb, complete, maxTicks });
     this.turns = 0;
     this.work = 0n;
+    this.settled = true;
   }
   async act(world, day, tick) {
     if (!world.wheel) return;
     await advanceTime(world, MACHINE.settle);
-    const turn = async (tag) => {
-      await world.turnWheel({ tag });
-      return (world.lastWheelReceipts ?? []).reduce((sum, r) => sum + parseEventLogs(
-        { abi: world.wheel.abi, logs: r.logs, eventName: "Ticked" }).reduce((s, e) => s + e.args.work, 0n), 0n);
-    };
-    let work = await turn(`wheel:d${day}t${tick}`);
-    this.turns = 1;
-    this.work = work;
-    while (this.complete && work > 0n && this.turns < this.maxTurns) {
-      work = await turn(`wheel:d${day}t${tick}:${this.turns}`);
-      this.turns += 1;
-      this.work += work;
-    }
+    const tag = `wheel:d${day}t${tick}`;
+    if (this.complete) ({ settled: this.settled } = await world.settleWheel({ tag, maxTicks: this.maxTicks }));
+    else await world.turnWheel({ tag });
+    const receipts = world.lastWheelReceipts ?? [];
+    this.turns = receipts.length;
+    this.work = receipts.reduce((sum, r) => sum + parseEventLogs(
+      { abi: world.wheel.abi, logs: r.logs, eventName: "Ticked" }).reduce((s, e) => s + e.args.work, 0n), 0n);
     if (this.arb) await this.arb.act(world, day, tick);
   }
 }

@@ -53,6 +53,21 @@ def turn_wheel(d, rounds: int = 1, max_work: int = 12, ctr=None) -> int:
                for ev in d.wheel.events.Ticked().process_receipt(rc, errors=DISCARD))
 
 
+def settle_wheel(d, ctr=None) -> bool:
+    """Tick the equity basket's work wheel as the deployer until its pending() view reads no work
+    (basket_machine.settle_receipts); True when it settled within the cap."""
+    from alberta_buck.sim.basket_machine import book_receipt, book_settle, settle_receipts
+    receipts, settled = [], False
+    try:
+        _, _, settled = settle_receipts(d, receipts=receipts)
+    finally:
+        if ctr is not None:
+            for rc in receipts:
+                book_receipt(d, rc, ctr)
+            book_settle(d, receipts, settled, ctr)
+    return settled
+
+
 def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machine",
         director_impl="pairs", on_day_start=None, on_frame=None,
         controller_impl="direct", recorder=None) -> dict:
@@ -135,8 +150,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     # nobody re-pinning them, and the basket opened at half its value.)
     # Afterwards the loop turns it every tick unless a BasketWheelAgent is
     # cast to call it (and to be paid for it).
-    builtin_wheel = (d.wheel is not None and not any(
-        type(a).__name__ == "BasketWheelAgent" for a in agents))
+    wheel_agents = [a for a in agents if type(a).__name__ == "BasketWheelAgent"]
+    builtin_wheel = d.wheel is not None and not wheel_agents
     if d.wheel is not None:
         from alberta_buck.sim.deploy import equity_arb_on
         placed = turn_wheel(d, rounds=2)
@@ -270,6 +285,18 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
                             wagent.snap(d, scenario, day, whale_tok, ctr)
                         finally:
                             d.chain.actor = None
+                # The forcing: the whales pinned the TOKEN/USDC pools to the external prices. The
+                # wheel reaps what that opened -- its arbitrage, the basket's responses -- to
+                # completion at once, before anyone else trades.
+                if whales and d.wheel is not None:
+                    if builtin_wheel:
+                        settle_wheel(d, ctr=ctr)
+                    for wa in wheel_agents:
+                        d.chain.actor = wa
+                        try:
+                            wa.act(d, scenario, day, tick, ctr)
+                        finally:
+                            d.chain.actor = None
             if keyed:
                 order = sorted(arbs, key=lambda a: _rng_mod.keyed_u(
                     scenario.seed, "order", day, tick, type(a).__name__,
@@ -301,7 +328,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
                                       bvib_now)
                     reserves = after
             if builtin_wheel:
-                turn_wheel(d, rounds=1, ctr=ctr)
+                settle_wheel(d, ctr=ctr)
         # WP-13: book the agent stand-ins' net inventory (the undertakings'
         # open books, the facility's drawn lines) into the observer's
         # pseudo-stabilizer before K's cycle; a no-op without an observer.

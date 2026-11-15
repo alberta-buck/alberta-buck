@@ -10,13 +10,16 @@ import { TransactionReceiptPending } from "../src/session.js";
 import { advanceTime, DAY } from "../src/buckworld.js";
 import { artifact } from "../artifacts/bundle.mjs";
 import * as identity from "../src/identity.js";
+// Pinned to vectors and fixtures computed at one second a block (the clock before 2026-11-15 night):
+// these sessions keep it until the vectors are regenerated at Ethereum's 12 s (BLOCK_SECONDS).
+const PINNED_CLOCK = { blockSeconds: 1 };
 
 const RAW = 1_000_000n;
 const spec = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-refinance.json", import.meta.url))).programme;
 const BANK = "0x000000000000000000000000000000000000dEaD";
 
 test("automatic debtors stage closing, resume cash and serialize calendar/receipt work", async (t) => {
-  const s = await nodeWebevmSession();
+  const s = await nodeWebevmSession(PINNED_CLOCK);
   const world = await buildEquilibriumWorld(s, artifact, { identity, wheelArb: false, targetBuck: 1_000_000n * RAW,
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
   });

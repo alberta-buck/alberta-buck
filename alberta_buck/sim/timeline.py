@@ -1,6 +1,10 @@
 """Absolute runner timestamps; work between ticks never adds model days."""
+import os
 
 DAY_SECONDS = 86400
+# Between two blocks, as on Ethereum (its 12 s slot): the EVM backends space the blocks a tick's
+# transactions mine by it. SIM_BLOCK_SECONDS overrides.
+BLOCK_SECONDS = int(os.environ.get("SIM_BLOCK_SECONDS", "12"))
 
 
 def tick_timestamp(epoch, day, tick, ticks_per_day, day_step=1):

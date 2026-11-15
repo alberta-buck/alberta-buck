@@ -115,6 +115,7 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
                      4295128740 if zero else 1461446703485210103287273052203988822378723970341, t0, t1))
         fund = d.net_stack.fund
         position = fund.functions.positionId().call()
+        evm.block_seconds = 0           # no time passes between the readings: a refusal changes nothing
         before = (d.wheel.functions.publishedValuation().call(), d.wheel.functions.reserve().call(),
                   d.buck.functions.totalIssued().call(), d.buck.functions.fundFlows().call(),
                   d.basket.functions.holdings(position).call())

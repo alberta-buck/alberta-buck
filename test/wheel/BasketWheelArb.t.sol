@@ -123,7 +123,8 @@ contract BasketWheelArbTest is Test {
     function test_consistent_pools_leave_nothing_to_do() public {
         (uint256 x,,) = wheel.plan(0);
         assertEq(x, 0);
-        assertEq(wheel.pending(), 0);
+        (bool due,) = wheel.pending();
+        assertFalse(due);
         (uint256 work,) = wheel.tick(1, 0);
         assertEq(work, 0);
     }

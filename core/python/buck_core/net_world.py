@@ -79,8 +79,13 @@ class NetBasket:
                 "src/basket/BasketMarketOps.sol:BasketMarketOps": self.market_library.address}
 
 
+# Each basket and route pool's oracle history (observation slots): at 12 s blocks, 2.5x the 600 s
+# TWAP window even if every block trades (core/js/src/net-world.js OBSERVATIONS).
+OBSERVATIONS = 128
+
+
 def deploy_net_basket(chain, stack, factory, governance, *, fee_tier=3000, twap_window=600,
-                      observation_cardinality=64, max_deviation_bp=500, min_seed_liquidity=1000):
+                      observation_cardinality=OBSERVATIONS, max_deviation_bp=500, min_seed_liquidity=1000):
     """Deploy one linked basket; identity, venues, fund and credit stay explicit.
 
     The returned library also links the existing upkeep facets. This helper
