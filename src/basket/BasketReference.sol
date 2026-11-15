@@ -6,6 +6,10 @@ import {IBasketReference} from "./IBasketReference.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 
+interface IBuckCarryView {
+    function accountBalancesScaled(address account) external view returns (uint256 gross, uint256 net);
+}
+
 /// @notice The parity reference: a fast validated raw value of the reference
 ///         basket in BUCKs. No positions, targets or K. Each publication is
 ///         one coherent all-pool observation; a missing pool invalidates it.
@@ -54,13 +58,17 @@ contract BasketReference is IBasketReference {
         (raw,) = marketValues();
     }
 
-    /// @notice The reference basket at each pool's TWAP and at its spot. Any
-    ///         pool that is empty, or whose spot has left its TWAP by more
+    /// @notice The reference basket at each pool's TWAP and at its spot, in
+    ///         net BUCK: each price at its pool's net / gross, the value of the
+    ///         Carrying BUCK a TOKEN sold into the pool fetches (as the basket's
+    ///         K reference; nominal while the basket's nominalReference is set).
+    ///         Any pool that is empty, or whose spot has left its TWAP by more
     ///         than the allowed deviation, refuses the whole reading.
     function marketValues() public view returns (int256 twap, int256 spot) {
         uint256 n = basket.constituentsLength();
         uint32 window = basket.twapWindow();
         if (n == 0 || window == 0) revert InvalidObservation();
+        bool net = !basket.nominalReference();
         for (uint256 i; i < n; ++i) {
             (address token, uint8 dec, uint256 amount,,, address pool,,, bool b0,,) = basket.constituents(i);
             if (IUniswapV3Pool(pool).liquidity() == 0) revert InvalidObservation();
@@ -70,6 +78,13 @@ contract BasketReference is IBasketReference {
             uint256 ps = UniswapV3OracleLib.getQuoteAtTick(spotTick, uint128(10 ** dec), token, _buck(pool, b0));
             uint256 delta = p > ps ? p - ps : ps - p;
             if (p == 0 || delta * 10000 > p * maxDeviationBp) revert InvalidObservation();
+            if (net) {
+                (uint256 gross, uint256 netValue) = IBuckCarryView(_buck(pool, b0)).accountBalancesScaled(pool);
+                if (gross != 0) {
+                    p = UniswapV3OracleLib.mulDiv(p, netValue, gross);
+                    ps = UniswapV3OracleLib.mulDiv(ps, netValue, gross);
+                }
+            }
             twap += int256(UniswapV3OracleLib.mulDiv(amount, p, 1e18));
             spot += int256(UniswapV3OracleLib.mulDiv(amount, ps, 1e18));
         }

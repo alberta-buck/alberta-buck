@@ -7,6 +7,9 @@ interface IBasketView {
     function governance() external view returns (address);
     function equity() external view returns (uint256);
     function twapWindow() external view returns (uint32);
+    /// @dev True while the references price pools in nominal rather than net
+    ///      BUCK (BasketVenueFacet.setNominalReference; comparison only).
+    function nominalReference() external view returns (bool);
     function constituentsLength() external view returns (uint256);
     function constituents(uint256 i) external view returns (
         address token, uint8 decimals, uint256 basketAmount, uint256 initialPriceInBuck,

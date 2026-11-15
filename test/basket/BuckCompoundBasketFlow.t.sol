@@ -11,6 +11,7 @@ import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
 import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
 import {EqToken, EqController, IPool} from "./BuckBasketEquity.t.sol";
+import {BasketReference} from "../../src/basket/BasketReference.sol";
 
 contract RejectCompoundPosition is BuckBasketUniswapV3 {
     error RejectedPosition();
@@ -83,6 +84,44 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         basket.setVenue(address(new BasketVenueFacet()));
         basket.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(0), 0, 0)));
         vm.stopPrank();
+    }
+
+    // K's reference prices the pools in net BUCK (owner, 2026-11-15): a Carrying
+    // pool's aged BUCK delivers only its net share when it leaves (BuckCash.move),
+    // so each TOKEN's TWAP price counts at its own pool's net / gross. The
+    // nominal reference (governance, for comparison only) reads quoted prices.
+    // The parity reference (BasketReference) follows the same switch.
+    function test_referencesReadCarryingPoolsInNetBuck() public {
+        _pools();
+        _machine();
+        BasketReference parity = new BasketReference(address(basket), 1800, 3600, 500);
+        BasketVenueFacet venue = BasketVenueFacet(address(basket));   // through the shell's fallback
+        vm.warp(vm.getBlockTimestamp() + YEAR);            // the pools' BUCK ages a year, idle
+        uint256 lo = type(uint256).max;
+        uint256 hi;
+        for (uint256 i; i < 3; ++i) {
+            (uint256 gross, uint256 net) = buck.accountBalancesScaled(pools[i]);
+            assertLt(net, gross, "an aged Carrying pool carries a fee");
+            uint256 r = net * 1e18 / gross;
+            if (r < lo) lo = r;
+            if (r > hi) hi = r;
+        }
+        int256 netValue = venue.basketValueInBuck();
+        assertEq(parity.basketValueInBuck(), netValue, "the parity reference reads net BUCK too");
+        vm.prank(GOV);
+        BasketVenueFacet(address(basket)).setNominalReference(true);
+        int256 nominalValue = venue.basketValueInBuck();
+        assertEq(parity.basketValueInBuck(), nominalValue, "and nominal under the switch");
+        assertLt(netValue, nominalValue, "net BVIB is below the quoted one once the pools carry a fee");
+        // A weighted mean of the pools' ratios: between the least and the most hollow
+        // (to a part per million: each price and product is floored).
+        assertGe(uint256(netValue) * 1e18 / uint256(nominalValue) + 1e12, lo);
+        assertLe(uint256(netValue) * 1e18 / uint256(nominalValue), hi + 1e12);
+        vm.prank(GOV);
+        BasketVenueFacet(address(basket)).setNominalReference(false);
+        assertEq(venue.basketValueInBuck(), netValue);
+        vm.expectRevert();
+        BasketVenueFacet(address(basket)).setNominalReference(true);   // governance only
     }
 
     function test_budgetUsesExistingCashThenIssuesOnlyItsShortfall() public {

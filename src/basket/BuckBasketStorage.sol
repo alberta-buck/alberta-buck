@@ -183,6 +183,11 @@ abstract contract BuckBasketStorage {
 
     /// @notice The work wheel allowed to credit the basket (0: none).
     address public wheel;
+    /// @dev K's raw reference and the parity reference in NOMINAL BUCK, the
+    ///      measure before 2026-11-15, kept for comparison only: by default they
+    ///      price each pool in net BUCK (BasketVenueFacet.basketValueInBuck).
+    ///      Internal (no getter bytes in the shells); packs into wheel's slot.
+    bool internal _nominalReference;
 
     // --- Events ----------------------------------------------------------- //
 
@@ -205,6 +210,7 @@ abstract contract BuckBasketStorage {
     event StressFee(uint256 indexed receiptId, uint256 deviation1e18, uint256 feeBp, uint256 feeValueBuck);
     event StressFeeSet(uint256 deadbandBp, uint256 slopeBp, uint256 maxBp);
     event WheelSet(address indexed wheel);
+    event NominalReferenceSet(bool nominal);
     event WheelCredit(uint256 indexed poolIdx, uint256 tokenAmount, uint256 partnerBuck);
 
     // --- Errors (custom errors save bytecode vs require-strings) ----------- //

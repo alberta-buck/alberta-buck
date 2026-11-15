@@ -5,15 +5,44 @@ import {BuckBasketUniswapV3} from "./BuckBasketUniswapV3.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 
+interface IBuckCarry {
+    function accountBalancesScaled(address account) external view returns (uint256 gross, uint256 net);
+}
+
 /// @notice Venue for the replacement machine. Missing TWAP history is an
 ///         unavailable price, including on K's raw reference path. Pools
 ///         must be seeded and aged before the basket accepts valued entries.
 contract BasketVenueFacet is BuckBasketUniswapV3 {
     error UnavailablePrice();
 
+    /// @notice The basket's value in NET BUCK: K's raw reference. A TOKEN/BUCK
+    ///         pool holds Carrying BUCK, whose accrued demurrage is carried, not
+    ///         paid: BUCK leaving the pool delivers net x nominal / gross of
+    ///         full-value BUCK (BuckCash.move), so a TOKEN sold into the pool at
+    ///         its nominal price P fetches P x net / gross. Each constituent's
+    ///         TWAP price is taken at its pool's ratio, as the desk's marks are
+    ///         (BasketDesk._venueMarks). Read nominally while governance sets
+    ///         the nominal reference (the measure before 2026-11-15), for
+    ///         comparison only.
     function basketValueInBuck() public view override returns (int256) {
         if (twapWindow == 0) revert UnavailablePrice();
-        return super.basketValueInBuck();
+        if (_nominalReference || constituents.length == 0) return super.basketValueInBuck();
+        int256 total;
+        for (uint256 i = 0; i < constituents.length; i++) {
+            Constituent storage c = constituents[i];
+            uint256 p = _readPoolPrice(c, twapWindow);
+            (uint256 gross, uint256 net) = IBuckCarry(address(buck)).accountBalancesScaled(c.pool);
+            if (gross != 0) p = UniswapV3OracleLib.mulDiv(p, net, gross);
+            total += int256(UniswapV3OracleLib.mulDiv(c.basketAmount, p, 1e18));
+        }
+        return total;
+    }
+
+    function nominalReference() external view returns (bool) { return _nominalReference; }
+
+    function setNominalReference(bool nominal) external onlyGov {
+        _nominalReference = nominal;
+        emit NominalReferenceSet(nominal);
     }
 
     function _valuationTick(Constituent storage c, int24) internal view override returns (int24) {
