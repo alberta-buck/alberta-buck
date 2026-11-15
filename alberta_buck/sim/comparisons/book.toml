@@ -1,0 +1,16 @@
+# The price book (N4, doc/review/bucknet-economy-implementation.org, "N4 as built"): each TOKEN is
+# priced by its best route -- into its own pool at that pool's net / gross, or for USDC and the USDC
+# into the dollar pool at the dollar pool's -- and K reads the book's sample. With the routes through
+# USDC off, the book prices the direct routes only (K's reference as before N4), and the households
+# read the basket at BVIB x the dollar pool's price (the book publishes no USDC value without every
+# USDC route). How often does the route through USDC win, and what does it move?
+question = "How often does a TOKEN's best route go through USDC, and what does pricing by it move?"
+experiment = "economy"
+days = 730
+
+[[axis]]
+name = "routes"
+note = "the price book's routes: the best of direct and through USDC, or direct only"
+[axis.values]
+best = {}
+direct = { "machine.book_markets" = false }

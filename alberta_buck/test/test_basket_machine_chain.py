@@ -129,6 +129,17 @@ def test_the_price_book_takes_each_tokens_best_net_route_and_k_reads_it(tmp_path
         assert d.pair_signals.functions.availableMask().call() == 3
 
 
+def test_the_book_without_markets_prices_direct_routes_only(tmp_path):
+    # The comparison arm (comparisons/book.toml): no routes through USDC, so no USDC value either;
+    # K still reads the book's (direct, net) sample.
+    with simulated(tmp_path, "equity-machine", {"book_markets": False}, days=2) as (d, frames):
+        book = d.signals.functions
+        assert int(book.markets().call(), 16) == 0
+        assert book.valueUsdc().call() == 0 and book.buckBid().call() == 0
+        assert not any(b[2] for b in (book.bids(i).call() for i in range(len(d.tokens))))
+        assert book.fresh().call() and d.basket.functions.basketValueInBuck().call() == book.rawValue().call()
+
+
 def test_machine_settings_are_the_experiments_then_the_environments_then_the_labs(monkeypatch):
     half = round(math.log(2) * 10**18)
     assert basket_machine.sizing(basket_machine.settings()) == (0, 4 * 10**18, 0, half, half, 10**18, 25 * 10**14, 2 * 10**16)

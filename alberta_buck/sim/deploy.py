@@ -99,7 +99,7 @@ def equity_arb_on(d) -> None:
     for k, t in enumerate(d.tokens):
         d.chain.send(d.wheel.functions.setTriangle(
             k, (t.address, d.pool_buck[k], d.pool_usdc[k], k)), sender=d.gov)
-    if getattr(d, "signals", None) is not None:
+    if getattr(d, "signals", None) is not None and int(d.signals.functions.markets().call(), 16):
         # The price book reads these routes' TWAPs: their pools keep the basket's observations.
         d.chain.send(d.signals.functions.widen())
 

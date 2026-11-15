@@ -49,6 +49,10 @@ DEFAULTS = {
     # net/gross: the Carrying BUCK a TOKEN sold into it fetches); True reads the quoted (nominal)
     # prices, the measure before 2026-11-15, for comparison (BasketVenueFacet.setNominalReference).
     "nominal_reference": False,
+    # The price book's routes through USDC (BasketReference.setMarkets: the wheel's triangles). False
+    # prices the direct routes only, for comparison; households then read the basket at BVIB x the
+    # dollar pool's price (the book publishes no USDC value without every USDC route).
+    "book_markets": True,
 }
 ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_AGE", "dt_max": "SIM_MACHINE_DT_MAX",
                "leash_bp": "SIM_MACHINE_LEASH_BP", "tilt": "SIM_MACHINE_TILT", "lean_cap_bp": "SIM_MACHINE_LEAN_CAP_BP",
@@ -214,7 +218,8 @@ def activate(d, given=None, turn_seconds=0) -> None:
     # deploy.equity_arb_on).
     interval = int(s["interval"])
     signals = chain.deploy("BasketReference", basket.address, interval, int(s["max_age"]), 500)
-    chain.send(signals.functions.setMarkets(wheel.address), sender=gov)
+    if s.get("book_markets", True):
+        chain.send(signals.functions.setMarkets(wheel.address), sender=gov)
     venue = chain.deploy("BasketVenueFacet", signals.address)
     # Both quote routes inform the pair observer. The policy's reference is each
     # constituent's declared price, never a live one.
