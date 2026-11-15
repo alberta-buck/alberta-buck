@@ -4241,6 +4241,37 @@ Python server world; the parity harness passes 30 days of both worlds.
   the savings world in the tab, serve it statically (Pages, like the wallet sandbox) and retire the
   server. Not to run pyrevm-backed hosted worlds for now.
 
+*** The savings world in the tab: the port, concretely (2026-11-15)
+
+What the hosted world is: =economy.toml= plus a =ShockAgent= (=make sim-savings-serve=). What the
+page needs of its world, through =SimLink= (=core/js/sandbox/src/savings/link.js=): =connect=,
+=close=, =op(msg)= (pause, resume, step, pace, shock, reset, chain, intervene), =call= and =batch=
+(JSON-RPC, with =sim_info=, =sim_status=, =sim_enroll=), and =onFrame= with the lite frame's fields
+that =model.row= reads (=refUsd=, =spotUsdc=, =spotBuck=, =buck_usd=, =basketVal=, =buckK=,
+=supply=, the savings block =sv=, =eq_w= / =eq_lean= / =eq_signal_raw=, the wheel's and desk's
+counters, =households= and =household_positions=, =pace=, =paused=). Visitors need a faithful
+economy, not Python's exact one: exact parity is the harness's (S2, S3), after.
+
+1. /The world/ (=core/js/src/scenarios/savings-world.js=): =buildEquilibriumWorld= (the machine
+   basket, its pools, the wheel, the price book) with =economy.toml='s five tokens, weights, day-0
+   prices and $10M depth (gap 4), the price paths from the experiment (gap 5: Python writes the
+   resolved series to JSON at build time, =PinWhale= reads them), =HouseholdPopulationAgent= with the
+   experiment's population settings, =ParityArb=, the keepers, and a shock (one constituent bought
+   or sold over some days, as the =ShockAgent=).
+2. /The frame/ (=savingsFrame(world, day)=): the fields above from the world's reads, in the
+   snapshot's units; =model.row= unchanged, so the page draws the same charts.
+3. /=LocalLink=/ (=core/js/sandbox/src/savings/local-link.js=): =SimLink='s surface over a Web
+   Worker that hosts webevm and the world: days run between ops, frames are posted per day (kept
+   for a reload's replay), JSON-RPC goes to the in-tab node (signed raw transactions and reads; the
+   visitor's wallet is an ordinary webevm account), =sim_enroll= registers the visitor with the
+   world's issuer and approves the basket, =sim_info= / =sim_status= answer from the world.
+4. /The page picks its link/: =sim-server.json='s =server= (a server's URL) uses =SimLink=; none
+   (the static page) uses =LocalLink=. =savings.browser.test.js= against both.
+5. /Speed/ (S5): seconds per simulated day in Chromium at the default population; a smaller
+   default population if a day takes more than a few seconds.
+6. /Serve statically/: the wallet sandbox's Pages project carries the savings tab; then retire the
+   datasim server and its tunnel route (the owner's step on the tunnel).
+
 *** S1. Parity inventory (2026-11-14)
 
 Python against JS, function by function, on a567669a. In short: for a household outside the
