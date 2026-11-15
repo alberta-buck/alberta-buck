@@ -4871,6 +4871,20 @@ exact-this-moment valuation.
 
 *** The owner's decisions (2026-11-15)
 
+- /A basket share is plain pro-rata ownership/ (the owner): no special demurrage on shares. On
+  entry, the incoming net BUCK (or TOKEN at its net value) against the net value of the whole
+  basket fixes the depositor's fraction; on exit, the depositor takes that fraction of what the
+  basket holds, carrying its share of the carried fees out. The code does this: a deposit is
+  measured as the rise in the basket's net balance (or TOKEN at its net LOW mark) against the
+  basket at its net HIGH marks; a cash exit pays the fraction of the net equity at the exiter's LOW
+  marks, sending enough nominal from the wallet that the payee receives that net value (the same
+  as handing over its fraction of the gross holdings, which deliver their net when they leave);
+  an in-kind exit hands over its fraction of the positions and TOKEN (its shortfall now valued
+  net, N2). Observed on the way: the basket's carry on the BUCK it borrowed (held in its positions)
+  and the Jubilee relief on its lien nearly cancel (0.44M against 0.45M at two years, 1.80M against
+  2.12M at five, =economy-5y=), so a share's exposure to demurrage is that of the BUCK its own
+  equity holds.
+
 - /Fresh deposit BUCK goes straight into the basket's pool positions/ (pairing idle TOKEN), refreshing
   the pools' carry; purchases pay from the wallet, whose BUCK came back from the pools carrying their
   fees.
@@ -4896,7 +4910,14 @@ worth"; everything else consults it.
   twice the bytes. (no behaviour change): =CarryRatio=; the five interface
   copies to =IBuckCashView=; every hand conversion through the library; sizes measured; forge
   unchanged.
-- [ ] /N2. The venue as the boundary/: net prices and marks in net mode; the re-netting deleted;
+- [X] /N2. The venue as the boundary/ (787e13f5; forge 1,550 passed). =BuckBasketUniswapV3.marks=
+  nets every field when the shell it serves keeps net accounting (it asks the shell, basket or
+  desk, by a guarded self-call: the desk also uses the base venue, so the netting lives there, not
+  only in the machine's facet); the shell's =_marks= and the desk's =_venueMarks= no longer re-net.
+  Findings 2 (in-kind exit) and 4 (=_fundCash=) fixed; finding 5 (pairing size) left for N5, which
+  changes how fresh BUCK is placed. Shell 416 bytes free (was 52), upkeep facet 762 (408), venue
+  facet 1,494. The venue's marks agree with net BVIB on pools aged a year (test).
+- [ ] (as planned) /N2. The venue as the boundary/: net prices and marks in net mode; the re-netting deleted;
   findings 2, 4 and 5 fixed; tests on pools aged a year (an in-kind exit; a pairing pass; a funded
   buy).
 - [ ] /N3. The kernel and the simulation/: the carry functions and a price reader in =buck-math= with
