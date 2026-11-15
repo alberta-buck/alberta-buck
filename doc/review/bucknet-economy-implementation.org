@@ -4893,6 +4893,16 @@ exact-this-moment valuation.
   HIGH bounds (the book against the spot); trades check their slippage against the book.
 - /No Buck change for sponsored accounts/ (question 6).
 
+- /Households value at what retiring now would fetch/ (the owner): a household computes and shows its
+  BUCK-denominated holdings at the value it would receive retiring them right now, into USDC by the
+  best route, or into net BUCK by the best route; no setting keeps the old basis, and no special
+  machinery in the household: it reads the price book. Its record carries its worth in both units
+  beside its USD counterfactual, so the years show which fee is better: the USD's hidden inflation
+  (carried toward bank-adjacent actors, away from wealth and dollar holders) or the BUCK's explicit
+  demurrage (carried toward the citizens who pledge their wealth, through the Jubilee fund).
+- /Fresh BUCK freshens the basket and its pools in real time/ (the owner): deposits bring fresh BUCK
+  in and straight into the TOKEN/BUCK pools; redemptions carry the carried fees (and the ROI) out.
+
 *** The wheel as the price book
 
 The wheel's first slot each turn already samples the market before anything trades (=SampleKind=,
@@ -4923,9 +4933,12 @@ worth"; everything else consults it.
 - [ ] /N3. The kernel and the simulation/: the carry functions and a price reader in =buck-math= with
   vectors; the simulation's helpers call them; finding 1 (a household setting keeps the old basis
   for a comparison), 6 and 9; the JS bundle rebuilt.
-- [ ] /N4. The price book/: the wheel's sample publishes each constituent's best-route net bid
-  (TOKEN to BUCK directly, or through USDC), from TWAPs, with the route and the time; K's reference,
-  parity, the pair observer, the marks' TWAP anchor and the desk read it; the simulation reads it.
+- [ ] /N4. The price book/ (next): the wheel's sample (=BasketReference=) publishes, for each
+  constituent, its best-route bid in net BUCK (directly at the pool's ratio, or through USDC at the
+  dollar pool's) and in USDC (directly, or through BUCK, which passes the Carrying router at
+  nominal), from TWAPs, with the time; and the basket's value in both. The pools come from the
+  wheel's arbitrage triangles. K's reference, parity, the pair observer, the marks' TWAP anchor and
+  the desk read it; the households read it for their valuations and decisions (finding 1, 6).
 - [ ] /N5. Fresh deposit BUCK straight into positions/; purchases pay the wallet's carried BUCK.
 - [ ] /N6. Each behaviour change measured as a comparison/ (the carry, the households' basis, the
   book, fresh BUCK into positions).
