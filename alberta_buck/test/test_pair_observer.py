@@ -141,23 +141,6 @@ def test_spectral_parameters_resolve_slow_and_fast_history_without_future():
     assert not spectrum(np.random.default_rng(1).normal(0, .001, 1280))["resolved"]
 
 
-def test_longer_run_preserves_noise_history_and_existing_path_prefix():
-    from alberta_buck.sim.pair_observer_lab import inputs
-    short = inputs("three-phase", 12, 42, .008, warmup=64)
-    long = inputs("three-phase", 20, 42, .008, warmup=64)
-    np.testing.assert_array_equal(short["observed"], long["observed"][:len(short["t"])])
-
-
-def test_full_numeraire_only_run_has_no_relative_motion_or_allocation_requests():
-    import json
-    from alberta_buck.sim.pair_observer_lab import evaluate_run
-    r = evaluate_run("numeraire-only", 50, 42, 0)
-    json.dumps(r, allow_nan=False)  # all telemetry is portable JSON
-    assert all(not row["candidates"] and not row["cycle_candidates"] for row in r["records"])
-    assert max(abs(p["velocity"]) for row in r["records"] for p in row["fused"]["pairs"]) < 1e-12
-    assert all(not p["resolved"] for p in r["spectra"]["pairs"])
-
-
 @pytest.mark.parametrize("prices", [{"BUCK": [1, 2]}, {"BUCK": [1, 0, 2]}, {"BUCK": [1, float('nan'), 2]}])
 def test_malformed_observation_rejected_before_state_mutation(prices):
     o = PairObserver([1]*3)

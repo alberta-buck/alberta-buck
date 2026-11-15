@@ -1,5 +1,4 @@
-# The control lab's question in the standard system (alberta_buck/sim/control_lab, retired by this
-# comparison; doc/review/bucknet-economy-implementation.org, "The control lab in the standard
+# The control lab's question in the standard system (the lab was retired by this comparison, 2026-11-15; doc/review/bucknet-economy-implementation.org, "The control lab in the standard
 # system"): how does each layer of the economy respond to a price cycle and a shock, every other
 # condition the same? The lab's ladder switched actors on one at a time; here the cast is one axis,
 # so any two casts on the same prices, shock and seed differ only by the actors added.

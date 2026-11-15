@@ -697,7 +697,7 @@ quarter of it, and the arbitrage lifts that to about two thirds.
 :CUSTOM_ID: evidence-lab
 :END:
 
-The lab (=alberta_buck/sim/control_lab/=) runs the real contracts for 120 days on three TOKENs
+The lab (the control lab, retired 2026-11-15 for =alberta_buck/sim/comparisons/=) ran the real contracts for 120 days on three TOKENs
 with a basket that starts at one million BUCKs.  The wheel turns four times a day.  Every gain is
 measured against the same basket doing no rebalancing, valued at outside prices.  Its price
 shapes are made up, and its cycles are far faster than real commodities, so read it for which

@@ -44,7 +44,7 @@ not identify which accounting produced a result. The
 | Both economy bootstraps | Do the existing Python and JS builders construct the canonical graph, issue actual pool money and handle the insurer premium? | =economy-bootstrap-test= | JS check plus Python machine/desk and two retained component setups; no five-year loop |
 | Economy accounting/report integration | Does the existing loop record actual cash, principal and open investor marks and finish its report? | =economy-accounting-test= | Both bootstraps, exact Python/JS marks and a three-day bootstrap-only JSON/PDF check; no household/five-year policy claim |
 | Fund return comparison | Can Jubilee reach its 50-year target in a closed BUCK economy? | =demurrage-returns= | No-return and explicitly funded 2% return tables |
-| Control lab | Which feedback component causes a response or instability? | =control-lab-plan/interactive/verify= | Cached traces and an offline interactive page |
+| Comparisons | What does one setting change, every other condition the same? | =compare COMPARE=<spec>= | Run records, a report, and the dashboard's Compare tab |
 | Sandboxes | Can a person operate a wallet, credit line and savings account? | See [[file:README-sandboxes.org][sandboxes]] | Interactive state and exported data |
 
 Keep these distinct checks. A five-year parity average cannot detect a broken wallet workflow;
@@ -741,16 +741,9 @@ See the [[file:doc/review/household-release-readiness.org][review]] for the evid
 
 * Diagnostics and deliberate retirement
 
-#+begin_src sh
-make nix-venv-control-lab-plan
-make nix-venv-control-lab-interactive CONTROL_LAB_JOBS=4
-make nix-venv-control-lab-verify
-make nix-venv-control-lab-interactive-render
-#+end_src
-
-The control lab preserves component isolation, guards, response timing and phase effects that
-an economic grid averages away. Its generated page is under =doc/control-lab/interactive/=.
-The single-run vector viewer remains useful for inspecting individual accounts and trades;
+The control lab, which isolated each component's response, was retired on 2026-11-15: its
+paired question (what each layer of the economy adds) runs as =comparisons/shocks.toml= (see
+"Comparisons"), read in the dashboard's Compare tab. The single-run vector viewer remains useful for inspecting individual accounts and trades;
 PDFs are the portable campaign record. Avoid running all diagnostic tuning sweeps routinely.
 
 The agreed simplification is coverage-based:

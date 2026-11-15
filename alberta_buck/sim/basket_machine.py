@@ -15,7 +15,7 @@ import os
 from alberta_buck.sim.chain import load_artifact
 
 LOG_TICK = math.log(1.0001)
-# The pair observer's timing (seconds) and rate floor, as the control lab runs them (doc/control-lab.toml).
+# The pair observer's timing (seconds) and rate floor, as the control lab (retired 2026-11-15) ran them.
 OBSERVER = (43200, 86400, 86400, 172800, round(.0002 / LOG_TICK / 86400 * 1e18))
 # The machine's own settings, at the control lab's values. An experiment's [machine] table overrides
 # them world by world; the environment fills in for a scenario that carries no experiment.

@@ -2173,8 +2173,8 @@ The BUCK_K and BuckBasket test suites cover:
 The Python simulation harness in =alberta_buck/sim/= runs the same contracts on an in-process EVM,
 or an anvil instance, with a cast of agents -- depositors, savers, households refinancing
 mortgages into BUCK, arbitrageurs, the wheel's callers -- on historical commodity prices (see the
-=make sim*= targets).  =alberta_buck/sim/control_lab/= is the laboratory the basket's rules were
-measured in.  What they show is in [[file:alberta-buck-ethereum-wheel.org::#evidence][The BasketWheel]].
+=make sim*= targets).  The basket's rules were measured in a control lab (since retired: its paired
+comparisons now run as =alberta_buck/sim/comparisons/=).  What they show is in [[file:alberta-buck-ethereum-wheel.org::#evidence][The BasketWheel]].
 
 Outstanding work tracked in companion memos:
 

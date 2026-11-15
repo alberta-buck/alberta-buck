@@ -4655,9 +4655,12 @@ identical in every parameter but the one toggled -- a general, understandable pa
   lifecycle mix as settings) x prices (cycle, cycle with a walk, history) x shock (none; LABR 30%
   dearer days 45 to 55) x seeds a, b; 120 days, 48 runs. Each cast smoke-tested for 3 days. Running
   on the Mac (datasim's memory is held by the five-year suite: 53 of 94 GB at day ~900).
-- [ ] /C5. Retire the lab/ when the shocks comparison reads as the lab's did: remove
-  =alberta_buck/sim/control_lab/=, =doc/control-lab*.toml=, its targets and its tests (strict
-  expected failures since the triage).
+- [X] /C5. Retire the lab/ (owner, 2026-11-15: its comparative simulations now run in the
+  dashboard's Compare tab; delete it). Removed =alberta_buck/sim/control_lab/= (both halves),
+  =pair_observer_lab.py= and its renderer, =doc/control-lab*.toml=, the lab's make targets (kept:
+  =basket-machine-results-html=, =pair-observer-test=), its tests and browser scripts, the strict
+  expected failures (=unported.py=). The pair observer's Python model and its 14 tests stay. The
+  evidence scripts in =doc/review= that imported the lab are left as records; they no longer run.
 
 *** C3, read (2026-11-15): the shocks comparison reads as the lab's ladder did
 
@@ -5317,8 +5320,7 @@ into the pools; each against the commit before, on =economy= and =economy-lifecy
 - *Running on datasim*: the five-year suite on the net-BUCK contracts in =~/src/alberta-buck-net=
   (3dee6d85; =build/net-suite.sh=, logs and markers in =build/logs=), against the quoted-BVIB baseline
   in =~/src/alberta-buck-lifecycle= (digested: "L5, the baseline"; its econ-F still running).
-- *Owner's calls*: C5's scope (move the lab's EVM-free half to =alberta_buck/sim/research/=, delete
-  the chain-driven half); N5 and the marks' anchor as above; the shadow controller (its position
+- *Owner's calls*: N5 and the marks' anchor as above; (C5 done: the lab deleted, owner's word); the shadow controller (its position
   integrator does not leak).
 - *Next (owner)*: after net quoting, cast the persistent BUCK demand: every agent's short-term BUCK
   balances, BUCK payroll. Do not tune K against its slide meanwhile.

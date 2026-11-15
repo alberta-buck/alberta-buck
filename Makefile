@@ -60,7 +60,6 @@ help:
 	  '  make nix-venv-economy-report CAMPAIGN=my-run  # saved JSON -> PDFs and index' \
 	  '  make nix-venv-sim-report SIM_REPORT_VECTORS="build/sim/run.json"  # standalone PDFs' \
 	  '  make nix-venv-economy-test          # model, shared policy and runner regressions' \
-	  '  make nix-venv-control-lab-plan      # diagnostic stages; separate from economic acceptance' \
 	  'Interactive views (README-sandboxes.org):' \
 	  '  make nix-sandbox SANDBOX_PORT=8980  # browser EVM, no Python economy' \
 	  '  make nix-venv-sim-savings SIM_SAVINGS_PORT=8981  # server/page; household decisions still gated' \
@@ -453,105 +452,15 @@ doc-privacy:
 
 docs: doc-proofs doc-receipt doc-paper doc-flow doc-identity-example doc-privacy
 
-# The staged control lab: cached pyrevm datasets, then EVM-free rendering.
-# These also work through nix-venv- (for example make nix-venv-control-lab-interactive).
-# Keep generation and rendering sequential even when make runs with -j.
-CONTROL_LAB_PYTHON	?= python
-CONTROL_LAB_EMACS	?= emacs
-CONTROL_LAB_CONFIG	?= doc/control-lab.toml
-CONTROL_LAB_JOBS	?= 6
-CONTROL_LAB_STAGES	?=
-CONTROL_LAB_FORCE	?=
-CONTROL_LAB_HTML_EVAL	= (progn (require (quote ox-html)) \
-			  (setq org-export-use-babel nil org-html-htmlize-output-type nil \
-			        org-html-link-org-files-as-html nil) \
-			  (find-file "doc/BASKET-MACHINE-RESULTS.org") (org-html-export-to-html))
+# The basket machine's results document as HTML.
+.PHONY: basket-machine-results-html
+basket-machine-results-html:
+	emacs --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil) (find-file "doc/BASKET-MACHINE-RESULTS.org") (org-html-export-to-html))'
 
-# The results document as HTML.
-.PHONY: control-lab-html
-control-lab-html:
-	$(CONTROL_LAB_EMACS) --batch -Q --eval '$(CONTROL_LAB_HTML_EVAL)'
-
-# Interactive JavaScript presentation and its full selector campaign.
-# Raw EVM JSON and offline plot payloads live together in CONTROL_LAB_CAMPAIGN_OUT.
-CONTROL_LAB_GRID		?= doc/control-lab-campaign.toml
-CONTROL_LAB_CAMPAIGN_OUT	?= doc/control-lab/interactive
-CONTROL_LAB_CAMPAIGN_ARGS = --config "$(CONTROL_LAB_CONFIG)" --grid "$(CONTROL_LAB_GRID)" \
-			   --out "$(CONTROL_LAB_CAMPAIGN_OUT)" --jobs $(CONTROL_LAB_JOBS) \
-			   $(if $(CONTROL_LAB_STAGES),--stages "$(CONTROL_LAB_STAGES)")
-
-.PHONY: control-lab-plan control-lab-interactive control-lab-interactive-render control-lab-verify control-lab-serve
-control-lab-plan:
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.campaign $(CONTROL_LAB_CAMPAIGN_ARGS) --plan
-
-control-lab-interactive: stage-uniswap
-	forge build $(FORGE_OPTS) -q
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.campaign $(CONTROL_LAB_CAMPAIGN_ARGS) $(CONTROL_LAB_FORCE)
-
-control-lab-interactive-render:
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.campaign --out "$(CONTROL_LAB_CAMPAIGN_OUT)" --render-only
-
-control-lab-verify:
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.audit --out "$(CONTROL_LAB_CAMPAIGN_OUT)"
-
-# Opening interactive/index.html directly also works; serving is optional.
-control-lab-serve:
-	$(CONTROL_LAB_PYTHON) -m http.server 8000 --bind 127.0.0.1 --directory doc
-
-# Fast Python sensor comparison, separate from EVM campaign fingerprints.
-PAIR_OBSERVER_OUT ?= doc/control-lab/pair-observer
-PAIR_OBSERVER_ARGS ?=
-.PHONY: pair-observer-lab pair-observer-data pair-observer-render pair-observer-test
-pair-observer-data:
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.pair_observer_lab --out "$(PAIR_OBSERVER_OUT)" --jobs $(CONTROL_LAB_JOBS) $(PAIR_OBSERVER_ARGS) --no-render
-
-pair-observer-render:
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.pair_observer_lab --out "$(PAIR_OBSERVER_OUT)" --render-only
-
-pair-observer-lab: pair-observer-data
-	$(MAKE) pair-observer-render
-
+# The pair observer's Python model (alberta_buck/sim/pair_observer.py).
+.PHONY: pair-observer-test
 pair-observer-test:
-	$(CONTROL_LAB_PYTHON) -m pytest alberta_buck/test/test_pair_observer.py -q
-
-# Four matched basket/arb arms, with render-only shadow noise estimators.
-CONTROL_LAB_BASKET_RESEARCH_OUT ?= doc/control-lab/basket-research/current
-CONTROL_LAB_BASKET_RESEARCH_PROFILES ?= three-phase,noise20,noise80,flat-noise80,historical-bridge,commodities
-CONTROL_LAB_BASKET_RESEARCH_STAGE ?= basket
-.PHONY: control-lab-basket-research control-lab-basket-research-render control-lab-basket-research-test
-control-lab-basket-research: stage-uniswap
-	forge build $(FORGE_OPTS) -q
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_research --config "$(CONTROL_LAB_CONFIG)" --out "$(CONTROL_LAB_BASKET_RESEARCH_OUT)" --profiles "$(CONTROL_LAB_BASKET_RESEARCH_PROFILES)" --stage "$(CONTROL_LAB_BASKET_RESEARCH_STAGE)" --jobs $(CONTROL_LAB_JOBS)
-	$(MAKE) control-lab-basket-research-render
-
-control-lab-basket-research-render:
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_research --out "$(CONTROL_LAB_BASKET_RESEARCH_OUT)" --render-only
-	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil) (find-file "$(abspath $(CONTROL_LAB_BASKET_RESEARCH_OUT))/results.org") (org-html-export-to-html))'
-
-control-lab-basket-research-test:
-	forge test $(FORGE_OPTS) --match-contract 'BasketArbIncomeTest|BasketUpkeepFacetTest'
-	$(CONTROL_LAB_PYTHON) -m pytest alberta_buck/test/test_basket_research.py alberta_buck/test/test_control_lab_campaign.py -q
-
-# How much of an open gap the pair policy releases, and how soon: one
-# maintenance control and several PairRebalancePolicy sizings per profile.
-CONTROL_LAB_BASKET_SIZING_OUT ?= doc/control-lab/basket-sizing/current
-CONTROL_LAB_BASKET_SIZING_PROFILES ?= three-phase,noise20,noise80,flat-noise80,historical-bridge,two-step,commodities
-CONTROL_LAB_BASKET_SIZING_SIZINGS ?= maintenance,first,lab,tilt-0,tilt-quarter,tilt-1,half-12h,half-2d,patience-1,patience-4,band-2pt,band-2pt-tilt-0,parity-0,parity-cheap
-CONTROL_LAB_BASKET_SIZING_STAGE ?= basket
-CONTROL_LAB_BASKET_SIZING_TICKS ?=
-.PHONY: control-lab-basket-sizing control-lab-basket-sizing-render control-lab-basket-sizing-test
-control-lab-basket-sizing: stage-uniswap
-	forge build $(FORGE_OPTS) -q
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_sizing --config "$(CONTROL_LAB_CONFIG)" --out "$(CONTROL_LAB_BASKET_SIZING_OUT)" --profiles "$(CONTROL_LAB_BASKET_SIZING_PROFILES)" --sizings "$(CONTROL_LAB_BASKET_SIZING_SIZINGS)" --stage "$(CONTROL_LAB_BASKET_SIZING_STAGE)" $(if $(CONTROL_LAB_BASKET_SIZING_TICKS),--ticks-per-day $(CONTROL_LAB_BASKET_SIZING_TICKS)) --jobs $(CONTROL_LAB_JOBS)
-	$(MAKE) control-lab-basket-sizing-render
-
-control-lab-basket-sizing-render:
-	$(CONTROL_LAB_PYTHON) -m alberta_buck.sim.control_lab.basket_sizing --out "$(CONTROL_LAB_BASKET_SIZING_OUT)" --render-only
-	$(CONTROL_LAB_EMACS) --batch -Q --eval '(progn (require (quote ox-html)) (setq org-export-use-babel nil org-html-htmlize-output-type nil org-html-link-org-files-as-html nil) (find-file "$(abspath $(CONTROL_LAB_BASKET_SIZING_OUT))/results.org") (org-html-export-to-html))'
-
-control-lab-basket-sizing-test:
-	forge test $(FORGE_OPTS) --match-contract 'PairRebalancePolicyTest|BasketUpkeepFacetTest'
-	$(CONTROL_LAB_PYTHON) -m pytest alberta_buck/test/test_basket_sizing.py alberta_buck/test/test_control_lab_commodities.py -q
+	python -m pytest alberta_buck/test/test_pair_observer.py -q
 
 
 # ── AB-RCPT/2 receipt golden-text renders ────────────────────────────

@@ -112,7 +112,7 @@ REVERT_SEED = 0x5AFE
 def gen_three_phase(start: float, k: int, n: int, days: int, amplitude: float = 0.12,
                     period_days: float = 30.0, walk: float = 0.0, walk_sigma: float = 0.01,
                     seed: int = 0) -> list[float]:
-    """The control lab's synthetic cycle (control_lab/model.py's feed): series k of n moves about its
+    """The control lab's synthetic cycle (its retired model's feed): series k of n moves about its
     first price as start x (1 + amplitude x sin(2 pi day / period + 2 pi k / n)), the n series evenly
     out of phase, so their sum barely moves while each one swings -- the basket's rebalancing work
     without a common trend. `walk` scales a log Brownian walk of `walk_sigma` a day on top, its steps
