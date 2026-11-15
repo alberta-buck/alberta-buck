@@ -11,6 +11,7 @@
 import { lineChart } from "./chart.js";
 import { fill, h, prefs } from "./dom.js";
 import { SimLink } from "../savings/link.js";
+import { LocalLink } from "../savings/local-link.js";
 import { MAX_DEVIATION_BP, Saver } from "../savings/wallet.js";
 import { annualized, channels, chooseIndex, compact, dateOf, deviationBp, equityWorth, newSid, prices,
          receiptWorth, row, serverBase, tokenFor, usd } from "../savings/model.js";
@@ -69,6 +70,9 @@ export function mountSavings(ctx) {
       : "Callers pay a rollup's gas: the wheel closes narrow gaps too",
     onclick: () => op(`Switching the wheel to ${name.toUpperCase()} gas`, { op: "chain", name }),
   }, name.toUpperCase()));
+  // The wheel's callers' gas profile: a server world's (a world in this tab has no gas profile).
+  const gasGroup = h("span", { class: "seg", role: "group", "aria-label": "the wheel's gas" },
+    h("span", { class: "seg-label" }, "Gas"), ...chainBtns);
   const shockUsd = h("input", { type: "number", min: "0.1", step: "0.1", value: "5", "aria-label": "shock size, $ millions",
                                 dataset: { key: "savings:shock-usd" }, class: "narrow" });
   const shockDays = h("input", { type: "number", min: "1", step: "1", value: "3", "aria-label": "shock days",
@@ -119,8 +123,7 @@ export function mountSavings(ctx) {
     noServer,
     kpis,
     h("div", { class: "row ctl" }, runBtn, resetBtn, h("span", { class: "seg-label" }, "Step"), ...stepBtns,
-      h("span", { class: "seg", role: "group", "aria-label": "the wheel's gas" },
-        h("span", { class: "seg-label" }, "Gas"), ...chainBtns)),
+      gasGroup),
     h("div", { class: "row ctl" },
       h("span", { class: "seg-label" }, "Shock"),
       h("button", { type: "button", title: "Someone buys BUCK with USDC, uncapped, over the days",
@@ -279,14 +282,24 @@ export function mountSavings(ctx) {
   const commodityGrid = h("div", { class: "chart-grid small" });
   S.commodity = [];
 
+  // Where the world runs decides the intro: a sim server's economy, or this tab's (connect()).
+  const intro = h("p", { class: "intro" });
+  const describe = (local) => fill(intro, local
+    ? ["A whole Alberta Buck economy runs in this tab, in a background worker: the BuckBasket and its work ",
+       "wheel, K, arbitrageurs pinning every TOKEN to its commodity's reference price (a random walk about ",
+       "its price), and households refinancing, saving and investing.  Watch it day by day, shock it, and ",
+       "save in it: the basket harvests the gaps between BUCK, USDC and the TOKENs for its depositors.  ",
+       "Nothing leaves your browser; a reload starts a new world.",
+       ctx.savingsOnly ? "" : "  It is a separate world from the other tabs', on a clock of its own."]
+    : ["A whole Alberta Buck economy runs on a server: five years of real commodity ",
+       "prices (or their reverting twins: the same commodities cycling, trend removed), the BuckBasket and ",
+       "its work wheel, the monetary desk and the undertakings, K, arbitrageurs pinning every TOKEN to its ",
+       "commodity, depositors and retirees.  Watch it day by day, shock it, and save in it: the basket harvests the commodities' ",
+       "cycles and the gaps between BUCK, USDC and the TOKENs for its depositors.",
+       ctx.savingsOnly ? "" : "  It is a separate world from the other tabs', which runs in your browser on a "
+         + "clock of its own."]);
   fill(panel,
-    h("p", { class: "intro" }, "A whole Alberta Buck economy runs on a server: five years of real commodity ",
-      "prices (or their reverting twins: the same commodities cycling, trend removed), the BuckBasket and ",
-      "its work wheel, the monetary desk and the undertakings, K, arbitrageurs pinning every TOKEN to its ",
-      "commodity, depositors and retirees.  Watch it day by day, shock it, and save in it: the basket harvests the commodities' ",
-      "cycles and the gaps between BUCK, USDC and the TOKENs for its depositors.",
-      ctx.savingsOnly ? "" : "  It is a separate world from the other tabs', which runs in your browser on a "
-        + "clock of its own."),
+    intro,
     ctx.savingsOnly ? h("p", { class: "hint" }, "The sandbox's other tools -- an identity issuer, wallets ",
       "and payments, insured credit, what an observer of the chain sees -- run in your browser, in a small ",
       "world of their own: ", h("a", { href: "https://sandbox.albertabuck.ca/" }, "sandbox.albertabuck.ca"), ".")
@@ -359,9 +372,15 @@ export function mountSavings(ctx) {
     commodityGrid.replaceChildren();
     S.lean = [];
     leanGrid.replaceChildren();
-    S.base = serverBase({ param: q.get("sim"), configured: ctx.simServer, saved: prefs.get("savings:server", ""),
-                          location });
-    serverIn.value = S.base;
+    // The world runs in this tab (a Web Worker on webevm) unless a server is asked for (?sim=), named
+    // under World settings, or serves this page; ?sim=local insists on the tab.
+    const saved = prefs.get("savings:server", "");
+    S.local = q.get("sim") === "local" || (!q.get("sim") && !saved && !ctx.simServer);
+    S.base = S.local ? "local" : serverBase({ param: q.get("sim"), configured: ctx.simServer, saved, location });
+    ctx.savingsLocal = S.local;
+    describe(S.local);
+    ctx.onSavingsWorld?.();
+    serverIn.value = S.local ? "" : S.base;
     S.sid = q.get("world") || prefs.get("savings:sid", "") || newSid();
     prefs.set("savings:sid", S.sid);
     S.sets = jsonPref("savings:sets", {});
@@ -375,9 +394,11 @@ export function mountSavings(ctx) {
     u.searchParams.set("tab", "savings");
     if (!ctx.sameOrigin) u.searchParams.set("sim", S.base);
     u.searchParams.set("world", S.sid);
-    worldLink.textContent = u.toString();
-    S.link = new SimLink({
-      urls: channels(S.base, S.sid, S.sets),
+    worldLink.textContent = S.local ? "this world runs in this tab: it has no address to share" : u.toString();
+    const Link = S.local ? LocalLink : SimLink;
+    S.link = new Link({
+      urls: S.local ? undefined : channels(S.base, S.sid, S.sets),
+      sets: S.sets,
       onState: (state, detail) => {
         if (state === "building") S.rows = [];          // the replay redraws from day 0
         stateChip.textContent = STATES[state] ?? state;
@@ -594,7 +615,8 @@ export function mountSavings(ctx) {
         "Whether BUCK has stayed cheap or dear beyond the desk's band, and for how many days"),
       stat("To depositors", dollars(last.credited), "The work wheel's harvest, credited to the depositors"),
       stat("Pace", last.pace > 0 ? `${(1 / last.pace).toFixed(1)} s/day` : "–"),
-      stat("Prices", !S.info ? "–" : String(S.info.prices?.[0] ?? "").startsWith("rev-") ? "reverting" : "history",
+      stat("Prices", !S.info ? "–" : S.info.local ? "walk"
+        : String(S.info.prices?.[0] ?? "").startsWith("rev-") ? "reverting" : "history",
         "Set when the world is made (World settings)"),
     ] : [h("span", { class: "hint" }, S.link ? STATES[S.link.state] : "")]);
     drawControls();
@@ -637,13 +659,15 @@ export function mountSavings(ctx) {
     resetBtn.disabled = !(live || S.link?.state === "done");
     runBtn.textContent = st?.paused ? "Run" : "Pause";
     for (const b of stepBtns) b.disabled = !live;
+    gasGroup.style.display = S.local ? "none" : "";
     for (const b of chainBtns) {
       b.setAttribute("aria-pressed", String(b.dataset.chain === (st?.chain ?? "l2")));
       b.disabled = !live;
     }
     if (st && live) {
       const bits = [st.paused ? `paused at day ${st.day}` : st.step_left !== null && st.step_left !== undefined
-        ? `stepping (${st.step_left + 1} to go)` : "running", `wheel on ${(st.chain ?? "l2").toUpperCase()} gas`];
+        ? `stepping (${st.step_left + 1} to go)` : "running",
+        ...(S.local ? ["in this tab"] : [`wheel on ${(st.chain ?? "l2").toUpperCase()} gas`])];
       const last = S.rows[S.rows.length - 1];
       if (last?.shockActive) bits.push(`${last.shockActive} shock${last.shockActive > 1 ? "s" : ""} under way`);
       stateChip.textContent = bits.join(" · ");

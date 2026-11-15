@@ -48,7 +48,10 @@ export async function webevmSession({ accountIndex = 0, journal = null, engine =
   const node = await createNode({ chainId: WEBEVM_CHAIN_ID, miningConfig: { type: "auto" }, initialBalances,
                                   ...(eng ? { engine: eng } : {}), ...nodeOptions });
   await node.request({ method: "anvil_setBlockTimestampInterval", params: [1] });
-  const client = createWalletClient({ transport: custom(node) }).extend(publicActions);
+  // node.request is looked up at each call, so a layer may wrap it later (savings-world.js acts
+  // as a visitor it enrolls by routing that visitor's sends to evm_sendRawTransactionAs).
+  const client = createWalletClient({ transport: custom({ request: (args) => node.request(args) }) })
+    .extend(publicActions);
   const session = new Session(client, { account: devAccount(accountIndex), journal });
   session.webevm = node;
   return session;

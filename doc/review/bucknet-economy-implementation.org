@@ -4276,6 +4276,48 @@ economy, not Python's exact one: exact parity is the harness's (S2, S3), after.
 6. /Serve statically/: the wallet sandbox's Pages project carries the savings tab; then retire the
    datasim server and its tunnel route (the owner's step on the tunnel).
 
+**** Built (2026-11-15): steps 1 to 5
+
+- /The world/ (=core/js/src/scenarios/savings-world.js=, =SavingsWorld=): eqworld's machine with the
+  whales on the reference walks, =ParityArb=, the wheel and PID keepers, a =ShockAgent= (buys or
+  sells BUCK on the dollar pool over some days; a sale draws on a pledged line) and
+  =HouseholdPopulationAgent= with =economy.toml='s settings scaled to a tab (2 debtors, 2 savers, 6
+  investors opening; arrivals 2, 2 and 6 a year); the page's own settings
+  (=agents.HouseholdPopulationAgent.<key>=, =scenario.seed=) override them. =step()= runs a day and
+  returns its frame; =rpc()= answers the page's JSON-RPC (=sim_info=, =sim_enroll=, every chain
+  method from the node).
+- /The frame/: the server's lite fields the page reads (=refUsd=, =spotUsdc=, =spotBuck=,
+  =buck_usd=, =basketVal=, =buckK=, =supply=, the equity savings block =sv=, =eq_w= / =eq_lean= (the
+  facet's targets, =basket_machine.targets_bp= ported), =eq_signal_raw=, the shock's counters, the
+  households' aggregate from each member's latest ledger row and their open positions). =model.row=
+  is unchanged.
+- /Enrolment as the server does it/: the world acts as the visitor's address (registers its
+  identity with the world's issuer, approves the basket) through webevm's trusted-sender method
+  (=evm_sendRawTransactionAs=, the node created with =senderMode: "trusted"=): a viem account signs
+  with a throwaway key and the node's request routes that raw transaction as the visitor. This
+  needed one change in =src/webevm.js=: the client's transport looks up =node.request= at each call,
+  so a layer may wrap it. Gas is free (base fee, gas price and priority fee 0), as on pyrevm: the
+  page's wallet signs legacy transactions at gas price 0.
+- /The worker/ (=sandbox/src/savings/world-worker.js=, bundled to =sandbox/dist/savings-world.js=):
+  webevm + revm and the world; control ops and JSON-RPC batches served only between days (the
+  server's chain lock); every frame kept; =sim_status= from its own state. =LocalLink=
+  (=sandbox/src/savings/local-link.js=) is =SimLink='s surface over it.
+- /The page/: the world runs in the tab unless a server serves the page, is asked for (=?sim=) or
+  is named under World settings (=?sim=local= insists on the tab). The static sandbox now keeps its
+  Savings tab; its world builds only when the tab opens. The badge, the intro and the controls say
+  which world it is (no gas profile in a tab).
+- /Speed/ (S5): boot 0.5 s and 0.3-0.4 s a day with ten households in Node; the whole browser test
+  (build, days, save, pause, step, shock, redeem) runs in 7 s in Chromium.
+- /Tests/: =savings-world.webevm.test.js= (Node: days, the frame through =model.row=, the page's own
+  =Saver= enrolling and depositing through =rpc()=); =savings-local.browser.test.js= (Chromium, the
+  static page: watch, save $10,000, pause, step one day, shock, redeem in BUCK, no console errors);
+  =sandbox.browser.test.js= now expects the Savings tab, unbooted. The server-backed
+  =savings.browser.test.js= runs as before.
+- /Not yet/: a reload starts a new world (a webevm snapshot in IndexedDB would keep it); the
+  economy's real commodity paths (the walk stands in: plan gap 5); the desk and the wheel's
+  counters (=wh_sol_*=, =dk_q*=) are absent, so those charts are flat; step 6, the static savings
+  site and the server's retirement.
+
 *** S1. Parity inventory (2026-11-14)
 
 Python against JS, function by function, on a567669a. In short: for a household outside the

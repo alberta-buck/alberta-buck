@@ -1980,11 +1980,19 @@ $(SANDBOX_ADAPTER):
 sandbox-artifacts:	sandbox-deps sim-build $(SANDBOX_ADAPTER)
 	@test -f out/UniswapV3Factory.sol/UniswapV3Factory.json || node scripts/stage-uniswap.mjs
 	node core/js/bin/bundle-artifacts.mjs sandbox
+	node core/js/bin/bundle-artifacts.mjs
 
 sandbox-build:	sandbox-artifacts core-build-wasm-web
 	cd core/js && npx esbuild sandbox/src/main.js --bundle --format=esm --minify \
 		--platform=browser --outfile=sandbox/dist/app.js \
 		--metafile=artifacts/sandbox-meta.json \
+		--alias:buffer=buffer \
+		--alias:fs=./demo/src/shims/fs-empty.js \
+		--log-limit=8
+	@# The Savings tab's world, in a Web Worker beside the page (sandbox/src/savings/world-worker.js).
+	cd core/js && npx esbuild sandbox/src/savings/world-worker.js --bundle --format=esm --minify \
+		--platform=browser --outfile=sandbox/dist/savings-world.js \
+		--metafile=artifacts/savings-world-meta.json \
 		--alias:buffer=buffer \
 		--alias:fs=./demo/src/shims/fs-empty.js \
 		--log-limit=8

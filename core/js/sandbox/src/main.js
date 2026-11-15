@@ -62,9 +62,11 @@ function selectTab(name) {
   // and the Savings tab's, on a server, on its own clock.  The badge says which.
   document.body.dataset.mode = name === "savings" ? "savings" : "world";
   const kind = $("world-kind");
-  kind.textContent = name === "savings" ? "SERVER WORLD" : "THIS TAB'S WORLD";
+  const local = ctx.savingsLocal ?? !(ctx.simServer || new URLSearchParams(location.search).get("sim"));
+  kind.textContent = name !== "savings" ? "THIS TAB'S WORLD" : local ? "SAVINGS WORLD, THIS TAB" : "SERVER WORLD";
   kind.title = name === "savings"
-    ? (ctx.savingsOnly
+    ? (local ? "The Savings tab runs a separate, larger world in this tab (a background worker), on its own clock."
+      : ctx.savingsOnly
       ? "A whole economy run on a sim server, on its own clock."
       : "The Savings tab watches a separate, much larger world run on a sim server, on its own clock.")
     : "Issuer, Wallets, Credit and Observer share one small world in this browser tab; its clock moves "
@@ -118,9 +120,9 @@ async function simServer() {
 async function boot() {
   ctx.simServer = await simServer();
   ctx.sameOrigin = ctx.simServer === "same-origin";
-  // No sim server configured (the static site, sandbox.albertabuck.ca) and
-  // none asked for (?sim=): the sandbox is the browser-only one, no Savings tab.
-  if (ctx.simServer || new URLSearchParams(location.search).get("sim")) {
+  // The Savings tab's world runs on a sim server when one serves the page or is asked for (?sim=),
+  // else in this tab (savings/local-link.js: a Web Worker on webevm), built when the tab opens.
+  {
     if (ctx.sameOrigin) {
       // The savings sandbox: the Savings tab alone.
       ctx.savingsOnly = true;
@@ -132,9 +134,6 @@ async function boot() {
       document.querySelector(".tabs .tab-sep").remove();
     }
     mountSavings(ctx);
-  } else {
-    TABS.splice(TABS.indexOf("savings"), 1);
-    for (const el of [$("tab-savings"), $("panel-savings"), document.querySelector(".tabs .tab-sep")]) el.remove();
   }
   mountTabs();
 }
