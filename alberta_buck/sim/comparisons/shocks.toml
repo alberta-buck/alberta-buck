@@ -1,0 +1,47 @@
+# The control lab's question in the standard system (alberta_buck/sim/control_lab, retired by this
+# comparison; doc/review/bucknet-economy-implementation.org, "The control lab in the standard
+# system"): how does each layer of the economy respond to a price cycle and a shock, every other
+# condition the same? The lab's ladder switched actors on one at a time; here the cast is one axis,
+# so any two casts on the same prices, shock and seed differ only by the actors added.
+#
+#   make nix-venv-compare COMPARE=shocks COMPARE_JOBS=16        (datasim: a few hours)
+#   make nix-venv-dashboard, then the Compare tab: vary cast, hold the rest
+question = "How does each layer of the economy respond to a price cycle and a shock?"
+experiment = "economy"
+days = 120
+
+[[axis]]
+name = "cast"
+note = "who acts: the market's plumbing (whale, arbitrageurs, LPs, keepers, desk) is in every cast"
+[axis.values]
+# The reference: the basket's upkeep with K held at k0 (the lab's stage 05).
+basket = { "scenario.agents.HouseholdPopulationAgent" = 0, "deploy.kp" = 0.0, "deploy.ki" = 0.0 }
+# K moves (the lab's stage 06).
+k = { "scenario.agents.HouseholdPopulationAgent" = 0 }
+# The households replace the lab's abstract buyer and issuer (its stages 08 to 10): savers and
+# investors demand BUCKs, debtors supply them, arriving with the price gap.
+households = {}
+# The household lifecycle mix (economy-lifecycle.toml's population, as settings).
+lifecycle = { "agents.HouseholdPopulationAgent.lifecycle" = true, "agents.HouseholdPopulationAgent.initial_debtors" = 4, "agents.HouseholdPopulationAgent.initial_savers" = 4, "agents.HouseholdPopulationAgent.initial_investors" = 12, "agents.HouseholdPopulationAgent.initial_retirees" = 6, "agents.HouseholdPopulationAgent.debtor_rate" = 0.0, "agents.HouseholdPopulationAgent.young_rate" = 0.05, "agents.HouseholdPopulationAgent.saver_rate" = 2.0, "agents.HouseholdPopulationAgent.investor_rate" = 10.0, "agents.HouseholdPopulationAgent.mortgage_supply_share" = 0.005, "agents.HouseholdPopulationAgent.mortgage_floor_k" = 10.0, "agents.HouseholdPopulationAgent.usd_fund_share" = 0.5, "agents.HouseholdPopulationAgent.usd_fund_return" = 0.08, "agents.HouseholdPopulationAgent.premium_fixed_usd" = 100.0 }
+
+[[axis]]
+name = "prices"
+note = "the constituents' dollar prices: the lab's three-phase cycle (12% over 30 days, out of phase), with a walk on top, or history"
+[axis.values]
+cycle = { "scenario.prices" = "three-phase" }
+cycle-walk = { "scenario.prices" = "three-phase", "scenario.walk" = 1.0 }
+history = { "scenario.prices" = "history" }
+
+[[axis]]
+name = "shock"
+note = "the lab's shock profile: one constituent 30% dearer for ten days from day 45"
+[axis.values]
+none = {}
+step = { "interventions" = [{ day = 45, action = "price_shock", token = "LABR", mult = 1.3, from_day = 45, until_day = 55 }] }
+
+[[axis]]
+name = "seed"
+note = "the world's seed: arrivals, decisions and the walk's steps"
+[axis.values]
+a = { "scenario.seed" = 41404 }
+b = { "scenario.seed" = 45517 }

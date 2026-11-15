@@ -109,6 +109,61 @@ def gen_revert(start: float, sigma: float, seed: int, days: int,
 REVERT_SEED = 0x5AFE
 
 
+def gen_three_phase(start: float, k: int, n: int, days: int, amplitude: float = 0.12,
+                    period_days: float = 30.0, walk: float = 0.0, walk_sigma: float = 0.01,
+                    seed: int = 0) -> list[float]:
+    """The control lab's synthetic cycle (control_lab/model.py's feed): series k of n moves about its
+    first price as start x (1 + amplitude x sin(2 pi day / period + 2 pi k / n)), the n series evenly
+    out of phase, so their sum barely moves while each one swings -- the basket's rebalancing work
+    without a common trend. `walk` scales a log Brownian walk of `walk_sigma` a day on top, its steps
+    keyed by (seed, k) alone: runs that differ only in `walk` see the same steps, scaled."""
+    rng = random.Random(f"three-phase-walk-{seed}-{k}")
+    w, out = 0.0, []
+    for day in range(days):
+        if day:
+            w += rng.gauss(0.0, walk_sigma)
+        out.append(start * (1 + amplitude * math.sin(2 * math.pi * (day / period_days + k / n)))
+                   * math.exp(walk * w))
+    return out
+
+
+def three_phase_like(files: list[str], amplitude: float = 0.12, period_days: float = 30.0,
+                     walk: float = 0.0, walk_sigma: float = 0.01, seed: int = 0,
+                     out_dir: Path = OUT_DIR) -> list[str]:
+    """A price window's three-phase twin (scenario.prices = "three-phase"): each series replaced by
+    gen_three_phase from its own first price, for as many days. Written beside the originals as
+    tp-<settings hash>-<name> on first use, under a lock and atomically, like revert_like."""
+    import fcntl
+    import hashlib
+    import os
+
+    key = hashlib.sha256(repr((amplitude, period_days, walk, walk_sigma, seed)).encode()).hexdigest()[:10]
+    want = [f"tp-{key}-" + (f[len("hist-"):] if f.startswith("hist-") else f) for f in files]
+    lock = out_dir / (want[0] + ".lock")
+    with lock.open("a+") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            if all((out_dir / f).exists() for f in want):
+                return want
+            for k, (src, dst) in enumerate(zip(files, want)):
+                with (out_dir / src).open() as f:
+                    rows = [int(r[1]) for r in list(csv.reader(f))[1:]]
+                series = gen_three_phase(float(rows[0]), k, len(files), len(rows), amplitude, period_days,
+                                         walk, walk_sigma, seed)
+                tmp = out_dir / f"{dst}.tmp-{os.getpid()}"
+                with tmp.open("w", newline="") as f:
+                    w = csv.writer(f)
+                    w.writerow(["day", "close_usd_micro"])
+                    for day, px in enumerate(series):
+                        w.writerow([day, round(px)])
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, out_dir / dst)
+            return want
+        finally:
+            fcntl.flock(lk, fcntl.LOCK_UN)
+
+
 def revert_like(files: list[str], out_dir: Path = OUT_DIR) -> list[str]:
     """The reverting twin of a price window (the savings demonstration's
     "Reverting" toggle, doc/CONVERGENCE.org 7a): for each series in `files`,

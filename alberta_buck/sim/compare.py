@@ -414,17 +414,20 @@ def report(args) -> int:
               f"{_fmt(f.get('bvib_end')):>9} {_fmt(f.get('bvib_gap_mean')):>9} {_fmt(f.get('buck_usd_end')):>9} "
               f"{_fmt(None if f.get('supply_end') is None else f['supply_end'] / 1e6, 2):>9}")
     for axis in body["axes"]:
-        rows                    = [p for p in body["summary"]["pairs"] if p["axis"] == axis["name"]]
+        every                   = [p for p in body["summary"]["pairs"] if p["axis"] == axis["name"]]
+        rows                    = [p for p in every if p["diverges"]]
         if not rows:
             continue
-        print(f"\n{axis['name']}: against {axis['reference']}  {axis['note']}")
-        print(f"  {'value':14} {'held':34} {'diverges':>9} {'dK end':>10} {'dK mean':>10} {'d|BVIB-1|':>10} "
+        waiting                 = len(every) - len(rows)
+        print(f"\n{axis['name']}: against {axis['reference']}  {axis['note']}"
+              + (f"  ({waiting} pairs not yet run)" if waiting else ""))
+        print(f"  {'value':14} {'held':44} {'diverges':>9} {'dK end':>10} {'dK mean':>10} {'d|BVIB-1|':>10} "
               f"{'dBUCK/USD':>10} {'dsupply M':>10}")
         for p in rows:
             held                = ",".join(f"{k}={v}" for k, v in p["held"].items()) or "-"
             dv, d               = p["diverges"], p["delta"] or {}
             day                 = "-" if dv is None else ("never" if dv["any"] is None else f"day {dv['watched'] if dv['watched'] is not None else dv['any']}")
-            print(f"  {p['value']:14} {held[:34]:34} {day:>9} {_fmt(d.get('k_end'), 6, sign=True):>10} "
+            print(f"  {p['value']:14} {held[:44]:44} {day:>9} {_fmt(d.get('k_end'), 6, sign=True):>10} "
                   f"{_fmt(d.get('k_mean'), 6, sign=True):>10} {_fmt(d.get('bvib_gap_mean'), 6, sign=True):>10} "
                   f"{_fmt(d.get('buck_usd_end'), 6, sign=True):>10} "
                   f"{_fmt(None if d.get('supply_end') is None else d['supply_end'] / 1e6, 2, sign=True):>10}")

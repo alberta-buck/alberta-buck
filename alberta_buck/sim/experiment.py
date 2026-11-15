@@ -136,6 +136,13 @@ DEFAULTS: dict = {
                                    # [] => the builder's own six, as the
                                    # older record ran
         "agents": {},              # count overrides
+        # prices = "three-phase" (the control lab's cycle, gen_prices.gen_three_phase): each
+        # constituent swings by cycle_amplitude over cycle_period_days, evenly out of phase, with
+        # a log walk of walk x walk_daily_sigma a day on top (its steps keyed by the seed alone).
+        "cycle_amplitude": 0.12,
+        "cycle_period_days": 30.0,
+        "walk": 0.0,
+        "walk_daily_sigma": 0.01,
     },
     "deploy": {
         "k0": 0.75,                # the target K the integrator leaks back to (the owner suspects it is
@@ -356,6 +363,7 @@ def build(exp: Experiment):
     if s.get("tokens"):
         from alberta_buck.sim.scenario import keep_tokens
         keep_tokens(sc, list(s["tokens"]))
+    # prices = "three-phase": the control lab's cycle about each first price (gen_prices.three_phase_like).
     # prices = "revert": the window's reverting twin (gen_prices.revert_like)
     # -- the same commodities cycling about their first price, trend
     # removed; the savings demonstration's toggle.  Absent or "history": the
@@ -366,8 +374,15 @@ def build(exp: Experiment):
         from alberta_buck.sim.prices import Prices
         sc.csv_files = revert_like(sc.csv_files)
         sc.prices = Prices(sc.csv_files)
+    elif mode == "three-phase":
+        from alberta_buck.sim.gen_prices import three_phase_like
+        from alberta_buck.sim.prices import Prices
+        sc.csv_files = three_phase_like(
+            sc.csv_files, amplitude=float(s["cycle_amplitude"]), period_days=float(s["cycle_period_days"]),
+            walk=float(s["walk"]), walk_sigma=float(s["walk_daily_sigma"]), seed=int(s["seed"]))
+        sc.prices = Prices(sc.csv_files)
     elif mode != "history":
-        raise ValueError(f"scenario.prices must be 'history' or 'revert', not {mode!r}")
+        raise ValueError(f"scenario.prices must be 'history', 'revert' or 'three-phase', not {mode!r}")
     if s["agents"]:
         sc.agents = {**sc.agents, **{k: int(v) for k, v in s["agents"].items()}}
     if s["days"]:
