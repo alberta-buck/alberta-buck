@@ -4080,3 +4080,133 @@ the lifecycle decides which role a household plays and when it stops earning):
 The JavaScript port of the household agents follows L1 (the policy is mirrored
 now); its agent behaviour for L2 to L4 follows once the Python worlds show the
 equilibrium.
+
+** The savings sandbox on webevm: JS household parity first (design, 2026-11-14)
+
+The owner: start porting the savings sandbox to webevm; keep its connection to a
+Python + pyrevm world if that is simple (it is: below); bring the JS household to
+parity with the Python implementation first. Tevm's speed was the only reason the
+savings world lives on a server: webevm + revm runs the small JS world a year in
+half a minute (observation 66).
+
+*** Where it stands
+
+- *The savings sandbox* is a page (=core/js/sandbox/src/ui/savings.js=,
+  =sandbox/src/savings/{link,model,wallet,abi}.js=) watching a Python world
+  (=economy.toml= on pyrevm) hosted by =alberta_buck/sim/server.py=. Its link is
+  three websockets to one session: *frames* (lite frames, replayed from day 0 on
+  connect), *control* (pause, step, pace, shock, chain; interventions since R2),
+  and *JSON-RPC* (the saver's reads and signed transactions). =make
+  nix-venv-sandbox-savings-test= passes (1 of 1, 81 s) on this revision.
+- *It does not use the dashboard.* The dashboard (=core/js/dashboard=) reads run
+  records through =alberta_buck/sim/dashboard.py=; the savings page reads the
+  server's lite frames. Both descend from the same snapshot frame, so they can
+  share one shape (the run record's =frame_record=, pinned by
+  =test/fixtures/run-record.json= for both languages).
+- *The wallet sandbox* already runs on webevm in the tab (=make
+  nix-wallet-sandbox-test= 15 of 15, the page in Chromium included).
+- *The JS household* has the canonical state machine (=net-household.js=,
+  =credit-household.js=, =household-calendar=, the shared =household-policy=);
+  the eight JS world files of the qualified set pass 132 of 132 on webevm. But:
+  - its population test (=core/js/test/legacy/credit-household.webevm.test.js=)
+    fails three cases on a calendar-day-against-chain-clock check that the
+    earlier Permit2 failure had hidden;
+  - the lifecycle (age, pension, USD fund, drawdown, stages, young-family
+    arrivals, the mortgage cap) is Python only; the JS policy has its functions
+    (=ageOn=, =stage=, =drawdownShare=, =fundGrowth=, the population keys), not
+    the agent behaviour;
+  - there is no JS world built from an experiment: =eqworld.js= builds a
+    machine world with a fixed small cast, not =economy.toml='s population,
+    bootstrap LPs, arbitrageurs and keepers;
+  - the JS worlds write no run record (plan step R4).
+
+*** The design
+
+1. /One world, two hosts, one link./ The savings page talks to a *world link*
+   with the three channels it has now. =ServerLink= is today's (Python +
+   pyrevm, unchanged: the server stays the research and five-year host).
+   =LocalLink= hosts the JS world in a Web Worker on webevm + revm: frames are
+   posted per simulated day, control ops apply between days, and JSON-RPC is
+   the in-tab node's own =request= (=webevm/worker-host= already serves a node
+   over a =MessagePort=). The page chooses by its link: =sim-server.json='s
+   =server= (as now) or local by default.
+2. /The world from the experiment./ A JS world builder reads the same experiment
+   (TOML converted to JSON at build time by Python's own loader, so both
+   languages read one resolved experiment): the deploy parameters, the basket
+   machine, the bootstrap LPs, the whales on the price path, the arbitrageurs,
+   the keepers, and the household population with its settings. Shared keyed
+   random streams (=rng = "keyed"=, already language-neutral) give both
+   languages the same arrivals and decisions.
+3. /Frames in the run record's shape./ The JS world emits =frame_record= frames
+   (R4) and the agents' lines, so the savings page, the dashboard and the parity
+   check all read one shape; =runrecord.py='s fixture pins it.
+4. /The dashboard and the savings page converge./ The dashboard's sources take a
+   local world as one more source (fewer capabilities than a server: no
+   five-year runs, a page's memory); the savings page keeps its own small view.
+
+*** Steps, in order
+
+- [ ] /S1. Parity inventory./ Python against JS, function by function: the
+  household agent (=credit_households.py= / =credit-household.js=), the state
+  machine (=net_household.py= / =net-household.js=), the calendar, the
+  population, the world (=deploy.py=, =basket_machine.py=, the agents in
+  =equilibrium_agents.py= and =direct_mint.py= / =eqworld.js=). A table of what
+  each has, what the other lacks, and the tests on each side.
+- [ ] /S2. A parity harness./ The same resolved experiment and seed in both
+  languages for N days, compared day by day: arrivals and decisions identical
+  (keyed streams), K, BVIB, supply, holders and each household's books within
+  stated tolerances; the operation journals equal where both make the same
+  calls (=mini_parity= and =js_join= are the precedents). Python on pyrevm, JS
+  on webevm in Node.
+- [ ] /S3. Close the gaps the harness shows./ First the JS population's
+  calendar-against-clock failure; then the lifecycle behaviour (the calendar's
+  pension and fund saving, the investor's monthly drawdown, a retired debtor's
+  or saver's proportional drawdown, the population's stages, retirees,
+  young-family arrivals and mortgage cap); then whatever else S1 and S2 find.
+  Done when the harness passes 30 days of =economy.toml= and
+  =economy-lifecycle.toml=.
+- [ ] /S4. The JS world builder and its run record (R4)./ Experiment JSON in,
+  deployment and cast out; frames and agent lines in the record's shape.
+- [ ] /S5. Speed./ Seconds per simulated day in Node and in Chromium for 30, 100
+  and 150 households; the household count a tab can carry at a day every few
+  seconds sets the local world's default population.
+- [ ] /S6. =LocalLink= and the page./ The worker hosting webevm and the world;
+  the three channels; the page choosing its link; =savings.browser.test.js= run
+  against both links.
+- [ ] /S7. The dashboard's local source./
+
+Acceptance: the savings page runs =economy.toml= (or a smaller default) wholly in
+a tab, a visitor's wallet trades in it, and the same page still attaches to a
+Python server world; the parity harness passes 30 days of both worlds.
+
+** Resume here (2026-11-14, before a compaction)
+
+- *Branch*: =feature/household-minimal-ecosystem=, pushed to GitHub (owner's
+  word); worktree =.claude/worktrees/buck-compound=.
+- *Running on datasim.local*: the five-year suite in
+  =~/src/alberta-buck-lifecycle= (detached at the pushed head; run records in
+  =build/runs/=, logs and done/failed markers in =build/logs/=): life-A, A2, B,
+  C, D, E (the lifecycle mixes) and econ-F (the economy with the one-year leak).
+  Check with =ssh datasim.local 'tail -1 ~/src/alberta-buck-lifecycle/build/logs/*.log'=;
+  view with =make nix-venv-dashboard-lan= there. When done: digest each,
+  compare where K settles by mix (L5), and record it here.
+- *Running locally*: the five-year economy world on the old defaults
+  (=build/sim/economy-5y.json=, record =build/runs/economy-5y=).
+- *Consolidation* (=doc/review/consolidation-plan.org=): wave 1 done; one test
+  command (=make nix-venv-test-all=, tiers, =test-worlds=) committed; legacy
+  JS tests moved to =core/js/test/legacy=. Python triage (the full run: 1,495
+  passed, 67 failed, 11 errors, all predating this session's work):
+  =test_sim_server= fixed; legacy to move to =alberta_buck/test/legacy=
+  (=test_credit_households= 30, =test_mature_worlds= 15, =test_debtor_ledger=
+  2, =test_routing_sim_web3= 1); stale tests of current code to fix
+  (=test_basket_machine_chain= 2: =wheel.responseMode()= is gone;
+  =test_control_lab= 7 and =test_control_lab_events= 1; =test_economy= 1;
+  =test_privacy_world= and =test_receipt_e2e=: unlinked bytecode); the 11
+  errors to triage. Then =make -k nix-venv-test-all= end to end.
+- *Owner decisions open*: the catalogue's stress arms (port before deleting?),
+  the shadow controller, the V2 adapter; the release's =webevm= dependency
+  (upstream PR https://github.com/wighawag/webevm/pull/23, or publish the fork
+  under a scope).
+- *Next work, in order*: the Python triage above; S1 to S3 (JS household
+  parity); the lifecycle suite's results; wave 2 and 3 retirements as decided;
+  then S4 to S7.
