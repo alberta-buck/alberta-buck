@@ -5167,7 +5167,12 @@ K reads the sample.
   recomputed off-chain from the pools' TWAPs to 1e-5, the ask is the bid over the dollar pool's
   ratio, and K reads the sample.
 - /Still to read the book/ (each a behaviour change, each measured): the pair observer (finding
-  3), the marks' TWAP anchor, and the households (next section).
+  3), the marks' TWAP anchor, and the households (next section). Since done: the households and the
+  pair observer. /The marks' anchor, measured and set aside/: in the first 134 days of the book
+  comparison the route through USDC wins on 12% of TOKEN-days (evenly across the five) by a median
+  0.1% over the direct net price; anchoring the marks there would move deposits and exits by about
+  that, on a sample up to an hour old (so it would need the route's premium over the live TWAP, a
+  wider =Bid= and the venue facet's last bytes). Not worth it now; the owner's call.
 - /Found on the way: the JS bundle was stale since the net reference/ (a5467eb6). Rebuilding it
   (=make nix-core-js-artifacts=) failed nine refinance vectors in
   =net-equilibrium-bootstrap.webevm.test.js=; they pass under the nominal reference, so the
@@ -5297,26 +5302,36 @@ N2.
 The book (K at the best route against the direct net reference), the households' basis, fresh BUCK
 into the pools; each against the commit before, on =economy= and =economy-lifecycle=, two years.
 
-** Resume here (2026-11-15, before a compaction)
+** Resume here (2026-11-15, evening)
+
+- *Branch*: =feature/household-minimal-ecosystem=, pushed; worktree =.claude/worktrees/buck-compound=.
+- *Net BUCK, done today*: N1, N2, N4 (the price book; K reads its sample), the households at the
+  book (fair value, the bid/ask mark, =nw_buck=), the pair observer net of each pool's carry, N3
+  (the kernel's carry and tick quote in four languages; the snapshot's spot prices from =slot0=),
+  the dashboard's book and worth-in-BUCK views; the leak defaults to a year in the contract.
+- *Set aside, with evidence*: N5 (fresh BUCK into the pools: the wallet holds almost nothing, so
+  it moves almost no carry); the marks' TWAP anchor from the book (the USDC route wins on 12% of
+  TOKEN-days by a median 0.1%: too little for the venue facet's last bytes). Both for the owner.
+- *Running here*: =comparisons/book.toml= (best routes against direct only, 730 days, two cores;
+  =build/runs/book.*=, log =build/test/compare-book.log=). When done: the report, and record it.
+- *Running on datasim*: the five-year suite on the net-BUCK contracts in =~/src/alberta-buck-net=
+  (3dee6d85; =build/net-suite.sh=, logs and markers in =build/logs=), against the quoted-BVIB baseline
+  in =~/src/alberta-buck-lifecycle= (digested: "L5, the baseline"; its econ-F still running).
+- *Owner's calls*: C5's scope (move the lab's EVM-free half to =alberta_buck/sim/research/=, delete
+  the chain-driven half); N5 and the marks' anchor as above; the shadow controller (its position
+  integrator does not leak).
+- *Next (owner)*: after net quoting, cast the persistent BUCK demand: every agent's short-term BUCK
+  balances, BUCK payroll. Do not tune K against its slide meanwhile.
+- *Core budget*: four cores on the Mac (forge =-j 4=, =COMPARE_JOBS= at most 4, =--test-concurrency=).
+- *Still open from before*: S3's remaining parity gaps (counters, world constants, the lifecycle in
+  JS); consolidation waves 2 and 3; the catalogue's stress arms (owner).
+
+** Resume here (superseded: 2026-11-15, before a compaction)
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed; worktree =.claude/worktrees/buck-compound=,
   clean at 7cd34241 plus this note.
 - *Next*: N4 is done ("N4 as built"); the households read the book; the pair observer and the
-  marks' TWAP anchor read it; N5; N3; N6. Run tests and simulations on two cores while the owner's
-  machine is busy (forge =-j 2= in =FORGE_OPTS=, =COMPARE_JOBS=2=, =--test-concurrency=2=).
-- *Done*: =comparisons/carry.toml=, digested above ("Result: the measure moves the market, not K"):
-  K falls alike under either measure (0.48 at two years with the leak); the net reference moves the
-  market by the carry, and the wind-down is the issuance phase. Runs =build/runs/carry.*=.
-- *Running on datasim*: the five-year lifecycle suite in =~/src/alberta-buck-lifecycle= (old
-  contracts: the quoted-BVIB baseline): life-A, A2, C, E complete; B, D at day 1,740 (06:30
-  2026-11-15); econ-F at 1,120. Digest by mix (L5). Memory: 47 of 94 GB used. After N4, rerun
-  econ-F on the net reference for five years (recommendation above).
-- *Done today, besides*: =alberta-buck-webevm= published and depended on by alias (8369c3e9); the
-  comparison runner and the dashboard's Compare tab; the control lab as =comparisons/shocks.toml=
-  (48 runs complete, =build/runs/shocks.*=; C5 retires the lab); the V2 adapter removed; the Python
-  tier passing (1,377); the JS population test on the canonical world and the four parity fixes.
-- *Still open from before*: S3's remaining parity gaps (counters, world constants, the lifecycle in
-  JS); consolidation waves 2 and 3; the shadow controller and the catalogue's stress arms (owner).
+  marks' TWAP anchor read it; N5; N3; N6.
 
 ** Resume here (superseded: 2026-11-14, evening)
 
