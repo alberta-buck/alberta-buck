@@ -26,9 +26,6 @@ contract BasketMachineIntegrationTest is BasketDeskFixture {
         bindCarryingPool(reg, address(machine));
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        // The legacy-accounting fixture's Buck (BuckLinear) has no net/gross
-        // view of a Carrying pool: its references read nominal BUCK.
-        BasketVenueFacet(address(b)).setNominalReference(true);
         b.setEquityWheel(address(new BasketUpkeepFacet(address(new ControlledPairIntent(address(b))), address(service), 0, 0)));
         b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, 0, 0));
         b.setNetMark(true);

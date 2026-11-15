@@ -23,7 +23,7 @@ contract BasketVenueFacet is BuckBasketUniswapV3 {
     ///         comparison only.
     function basketValueInBuck() public view override returns (int256) {
         if (twapWindow == 0) revert UnavailablePrice();
-        if (_nominalReference || constituents.length == 0) return super.basketValueInBuck();
+        if (_nominalReference || constituents.length == 0 || !_netShell()) return super.basketValueInBuck();
         int256 total;
         for (uint256 i = 0; i < constituents.length; i++) {
             Constituent storage c = constituents[i];
@@ -34,7 +34,9 @@ contract BasketVenueFacet is BuckBasketUniswapV3 {
         return total;
     }
 
-    function nominalReference() external view returns (bool) { return _nominalReference; }
+    /// @notice True while the references read nominal BUCK: governance's
+    ///         comparison switch, or a legacy shell without net accounting.
+    function nominalReference() external view returns (bool) { return _nominalReference || !_netShell(); }
 
     function setNominalReference(bool nominal) external onlyGov {
         _nominalReference = nominal;

@@ -26,6 +26,14 @@ Q128 = 1 << 128
 MASK256 = (1 << 256) - 1
 
 
+
+def _quoted(net_amount: int, gross: int, net: int) -> int:
+    """A net BUCK amount or price from a Carrying account (gross, net) back to the nominal V3 quoted
+    it in, rounded up (lib/CarryRatio.sol toNominal; within a raw unit of the quote)."""
+    if gross == 0 or gross == net:
+        return net_amount
+    return -(-net_amount * gross // net)
+
 def household_summary(states):
     """Compact household books retained by the savings server's lite frames; money is in base units.
 
@@ -171,9 +179,8 @@ def _eqsave_frame(d, ctr) -> dict:
     ratios = ([d.buck.functions.accountBalancesScaled(p).call() for p in d.pool_buck]
               if canonical else None)
     try:
+        # Net BUCK under net accounting: the venue nets its marks (BuckBasketUniswapV3.marks).
         p_low = [int(b.functions.marks(i, 0).call()[3]) for i in range(n)]
-        if canonical:
-            p_low = [p * net // gross if gross else 0 for p, (gross, net) in zip(p_low, ratios)]
     except Exception:
         if canonical:
             raise
@@ -222,13 +229,12 @@ def _eqsave_frame(d, ctr) -> dict:
             f["eq_headroom"] = int(b.functions.headroom().call())
             f["eq_mark"] = int(b.functions.markNow().call())
             if canonical:
-                # Match the basket's LOW position mark, including its exact
-                # Carrying ratio and the same order of integer rounding.
-                nominal = [int(b.functions.marks(i, int(b.functions.liquidityOf(i).call())).call()[0])
-                           for i in range(n)]
-                held = [p * net // gross // 2 if gross else 0
-                        for p, (gross, net) in zip(nominal, ratios)]
-                f["eq_held_buck_nominal"] = sum(p // 2 for p in nominal)
+                # The basket's LOW position marks, net at the venue; the nominal BUCK they hold is
+                # the same through the pool's ratio back (rounded up: within a raw unit).
+                net_marks = [int(b.functions.marks(i, int(b.functions.liquidityOf(i).call())).call()[0])
+                             for i in range(n)]
+                held = [p // 2 for p in net_marks]
+                f["eq_held_buck_nominal"] = sum(_quoted(p, g, nt) // 2 for p, (g, nt) in zip(net_marks, ratios))
                 f["eq_held_buck"] = sum(held)
                 f["eq_carried_fee"] = f["eq_held_buck_nominal"] - f["eq_held_buck"]
                 f["eq_unpaid_relief"] = int(b.functions.reliefAccrued().call())
@@ -646,8 +652,11 @@ class Snapshotter:
         if getattr(d, "equity_machine", False) and getattr(d, "buck_accounting", "") == "net":
             # The quoted measure beside the one K reads: each pool's TWAP price before its net/gross
             # (the venue's pTwap; the reference before 2026-11-15). Their ratio is the pools' carry.
+            # (the venue's marks are net: each pool's pTwap back through its ratio).
             bv_nominal = sum(int(d.basket.functions.constituents(i).call()[2])
-                             * int(d.basket.functions.marks(i, 0).call()[4]) // 10**18 for i in range(len(d.tokens)))
+                             * _quoted(int(d.basket.functions.marks(i, 0).call()[4]),
+                                       *d.buck.functions.accountBalancesScaled(pool).call()) // 10**18
+                             for i, pool in enumerate(d.pool_buck))
         try:
             bk = int(d.kctrl.functions.buckK().call())
         except Exception:

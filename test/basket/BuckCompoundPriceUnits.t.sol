@@ -37,9 +37,17 @@ contract BuckCompoundPriceUnitsTest is BuckCompoundDeskFixture {
         emit log_named_uint("idle pool net/nominal ratio (1e18)", Math.mulDiv(afterNet, 1e18, afterGross));
     }
 
+    /// @dev The pool's TWAP price as V3 quotes it, in nominal BUCK: the venue's
+    ///      marks are net (BuckBasketUniswapV3.marks), so take its net price back
+    ///      through the pool's ratio (rounded up: at most one raw unit high).
+    function _quotedTwap() internal view returns (uint256) {
+        (uint256 gross, uint256 net) = buck.accountBalancesScaled(pool);
+        return Math.mulDiv(IBuckBasketVenue(address(desk)).marks(0, 0).pTwap, gross, net, Math.Rounding.Ceil);
+    }
+
     function test_freshNetIssuanceUsesNominalTicksAfterTradingCosts() public {
         vm.warp(block.timestamp + YEAR);
-        uint256 nominalPrice = IBuckBasketVenue(address(desk)).marks(0, 0).pTwap;
+        uint256 nominalPrice = _quotedTwap();
         uint256 principal = _issue();
         uint256 tokenOut = desk.monetaryTokenHeld(0) - 1000e18;
         uint256 nominalValue = Math.mulDiv(tokenOut, nominalPrice, 1e18);
@@ -56,7 +64,7 @@ contract BuckCompoundPriceUnitsTest is BuckCompoundDeskFixture {
     function test_buybackCostIncludesThePoolsCarriedFeesAndSwapCosts() public {
         _grant(1000e18);
         vm.warp(block.timestamp + YEAR);
-        uint256 nominalPrice = IBuckBasketVenue(address(desk)).marks(0, 0).pTwap;
+        uint256 nominalPrice = _quotedTwap();
         (uint256 gross, uint256 net) = buck.accountBalancesScaled(pool);
         uint256 beforeNominal = buck.balanceOf(pool);
         policy.set(-50, false);

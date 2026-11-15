@@ -261,23 +261,10 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         return IBuckKSource(address(controller)).currentBuckK();
     }
 
-    function _marks(uint256 i) internal view returns (IBuckBasketVenue.Marks memory m) {
-        m = IBuckBasketVenue(address(this)).marks(i, liquidityOf[i]);
-        if (!netAccounting) return m;
-        // V3 prices and position amounts are in the pool's nominal BUCK.
-        // The pool is a Carrying account: any BUCK it sends carries its
-        // average fee. Convert both the BUCK side and TOKEN's BUCK quote to
-        // full-value units using the exact current net/nominal ratio.
-        (uint256 gross, uint256 net) = IBuckNetAccount(address(buck)).accountBalancesScaled(constituents[i].pool);
-        if (gross == net && gross != 0) return m;
-        if (gross == 0) return IBuckBasketVenue.Marks(0, 0, 0, 0, 0, 0, 0);
-        m.posLow = Math.mulDiv(m.posLow, net, gross);
-        m.posTwap = Math.mulDiv(m.posTwap, net, gross);
-        m.posHigh = Math.mulDiv(m.posHigh, net, gross);
-        m.pLow = Math.mulDiv(m.pLow, net, gross);
-        m.pTwap = Math.mulDiv(m.pTwap, net, gross);
-        m.pHigh = Math.mulDiv(m.pHigh, net, gross);
-        m.depth = Math.mulDiv(m.depth, net, gross);
+    /// @dev Pool i's marks, in net BUCK under net accounting: the venue nets
+    ///      them (BuckBasketUniswapV3.marks), the one place they are netted.
+    function _marks(uint256 i) internal view returns (IBuckBasketVenue.Marks memory) {
+        return IBuckBasketVenue(address(this)).marks(i, liquidityOf[i]);
     }
 
     /// @dev Pre: s.m contains this snapshot's pool marks. Post: canonical cash,
@@ -400,7 +387,9 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         if (!netAccounting) return (Math.min(desired, _bk().balanceOf(address(this))), 0);
         controller.compute();
         Snap memory s = _snap();
+        uint256 spend = s.spend;    // net: _markS leaves the nominal balance, which the legacy branch wants
         _markS(s);
+        s.spend = spend;
         shortfall = _shortfallS(s);
         funded = Math.min(desired, _liquidityS(s));
         if (funded != 0 && address(credit) != address(0)) {

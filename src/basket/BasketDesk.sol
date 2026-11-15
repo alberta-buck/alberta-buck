@@ -199,16 +199,10 @@ contract BasketDesk is MonetaryDesk {
         return IBuckHolder(address(buck));
     }
 
+    /// @dev Pool i's prices, in net BUCK under net accounting: the venue nets
+    ///      them (BuckBasketUniswapV3.marks), the one place they are netted.
     function _venueMarks(uint256 i) internal view returns (IBuckBasketVenue.Marks memory) {
-        IBuckBasketVenue.Marks memory m = IBuckBasketVenue(address(this)).marks(i, 0);
-        if (!netAccounting) return m;
-        (uint256 gross, uint256 net) = IBuckNetAccount(address(buck)).accountBalancesScaled(constituents[i].pool);
-        if (gross == 0) return IBuckBasketVenue.Marks(0, 0, 0, 0, 0, 0, 0);
-        m.pLow = Math.mulDiv(m.pLow, net, gross);
-        m.pTwap = Math.mulDiv(m.pTwap, net, gross);
-        m.pHigh = Math.mulDiv(m.pHigh, net, gross);
-        m.depth = Math.mulDiv(m.depth, net, gross);
-        return m;
+        return IBuckBasketVenue(address(this)).marks(i, 0);
     }
 
     /// @notice Live net cash, actual NFT principal, marked unpaid relief,

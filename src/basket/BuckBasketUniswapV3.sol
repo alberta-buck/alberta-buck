@@ -6,6 +6,7 @@ import {IERC20}             from "@openzeppelin/contracts/token/ERC20/IERC20.sol
 import {Math}               from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
+import {CarryRatio}         from "../lib/CarryRatio.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {BuckBasketStorage, IUniswapV3MintCallback,
         IUniswapV3SwapCallback} from "./BuckBasketStorage.sol";
@@ -26,6 +27,11 @@ import {BuckBasketStorage, IUniswapV3MintCallback,
 ///         the fallback by an external caller, which would corrupt accounting.
 ///         The callbacks instead authenticate the calling pool via the shared
 ///         `_callbackPool` / `_swapCallbackPool` guards.
+/// @dev The basket's and the desk's own flag, read by the venue they delegatecall.
+interface INetAccountingShell {
+    function netAccounting() external view returns (bool);
+}
+
 contract BuckBasketUniswapV3 is
     BuckBasketStorage, IBuckBasketVenue, IUniswapV3MintCallback, IUniswapV3SwapCallback
 {
@@ -307,9 +313,38 @@ contract BuckBasketUniswapV3 is
     // --- Equity primitives (BuckBasketEquity) ------------------------------ //
 
     /// @inheritdoc IBuckBasketVenue
+    /// @dev In NET BUCK when the shell keeps net accounting (canonical Buck):
+    ///      V3's prices and position amounts are in the pool's nominal BUCK,
+    ///      and the pool is a Carrying account, so every field is taken at its
+    ///      net / gross (lib/CarryRatio.sol); a pool with no BUCK marks
+    ///      nothing. A legacy shell reads the quoted marks. This is the one
+    ///      place the basket's and the desk's marks are netted.
     function marks(uint256 i, uint128 liquidity)
         external view override returns (Marks memory m)
     {
+        m = _quotedMarks(i, liquidity);
+        if (!_netShell()) return m;
+        (uint256 g, uint256 n) = CarryRatio.read(address(buck), constituents[i].pool);
+        if (g == 0) return Marks(0, 0, 0, 0, 0, 0, 0);
+        if (g == n) return m;
+        m.posLow = CarryRatio.toNet(g, n, m.posLow);
+        m.posTwap = CarryRatio.toNet(g, n, m.posTwap);
+        m.posHigh = CarryRatio.toNet(g, n, m.posHigh);
+        m.pLow = CarryRatio.toNet(g, n, m.pLow);
+        m.pTwap = CarryRatio.toNet(g, n, m.pTwap);
+        m.pHigh = CarryRatio.toNet(g, n, m.pHigh);
+        m.depth = CarryRatio.toNet(g, n, m.depth);
+    }
+
+    /// @dev Whether the shell this venue serves (it runs by delegatecall, so
+    ///      address(this) is the basket or the desk) keeps net accounting. A
+    ///      shell without the flag (the pro-rata basket) is legacy.
+    function _netShell() internal view returns (bool) {
+        try INetAccountingShell(address(this)).netAccounting() returns (bool net) { return net; } catch { return false; }
+    }
+
+    /// @dev The marks as V3 quotes them, in the pool's nominal BUCK.
+    function _quotedMarks(uint256 i, uint128 liquidity) internal view returns (Marks memory m) {
         Constituent storage c = constituents[i];
         (uint160 sSpot, int24 tSpot,,,,,) = IUniswapV3Pool(c.pool).slot0();
         int24 tTwap = _valuationTick(c, tSpot);

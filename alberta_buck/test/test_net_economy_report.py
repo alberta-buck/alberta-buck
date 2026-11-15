@@ -77,9 +77,8 @@ def test_short_canonical_economy_records_actual_books_and_renders_pdf(monkeypatc
         assert frame["eq_equity"] == frame["basketNav"] - frame["eq_lien"] + frame["eq_unpaid_relief"]
         held = 0
         for i, pool in enumerate(d.pool_buck):
-            gross, net_pool = buck.functions.accountBalancesScaled(pool).call()
-            nominal = basket.functions.marks(i, basket.functions.liquidityOf(i).call()).call()[0]
-            held += nominal * net_pool // gross // 2
+            # The venue's marks are net under net accounting (BuckBasketUniswapV3.marks).
+            held += basket.functions.marks(i, basket.functions.liquidityOf(i).call()).call()[0] // 2
         assert frame["eq_held_buck"] == held
         assert frame["eq_carried_fee"] == frame["eq_held_buck_nominal"] - held > 0
         assert frame["lp"]["bootstrap"][1] > 0

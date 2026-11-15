@@ -336,9 +336,7 @@ contract BuckCompoundDeskTest is BuckCompoundDeskFixture {
         _newDesk(face);
         _grant(1000e18);
         k.setK(nextK);
-        uint256 depth = IBuckBasketVenue(address(desk)).marks(0, 0).depth;
-        (uint256 gross, uint256 net) = buck.accountBalancesScaled(pool);
-        depth = Math.mulDiv(depth, net, gross);
+        uint256 depth = IBuckBasketVenue(address(desk)).marks(0, 0).depth;   // net: the venue nets it
         uint256 expected = Math.min(Math.mulDiv(face, nextK, 1e18),
             Math.min(Math.mulDiv(depth, 40, 10_000), Math.mulDiv(basket.equity(), effort, 10_000)));
         policy.set(int32(uint32(effort)), true);

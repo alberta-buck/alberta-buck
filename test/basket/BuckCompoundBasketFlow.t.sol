@@ -12,6 +12,8 @@ import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
 import {EqToken, EqController, IPool} from "./BuckBasketEquity.t.sol";
 import {BasketReference} from "../../src/basket/BasketReference.sol";
+import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 contract RejectCompoundPosition is BuckBasketUniswapV3 {
     error RejectedPosition();
@@ -108,6 +110,14 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         }
         int256 netValue = venue.basketValueInBuck();
         assertEq(parity.basketValueInBuck(), netValue, "the parity reference reads net BUCK too");
+        // The basket's marks are net at the venue (the one place they are netted), and agree
+        // with the reference: every exit, deposit and plan reads these (BasketMarketOps.exitAssets too).
+        uint256 sum;
+        for (uint256 i; i < 3; ++i) {
+            (,, uint256 amount,,,,,,,,) = basket.constituents(i);
+            sum += Math.mulDiv(amount, IBuckBasketVenue(address(basket)).marks(i, basket.liquidityOf(i)).pTwap, 1e18);
+        }
+        assertEq(int256(sum), netValue, "marks and BVIB: one net price");
         vm.prank(GOV);
         BasketVenueFacet(address(basket)).setNominalReference(true);
         int256 nominalValue = venue.basketValueInBuck();

@@ -45,9 +45,6 @@ contract BasketMachineTest is BuckBasketEquityTest {
         intent.setRate(0);
         vm.startPrank(GOV);
         b.setVenue(address(new BasketVenueFacet()));
-        // The legacy-accounting fixture's Buck (BuckLinear) has no net/gross
-        // view of a Carrying pool: its references read nominal BUCK.
-        BasketVenueFacet(address(b)).setNominalReference(true);
         vm.stopPrank();
         if (withSignal) {
             signals = new BasketReference(address(b), 1800, 3600, 500);
