@@ -207,12 +207,29 @@ export function installHouseholdOps(world) {
         pending += amount * num / den;
       }
     }
-    const [num, den] = await priceRatio(world.poolUB, buck);
+    // The BUCK's bid and ask (Python net_snapshot.buck_bid_ask): the price book's while fresh, else
+    // the dollar pool's spot and carry; raw USDC per raw net BUCK.
+    const priceBook = world.machine?.parity;
+    let bid = null, ask = null;
+    if (priceBook && await at(priceBook, "fresh")) {
+      const one = 10n ** BigInt(await at(buck, "decimals")), b = await at(priceBook, "buckBid");
+      if (b) [bid, ask] = [[b, one], [await at(priceBook, "buckAsk"), one]];
+    }
+    if (!bid) {
+      const spot = await priceRatio(world.poolUB, buck), [gross, net] = await at(buck, "accountBalancesScaled", [world.poolUB.address]);
+      [bid, ask] = [spot, net && gross !== net ? [spot[0] * gross, spot[1] * net] : spot];
+    }
     const receiptOwner = agent.savings?.address ?? owner;
     const positions = await markNetBasketPositions(s, basket, buck, receiptOwner, agent.receipts, { blockNumber });
     const cashTotal = cashValues.reduce((sum, v) => sum + v, 0n);
     const scaled = buckValues.reduce((sum, v) => sum + v, 0n) + positions.mark * Q + book.premiumNetScaled
       - book.state.issued * Q + relief;
+    // Owner, 2026-11-15: worth what retiring it now fetches. The BUCK (cash, receipts, premium,
+    // relief) first retires the BUCK debt at par; a surplus sells at the bid, a shortfall is bought
+    // at the ask. BigInt division truncates toward zero, as Python's _tdiv.
+    const [num, den] = scaled >= 0n ? bid : ask;
+    const usd = cashTotal + pending - agent.mortgage - agent.livingArrears - agent.premiumArrears;
+    const [n2, d2] = usd >= 0n ? ask : bid;
     return { blockNumber, cash: cashValues[0], auxCash: cashTotal - cashValues[0],
       held: buckValues[0] / Q, savedBucks: agent.savings ? buckValues[1] / Q : 0n,
       wallet: agent.wallet ? buckValues.at(-1) / Q : 0n,
@@ -223,8 +240,7 @@ export function installHouseholdOps(world) {
       reliefLiquidityLimited: book.exceedsLiquidityLimit, availableReliefScaled: book.availableReliefScaled,
       basketBasis: positions.basis, basketMark: positions.mark, basketRoi: positions.roi,
       basketShares: positions.positions.reduce((sum, p) => sum + p.shares, 0n), basketReceipts: positions.positions.length,
-      pending, nw: cashTotal + pending + scaled * num / (Q * den) - agent.mortgage
-        - agent.livingArrears - agent.premiumArrears };
+      pending, nw: usd + scaled * num / (Q * den), nwBuck: scaled / Q + usd * d2 / n2 };
   };
   // The investor deposits the BUCKs it holds. When the basket's price guard refuses, it offers half,
   // up to four times; what is still refused stays for the next decision.

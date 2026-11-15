@@ -125,6 +125,23 @@ def _exportable(held, reserve):
     return max(0, held - reserve - (held + 999) // 1000)
 
 
+def fair_usdc(d, read, q):
+    """The BUCK's fair dollar value: USDC per net BUCK at parity, as (numerator, denominator, basis).
+
+    Owner, 2026-11-15: a holding is worth what selling it fetches. While the price book
+    (BasketReference) is fresh, that is its basket in USDC by each TOKEN's best route (directly, or
+    through BUCK); a world without a book reads the basket in net BUCK at the dollar pool's price.
+    `read` calls a contract function at the household's pinned block; `q` is that block's market.
+    """
+    book = getattr(d, "signals", None)
+    if book is not None and read(book.functions.fresh()):
+        value = read(book.functions.valueUsdc())
+        if value:
+            return value, 10**18, "the book's basket in USDC"
+    return (read(d.basket.functions.basketValueInBuck()) * q.price_num, 10**18 * q.price_den,
+            "basket-in-buck x dollar-pool spot")
+
+
 def observe_refinance_forecasts(d):
     """Current fund/age ratio and the explicitly modeled idle-cash baseline.
 
@@ -178,7 +195,7 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
         raise ValueError("household assessment block changed")
     cash = d.usdc.functions.balanceOf(agent.address).call(block_identifier=block)
     k = d.kctrl.functions.currentBuckK().call(block_identifier=block)
-    bvib = d.basket.functions.basketValueInBuck().call(block_identifier=block)
+    fair_num, fair_den, _ = fair_usdc(d, lambda fn: fn.call(block_identifier=block), market)
     month = (day - agent.arrive_day) // 30
     # Reuse the pinned books/market rather than re-reading the entire legacy
     # household state. Financial feasibility remains integer arithmetic.
@@ -188,7 +205,7 @@ def assess_refinance(agent, d, day, *, expected_relief_rate, expected_refund_gro
         activated_capacity=available.capacity / RAW,
         issuance_limit=0 if available.maturities_pending else available.shared_limit / RAW,
         at_renewal=(month - agent.p["renew_in"]) % agent.p["term_months"] == 0,
-        basket_usd=(bvib / 10**18) * (float(market.price_num) / float(market.price_den)),
+        basket_usd=float(fair_num) / float(fair_den),
         expected_relief_rate=expected_relief_rate, expected_refund_growth=expected_refund_growth,
         expected_wallet_growth=expected_wallet_growth, premium_refund_fraction=1.)
     t = policy.terms(state, agent.p)
@@ -413,7 +430,8 @@ def assess_remainder(agent, d, day, *, expected_wallet_growth=None, slippage_bp=
             raise ValueError("household remainder needs a verified ordinary wallet")
         held = read(d.buck.functions.balanceOf(agent.address))
         market = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
-        fair = read(d.basket.functions.basketValueInBuck()) / 10**18 * (market.price_num / market.price_den)
+        fair_num, fair_den, _ = fair_usdc(d, read, market)
+        fair = float(fair_num) / float(fair_den)
         t = carry.RefiTerms(debt=agent.mortgage / RAW, rate=agent.apr, face=agent._face0 / RAW,
             premium_bp=agent.premium_rate, joined=True, payback_y=agent.p["theta"], risk=agent.p["risk"],
             headroom=held / RAW, buck_value=fair, penalty_months=0, fixed_cost=0,
@@ -490,13 +508,12 @@ def assess_surplus(agent, d, day, *, forecasts=None):
     held = read(d.buck.functions.balanceOf(agent.address))
     book = d.net_credit_ops.household(agent.address, agent._token_ids, block_number=block)
     q = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
-    fair_num, fair_den = read(d.basket.functions.basketValueInBuck()) * q.price_num, 10**18 * q.price_den
+    fair_num, fair_den, basis = fair_usdc(d, read, q)
     credit = credit_cash_floor(agent, d, day, block, forecasts)
     floor = max(agent.cash_buffer, credit["cash_floor"])
     choice = policy.net_surplus_purchase(q, cash, book.issued, fair_num, fair_den, floor, agent.p)
     context = dict(block=block, cash=cash, protected_buck=held, credit_funding=credit, choice=choice,
-                   fair_num=fair_num, fair_den=fair_den, fair_basis="basket-in-buck x dollar-pool spot",
-                   reason=choice["reason"])
+                   fair_num=fair_num, fair_den=fair_den, fair_basis=basis, reason=choice["reason"])
     plan = None
     if choice["action"] == "retire" and agent._basket_receipts:
         positions = mark_net_basket_positions(d.chain, d.basket, d.buck, agent.address, agent._basket_receipts, block_number=block)
@@ -573,7 +590,7 @@ def assess_investment(agent, d, day, *, expected_relief_rate, expected_refund_gr
         raise ValueError("household assessment block changed")
     cash = read(d.usdc.functions.balanceOf(agent.address))
     k = read(d.kctrl.functions.currentBuckK())
-    bvib = read(d.basket.functions.basketValueInBuck())
+    fair_num, fair_den, _ = fair_usdc(d, read, market)
     # spendable is zero: wallet BUCK is money already owned, not issuing capacity.
     state = dict(accounting="net", mortgage=0., face=agent._face0 / RAW, joined=agent.joined,
         closing_paid=agent.refinance_closed, k=k / 10**18, spendable=0., drawn=book.issued / RAW,
@@ -581,7 +598,7 @@ def assess_investment(agent, d, day, *, expected_relief_rate, expected_refund_gr
         activated_capacity=available.capacity / RAW,
         issuance_limit=0 if available.maturities_pending else available.shared_limit / RAW, at_renewal=False,
         ru=market.reserve_usdc / RAW, rb=market.reserve_buck / RAW, fee=market.fee_ppm / 10**6,
-        basket_usd=(bvib / 10**18) * (float(market.price_num) / float(market.price_den)),
+        basket_usd=float(fair_num) / float(fair_den),
         expected_relief_rate=expected_relief_rate, expected_refund_growth=expected_refund_growth,
         expected_wallet_growth=expected_wallet_growth, premium_refund_fraction=1.)
     context = dict(block=block, considered=0, issuance_quotes=0, rejections={}, feasible=0, cash=cash,
@@ -593,7 +610,7 @@ def assess_investment(agent, d, day, *, expected_relief_rate, expected_refund_gr
         context["reason"] = reason
         return dict(plan=plan, verdict=verdict, context=context)
 
-    if not market.reserve_buck or not market.reserve_usdc or not bvib:
+    if not market.reserve_buck or not market.reserve_usdc or not fair_num:
         return done(None, carry.NO, "market-unavailable")
     wanted, why = policy.investment_want(state, agent.p)
     want = int(wanted * RAW)
@@ -814,15 +831,17 @@ def assess_wallet(agent, d, day, *, forecasts=None):
     cash = read(d.usdc.functions.balanceOf(agent.address))
     held = read(d.buck.functions.balanceOf(wallet)) if wallet else 0
     q = observe_net_market(d.chain, d.buck, d.usdc, d.pool_ub, d.fee_ub, block_number=block)
-    bvib = read(d.basket.functions.basketValueInBuck())
-    # cost/fair of a marginal net BUCK; the dollar pool's own price cancels.
-    ratio = (q.gross_scaled * 10**6 * 10**36 // (q.net_scaled * (10**6 - q.fee_ppm) * bvib)) if q.net_scaled and bvib else None
+    fair_num, fair_den, basis = fair_usdc(d, read, q)
+    # cost/fair of a marginal net BUCK (WAD): its cost, at the dollar pool's price, carry and fee,
+    # over its fair dollar value.
+    ratio = (q.price_num * q.gross_scaled * 10**6 * 10**18 * fair_den
+             // (q.price_den * q.net_scaled * (10**6 - q.fee_ppm) * fair_num)) if q.net_scaled and fair_num else None
     target = policy.net_wallet_target(ratio, day - agent.arrive_day, spending, agent.p)
     credit = credit_cash_floor(agent, d, day, block, forecasts)
     floor = max(agent.cash_buffer, credit["cash_floor"])
     choice = policy.net_wallet_adjustment(q, cash, held, target, floor, agent.p)
     context = dict(block=block, cash=cash, wallet=wallet, held=held, target=target, credit_funding=credit, choice=choice,
-                   marginal_ratio_wad=ratio, fair_basis="basket-in-buck x dollar-pool spot", reason=choice["reason"])
+                   marginal_ratio_wad=ratio, fair_basis=basis, reason=choice["reason"])
     plan = None
     if choice["action"] in ("buy", "sell"):
         plan = WalletPlan(choice["action"], wallet, floor, target, held, choice["spend_usdc"], choice["minimum_net"],

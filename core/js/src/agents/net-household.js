@@ -26,6 +26,20 @@ const bankTerms = (p) => {
 
 // Existing 0.1% owned trade cushion; not another demurrage calculation.
 // The actual wallet balance and unchanged reserve guard govern execution.
+// The BUCK's fair dollar value: USDC per net BUCK at parity, as { num, den, basis } (Python
+// net_household.fair_usdc). Owner, 2026-11-15: a holding is worth what selling it fetches. While the
+// price book (BasketReference) is fresh, its basket in USDC by each TOKEN's best route; a world
+// without a book reads the basket in net BUCK at the dollar pool's price. `at` reads at the
+// household's pinned block; `q` is that block's market.
+export const fairUsdc = async (world, at, q) => {
+  const book = world.machine?.parity;
+  if (book && await at(book, "fresh")) {
+    const value = await at(book, "valueUsdc");
+    if (value) return { num: value, den: 10n ** 18n, basis: "the book's basket in USDC" };
+  }
+  return { num: await at(world.basket, "basketValueInBuck") * q.price_num, den: 10n ** 18n * q.price_den,
+    basis: "basket-in-buck x dollar-pool spot" };
+};
 export const exportable = (held, reserve) => max(0n, held - reserve - (held + 999n) / 1000n);
 export const basketOps = (world) => netBasketOps(world.session, world.basket, world.buck,
   { execute: world.netMarket.execute, simulate: world.netMarket.simulate });
@@ -75,14 +89,14 @@ export async function assessRefinance(a, world, day, { expected_relief_rate, exp
   const available = await world.netCreditOps.quoteHouseholdActivatedCapacity(owner, ids);
   if (available.blockNumber !== blockNumber) throw new Error("household assessment block changed");
   const cash = await at(world.usdc, "balanceOf", [owner]), k = await at(world.kctrl, "currentBuckK");
-  const bvib = await at(world.basket, "basketValueInBuck"), month = Math.floor((day - a.arrive_day) / 30);
+  const fair = await fairUsdc(world, at, market), month = Math.floor((day - a.arrive_day) / 30);
   const state = { accounting: "net", mortgage: Number(a.mortgage) / 1e6, face: Number(a.face) / 1e6,
     joined: a.joined, closing_paid: a.refinanceClosed, k: Number(k) / 1e18, spendable: Number(book.spendable) / 1e6,
     unactivated: available.maturitiesPending ? 0 : Number(available.unactivatedPresent) / 1e6,
     activated_capacity: Number(available.capacity) / 1e6,
     issuance_limit: available.maturitiesPending ? 0 : Number(available.sharedLimit) / 1e6,
     at_renewal: (month - a.p.renew_in) % a.p.term_months === 0,
-    basket_usd: Number(bvib) / 1e18 * (Number(market.price_num) / Number(market.price_den)),
+    basket_usd: Number(fair.num) / Number(fair.den),
     expected_relief_rate, expected_refund_growth, expected_wallet_growth, premium_refund_fraction: 1 };
   const t = terms(state, a.p);
   const utilization = a.face * k * BigInt(Math.trunc(a.p.utilization * 1e9)) / (10n ** 18n * 10n ** 9n);
@@ -256,7 +270,7 @@ export async function assessRemainder(a, world, day, { expected_wallet_growth = 
     }
     const held = await at(world.buck, "balanceOf", [owner]);
     const market = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber: block });
-    const fair = Number(await at(world.basket, "basketValueInBuck")) / 1e18 * (Number(market.price_num) / Number(market.price_den));
+    const value = await fairUsdc(world, at, market), fair = Number(value.num) / Number(value.den);
     const t = { debt: Number(a.mortgage) / 1e6, rate: a.p.apr, face: Number(a.face) / 1e6,
       premium_bp: a.p.premium_bp, joined: true, payback_y: a.p.theta, risk: a.p.risk,
       headroom: Number(held) / 1e6, buck_value: fair, penalty_months: 0, fixed_cost: 0,
@@ -328,7 +342,7 @@ export async function assessInvestment(a, world, day, { expected_relief_rate, ex
   const available = await world.netCreditOps.quoteHouseholdActivatedCapacity(owner, ids);
   if (available.blockNumber !== blockNumber) throw new Error("household assessment block changed");
   const cash = await at(world.usdc, "balanceOf", [owner]), k = await at(world.kctrl, "currentBuckK");
-  const bvib = await at(world.basket, "basketValueInBuck");
+  const fair = await fairUsdc(world, at, market);
   // spendable is zero: wallet BUCK is money already owned, not issuing capacity.
   const state = { accounting: "net", mortgage: 0, face: Number(a.face) / 1e6, joined: a.joined,
     closing_paid: a.refinanceClosed, k: Number(k) / 1e18, spendable: 0, drawn: Number(book.issued) / 1e6,
@@ -336,7 +350,7 @@ export async function assessInvestment(a, world, day, { expected_relief_rate, ex
     activated_capacity: Number(available.capacity) / 1e6,
     issuance_limit: available.maturitiesPending ? 0 : Number(available.sharedLimit) / 1e6, at_renewal: false,
     ru: Number(market.reserve_usdc) / 1e6, rb: Number(market.reserve_buck) / 1e6, fee: Number(market.fee_ppm) / 1e6,
-    basket_usd: Number(bvib) / 1e18 * (Number(market.price_num) / Number(market.price_den)),
+    basket_usd: Number(fair.num) / Number(fair.den),
     expected_relief_rate, expected_refund_growth, expected_wallet_growth, premium_refund_fraction: 1 };
   const context = { block: blockNumber, considered: 0, issuance_quotes: 0, rejections: {}, feasible: 0, cash,
     forecasts: { relief_rate: expected_relief_rate, refund_growth: expected_refund_growth, wallet_growth: expected_wallet_growth },
@@ -346,7 +360,7 @@ export async function assessInvestment(a, world, day, { expected_relief_rate, ex
     context.reason = reason;
     return { plan, verdict, context };
   };
-  if (!market.reserve_buck || !market.reserve_usdc || !bvib) return done(null, NO, "market-unavailable");
+  if (!market.reserve_buck || !market.reserve_usdc || !fair.num) return done(null, NO, "market-unavailable");
   const [wanted, why] = investmentWant(state, a.p), want = BigInt(Math.trunc(wanted * 1e6));
   Object.assign(context, { want, basis: why });
   if (want < RAW) return done(null, NO, why === "hold" ? "hold" : "below-issue-grain");
@@ -523,14 +537,16 @@ export async function assessWallet(a, world, day, { forecasts = {} } = {}) {
   const wallet = a.wallet?.address ?? "";
   const cash = await at(world.usdc, "balanceOf", [owner]), held = wallet ? await at(world.buck, "balanceOf", [wallet]) : 0n;
   const q = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber });
-  const bvib = await at(world.basket, "basketValueInBuck");
-  // cost/fair of a marginal net BUCK; the dollar pool's own price cancels.
-  const ratio = q.net_scaled && bvib ? q.gross_scaled * 1_000_000n * 10n ** 36n / (q.net_scaled * (1_000_000n - q.fee_ppm) * bvib) : null;
+  const fair = await fairUsdc(world, at, q);
+  // cost/fair of a marginal net BUCK (WAD): its cost, at the dollar pool's price, carry and fee,
+  // over its fair dollar value.
+  const ratio = q.net_scaled && fair.num ? q.price_num * q.gross_scaled * 1_000_000n * 10n ** 18n * fair.den
+    / (q.price_den * q.net_scaled * (1_000_000n - q.fee_ppm) * fair.num) : null;
   const target = netWalletTarget(ratio, day - a.arrive_day, spending, a.p);
   const credit = await creditCashFloor(a, world, day, blockNumber, forecasts);
   const floor = max(a.buffer, credit.cash_floor), choice = netWalletAdjustment(q, cash, held, target, floor, a.p);
   const context = { block: blockNumber, cash, wallet, held, target, credit_funding: credit, choice,
-    marginal_ratio_wad: ratio, fair_basis: "basket-in-buck x dollar-pool spot", reason: choice.reason };
+    marginal_ratio_wad: ratio, fair_basis: fair.basis, reason: choice.reason };
   const plan = ["buy", "sell"].includes(choice.action) ? { action: choice.action, wallet, cash_buffer: floor, target, held,
     spend_usdc: choice.spend_usdc, minimum_net: choice.minimum_net, sell_buck: choice.sell_buck,
     minimum_usdc: choice.minimum_usdc, slippage_bp: 50 } : null;
@@ -551,14 +567,13 @@ export async function assessSurplus(a, world, day, { forecasts = {} } = {}) {
   const cash = await at(world.usdc, "balanceOf", [owner]), held = await at(world.buck, "balanceOf", [owner]);
   const book = await world.netCreditOps.household(owner, ids, { blockNumber });
   const q = await observeNetMarket(s, world.buck, world.usdc, world.poolUB, world.fees.ub, { blockNumber });
-  const fairNum = await at(world.basket, "basketValueInBuck") * q.price_num, fairDen = 10n ** 18n * q.price_den;
+  const fair = await fairUsdc(world, at, q), fairNum = fair.num, fairDen = fair.den;
   const credit = await creditCashFloor(a, world, day, blockNumber, forecasts);
   const floor = max(a.buffer, credit.cash_floor), choice = netSurplusPurchase(q, cash, book.issued, fairNum, fairDen, floor, a.p);
-  // Fair value is the basket's BUCK price times the SAME dollar pool's spot,
-  // so that pool's price cancels: the discount is basket purchasing power net
-  // of carried and trading fees. One dislocated dollar route is not a signal.
+  // Fair value is the basket's USDC value by its best routes (fairUsdc); the
+  // purchase cost carries the dollar pool's price, carry and fee.
   const context = { block: blockNumber, cash, protected_buck: held, credit_funding: credit, choice,
-    fair_num: fairNum, fair_den: fairDen, fair_basis: "basket-in-buck x dollar-pool spot", reason: choice.reason };
+    fair_num: fairNum, fair_den: fairDen, fair_basis: fair.basis, reason: choice.reason };
   let plan = null;
   if (choice.action === "retire" && a.receipts.length) {
     const positions = await markNetBasketPositions(s, world.basket, world.buck, owner, a.receipts, { blockNumber });

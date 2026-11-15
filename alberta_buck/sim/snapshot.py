@@ -42,7 +42,7 @@ def household_summary(states):
     """
     members                     = [a for a in states if "member" in a]
     active                      = [a for a in members if a.get("active")]
-    fields                      = ("nw", "hypo", "mortgage", "hypo_mortgage", "cash", "aux_cash", "hypo_cash", "drawn",
+    fields                      = ("nw", "nw_buck", "hypo", "mortgage", "hypo_mortgage", "cash", "aux_cash", "hypo_cash", "drawn",
                                    "basket", "invested_usd", "issued_invest", "pending_usd", "unwound",
                                    "external_interest", "hypo_interest", "external_paid", "hypo_paid",
                                    "arrears", "hypo_arrears", "basket_receipts")

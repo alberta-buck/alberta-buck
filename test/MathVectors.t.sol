@@ -273,6 +273,7 @@ contract MathVectorsTest is Test {
         PidHarness h = new PidHarness(KP, KI, KD, DT, KMIN, KMAX, K0);
         MockBasketRef basket = new MockBasketRef();
         h.setBasket(address(basket));
+        h.setLeak(0);               // the kernels' PID is the unleaked integrator
         h.setDTMax(DTMAX);
         _row("pid_params", string.concat(
             _kvi("kp", KP), ",", _kvi("ki", KI), ",", _kvi("kd", KD), ",",

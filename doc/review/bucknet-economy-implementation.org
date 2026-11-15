@@ -5136,6 +5136,42 @@ in place of BVIB times the dollar pool's nominal price, in every place listed un
 beside its USD counterfactual (=hypo=); the dashboard's Agents tab shows both, so the years show
 the USD's inflation against the BUCK's demurrage.
 
+**** As built (2026-11-15), with the pair observer and the leak
+
+- /Fair value/ (finding 1): one helper per language, =net_household.fair_usdc= and JS =fairUsdc=:
+  USDC per net BUCK at parity is the book's =valueUsdc= / 1e18 while the book is fresh, else (a
+  world without a book) BVIB x the dollar pool's price, as before. All five sites (refinance,
+  remainder, surplus, investment, wallet) read it; the wallet's marginal ratio is the purchase cost
+  (the dollar pool's price, carry and fee) over it. Both languages divide it as floats in the same
+  order, so they stay bit-identical. The investor's rule still reads BVIB (net, what K reads).
+  The policy's sell-side tests (=premium_sale=, =discount= on the carry line) keep the dollar
+  pool's spot: what a full-value BUCK sold fetches.
+- /The mark/ (finding 6): =net_snapshot.household_mark= and JS =netMark=. The household's BUCK (cash,
+  receipts, premium, relief) first retires its BUCK debt at par; a surplus is worth the BUCK's bid,
+  a shortfall costs its ask (=buck_bid_ask=: the book's while fresh, else the dollar pool's spot
+  and its carry). The same worth in net BUCK (=nw_buck=: the dollars bought at the ask, or a dollar
+  debt paid by selling at the bid) sits beside =nw= and =hypo= in the household state, the
+  households' aggregate, the agent rows and the run record. A debtor short of BUCK now marks its
+  debt about 2% dearer at two years (the dollar pool's carry), as finding 6 said.
+- /The pair observer/ (finding 3, =PairSignals=): on a quote that keeps carrying accounts (detected
+  once at construction: Buck answers =accountBalancesScaled=) each pool's observation adds
+  ln(net/gross) in ticks (a six-term series; under 2e-4 ticks while a pool is under 10% hollow), so
+  a level is what the TOKEN fetches in net BUCK. Two pools quoting alike but carrying 1% and 5% now
+  read 412.45 ticks apart on the BUCK route, as they truly are, rather than 0; the USDC route
+  carries nothing. Both routes still publish within the observer's per-venue read budget in the
+  Python world (asserted).
+- /The leak is the default/ (owner: "unless an error is more persistent than a 1-year leak, it
+  should correctly be cancelled out"): =BuckKControllerDirect.leakTau= starts at 365 days; both
+  worlds always call =setLeak= (so a comparison's "no leak" arm really has none). Tests that pin the
+  unleaked integrator's arithmetic set the leak to 0 explicitly, the kernels' PID vectors among them
+  (the kernels model no leak). The shadow controller's position integrator does not leak, so its
+  exact reproduction of D4 holds only unleaked: one more point for the owner's call on the shadow.
+- /K's slide/ (owner): not to be corrected now. After everything is quoted in net BUCK, the next
+  casting is the persistent BUCK demand of a real economy: every agent's short-term BUCK balances,
+  BUCK payroll.
+- /Tests/: forge 1,553 (the observer's carry test, the leak default); Python household, machine and
+  economy suites; JS equilibrium and household suites, 142 passed.
+
 *** N5. Fresh deposit BUCK straight into the pools
 
 A BUCK deposit is fresh (full value) and would dilute the wallet's carried BUCK, which purchases

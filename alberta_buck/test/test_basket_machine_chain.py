@@ -123,6 +123,10 @@ def test_the_price_book_takes_each_tokens_best_net_route_and_k_reads_it(tmp_path
         assert d.basket.functions.basketValueInBuck().call() == book.functions.rawValue().call()
         assert frames[-1]["basketVal"] == frames[-1]["eq_signal_raw"]
         assert frames[-1]["eq_book_usdc"] > 0 and len(frames[-1]["eq_book_bids"]) == len(d.tokens)
+        # The pair observer's BUCK route is net of each pool's carry (finding 3), and both routes publish
+        # within its per-venue read budget.
+        assert d.pair_signals.functions.carryMask().call() == 1
+        assert d.pair_signals.functions.availableMask().call() == 3
 
 
 def test_machine_settings_are_the_experiments_then_the_environments_then_the_labs(monkeypatch):

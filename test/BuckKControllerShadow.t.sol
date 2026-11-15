@@ -92,6 +92,9 @@ contract BuckKControllerShadowTest is Test {
         vm.prank(GOV); direct.setBasket(address(basket));
         vm.prank(GOV); shadow.setBasket(address(basket));
         vm.prank(GOV); shadow.setObserver(address(observer));
+        // These pin the unleaked integrators' arithmetic (the leak's own tests are in Direct's).
+        vm.prank(GOV); direct.setLeak(0);
+        vm.prank(GOV); shadow.setLeak(0);
     }
 
     // ---- helpers ---------------------------------------------------------- //
@@ -225,6 +228,10 @@ contract BuckKControllerShadowTest is Test {
         vm.prank(GOV); kS0.setPositionGains(KP, KI, kd);
         kD4 = new BuckKControllerDirect(KP, KI, kd, 3600, 0.50e18, 1.50e18, K0, GOV);
         vm.prank(GOV); kD4.setBasket(address(composite));
+        // The exact reproduction holds for the unleaked integrators: the shadow's position
+        // integrator does not leak, so with the default year's leak the two part.
+        vm.prank(GOV); kS0.setLeak(0);
+        vm.prank(GOV); kD4.setLeak(0);
     }
 
     /// @dev The observer's own integer arithmetic for the composite.

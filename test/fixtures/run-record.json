@@ -71,7 +71,8 @@
     "basket": 3000000,
     "basket_mark": 3100000,
     "cash": 700000,
-    "mortgage": 9000000
+    "mortgage": 9000000,
+    "nw_buck": 4854368
    },
    "pop": {
     "gap": 0.01,
@@ -226,7 +227,8 @@
     "basket": 3000000,
     "basket_mark": 3100000,
     "cash": 700000,
-    "mortgage": 9000000
+    "mortgage": 9000000,
+    "nw_buck": 4854368
    },
    "pop": {
     "gap": 0.01,
@@ -382,7 +384,8 @@
     "basket": 3000000,
     "basket_mark": 3100000,
     "cash": 700000,
-    "mortgage": 9000000
+    "mortgage": 9000000,
+    "nw_buck": 4854368
    },
    "pop": {
     "gap": 0.01,
@@ -630,6 +633,7 @@
     "active": 6,
     "exited": 0,
     "nw": 5000000,
+    "nw_buck": 4854368,
     "hypo": 4000000,
     "drawn": 0,
     "basket": 3000000,
@@ -777,6 +781,7 @@
     "active": 6,
     "exited": 0,
     "nw": 5000000,
+    "nw_buck": 4854368,
     "hypo": 4000000,
     "drawn": 400000,
     "basket": 3000000,
@@ -943,6 +948,7 @@
     "active": 6,
     "exited": 1,
     "nw": 5000000,
+    "nw_buck": 4854368,
     "hypo": 4000000,
     "drawn": 900000,
     "basket": 3000000,

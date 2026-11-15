@@ -70,8 +70,10 @@ interface IBuckBasketRef {
 ///         rather than winding to a rail, and returns to buckK0 at parity.
 ///         buckK0 is the target K: the integrator holds K away from it only
 ///         while the error persists.  An error the loop cannot correct (no
-///         actor responds to K) then moves K by a bounded amount.  `leakTau`
-///         = 0 (the default) is the unleaked integrator.
+///         actor responds to K) then moves K by a bounded amount.  A year is
+///         the default (owner, 2026-11-15): an error that persists less than
+///         a year is cancelled out; governance may set another, and 0 is the
+///         unleaked integrator.
 ///
 ///         BuckBasket is the privileged caller of `reprime()` -- it invokes
 ///         that hook after `addBasketToken` so the dilution-induced jump in
@@ -93,7 +95,7 @@ contract BuckKControllerDirect is BuckKControllerBase {
     event LeakUpdated(uint256 leakTau);
 
     /// @notice The integrator's leak time constant, in seconds; 0 = no leak.
-    uint256 public leakTau;
+    uint256 public leakTau = 365 days;
 
     constructor(
         int256 _Kp, int256 _Ki, int256 _Kd,

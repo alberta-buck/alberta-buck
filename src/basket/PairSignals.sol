@@ -4,16 +4,25 @@ pragma solidity ^0.8.20;
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IPairSignals} from "./IPairSignals.sol";
+import {IBuckNetView} from "../IBuckNetView.sol";
 
 /// @notice A price-only observer, callable directly or through SampleKind.
 /// One call observes all registered routes; it never trades or values a book.
 /// Levels are whole-token log prices in fractional ticks (1e18 per tick),
 /// rates are fractional ticks/second. Error allowances are empirical, not
 /// statistical confidence bounds. Configuration is immutable for continuity.
+/// On a quote that keeps carrying accounts (BUCK) each pool's level is net:
+/// its BUCK leaves at the pool's net / gross (lib/CarryRatio.sol), so a TOKEN
+/// fetches its quoted price times that ratio, and the level adds its log in
+/// ticks. Two pools of unequal carry then no longer look separated by it.
 contract PairSignals is IPairSignals {
     int256 private constant WAD = 1e18;
     // ln(10) / ln(1.0001), rounded to 18 decimal places.
     int256 private constant TICKS_PER_DECIMAL = 23027002203299704104435;
+    // 1 / ln(1.0001): ticks per unit of natural log, 18 decimal places.
+    int256 private constant TICKS_PER_LN = 10000499991667083306946;
+    /// @notice Bit q set: quote q keeps carrying accounts, and its levels are net.
+    uint256 public immutable carryMask;
     uint256 public immutable tokenCount;
     uint256 public immutable venueCount;
     uint32 public immutable responseTime;
@@ -82,8 +91,10 @@ contract PairSignals is IPairSignals {
             require(tokens_[i] != address(0), "token");
             for (uint256 j; j < i; ++j) require(tokens_[i] != tokens_[j], "duplicate token");
         }
+        uint256 carrying;
         for (uint256 q; q < qn; ++q) {
             require(quotes_[q] != address(0), "quote");
+            if (_keepsCarry(quotes_[q])) carrying |= 1 << q;
             for (uint256 r; r < q; ++r) require(quotes_[q] != quotes_[r], "duplicate quote");
             uint8 qd = IERC20Metadata(quotes_[q]).decimals();
             require(qd <= 36, "decimals");
@@ -100,6 +111,33 @@ contract PairSignals is IPairSignals {
                 spots.push(); tracks.push();
             }
         }
+        carryMask = carrying;
+    }
+
+    /// @dev A quote token with Buck's net view keeps carrying accounts.
+    function _keepsCarry(address quote) private view returns (bool) {
+        try IBuckNetView(quote).accountBalancesScaled(address(this)) returns (uint256, uint256) {
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /// @dev ln(net / gross) of a pool's quote balance, in fractional ticks (<= 0): the
+    ///      series -sum x^k / k in the hollow share x, to six terms (under 2e-4 ticks
+    ///      while x <= 0.1); a pool more than half hollow is taken at half.
+    function _carryTicks(address quote, address pool) private view returns (int256) {
+        (uint256 gross, uint256 net) = IBuckNetView(quote).accountBalancesScaled(pool);
+        if (gross == 0 || net >= gross) return 0;
+        int256 x = int256((gross - net) * uint256(WAD) / gross);
+        if (x > WAD / 2) x = WAD / 2;
+        int256 term = x;
+        int256 sum;
+        for (int256 k = 1; k <= 6; ++k) {
+            sum += term / k;
+            term = term * x / WAD;
+        }
+        return -sum * TICKS_PER_LN / WAD;
     }
 
     /// @dev Override for a chain whose native block ID differs from block.number.
@@ -108,9 +146,12 @@ contract PairSignals is IPairSignals {
 
     /// @notice One complete route read succeeds or fails as a unit. There is
     /// no outlier rejection: a valid dislocation remains visible in spots.
-    function readVenue(uint256 q) external view returns (Sample[] memory samples) {
+    ///      `carry` is each pool's net / gross in ticks on a carrying quote, else 0.
+    function readVenue(uint256 q) external view returns (Sample[] memory samples, int256[] memory carry) {
         require(q < venueCount, "venue");
         samples = new Sample[](tokenCount);
+        carry = new int256[](tokenCount);
+        bool net = carryMask & (1 << q) != 0;
         uint32[] memory ago = new uint32[](1);
         for (uint256 i; i < tokenCount; ++i) {
             IUniswapV3Pool pool = IUniswapV3Pool(routes[q * tokenCount + i].pool);
@@ -119,6 +160,7 @@ contract PairSignals is IPairSignals {
             uint128 liquidity = pool.liquidity();
             require(liquidity > 0 && sqrtPrice > 0, "empty pool");
             samples[i] = Sample(cumulatives[0], tick, sqrtPrice, liquidity);
+            if (net) carry[i] = _carryTicks(quotes[q], address(pool));
         }
     }
 
@@ -129,8 +171,8 @@ contract PairSignals is IPairSignals {
         for (uint256 q; q < venueCount; ++q) {
             // A bad pool cannot use the entire caller budget or prevent
             // another complete venue from publishing. Pools are registered.
-            try this.readVenue{gas: 100_000 * tokenCount}(q) returns (Sample[] memory samples) {
-                _accept(q, samples);
+            try this.readVenue{gas: 100_000 * tokenCount}(q) returns (Sample[] memory samples, int256[] memory carry) {
+                _accept(q, samples, carry);
                 mask |= 1 << q;
             } catch {
                 // Require a new common endpoint and warmup after recovery.
@@ -143,7 +185,7 @@ contract PairSignals is IPairSignals {
         emit Observed(epoch, lastAttemptBlock, mask, readyMask());
     }
 
-    function _accept(uint256 q, Sample[] memory samples) private {
+    function _accept(uint256 q, Sample[] memory samples, int256[] memory carry) private {
         Venue storage venue = venues[q];
         uint64 nowAt = uint64(block.timestamp);
         uint256 previousAt = venue.endpointAt;
@@ -161,7 +203,7 @@ contract PairSignals is IPairSignals {
                 unchecked { delta = samples[i].cumulative - previousCumulative; }
                 int256 value = int256(delta) * WAD / int256(nowAt - previousAt);
                 if (!routes[index].token0) value = -value;
-                observations[i] = value + routes[index].decimalOffset;
+                observations[i] = value + routes[index].decimalOffset + carry[i];
                 sum += observations[i];
             }
         }

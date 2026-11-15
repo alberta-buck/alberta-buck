@@ -42,7 +42,7 @@ FILES                           = dict(frames="frames.jsonl", events="events.jso
                                        interventions="interventions.jsonl")
 UNITS                           = dict(money="raw integer, 1e-6 BUCK or USDC", price="float, USD or BUCK per unit",
                                        ratio="float", day="simulated day index from 0")
-AGENT_FIELDS                    = ("role", "nw", "hypo", "drawn", "limit", "basket", "basket_mark", "held_buck", "cash",
+AGENT_FIELDS                    = ("role", "nw", "nw_buck", "hypo", "drawn", "limit", "basket", "basket_mark", "held_buck", "cash",
                                    "mortgage", "action", "error", "exited", "active", "relief_unavailable",
                                    # the lifecycle (household_policy.stage): present only for households with an age
                                    "age", "stage", "usd_fund", "usd_fund_paid")
@@ -175,7 +175,8 @@ def frame_record(flat: dict, tokens) -> dict:
                         relief_available=_scaled(net.get("available_relief_scaled"))) if jubilee else None,
         "population": dict(roles=roles, gap=pop.get("gap"), k_factor=pop.get("k_factor"),
                            stages=pop.get("stages")) if pop else None,
-        "households": dict(active=hh.get("active"), exited=hh.get("exited"), nw=hh.get("nw"), hypo=hh.get("hypo"),
+        "households": dict(active=hh.get("active"), exited=hh.get("exited"), nw=hh.get("nw"),
+                           nw_buck=hh.get("nw_buck"), hypo=hh.get("hypo"),
                            drawn=hh.get("drawn"), basket=hh.get("basket"), basket_mark=hh.get("basket_mark"),
                            cash=hh.get("cash"), mortgage=hh.get("mortgage")) if hh else None,
         "health": dict(errors=sum(bool(a.get("error")) for a in members) if members else None,

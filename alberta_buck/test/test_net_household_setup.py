@@ -885,14 +885,28 @@ def test_personal_portfolio_marks_use_actual_cash_debt_receipts_and_all_custody(
         pending = sum(int(sum(token.functions.balanceOf(a).call() for a in addresses) * ratio(pool, token))
                       for token, pool in zip(d.tokens, d.pool_usdc))
         scaled = sum(buck.functions.netBalanceScaled(a).call() for a in addresses)
-        valued = int((Fraction(scaled + book.premium_net_scaled + book.relief_scaled, Q)
-                      + basket - book.state.issued) * ratio(d.pool_ub, buck))
+        position = Fraction(scaled + book.premium_net_scaled + book.relief_scaled, Q) + basket - book.state.issued
+        # Owner, 2026-11-15: worth what retiring it now fetches. The BUCK first retires the BUCK
+        # debt at par; a surplus sells at the BUCK's bid, a shortfall is bought at its ask (it
+        # arrives at the dollar pool's net / gross). The price book's while fresh, else the spot.
+        signals = getattr(d, "signals", None)
+        if signals is not None and signals.functions.fresh().call() and signals.functions.buckBid().call():
+            bid, ask = (Fraction(signals.functions.buckBid().call(), RAW),
+                        Fraction(signals.functions.buckAsk().call(), RAW))
+        else:
+            gross, net = buck.functions.accountBalancesScaled(d.pool_ub).call()
+            bid = ratio(d.pool_ub, buck)
+            ask = bid * gross / net
+        valued = int(position * (bid if position >= 0 else ask))
         block = d.w3.eth.block_number
         counters = (agent.external_paid, agent.hypo_paid, agent._basket_in,
                     agent._basket_shares, dict(agent._receipt_book))
         state = agent.octl_state(d)
         assert d.w3.eth.block_number == block == state["mark_block"]
-        assert state["nw"] == dollars + pending + valued - agent.mortgage - agent.living_arrears - agent.premium_arrears
+        usd = dollars + pending - agent.mortgage - agent.living_arrears - agent.premium_arrears
+        assert state["nw"] == usd + valued
+        # The same worth in net BUCK: dollars bought into BUCK at the ask, a dollar debt sold for at the bid.
+        assert state["nw_buck"] == int(position) + int(Fraction(usd) / (ask if usd >= 0 else bid))
         assert state["drawn"] == book.state.issued and state["held_buck"] == book.state.spendable
         assert state["premium_net"] == book.premium_net_scaled // Q
         assert int(state["relief_scaled"]) == book.relief_scaled
@@ -902,7 +916,7 @@ def test_personal_portfolio_marks_use_actual_cash_debt_receipts_and_all_custody(
         assert state["hypo"] == agent.hypo_cash - agent.hypo_mortgage - agent.hypo_living_arrears - agent.hypo_premium_arrears
         assert counters == (agent.external_paid, agent.hypo_paid, agent._basket_in,
                             agent._basket_shares, dict(agent._receipt_book))
-        return state
+        return state | dict(test_valued=valued, test_bid=bid, test_position=position)
 
     before = check(debtor)
     assert before["aux_cash"] == 30 * RAW and before["insurance_age"] > 0
@@ -919,10 +933,13 @@ def test_personal_portfolio_marks_use_actual_cash_debt_receipts_and_all_custody(
     # Mark-to-market precedes the gain fee AND the existing BUCK conversion
     # charge. Reconcile the realized loss to the remaining receipt plus cash
     # actually returned, rather than assuming a cost-free redemption.
+    # The debtor is short of BUCK before and after, so the change is valued at the ask (>= the bid).
     loss = before["nw"] - after["nw"]
-    assert loss >= int(cut * ratio(d.pool_ub, buck))
-    assert loss == int((before["basket_mark"] + before["savings_held"]
-                        - after["basket_mark"] - after["savings_held"]) * ratio(d.pool_ub, buck))
+    assert before["test_position"] < 0 and after["test_position"] < 0
+    assert loss >= int(cut * after["test_bid"])
+    assert loss == before["test_valued"] - after["test_valued"]
+    assert before["test_position"] - after["test_position"] == (before["basket_mark"] + before["savings_held"]
+                                                                - after["basket_mark"] - after["savings_held"])
 
     # Full-width money is never narrowed through floats in a financial mark.
     huge = 2**100 + 123

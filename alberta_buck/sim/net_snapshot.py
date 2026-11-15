@@ -131,6 +131,30 @@ def observe(d, agents):
     return out, positions
 
 
+def _tdiv(a, b):
+    """Integer division truncated toward zero, as JS BigInt divides."""
+    q = abs(a) // abs(b)
+    return q if (a < 0) == (b < 0) else -q
+
+
+def buck_bid_ask(d, read, spot):
+    """The BUCK's bid and ask in USDC, each (numerator, denominator) raw USDC per raw net BUCK.
+
+    The bid is what selling a full-value BUCK fetches; the ask what a net BUCK costs (bought, it
+    arrives at the dollar pool's net / gross). The price book's (BasketReference) while its sample
+    is fresh; otherwise the dollar pool's spot (`spot()`, the same ratio) and its carry.
+    """
+    book = getattr(d, "signals", None)
+    if book is not None and read(book.functions.fresh()):
+        bid = read(book.functions.buckBid())
+        if bid:
+            one = 10 ** read(d.buck.functions.decimals())
+            return (bid, one), (read(book.functions.buckAsk()), one)
+    gross, net = read(d.buck.functions.accountBalancesScaled(d.pool_ub))
+    num, den = spot()
+    return (num, den), ((num * gross, den * net) if net and gross != net else (num, den))
+
+
 def household_mark(d, agent):
     """Mark one household's financial portfolio at one block, before exits.
 
@@ -178,17 +202,24 @@ def household_mark(d, agent):
         if amount:
             numerator, denominator = price_ratio(pool, token)
             pending += amount * numerator // denominator
-    numerator, denominator = price_ratio(d.pool_ub, d.buck)
+    bid, ask = buck_bid_ask(d, read, lambda: price_ratio(d.pool_ub, d.buck))
     receipt_owner = savings.address if savings is not None else owner
     position = mark_net_basket_positions(d.chain, d.basket, d.buck, receipt_owner,
                                          agent._basket_receipts, block_number=block)
     scaled = sum(bucks.values()) + position.mark * Q + book.premium_net_scaled - book.state.issued * Q + relief
+    # Owner, 2026-11-15: worth what retiring it now fetches. The household's BUCK (cash, receipts,
+    # premium, relief) first retires its BUCK debt at par; a surplus sells at the BUCK's bid, a
+    # shortfall is bought at its ask (a bought BUCK arrives at the dollar pool's ratio).
     # Match JS BigInt's signed division (truncate toward zero) once, after
     # combining full-precision BUCK values. A negative book is valid data.
-    valued = abs(scaled) * numerator // (Q * denominator)
-    if scaled < 0:
-        valued = -valued
+    numerator, denominator = bid if scaled >= 0 else ask
+    valued = _tdiv(scaled * numerator, Q * denominator)
     arrears = agent.living_arrears + agent.premium_arrears
+    usd = sum(cash.values()) + pending - agent.mortgage - arrears
+    # The same worth in net BUCK: dollars bought into BUCK at the ask, or a dollar debt paid by
+    # selling BUCK at the bid.
+    numerator, denominator = ask if usd >= 0 else bid
+    worth_buck = _tdiv(scaled, Q) + _tdiv(usd * denominator, numerator)
     return {"mark_block": block, "cash": cash[owner], "aux_cash": sum(cash.values()) - cash[owner],
             "held_buck": bucks[owner] // Q, "savings_held": bucks.get(receipt_owner, 0) // Q if savings else 0,
             "wallet_buck": bucks[wallet.address] // Q if wallet else 0,
@@ -203,5 +234,4 @@ def household_mark(d, agent):
             "basket": position.basis, "basket_in": position.basis, "basket_at_risk": position.basis,
             "basket_shares": str(sum(p.shares for p in position.positions)),
             "basket_mark": position.mark, "basket_receipts": len(position.positions), "basket_roi": position.roi,
-            "pending_usd": pending,
-            "nw": sum(cash.values()) + pending + valued - agent.mortgage - arrears}
+            "pending_usd": pending, "nw": usd + valued, "nw_buck": worth_buck}

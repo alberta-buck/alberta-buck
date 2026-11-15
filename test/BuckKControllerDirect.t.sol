@@ -31,8 +31,10 @@ contract BuckKControllerDirectTest is Test {
         basket = new MockBasket();
         basket.setController(address(ctrl));
         basket.setBasketValue(int256(1e18));     // start at parity
-        vm.prank(GOV);
+        vm.startPrank(GOV);
         ctrl.setBasket(address(basket));
+        ctrl.setLeak(0);                          // these pin the unleaked integrator's arithmetic
+        vm.stopPrank();
     }
 
     function test_set_basket_only_governance() public {
@@ -205,7 +207,7 @@ contract BuckKControllerDirectTest is Test {
         b.setBasketValue(int256(1e18));
         vm.startPrank(GOV);
         c.setBasket(address(b));
-        if (tau > 0) c.setLeak(tau);
+        c.setLeak(tau);                           // 0: the unleaked integrator
         vm.stopPrank();
     }
 
@@ -218,9 +220,10 @@ contract BuckKControllerDirectTest is Test {
         }
     }
 
-    function test_leak_is_off_by_default() public {
-        (BuckKControllerDirect c,) = _simCtrl(0);
-        assertEq(c.leakTau(), 0);
+    function test_leak_is_a_year_by_default() public {
+        // Owner, 2026-11-15: an error that persists less than a year is cancelled out.
+        BuckKControllerDirect c = new BuckKControllerDirect(SIM_KP, SIM_KI, 0, 1800, 0, 0.95e18, SIM_K0, GOV);
+        assertEq(c.leakTau(), 365 days);
     }
 
     function test_set_leak_only_governance() public {

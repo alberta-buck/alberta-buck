@@ -35,6 +35,16 @@ contract PairPool {
     }
 }
 
+// A quote that keeps carrying accounts, as Buck does: each pool's gross and net.
+contract CarryQuote is MockERC20 {
+    mapping(address => uint256[2]) carried;
+    constructor() MockERC20("Buck", "BUCK", 6) {}
+    function setCarry(address account, uint256 gross, uint256 net) external { carried[account] = [gross, net]; }
+    function accountBalancesScaled(address account) external view returns (uint256, uint256) {
+        return (carried[account][0], carried[account][1]);
+    }
+}
+
 contract PairSignalsTest is Test {
     PairSignals s;
     PairPool[6] pools;
@@ -68,6 +78,32 @@ contract PairSignalsTest is Test {
         time += dt; vm.warp(time); vm.roll(vm.getBlockNumber() + 1); s.observe();
     }
     function warm() internal { s.observe(); for (uint256 i; i < 30; ++i) step(12); }
+
+    // Owner, 2026-11-15: a TOKEN on the BUCK route is worth what it fetches in net BUCK. Two pools
+    // quoting the same price but carrying 1% and 5% are ln(0.99 / 0.95) apart, about 412 ticks:
+    // before this, a pair looked that far from separation on the BUCK route and half as far in the
+    // consensus, against a 100-tick gate. The USDC route carries nothing.
+    function test_carryingQuoteLevelsAreNetOfEachPoolsCarry() public {
+        CarryQuote buckQuote = new CarryQuote();
+        address[] memory qs = new address[](2);
+        (qs[0], qs[1]) = (address(buckQuote), quotes[1]);
+        address[] memory ps = new address[](6);
+        for (uint256 p; p < 6; ++p) {
+            pools[p] = new PairPool(tokens[p % 3], qs[p / 3]);     // every price at tick 0
+            ps[p] = address(pools[p]);
+        }
+        buckQuote.setCarry(ps[0], 100e36, 99e36);
+        buckQuote.setCarry(ps[1], 100e36, 95e36);
+        s = new PairSignals(tokens, qs, ps, 60, 120, 3600, 240, 1e12);
+        assertEq(s.carryMask(), 1, "BUCK keeps carrying accounts; the other quote does not");
+        warm();
+        (int256 net,,,) = s.routePair(0, 0, 1);
+        (int256 usd,,,) = s.routePair(1, 0, 1);
+        assertApproxEqAbs(net, 412.4502064761e18, 1e15, "ln(0.99 / 0.95) in ticks");
+        assertEq(usd, 0, "no carry on the USDC route");
+        (int256 fresh,,,) = s.routePair(0, 0, 2);
+        assertApproxEqAbs(fresh, -100.5083836192e18, 1e15, "against a pool carrying nothing: ln(0.99)");
+    }
 
     function test_bootstrapIsUnreadyAndRepeatedCallsCannotInventTime() public {
         s.observe(); assertEq(s.readyMask(), 0);

@@ -1251,7 +1251,7 @@ export class CreditHouseholdAgent {
       basketMarkAvailable: net || world.basketKind === "machine" && (this.shares > 0n || basis === 0n),
       basketRoi: net ? s.basketRoi : basis > 0n && this.shares > 0n && world.basketKind === "machine"
         ? Number(s.basketMark - basis) / Number(basis) : null,
-      ...(net ? { markBlock: s.blockNumber, auxCash: s.auxCash, held: s.held, savingsHeld: s.savedBucks,
+      ...(net ? { markBlock: s.blockNumber, nwBuck: s.nwBuck, auxCash: s.auxCash, held: s.held, savingsHeld: s.savedBucks,
         premiumNet: s.premiumNet, reliefScaled: s.reliefScaled, reliefUnavailable: s.reliefUnavailable,
         availableReliefScaled: s.availableReliefScaled,
         reliefLiquidityLimited: s.reliefLiquidityLimited, basketShares: s.basketShares,

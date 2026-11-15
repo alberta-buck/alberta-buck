@@ -273,8 +273,8 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         KP, KI, KD, dp.dt, KMIN, KMAX, K0, gov)
     if dp.dtmax_secs:
         chain.send(kctrl.functions.setDTMax(dp.dtmax_secs), sender=gov)
-    if dp.leak_secs:
-        chain.send(kctrl.functions.setLeak(dp.leak_secs), sender=gov)
+    # Always: the contract's own default is a year, so a world without a leak (0) must say so.
+    chain.send(kctrl.functions.setLeak(dp.leak_secs), sender=gov)
     # The insurance pool: a contract bound Carrying through the registry, as
     # Buck's pool is meant to be -- it holds premium deposits on its members'
     # behalf, so the demurrage they accrue travels with them instead of

@@ -35,6 +35,8 @@ def test_frame_record_groups_a_snapshot_frame_by_component():
     assert f["market"]["book"]["bids"][0] == dict(symbol="LABR", buck=.247, usdc=.252, via_usdc=True, via_buck=False)
     assert (f["market"]["book"]["buck_bid"], f["market"]["book"]["buck_ask"]) == (1.01, 1.01202)
     assert FIXTURE["frames"][0]["market"]["book"] is None and FIXTURE["frames"][0]["control"]["bvib_usdc"] is None
+    # Each household's worth in USDC and in net BUCK, beside its USD counterfactual.
+    assert f["households"]["nw_buck"] == FIXTURE["flat"][2]["households"]["nw_buck"]
     # A world without the canonical reads or households records their absence, never a zero.
     bare = runrecord.frame_record(dict(day=4, supply=10, buckK=7 * 10**17), [])
     assert bare["supply"]["holders"] is None and bare["jubilee"] is None and bare["households"] is None
