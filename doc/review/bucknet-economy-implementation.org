@@ -4747,6 +4747,134 @@ five. Against BVIB's excess:
   =economy= for two years: does K hold near its net equilibrium, and how much of the wind-down was the
   measure?
 
+** Net BUCK throughout: the review, and one way to handle carried fees (2026-11-15)
+
+The owner: whenever pools are priced in BUCK, price in net BUCK, especially on routes through the
+TOKEN/BUCK and BUCK/USDC pools. BUCK entering the basket is full value from an ordinary account and
+Carrying from the Jubilee fund, an insurance pool or a pool; it is either deposited into the
+basket's pool positions (diluting their carried fee) or spent directly. Review the flow in,
+through the basket's own trades, and out on withdrawal; then isolate one minimal interface for
+things valued or priced in BUCK that may carry fees, implemented and documented in as few places
+as possible, and take the related chances to simplify the pricing code. Three read-only reviews
+(in and out of the basket; the basket's own route pricing; the simulation's agents) at 614348c8.
+
+*** How BUCK moves, and where its value is counted
+
+- Ordinary accounts (households, the desk, SimLP) hold full-value BUCK. Carrying accounts (the
+  pools, the Universal Router, the basket, the wheel, the Jubilee fund, the insurance pool) hold
+  nominal BUCK whose demurrage (2%/yr) is carried: a Carrying sender delivers net x nominal / gross
+  (=BuckCash.move=). So a TOKEN sold into pool i at quoted price P fetches P r_i net; bought with
+  full-value BUCK it costs P; bought by the basket (wallet ratio r_b) it costs P r_b net.
+- /Into the basket/: a BUCK deposit is measured as the rise in the basket's net balance, whoever
+  sends it; a TOKEN deposit at the netted LOW mark. Shares, basis and principal are net.
+- /Inside/: the basket's marks (=BuckBasketEquityStorage._marks=) and the desk's (=_venueMarks=)
+  re-net the venue's nominal marks, so equity, the mark, the lien, headroom, liquidity, the upkeep
+  plan and the desk's sizes are net; the arbitrage planner simulates Uniswap in nominal and converts
+  at the wallet's and each pool's ratio; K's and the parity reference are net since a5467eb6.
+- /Out/: a cash exit pays its net share through =payNet= (sending enough nominal to deliver it); a
+  sold exit measures its residue from net cash; the basket's own principal is retired net.
+- /The arbitrageurs/ in the simulation quote in nominal, which is exact for them: BUCK only passes
+  pool to pool through the Carrying router, keeping its carried fee.
+
+*** Findings, most consequential first
+
+| # | where | what | unit | consequence | fix |
+|---+-------+------+------+-------------+-----|
+| 1 | sim: =net_household.py= 191, 416, 493, 584, 819; =household_policy.py= 359-389; JS mirrors | a household's "fair" basket value = BVIB (net BUCK) x the dollar pool's price per NOMINAL BUCK, against a buy cost already per net BUCK | mixed | households see the BUCK about (1 - r_ub) dear (1.4% by day 275): less saving in BUCK, paydown only beyond retire_disc + 1.4%, smaller wallet targets, issuance favoured in scoring. A supply bias, before and after a5467eb6, and a candidate cause of K's wind-down | fair at the dollar pool's net price (x gross/net), or at the basket's USD value (question 2) |
+| 2 | =BasketMarketOps.sol= 191-229 (=exitAssets=) | an in-kind exit short of its lien share keeps back TOKEN worth the shortfall, valued at the venue's NOMINAL low mark | nominal vs net | the exiter leaves with (1 - r) of the shortfall, the stayers pay: 0.2-1.8% of the exiter's equity at 0.6-4.7% carry. Only =redeemInKind=, opt-in; tests age pools 601 s | net pLow (or the venue returns net marks, below) |
+| 3 | =PairSignals.sol= 162-164, =PairRebalancePolicy.sol= 214-231 | a pair's level on the BUCK route = log(P_a / P_b) from ticks | nominal | r cancels only when the pools are equally hollow: 0.99 against 0.95 is ~412 ticks on the BUCK route, ~206 in the consensus, against a 100-tick separation gate. Sells of the hollow pool's TOKEN open early | carry ticks added per route (question 5) |
+| 4 | =BuckBasketEquityStorage.sol= 458 (=_markS=) read by =_fundCash= 405-410 | the snapshot's net spendable cash overwritten with balanceOf | nominal | draws fall short by the wallet's carried fee; buys and pairings come out smaller; conservative | keep the net spend in =_fundCash= (upkeep facet only) |
+| 5 | =BasketUpkeepFacet.sol= 192-194, 444 | pairing what waits sized at the pool's ratio, minted at the wallet's | net at r_i | leaves (1 - r_i/r_b) of the TOKEN idle a pass; gas only | size at the boundary (below) |
+| 6 | sim: =net_snapshot.household_mark=, JS =netMark= | a household's net book priced at USD per nominal BUCK | nominal | a debtor's liability understated by (1 - r) x issued: ~$4k on $290k at 1.4% | net price (question 3) |
+| 7 | =Buck= / =BuckCash.move= 180-186 with =payNet= | a sponsored ordinary redeemer: the sponsor tops up a payment the basket already raised to full value | -- | the redeemer gets pay x g/n, the sponsor pays the carry twice | a full-value transfer for approved Carrying services (question 6) |
+| 8 | =JubileeKind.sol= 202, 234 | retirement from surplus cash compares nominal balanceOf with a net target | nominal | dormant: it excludes a Carrying basket | net cash, if wanted (question 7) |
+| 9 | sim: =snapshot.py= 65-71; =basket_wheel_agent.py=; =shock_agent.py=; =basket_machine.targets_bp=; JS artifact bundle | spot prices from pool balances (the retired gauge); wheel counters and shock sizes at nominal; target mirror un-netted; the JS demo bundle predates a5467eb6 | nominal | records and counters only; the demo worlds read nominal BVIB | slot0 and the carry; rebuild the bundle |
+| 10 | =BuckBasketEquity.sol= 369, 612; =BasketUpkeepFacet.sol= 117 | events report the nominal argument | nominal | reporting only | net amounts where it fits |
+
+Checked and correct, among others: the deposit and cash-exit paths; =_marks= and everything built
+on it (equity, share price, mark, lien, headroom, liquidity, the book, plan, targets, leash, swap
+caps); quotients whose ratio cancels (idle value / pTwap, burn value / posTwap); single-pool guards
+(spot against TWAP, the venue's fairOut, the deposit guard, the Jubilee fund's position check) where
+r appears on both sides; the gross account caps against MAX_BALANCE (gross is right there); the
+arbitrage planner (nominal inside, ratios at its BUCK ends); the desk (ordinary, so its payments are
+full value); the household trade quotes and every canonical trade bound (=NetMarketQuote=: buys in
+net, sales in nominal full-value input).
+
+*** One way to handle BUCK that may carry fees
+
+Five local interface copies of the net view, about 20 hand-written net/gross conversions in two
+scalings and three rounding habits, four different rules for an empty account, and marks re-netted
+in two places. The design (the owner, 2026-11-15: as few places as necessary):
+
+1. /One declaration/: =IBuckCashView= (=src/IBuckCashView.sol=, already on Buck); the basket's local
+   copies import it, with a small separate interface for its issuance calls.
+2. /One conversion/: an internal library =src/lib/CarryRatio.sol= (=BuckNet= is the legacy facade's
+   name), documented once:
+   - =Ratio {gross, net}= read once per account (=accountBalancesScaled=);
+   - =toNet(r, nominal)=: floor(nominal x net / gross), and =toNetScaled=: exactly what
+     =BuckCash.move= delivers;
+   - =toNominal(r, net)=: the ceiling inverse, for sizing what must be sent;
+   - =spendable(r, balance)=;
+   - the rules: convert with the ratio of the account the BUCK leaves (a pool's for BUCK out of a
+     pool, the wallet's for BUCK the basket pays); an empty account (gross 0) carries nothing, so
+     its quoted amount is its net; executed amounts are still measured as net balance changes (move
+     rounds), conversions are for quotes and marks.
+3. /One boundary/: =BasketVenueFacet= is where Uniswap's nominal prices and amounts meet the basket.
+   In net mode it returns net prices and marks (=_readPoolPrice=, =marks=), so =_marks= and the
+   desk's =_venueMarks= become plain calls (deleted in the same commit, or marks are netted twice),
+   finding 2 is fixed by construction, and =basketValueInBuck= shares the venue's one net price.
+   The mode is the venue's own (a deploy-time setting, refused against a token with no net view);
+   the legacy shells deploy =BuckBasketUniswapV3= directly. =BasketReference= and the pair signals
+   read pools themselves and use the library.
+4. /Nominal stays, explicitly, in five places/: amounts handed to Uniswap (swap inputs, price
+   limits, mint amounts); the execution-against-TWAP slippage guard (netting it would fold the
+   payer's and pool's ratios into the tolerance); the arbitrage planner's Uniswap simulation; the
+   gross account caps; and the comparison-only nominal reference.
+5. /Off-chain, once/: the same conversion in the Rust kernel (=buck-math=, beside =net_demurrage.rs=),
+   with cases in =net-math-vectors.json= checked by Solidity (=NetMathVectorsTest=), Rust, Python and
+   JS; and one block-pinned price reader per language (slot0, as decision 8 chose) replacing the
+   seven ways the simulation reads a price and the sixteen copies of "the basket in dollars".
+
+Sizes: the venue has 2,127 bytes (an estimated 1-1.5 KB is needed); the shell (52) and the upkeep
+facet (408) gain room as their re-netting goes; the shell's net wrappers stay public in the linked
+=BasketMarketOps= (4,398 free).
+
+*** Questions for the owner
+
+1. /A net price is a bid./ A TOKEN sold into pool i fetches P r_i; bought it costs P (full value) or
+   P r_b (the basket). The marks use the sell side. Should the entry side (HIGH) or the targets'
+   tilt use the buy side, a mid, or the USDC route?
+2. /A household's fair value/: the dollar pool's net price (BVIB_net x P / r_ub; the household's
+   signal is then exactly K's), or the basket's dollar value (sum of amount x TOKEN/USDC price)? They
+   differ by r_tok / r_ub, ~0.2%.
+3. /A household's mark/: everything at the net price, or assets at their nominal exit (bid) and
+   liabilities at the net buy cost (ask)?
+4. /Carry on the basket's own buys and pairing/: paying wallet BUCK into a hollower pool gives
+   (r_b - r_i)(1 - s_i) to its other LPs; the deposit charges ignore it. A guard, or a preference
+   for fresher pools?
+5. /The pair observer/: net BUCK route (carry ticks, recording the basket's own refresh of r), or
+   separation on the USDC route alone?
+6. /A sponsored redeemer/: should Buck offer approved Carrying services a full-value transfer, so the
+   sponsor does not pay the carry twice?
+7. /The Jubilee retirement job/ (from surplus cash): dormant for the Carrying machine basket by
+   intent?
+8. /referencePrice/: a net price (as the basket marks)? The comments say "as the venue quotes it".
+9. /Nominal arbitrage/ leaves standing net gaps r_i / r_ub between pools that no ordinary account
+   can close: accept as how Carrying pools trade, or model carry-aware arbitrage?
+
+*** Work, in order
+
+- [ ] /N1. One declaration, one library/ (no behaviour change): =CarryRatio=; the five interface
+  copies to =IBuckCashView=; every hand conversion through the library; sizes measured; forge
+  unchanged.
+- [ ] /N2. The venue as the boundary/: net prices and marks in net mode; the re-netting deleted;
+  findings 2, 4 and 5 fixed; tests on pools aged a year (an in-kind exit; a pairing pass; a funded
+  buy).
+- [ ] /N3. The kernel and the simulation/: the carry functions and a price reader in =buck-math= with
+  vectors; the simulation's helpers call them; finding 1 (a household setting keeps the old basis
+  for a comparison), 6 and 9; the JS bundle rebuilt.
+- [ ] /N4. The owner's answers/ (questions 1-9), each change measured as a comparison.
+
 ** Resume here (2026-11-14, evening)
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed to GitHub (owner's
