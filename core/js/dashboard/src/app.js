@@ -3,19 +3,20 @@
 // Insurers and Events tabs are named and not yet built.
 
 import { AgentsTab } from "./agents.js";
+import { CompareTab } from "./compare.js";
 import { HoverBus } from "./chart.js";
 import { ControlPanel, newSessionForm } from "./controls.js";
 import { LiveControl } from "./live.js";
 import { ChartTab, OverviewTab } from "./overview.js";
 import { BASKET, JUBILEE, MARKET, runStatus, tabTiles } from "./series.js";
-import { HttpRunSource, listRuns } from "./sources.js";
+import { HttpRunSource, compareSource, listRuns } from "./sources.js";
 
 const POLL_MS = 2000;
 const MANIFEST_MS = 10000;
 const TABS = [
   ["overview", "Overview"], ["market", "Market"], ["basket", "BuckBasket"], ["jubilee", "Jubilee fund"],
   ["insurers", "Insurers and pools", "Not yet recorded: the frames do not read the insurers' pools"],
-  ["agents", "Agents"], ["events", "Events", "Not yet built"],
+  ["agents", "Agents"], ["events", "Events", "Not yet built"], ["compare", "Compare"],
 ];
 const AGENTS_MS = 10000;
 const STATUS = {
@@ -84,7 +85,8 @@ function view(id) {
       (f) => tabTiles("market", f))
       : id === "basket" ? new ChartTab(root, bus, BASKET(tokens), (f) => tabTiles("basket", f))
         : id === "jubilee" ? new ChartTab(root, bus, JUBILEE(), (f) => tabTiles("jubilee", f))
-          : id === "agents" ? new AgentsTab(root, bus, panel) : null;
+          : id === "agents" ? new AgentsTab(root, bus, panel)
+            : id === "compare" ? new CompareTab(root, bus, compareSource()) : null;
   return views[id];
 }
 
@@ -118,7 +120,12 @@ function showStatus() {
 }
 
 function render(switched = false) {
-  $("empty").hidden = state.frames.length > 0;
+  $("empty").hidden = state.frames.length > 0 || state.tab === "compare";
+  if (state.tab === "compare") {
+    // Compare reads its own runs, whichever run is open above; drawn on switching to it.
+    if (switched) view("compare").show();
+    return;
+  }
   if (!state.source) return;
   const v = view(state.tab);
   if (!v) return;

@@ -12,6 +12,8 @@ Serves core/js/dashboard/ and a JSON API over a runs directory (alberta_buck.sim
   GET  /api/runs/<id>/agents              each household's latest line (the Agents table)
   GET  /api/runs/<id>/agents?member=<m>   one household's lines, day by day
   GET  /api/runs/<id>/events?member=<m>   one household's state-machine steps
+  GET  /api/comparisons                   every comparison's index (alberta_buck.sim.compare), newest first
+  GET  /api/comparisons/<name>            one comparison's index: its axes, which run is which, its summary
 
 and live sessions: worlds it runs itself (server.Session, one thread and pyrevm EVM each), each
 writing its run record as it goes (live-<sid>), kept until its operator stops it:
@@ -277,6 +279,15 @@ def make_handler(root: Path, static: Path = STATIC, live: LiveSessions | None = 
                     return self._live_get(parts)
                 if parts == ["api", "runs"]:
                     return self._json(runrecord.runs(root))
+                if parts == ["api", "comparisons"]:
+                    from alberta_buck.sim import compare
+                    return self._json(compare.comparisons(root))
+                if len(parts) == 3 and parts[:2] == ["api", "comparisons"] and RUN_ID.match(parts[2]):
+                    from alberta_buck.sim import compare
+                    path = compare.index_path(root, parts[2])
+                    if not path.exists():
+                        return self._json({"error": "no such comparison"}, 404)
+                    return self._json(json.loads(path.read_text()))
                 if len(parts) == 4 and parts[:2] == ["api", "runs"]:
                     directory = self._run(parts[2])
                     if directory is None:

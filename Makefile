@@ -956,9 +956,10 @@ compare-null: sim-build core-build-py
 #   make nix-venv-run-import VECTORS="build/sim/economy-smoke-365.json ..."   # earlier vectors
 #   make nix-venv-dashboard-test
 #   make nix-dashboard-live-check          # the page's live controls, against a running dashboard
+#   make nix-dashboard-compare-check       # the Compare tab, against a running dashboard with a comparison
 # Live sessions (New live session on the page) run inside the dashboard, one EVM each.
 DASHBOARD_PORT ?= 8890
-.PHONY: dashboard dashboard-lan run-import dashboard-test dashboard-live-check
+.PHONY: dashboard dashboard-lan run-import dashboard-test dashboard-live-check dashboard-compare-check
 dashboard:
 	python -m alberta_buck.sim.dashboard --port $(DASHBOARD_PORT)
 # Every interface, read only: anyone who can reach the port reads the run records; nobody can start or
@@ -970,11 +971,15 @@ dashboard-lan:
 run-import:
 	python -m alberta_buck.sim.runrecord import $(VECTORS)
 dashboard-test:
-	python -m pytest alberta_buck/test/test_runrecord.py alberta_buck/test/test_dashboard_live.py -q
-	cd core/js && node --test test/dashboard-series.test.js
+	python -m pytest alberta_buck/test/test_runrecord.py alberta_buck/test/test_dashboard_live.py alberta_buck/test/test_compare.py -q
+	cd core/js && node --test test/dashboard-series.test.js test/dashboard-compare.test.js
 dashboard-live-check:
 	mkdir -p build/test
 	cd core/js && node dashboard/bin/live-check.mjs http://127.0.0.1:$(DASHBOARD_PORT)/ ../../build/test/dashboard-live.png
+# The Compare tab in Chromium, against a dashboard whose runs hold a comparison (make compare).
+dashboard-compare-check:
+	mkdir -p build/test
+	cd core/js && node dashboard/bin/compare-check.mjs http://127.0.0.1:$(DASHBOARD_PORT)/ ../../build/test/dashboard-compare.png
 # Full household lifecycle gate, including currently unported canonical
 # action cases. Use economy-accounting-test for completed migration blocks;
 # its passing component checks do not imply this full lifecycle is enabled.

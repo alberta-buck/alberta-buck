@@ -222,3 +222,11 @@ th[aria-sort="descending"] button.sort::after { content: " \2193"; }
 .drill .events tr.fault td { color: var(--critical); }
 .panel[hidden] { display: none; }
 .empty-label { fill: var(--text-muted); font-size: 12px; }
+
+/* Compare: runs identical but for the settings under study, side by side. */
+.compare-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; }
+.compare-pick { font-size: 13px; color: var(--text-secondary); }
+.compare-pick select { margin-left: 4px; max-width: 100%; }
+.compare-differs h3 { font-size: 13px; margin: 8px 0 2px; }
+.compare-list { font-size: 12px; color: var(--text-secondary); margin: 0 0 8px; padding-left: 18px; }
+.table-wrap td.num .delta { color: var(--text-muted); }

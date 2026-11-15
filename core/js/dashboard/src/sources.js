@@ -66,3 +66,16 @@ export async function listRuns(base = "") {
   if (!r.ok) throw new Error(`runs: ${r.status}`);
   return r.json();
 }
+
+// What the Compare tab reads: the comparisons' indexes (alberta_buck/sim/compare.py), the runs, and
+// any run's manifest and frames.
+export const compareSource = (base = "") => ({
+  async comparisons() {
+    const r = await fetch(`${base}/api/comparisons`, { cache: "no-store" });
+    if (!r.ok) throw new Error(`comparisons: ${r.status}`);
+    return r.json();
+  },
+  runs: () => listRuns(base),
+  manifest: (id) => new HttpRunSource(id, base).manifest(),
+  frames: (id) => new HttpRunSource(id, base).frames(-1),
+});
