@@ -79,6 +79,11 @@ test("the BuckBasket, Market and Jubilee tabs read the recorded frame shape", as
   assert.deepEqual(chartData(BASKET(tokens).find((s) => s.id === "weights"), frames).series.map((s) => s.values[2]), [-2, 2]);
   assert.deepEqual(chartData(MARKET(tokens).find((s) => s.id === "carry"), frames).series.map((s) => s.values[2]),
     [0.99, 0.995, 0.998], "each pool's BUCK net of its carried fee");
+  // The price book: the BUCK's bid and ask beside its spot, its fair dollar value, and the routes.
+  const usd = chartData(MARKET(tokens).find((s) => s.id === "buck_usd"), frames).series;
+  assert.deepEqual(usd.map((s) => s.values[2]), [frames[2].market.buck_usd, 1.01, 1.01202, 1.03]);
+  assert.equal(usd[1].values[0], null, "no book before it samples");
+  assert.deepEqual(chartData(MARKET(tokens).find((s) => s.id === "routes"), frames).series[0].values.slice(0, 3), [null, null, 1]);
   const gap = chartData(MARKET(tokens).find((s) => s.id === "triangle"), frames).series[0].values[2];
   assert.ok(Math.abs(gap - (0.249 * 0.99 / 0.251 - 1) * 100) < 1e-9);
   const pools = stackTops(chartData(MARKET(tokens).find((s) => s.id === "pools"), frames));

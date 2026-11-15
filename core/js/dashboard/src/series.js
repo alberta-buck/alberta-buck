@@ -191,8 +191,19 @@ export const BASKET = (tokens = []) => [
 export const MARKET = (tokens = [], split = true) => [
   {
     id: "buck_usd", title: "BUCK in USD", unit: "ratio", kind: "line",
-    note: "The BUCK's dollar price in its USDC pool.",
-    series: [{ key: "buck_usd", label: "BUCK/USD", value: (f) => num(f.market?.buck_usd) }],
+    note: "The BUCK's dollar price in its USDC pool; from the price book: what a full-value BUCK sold fetches (bid), what a net BUCK bought costs (ask: it arrives hollow from the Carrying pool), and the BUCK's fair value (the basket's dollar value by each TOKEN's best route, per BUCK at parity).",
+    series: [
+      { key: "buck_usd", label: "BUCK/USD", value: (f) => num(f.market?.buck_usd) },
+      { key: "bid", label: "Bid (book)", value: (f) => num(f.market?.book?.buck_bid) },
+      { key: "ask", label: "Ask (book)", value: (f) => num(f.market?.book?.buck_ask) },
+      { key: "fair", label: "Fair (basket in USDC)", value: (f) => num(f.control?.bvib_usdc) },
+    ],
+  },
+  {
+    id: "routes", title: "TOKENs sold best through USDC", unit: "count", kind: "line",
+    note: "The price book prices each TOKEN by its best route: into its own pool (at that pool's net / gross) or for USDC and the USDC into the dollar pool (at the dollar pool's). The count whose best route to net BUCK goes through USDC; the rest sell best directly.",
+    series: [{ key: "via_usdc", label: "Through USDC",
+      value: (f) => (f.market?.book?.bids ? f.market.book.bids.filter((b) => b.via_usdc).length : null) }],
   },
   {
     id: "triangle", title: "Triangle gap by commodity", unit: "pct", kind: "line", reference: 0,

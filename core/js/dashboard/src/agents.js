@@ -25,6 +25,7 @@ export const COLUMNS = [
   { key: "age", label: "Age", value: (r) => (r.age === undefined || r.age === null ? null : Math.floor(r.age)), unit: "count" },
   { key: "day", label: "Day", value: (r) => r.day, unit: "count" },
   { key: "vs", label: "Net worth vs counterfactual", value: (r) => (r.nw === undefined || r.hypo === undefined ? null : money(r.nw - r.hypo)), unit: "usd" },
+  { key: "nw_buck", label: "Worth in net BUCK", value: (r) => money(r.nw_buck), unit: "buck" },
   { key: "drawn", label: "Drawn", value: (r) => money(r.drawn), unit: "buck" },
   { key: "basket", label: "Basket", value: (r) => money(r.basket), unit: "buck" },
   { key: "held", label: "Held BUCK", value: (r) => money(r.held_buck), unit: "buck" },
@@ -42,6 +43,11 @@ export const MEMBER = [
       { key: "nw", label: "Net worth", value: (r) => money(r.nw) },
       { key: "hypo", label: "Counterfactual", value: (r) => money(r.hypo) },
     ],
+  },
+  {
+    id: "m-nw-buck", title: "Net worth in net BUCK", unit: "buck", kind: "line",
+    note: "The same worth in full-value BUCK: what retiring everything into BUCK now would fetch (its BUCK first retires its BUCK debt; dollars buy BUCK at the ask, a dollar debt is paid by selling at the bid). Beside the dollar line, the years show which fee costs more: the dollar's inflation or the BUCK's demurrage.",
+    series: [{ key: "nw_buck", label: "Net worth (net BUCK)", value: (r) => money(r.nw_buck) }],
   },
   {
     id: "m-credit", title: "Credit and holdings", unit: "buck", kind: "line",
