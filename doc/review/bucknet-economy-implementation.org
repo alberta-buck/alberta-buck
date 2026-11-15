@@ -4722,18 +4722,30 @@ five. Against BVIB's excess:
 
 *** The fix, and how it is measured
 
-- [ ] /Net BVIB in the contract./ =BasketVenueFacet.basketValueInBuck= multiplies each
+- [X] /Net BVIB in the contract/ (a5467eb6; forge 1,550 passed). Done as below, and the parity
+  reference (=BasketReference=, read by the upkeep facet and the desk's policy) follows the same
+  switch. A year of idle carry makes the test's pools 1.98% hollow; both references then read net.
+  The legacy-accounting machine fixtures (=BuckLinear= has no net view) set the nominal reference.
+- [ ] (superseded) /Net BVIB in the contract./ =BasketVenueFacet.basketValueInBuck= multiplies each
   constituent's TWAP price by its pool's net/gross (=accountBalancesScaled=). A governance flag
   =nominalReference= (default false: net) keeps the old measure for comparison; it packs into the
   slot of =wheel=, so no storage moves (the facet has 2,572 bytes of room). Forge tests: an aged
   pool reads below its nominal; the flag restores it.
-- [ ] /Rational arbitrage in the simulation./ The arbitrageurs value BUCK out of a Carrying pool
-  at net (quote x r), Python first (=router.quote_path=, the cycle arbitrageurs); a scenario flag
-  keeps the naive quoting for comparison. JS later (S3).
-- [ ] /The frames record both/: BVIB nominal and net, and each pool's r (=market.pools=), for the
-  dashboard.
-- [ ] /A comparison/ (=comparisons/carry.toml=): reference (net, nominal) x arbitrage (net, naive)
-  on =economy= for two years, leak on; does K hold near its net equilibrium?
+- [X] /Arbitrage needs no change./ The Universal Router is bound Carrying, like the pools
+  (=deploy.py=): in a multi-hop trade the hollow BUCK leaves one pool into the router and enters the
+  next at its nominal amount, carrying its fee with it. The cycle arbitrageurs therefore lose
+  nothing, and the nominal triangle closing is right for them; the carry moves between Carrying
+  accounts at nominal and is realized only when BUCK leaves into an ordinary account (a household
+  buying BUCK, an LP withdrawing, the basket's BUCK coming home). The measure was the fault, not the
+  market. (A direct trade into an arbitrageur's own ordinary wallet does take the carry; small.)
+- [X] /The frames record both/: =control.bvib= (net, what K reads) and =control.bvib_nominal=
+  (the quoted measure), each TOKEN/BUCK pool's =net= (=market.pools=) and the dollar pool's
+  (=market.dollar_pool_net=); the Overview draws the quoted BVIB beside BVIB, the Market tab each
+  pool's BUCK net of its carried fee, and the Compare tab both BVIBs. The machine setting
+  =machine.nominal_reference= (default false) deploys the nominal measure, for comparison.
+- [-] /A comparison/ (=comparisons/carry.toml=): reference (net, nominal) x leak (a year, none) on
+  =economy= for two years: does K hold near its net equilibrium, and how much of the wind-down was the
+  measure?
 
 ** Resume here (2026-11-14, evening)
 

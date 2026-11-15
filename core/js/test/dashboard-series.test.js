@@ -20,7 +20,8 @@ test("every Overview chart reads the recorded frame shape", () => {
       assert.ok(series.values.some((v) => v !== null), `${s.id}.${series.key} is recorded in the fixture`);
     }
   }
-  assert.deepEqual(chartData(spec("price"), frames).series.map((s) => s.values), [[0.99, 1.01, 1.02], [1.01, 0.995, 0.99]]);
+  assert.deepEqual(chartData(spec("price"), frames).series.map((s) => s.values),
+    [[0.99, 1.01, 1.02], [null, 1.015, 1.0275], [1.01, 0.995, 0.99]], "BVIB, quoted BVIB (none while the pools are fresh), BUCK/USD");
   assert.deepEqual(chartData(spec("population"), frames).series.map((s) => s.values.at(-1)), [2, 1, 3]);
   assert.deepEqual(chartData(spec("health"), frames).series.map((s) => s.values), [[0, 1, 2], [0, 0, 1]]);
 });
@@ -76,6 +77,8 @@ test("the BuckBasket, Market and Jubilee tabs read the recorded frame shape", as
   assert.deepEqual(chartData(BASKET(tokens).find((s) => s.id === "wheel"), frames).series[0].values, [null, 1, 1],
     "a cumulative counter is drawn as its daily change");
   assert.deepEqual(chartData(BASKET(tokens).find((s) => s.id === "weights"), frames).series.map((s) => s.values[2]), [-2, 2]);
+  assert.deepEqual(chartData(MARKET(tokens).find((s) => s.id === "carry"), frames).series.map((s) => s.values[2]),
+    [0.99, 0.995, 0.998], "each pool's BUCK net of its carried fee");
   const gap = chartData(MARKET(tokens).find((s) => s.id === "triangle"), frames).series[0].values[2];
   assert.ok(Math.abs(gap - (0.249 * 0.99 / 0.251 - 1) * 100) < 1e-9);
   const pools = stackTops(chartData(MARKET(tokens).find((s) => s.id === "pools"), frames));

@@ -45,6 +45,10 @@ DEFAULTS = {
     "desk_gain_bp": 2500,
     "desk_cap_bp": 40,
     "desk_persist_days": 30,        # days beyond the band before it acts
+    # K's reference and the parity reference price each pool in net BUCK (its TWAP price x its
+    # net/gross: the Carrying BUCK a TOKEN sold into it fetches); True reads the quoted (nominal)
+    # prices, the measure before 2026-11-15, for comparison (BasketVenueFacet.setNominalReference).
+    "nominal_reference": False,
 }
 ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_AGE", "dt_max": "SIM_MACHINE_DT_MAX",
                "leash_bp": "SIM_MACHINE_LEASH_BP", "tilt": "SIM_MACHINE_TILT", "lean_cap_bp": "SIM_MACHINE_LEAN_CAP_BP",
@@ -232,6 +236,9 @@ def activate(d, given=None, turn_seconds=0) -> None:
                    else max(2 * interval, int(d.kctrl.functions.dT().call()), int(turn_seconds)))
         chain.send(d.kctrl.functions.setDTMax(horizon), sender=gov)
     chain.send(basket.functions.setVenue(venue.address), sender=gov)
+    if s.get("nominal_reference"):
+        shell_venue = d.w3.eth.contract(address=basket.address, abi=venue.abi)    # through the shell's fallback
+        chain.send(shell_venue.functions.setNominalReference(True), sender=gov)
     chain.send(basket.functions.setEquityWheel(response.address), sender=gov)
     if getattr(d, "net_stack", None) is not None:
         from alberta_buck.sim import identity as idmod

@@ -156,7 +156,8 @@
    "directTrades": 5,
    "ubTrades": 3,
    "eq_headroom": 900000,
-   "eq_mark": 14000000
+   "eq_mark": 14000000,
+   "basketValNominal": null
   },
   {
    "day": 1,
@@ -203,10 +204,12 @@
      },
      "buck_tokens": [
       {
-       "nominal_scaled": "8400000000000000000000000000000000000000000"
+       "nominal_scaled": "8400000000000000000000000000000000000000000",
+       "net_ratio_scaled": "995000000000000000000000000000000000"
       },
       {
-       "nominal_scaled": "6300000000000000000000000000000000000000000"
+       "nominal_scaled": "6300000000000000000000000000000000000000000",
+       "net_ratio_scaled": "997000000000000000000000000000000000"
       }
      ],
      "basket": {
@@ -308,7 +311,8 @@
    "directTrades": 7,
    "ubTrades": 4,
    "eq_headroom": 300000,
-   "eq_mark": 14400000
+   "eq_mark": 14400000,
+   "basketValNominal": 1015000000000000000
   },
   {
    "day": 2,
@@ -351,14 +355,17 @@
     },
     "carrying": {
      "buck_usdc": {
-      "nominal_scaled": "14800000000000000000000000000000000000000000"
+      "nominal_scaled": "14800000000000000000000000000000000000000000",
+      "net_ratio_scaled": "998000000000000000000000000000000000"
      },
      "buck_tokens": [
       {
-       "nominal_scaled": "8900000000000000000000000000000000000000000"
+       "nominal_scaled": "8900000000000000000000000000000000000000000",
+       "net_ratio_scaled": "990000000000000000000000000000000000"
       },
       {
-       "nominal_scaled": "6700000000000000000000000000000000000000000"
+       "nominal_scaled": "6700000000000000000000000000000000000000000",
+       "net_ratio_scaled": "995000000000000000000000000000000000"
       }
      ],
      "basket": {
@@ -468,7 +475,8 @@
    "directTrades": 9,
    "ubTrades": 5,
    "eq_headroom": -250000,
-   "eq_mark": 14660000
+   "eq_mark": 14660000,
+   "basketValNominal": 1027500000000000000
   }
  ],
  "frames": [
@@ -478,6 +486,7 @@
    "control": {
     "k": 0.75,
     "bvib": 0.99,
+    "bvib_nominal": null,
     "pid": {
      "p": -100,
      "i": -2000,
@@ -503,13 +512,16 @@
     "pools": [
      {
       "symbol": "LABR",
-      "buck": 8000000
+      "buck": 8000000,
+      "net": null
      },
      {
       "symbol": "CNST",
-      "buck": 6000000
+      "buck": 6000000,
+      "net": null
      }
     ],
+    "dollar_pool_net": null,
     "arb": {
      "cycles": 10,
      "direct": 5,
@@ -619,6 +631,7 @@
    "control": {
     "k": 0.749,
     "bvib": 1.01,
+    "bvib_nominal": 1.015,
     "pid": {
      "p": -100,
      "i": -2000,
@@ -644,13 +657,16 @@
     "pools": [
      {
       "symbol": "LABR",
-      "buck": 8400000
+      "buck": 8400000,
+      "net": 0.995
      },
      {
       "symbol": "CNST",
-      "buck": 6300000
+      "buck": 6300000,
+      "net": 0.997
      }
     ],
+    "dollar_pool_net": null,
     "arb": {
      "cycles": 17,
      "direct": 7,
@@ -760,6 +776,7 @@
    "control": {
     "k": 0.747,
     "bvib": 1.02,
+    "bvib_nominal": 1.0275,
     "pid": {
      "p": -100,
      "i": -2000,
@@ -785,13 +802,16 @@
     "pools": [
      {
       "symbol": "LABR",
-      "buck": 8900000
+      "buck": 8900000,
+      "net": 0.99
      },
      {
       "symbol": "CNST",
-      "buck": 6700000
+      "buck": 6700000,
+      "net": 0.995
      }
     ],
+    "dollar_pool_net": 0.998,
     "arb": {
      "cycles": 24,
      "direct": 9,

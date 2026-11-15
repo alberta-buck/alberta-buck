@@ -224,6 +224,7 @@ def headline(frames: list[dict]) -> dict:
         "days": len(frames),
         "k_end": ks[-1] if ks else None, "k_mean": mean(ks), "k_min": min(ks, default=None), "k_max": max(ks, default=None),
         "bvib_end": bv[-1] if bv else None, "bvib_gap_mean": mean([abs(x - 1) for x in bv]),
+        "bvib_nominal_end": _num(_get(last, "control", "bvib_nominal")),
         "bvib_above": mean([1.0 if x > 1 else 0.0 for x in bv]),
         "buck_usd_end": _num(_get(last, "market", "buck_usd")),
         "supply_end": money("supply", "total"), "basket_lien_end": money("supply", "basket_lien"),

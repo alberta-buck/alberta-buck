@@ -23,6 +23,7 @@ const WATCHED = [["control", "k"], ["control", "bvib"], ["market", "buck_usd"], 
 export const METRICS = [
   { id: "k", title: "K", unit: "ratio", value: (f) => num(f?.control?.k) },
   { id: "bvib", title: "BVIB", unit: "ratio", reference: 1, value: (f) => num(f?.control?.bvib) },
+  { id: "bvib_nominal", title: "BVIB quoted (nominal)", unit: "ratio", reference: 1, value: (f) => num(f?.control?.bvib_nominal) },
   { id: "buck_usd", title: "BUCK/USD", unit: "ratio", reference: 1, value: (f) => num(f?.market?.buck_usd) },
   { id: "supply", title: "BUCK supply", unit: "buck", value: (f) => buck(f?.supply?.total) },
   { id: "lien", title: "Basket lien", unit: "buck", value: (f) => buck(f?.supply?.basket_lien) },

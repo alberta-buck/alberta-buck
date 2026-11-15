@@ -65,6 +65,12 @@ def _price(raw):
     return None if raw is None else int(raw) / RAW
 
 
+def _carry(row):
+    """A Carrying account's net / nominal BUCK (1 is fresh; less as its carried fee grows)."""
+    v = (row or {}).get("net_ratio_scaled")
+    return None if v is None else int(v) / SCALE
+
+
 def _scaled(value):
     """A 1e36-scaled chain value (often a decimal string) as raw units."""
     return None if value is None else int(value) // SCALE
@@ -137,12 +143,14 @@ def frame_record(flat: dict, tokens) -> dict:
         "day": flat["day"],
         "block": net.get("block"),
         "control": dict(k=_ratio(flat.get("buckK")), bvib=_ratio(flat.get("basketVal")),
+                        bvib_nominal=_ratio(flat.get("basketValNominal")),
                         pid=dict(p=flat.get("pid_p"), i=flat.get("pid_i"), d=flat.get("pid_d"))),
         "market": dict(buck_usd=_price(flat.get("buck_usd")),
                        tokens=[dict(symbol=s, ref_usd=_price(r), usdc=_price(u), buck=_price(b))
                                for s, r, u, b in spots],
-                       pools=[dict(symbol=s, buck=_scaled(row.get("nominal_scaled")))
+                       pools=[dict(symbol=s, buck=_scaled(row.get("nominal_scaled")), net=_carry(row))
                               for s, row in zip(tokens, carried)] if carried else None,
+                       dollar_pool_net=_carry((net.get("carrying") or {}).get("buck_usdc")),
                        arb=dict(cycles=flat.get("cycleTrades"), direct=flat.get("directTrades"), ub=flat.get("ubTrades"))),
         "supply": dict(total=supply, active_principal=net.get("active_principal"),
                        deferred_principal=net.get("deferred_principal"), basket_lien=flat.get("eq_lien"),

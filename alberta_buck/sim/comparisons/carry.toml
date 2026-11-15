@@ -1,0 +1,23 @@
+# Does K's reference read the pools in net or nominal BUCK, and how much of K's wind-down was the
+# measure? (doc/review/bucknet-economy-implementation.org, "BVIB in nominal or net BUCK"). The pools'
+# BUCK is Carrying: as it ages it carries its demurrage, and BUCK leaving a pool delivers only its
+# net share. The nominal reference reads each pool's quoted price (as K did before 2026-11-15); the
+# net reference reads it at the pool's net/gross. Crossed with the integrator's leak, since both
+# answer the same symptom.
+question = "How much of K's wind-down is reading the pools' carried BUCK at its nominal value?"
+experiment = "economy"
+days = 730
+
+[[axis]]
+name = "reference"
+note = "K's and the basket's parity reference: each pool's price at its net/gross, or quoted"
+[axis.values]
+net = {}
+nominal = { "machine.nominal_reference" = true }
+
+[[axis]]
+name = "leak"
+note = "the integrator's leak (deploy.leak_days): a year, or none"
+[axis.values]
+year = {}
+none = { "deploy.leak_days" = 0.0 }

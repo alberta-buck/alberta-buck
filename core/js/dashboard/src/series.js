@@ -18,9 +18,10 @@ export const OVERVIEW = [
   },
   {
     id: "price", title: "BVIB and BUCK/USD", unit: "ratio", kind: "line", reference: 1,
-    note: "BVIB is the basket's value in BUCK, the controlled variable: 1 is equilibrium. BUCK/USD is the BUCK's dollar price in its USDC pool.",
+    note: "BVIB is the basket's value in net BUCK, the controlled variable: 1 is equilibrium. Each pool's price counts at its BUCK's net value, less the demurrage it carries; the quoted BVIB is the same at the pools' nominal prices (what K read before 2026-11-15). BUCK/USD is the BUCK's dollar price in its USDC pool.",
     series: [
       { key: "bvib", label: "BVIB", value: (f) => num(f.control?.bvib) },
+      { key: "bvib_nominal", label: "BVIB quoted", value: (f) => num(f.control?.bvib_nominal) },
       { key: "buck_usd", label: "BUCK/USD", value: (f) => num(f.market?.buck_usd) },
     ],
   },
@@ -223,6 +224,14 @@ export const MARKET = (tokens = [], split = true) => [
       { key: "dollar", label: "BUCK/USDC", value: (f) => buck(f.supply?.holders?.dollar_pool) },
       ...(split ? tokens.map((sym, i) => ({ key: sym, label: `${sym}/BUCK`, value: (f) => buck(f.market?.pools?.[i]?.buck) }))
         : [{ key: "tokens", label: "TOKEN/BUCK pools (together)", value: (f) => buck(f.supply?.holders?.token_pools) }]),
+    ],
+  },
+  {
+    id: "carry", title: "The pools' BUCK, net of its carried fee", unit: "ratio", kind: "line", reference: 1,
+    note: "Each pool's BUCK is Carrying: its demurrage is carried, not paid, and BUCK leaving the pool delivers only this share of its nominal amount. 1 is fresh; it falls as the pool's BUCK ages and rises with fresh BUCK paid in. BVIB reads each TOKEN/BUCK pool's price at it.",
+    series: [
+      ...tokens.map((sym, i) => ({ key: sym, label: `${sym}/BUCK`, value: (f) => num(f.market?.pools?.[i]?.net) })),
+      { key: "dollar", label: "BUCK/USDC", value: (f) => num(f.market?.dollar_pool_net) },
     ],
   },
   {

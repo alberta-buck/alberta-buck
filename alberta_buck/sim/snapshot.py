@@ -642,6 +642,12 @@ class Snapshotter:
             if getattr(d, "buck_accounting", "") == "net":
                 raise
             bv = 0
+        bv_nominal = None
+        if getattr(d, "equity_machine", False) and getattr(d, "buck_accounting", "") == "net":
+            # The quoted measure beside the one K reads: each pool's TWAP price before its net/gross
+            # (the venue's pTwap; the reference before 2026-11-15). Their ratio is the pools' carry.
+            bv_nominal = sum(int(d.basket.functions.constituents(i).call()[2])
+                             * int(d.basket.functions.marks(i, 0).call()[4]) // 10**18 for i in range(len(d.tokens)))
         try:
             bk = int(d.kctrl.functions.buckK().call())
         except Exception:
@@ -821,6 +827,7 @@ class Snapshotter:
             "spotUsdc": su,
             "spotBuck": sb,
             "basketVal": bv,
+            "basketValNominal": bv_nominal,
             "buckK": bk,
             "simlp_drawn": simlp_drawn,                 # actual NFT principal in canonical worlds
             "pid_p": pid_p,
