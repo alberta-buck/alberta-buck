@@ -60,6 +60,14 @@ jobs:
       - name: Root npm dependencies (Uniswap's published contracts)
         run: npm ci --no-audit --no-fund
 
+      # The sandbox bundles the linked BuckNet artifacts from the whole tree's build (since
+      # 0880db04), and lib/ is not committed: install its pinned tags. The committed price windows
+      # are current; a fresh checkout's mtimes must not make them look stale to make.
+      - name: Solidity libraries (the pinned tags)
+        run: |
+          make install
+          make -t prices-routing
+
       - name: Build the sandbox
         run: make sandbox-build
 
