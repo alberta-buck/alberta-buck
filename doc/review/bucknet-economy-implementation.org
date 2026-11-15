@@ -4308,6 +4308,15 @@ economy, not Python's exact one: exact parity is the harness's (S2, S3), after.
   which world it is (no gas profile in a tab).
 - /Speed/ (S5): boot 0.5 s and 0.3-0.4 s a day with ten households in Node; the whole browser test
   (build, days, save, pause, step, shock, redeem) runs in 7 s in Chromium.
+- /Ticks and pace/ (owner, 2026-11-15: several blocks a day for realistic tracking and arbitrage; a
+  target seconds a day): =scenario.ticks_per_day= (World settings, 1 to 24; a tab's default 4, the
+  server's =economy.toml= 2) runs every tick: the =DayClock= puts tick k at k/T of the day, the whales
+  re-pin each TOKEN/USDC pool to the reference price interpolated (geometrically) within the day,
+  the arbitrageur and the wheel act at each tick (=PinWhale= and =ParityArb= take =everyTick=; their
+  other callers keep one act a day); households still decide at the day's first tick. Four ticks
+  cost 0.43 s a day in Node. The pace is live, in seconds a simulated day (default 1; 0 runs as
+  fast as it computes), sent as the server's =pace= op, so it steers a server world too. A
+  household's own =record= already marks it each day: the world's extra pass went.
 - /Tests/: =savings-world.webevm.test.js= (Node: days, the frame through =model.row=, the page's own
   =Saver= enrolling and depositing through =rpc()=); =savings-local.browser.test.js= (Chromium, the
   static page: watch, save $10,000, pause, step one day, shock, redeem in BUCK, no console errors);

@@ -86,6 +86,18 @@ export function mountSavings(ctx) {
     { op: "shock", side, usd: m * 1e6, days });
   };
 
+  // The pace, live: a target number of seconds a simulated day (the world's "pace" op, days a second).
+  const secondsIn = h("input", { type: "number", min: "0", step: "0.1", value: prefs.get("savings:seconds", "1"),
+                                 "aria-label": "seconds per day", class: "narrow",
+                                 onchange: () => setPace() });
+  function setPace() {
+    const secs = Number(secondsIn.value);
+    if (!(secs >= 0)) return ctx.say("The pace needs a number of seconds a day (0: as fast as it runs).", "error");
+    prefs.set("savings:seconds", String(secs));
+    return op(secs ? `Pacing the world at ${secs} s a day` : "Running the world as fast as it goes",
+              { op: "pace", days_per_second: secs ? 1 / secs : 0 });
+  }
+
   // World settings: where, and what a new world is made of.
   const serverIn = h("input", { type: "text", "aria-label": "sim server", dataset: { key: "savings:server-in" },
                                 size: 30 });
@@ -94,6 +106,10 @@ export function mountSavings(ctx) {
     h("option", { value: "revert" }, "Reverting (cycles about a mean)"));
   const seedIn = h("input", { type: "text", "aria-label": "seed", placeholder: "default", size: 8,
                               dataset: { key: "savings:seed" } });
+  // Ticks a simulated day: the whales re-pin the TOKEN/USDC pools and the arbitrageurs and the wheel
+  // act at each, so more ticks track the commodities through the day more closely (and cost more).
+  const ticksSel = h("select", { "aria-label": "ticks per day" },
+    ...[1, 2, 4, 8, 12, 24].map((n) => h("option", { value: String(n) }, String(n))));
   // An equity basket's upkeep: the older director and its Deploy / Fund / Trim
   // steps, or the basket machine (the server's scenario.basket).
   const upkeepOf = (machine) => (machine ? "equity-machine" : "equity-ops");
@@ -105,9 +121,9 @@ export function mountSavings(ctx) {
     surplus_policy: ["Surplus cash", [["adaptive", "Adaptive saving / discounted paydown"],
       ["basket", "Always invest"], ["retire", "Always retire liability"], ["discount", "Retire only at discount"]]],
     ...Object.fromEntries(["debtors", "savers", "investors"].map((role) =>
-      [`initial_${role}`, [`Opening ${role}`, [0, 6, 12, 24, 30, 60].map((n) => [n, String(n)])]])),
+      [`initial_${role}`, [`Opening ${role}`, [0, 2, 6, 12, 24, 30, 60].map((n) => [n, String(n)])]])),
     ...Object.fromEntries(["debtor", "saver", "investor"].map((role) =>
-      [`${role}_rate`, [`New ${role}s / year`, [0, 3, 6, 12, 30, 60].map((n) => [n, String(n)])]])),
+      [`${role}_rate`, [`New ${role}s / year`, [0, 2, 3, 6, 12, 30, 60].map((n) => [n, String(n)])]])),
   };
   const householdDefaults = { surplus_policy: "adaptive", initial_debtors: 6, initial_savers: 6,
     initial_investors: 30, debtor_rate: 6, saver_rate: 6, investor_rate: 30 };
@@ -125,6 +141,10 @@ export function mountSavings(ctx) {
     h("div", { class: "row ctl" }, runBtn, resetBtn, h("span", { class: "seg-label" }, "Step"), ...stepBtns,
       gasGroup),
     h("div", { class: "row ctl" },
+      h("label", { class: "inline", title: "The world's pace: at most one simulated day each this many seconds "
+        + "(0: as fast as it runs). A day that takes longer to compute runs at its own speed." },
+        "Pace", secondsIn, "s / day")),
+    h("div", { class: "row ctl" },
       h("span", { class: "seg-label" }, "Shock"),
       h("button", { type: "button", title: "Someone buys BUCK with USDC, uncapped, over the days",
                     onclick: () => shock("buy") }, "BUCK demand"),
@@ -141,7 +161,8 @@ export function mountSavings(ctx) {
         h("div", { class: "row" },
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Prices"), pricesSel),
           upkeepField,
-          h("label", { class: "field" }, h("span", { class: "field-label" }, "Seed"), seedIn)),
+          h("label", { class: "field" }, h("span", { class: "field-label" }, "Seed"), seedIn),
+          h("label", { class: "field" }, h("span", { class: "field-label" }, "Ticks / day"), ticksSel)),
         h("div", { class: "row" }, ...householdFields),
         h("div", { class: "row" },
           h("button", { type: "button", class: "danger", onclick: () => newWorld() }, "New world")),
@@ -441,6 +462,8 @@ export function mountSavings(ctx) {
           for (const [key, select] of Object.entries(householdSelects)) {
             select.value = String(info.households?.[key] ?? householdDefaults[key]);
           }
+          ticksSel.value = String(info.ticks_per_day ?? S.sets["scenario.ticks_per_day"] ?? (S.local ? 4 : 2));
+          if (prefs.get("savings:seconds", "") !== "") setPace();
           prefs.set("savings:key", S.saver.key);
           buildCommodities();
           draw();
@@ -539,6 +562,7 @@ export function mountSavings(ctx) {
     for (const [key, select] of Object.entries(householdSelects)) sets[`agents.HouseholdPopulationAgent.${key}`] = select.value;
     if (pricesSel.value !== "history") sets["scenario.prices"] = pricesSel.value;
     if (seedIn.value.trim()) sets["scenario.seed"] = seedIn.value.trim();
+    sets["scenario.ticks_per_day"] = ticksSel.value;
     if (S.info?.basket_kind === "equity") sets["scenario.basket"] = upkeepSel.value;
     const chain = S.status?.chain;
     if (chain && chain !== "l2") sets["agents.BasketWheelAgent.chain"] = chain;

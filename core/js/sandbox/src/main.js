@@ -93,7 +93,7 @@ function mountTabs() {
     });
   }
   const asked = new URLSearchParams(location.search).get("tab");
-  const saved = TABS.includes(asked) ? asked : ctx.sameOrigin ? "savings" : prefs.get("tab", "issuer");
+  const saved = TABS.includes(asked) ? asked : ctx.savingsOnly ? "savings" : prefs.get("tab", "issuer");
   selectTab(TABS.includes(saved) ? saved : TABS[0]);
 }
 
@@ -123,8 +123,10 @@ async function boot() {
   // The Savings tab's world runs on a sim server when one serves the page or is asked for (?sim=),
   // else in this tab (savings/local-link.js: a Web Worker on webevm), built when the tab opens.
   {
-    if (ctx.sameOrigin) {
-      // The savings sandbox: the Savings tab alone.
+    // The savings sandbox -- the Savings tab alone -- when a sim server serves the page, when the page
+    // is served as savings-sandbox.<domain> (a custom domain on the same static site), or ?only=savings.
+    const params = new URLSearchParams(location.search);
+    if (ctx.sameOrigin || location.hostname.startsWith("savings-sandbox.") || params.get("only") === "savings") {
       ctx.savingsOnly = true;
       for (const t of ["issuer", "wallets", "credit", "observer"]) {
         TABS.splice(TABS.indexOf(t), 1);

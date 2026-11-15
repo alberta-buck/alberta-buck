@@ -21,7 +21,7 @@ import { SavingsWorld, SAVINGS_NODE_OPTIONS } from "../../../src/scenarios/savin
 
 const host = {
   world: null, sets: {}, frames: [], day: 0,
-  paused: false, pace: 2, stepLeft: 0, done: false, ops: 0, last: null, error: null,
+  paused: false, pace: 1, stepLeft: 0, done: false, ops: 0, last: null, error: null,
   rpc: [], control: [], wake: null, generation: 0,
 };
 let identity = null;

@@ -27,11 +27,12 @@ export class ParityArb {
    *                         `size` fixed.  Default: 8000 where the basket has
    *                         a wheel (the machine), 0 elsewhere
    * @param opts.maxSize     the most one triangle may be, USDC base units
+   * @param opts.everyTick   act every tick of the day, not only the first
    */
   constructor({ size = 2_000n * 10n ** 6n, thresholdBp = 100n,
                 maxIters = 3, closeBp = null,
-                maxSize = 1_000_000n * 10n ** 6n } = {}) {
-    Object.assign(this, { size, thresholdBp, maxIters, closeBp, maxSize });
+                maxSize = 1_000_000n * 10n ** 6n, everyTick = false } = {}) {
+    Object.assign(this, { size, thresholdBp, maxIters, closeBp, maxSize, everyTick });
     this.triangles = 0;          // ops counter, for the curious
   }
 
@@ -42,7 +43,7 @@ export class ParityArb {
   }
 
   async act(world, day, tick) {
-    if (tick !== 0) return;
+    if (tick !== 0 && !this.everyTick) return;
     const { usdc, buck, fees } = world;
     for (let i = 0; i < world.tokens.length; i++) {
       const t = world.tokens[i];

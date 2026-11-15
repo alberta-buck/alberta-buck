@@ -15,10 +15,12 @@ export class PinWhale {
    * @param opts.pool    UniswapV3Pool handle (TOKEN/quote)
    * @param opts.token   TOKEN address   @param opts.tokenDec its decimals
    * @param opts.quote   quote address (e.g. USDC)
-   * @param opts.refPrice (day) => quote base units per whole TOKEN
+   * @param opts.refPrice (day, tick) => quote base units per whole TOKEN
+   * @param opts.everyTick snap every tick of the day (the reference price at that tick), not only
+   *                       the first
    */
-  constructor({ simlp, pool, token, tokenDec, quote, refPrice }) {
-    Object.assign(this, { simlp, pool, token, tokenDec, quote, refPrice });
+  constructor({ simlp, pool, token, tokenDec, quote, refPrice, everyTick = false }) {
+    Object.assign(this, { simlp, pool, token, tokenDec, quote, refPrice, everyTick });
   }
 
   async setup(world) {
@@ -31,15 +33,15 @@ export class PinWhale {
   }
 
   async act(world, day, tick) {
-    if (tick !== 0) return;                       // one snap per day
+    if (tick !== 0 && !this.everyTick) return;     // one snap per day, unless every tick
     const slot0 = await world.session.call(this.pool, "slot0");
     const cur = slot0[0];                          // sqrtPriceX96
     const targ = sqrtPriceX96(this.token, 10n ** BigInt(this.tokenDec),
-                              this.quote, this.refPrice(day));
+                              this.quote, this.refPrice(day, tick));
     if (cur === targ) return;
     await world.session.send(this.simlp, "swap",
       [this.pool.address, this.simlp.address, targ < cur, HUGE, targ,
        this.t0, this.t1],
-      { tag: `whale:snap:d${day}` });
+      { tag: `whale:snap:d${day}t${tick}` });
   }
 }

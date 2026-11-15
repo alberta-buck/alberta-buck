@@ -63,12 +63,13 @@ export class LocalLink {
     this._set("closed");
   }
 
-  /** Stop the worker and its world for good. */
+  /** Stop the worker and its world for good. Questions still out to it are dropped, not failed:
+   *  the page has left this world, and nothing waiting on it should report an error. */
   terminate() {
     this.closed = true;
     this.worker?.terminate();
     this.worker = null;
-    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("the world stopped")); }
+    for (const p of this.pending.values()) clearTimeout(p.timer);
     this.pending.clear();
   }
 

@@ -887,11 +887,23 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
 
 /** FIRST in agent order. Pin each day to one epoch so keeper settlement
  *  and mined transaction seconds do not accumulate into extra bank days.
- *  Repeating a day's clock is idempotent; overrunning a whole day fails. */
+ *  Repeating a day's clock is idempotent; overrunning a whole day fails.
+ *  With ticksPerDay > 1, tick k of a day starts k / ticksPerDay of a day in
+ *  (unless the day's work has already passed that time). */
 export class DayClock {
+  constructor({ ticksPerDay = 1 } = {}) {
+    if (!Number.isSafeInteger(ticksPerDay) || ticksPerDay < 1) throw new Error("ticksPerDay must be a positive integer");
+    this.ticksPerDay = ticksPerDay;
+  }
   async act(world, day, tick) {
     if (!Number.isSafeInteger(day) || day < 0 || !Number.isSafeInteger(tick) || tick < 0) throw new Error("invalid simulation clock day/tick");
-    if (tick !== 0) return;
+    if (tick !== 0) {
+      if (world.householdEpoch === undefined || tick >= this.ticksPerDay) return;
+      const now = (await world.session.client.getBlock()).timestamp;
+      const target = world.householdEpoch + BigInt(day) * BigInt(DAY) + BigInt(tick) * BigInt(DAY) / BigInt(this.ticksPerDay);
+      if (target > now) await advanceTime(world, target - now);
+      return;
+    }
     const now = (await world.session.client.getBlock()).timestamp;
     // Preserve the existing first-day advance; all households then share
     // that day's start, including households that arrive on later days.

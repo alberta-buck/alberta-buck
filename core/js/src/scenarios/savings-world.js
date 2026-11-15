@@ -42,6 +42,18 @@ export const HOUSEHOLD_SETTINGS = {
   carry_utilization: 0.3,
 };
 const POPULATION_KEYS = new Set([...Object.keys(POPULATION), "max_members", "settle_days"]);
+/** Ticks a simulated day (scenario.ticks_per_day): the whales re-pin each TOKEN/USDC pool to its
+ *  reference price at every tick and the arbitrageur and the wheel act every tick, so the pools
+ *  track their commodities through the day (economy.toml runs 2; a tab's default is 4). */
+export const TICKS_PER_DAY = 4;
+
+/** A reference walk's price at day d and tick k of `ticks`: geometric between its days. */
+function priceAt(feed, d, k, ticks) {
+  const p0 = feed[d % feed.length];
+  if (!k) return p0;
+  const p1 = feed[(d + 1) % feed.length];
+  return BigInt(Math.round(Number(p0) * (Number(p1) / Number(p0)) ** (k / ticks)));
+}
 
 // The household aggregate's money fields: the Python snapshot's (_households) names, from each
 // member's latest ledger row (credit-household.js record()).
@@ -131,12 +143,15 @@ export class SavingsWorld {
    * @param deps.identity   the buck-identity kernel API
    * @param deps.artifacts  (name) => {abi, bytecode}
    * @param deps.urArtifact the UniversalRouter artifact
-   * @param deps.sets       the page's settings: agents.HouseholdPopulationAgent.<key>, scenario.seed
+   * @param deps.sets       the page's settings: agents.HouseholdPopulationAgent.<key>,
+   *                        scenario.seed, scenario.ticks_per_day
    */
   constructor({ session, identity, artifacts, urArtifact, sets = {}, rng }) {
     Object.assign(this, { session, identity, artifacts, urArtifact, rng });
     this.day = 0;
     this.seed = Number(sets["scenario.seed"] ?? 41404) || 41404;
+    const ticks = Math.floor(Number(sets["scenario.ticks_per_day"] ?? TICKS_PER_DAY));
+    this.ticksPerDay = Number.isSafeInteger(ticks) && ticks >= 1 && ticks <= 48 ? ticks : TICKS_PER_DAY;
     this.population = { ...POPULATION };
     this.settings = { ...HOUSEHOLD_SETTINGS };
     for (const [key, value] of Object.entries(sets)) {
@@ -154,15 +169,16 @@ export class SavingsWorld {
     const w = this.world = await buildEquilibriumWorld(this.session, this.artifacts, {
       identity: this.identity, urArtifact: this.urArtifact, rng: this.rng, basket: "machine",
       feedSeed: this.seed });
-    const arb = new ParityArb();
+    const T = this.ticksPerDay;
+    const arb = new ParityArb({ everyTick: true });
     this.shock = new ShockAgent();
-    let n = 0;
     this.pop = new HouseholdPopulationAgent({ makeAccount: () => privateKeyToAccount(generatePrivateKey()),
       seed: this.seed, days: 3650, settings: this.settings, ...this.population });
     this.cast = [
-      new DayClock(),
+      new DayClock({ ticksPerDay: T }),
       ...w.tokens.map((t, i) => new PinWhale({ simlp: w.simlp, pool: t.poolUsdc, token: t.erc20.address,
-        tokenDec: t.dec, quote: w.usdc.address, refPrice: (d) => w.feeds[i][d % w.feeds[i].length] })),
+        tokenDec: t.dec, quote: w.usdc.address, everyTick: true,
+        refPrice: (d, k = 0) => priceAt(w.feeds[i], d, k, T) })),
       arb,
       new WheelKeeper({ arb }),
       new PidKeeper(),
@@ -170,17 +186,16 @@ export class SavingsWorld {
       this.pop,
     ];
     for (const a of this.cast) if (a.setup) await a.setup(w);
-    n = this.cast.length;
     this.frames = [];
-    return n;
+    return this.cast.length;
   }
 
-  /** One simulated day: every agent in cast order, then the households' marks and the frame. */
+  /** One simulated day: its ticks, every agent in cast order at each (the households decide and
+   *  record their marks at the day's first), then the frame. */
   async step() {
     const w = this.world, d = this.day;
-    for (const a of this.cast) await a.act(w, d, 0);
-    for (const m of this.pop.members) {
-      try { await m.record(w, d); } catch { /* an unreadable mark keeps the last row */ }
+    for (let k = 0; k < this.ticksPerDay; k++) {
+      for (const a of this.cast) await a.act(w, d, k);
     }
     const frame = await this.frame(d);
     this.frames.push(frame);
@@ -312,7 +327,7 @@ export class SavingsWorld {
       basket: w.basket.address, receipt, kctrl: w.kctrl.address, pool_ub: w.poolUB.address,
       router: w.router?.address ?? null, wheel: w.wheel?.address ?? null, director: null,
       basket_kind: "equity", machine: true, tokens, prices: ["walk"], start_date: null,
-      households: { ...this.population, ...this.settings }, local: true,
+      households: { ...this.population, ...this.settings }, local: true, ticks_per_day: this.ticksPerDay,
     };
   }
 

@@ -21,11 +21,13 @@ test("the savings world runs days, frames them for the page, and serves the page
   const session = await nodeWebevmSession({ nodeOptions: SAVINGS_NODE_OPTIONS });
   const world = new SavingsWorld({ session, identity, artifacts: loadAnyArtifact,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")),
-    sets: { "agents.HouseholdPopulationAgent.initial_investors": "2", "scenario.seed": "7" } });
+    sets: { "agents.HouseholdPopulationAgent.initial_investors": "2", "scenario.seed": "7",
+            "scenario.ticks_per_day": "4" } });
   let t = performance.now();
   await world.boot();
   const bootMs = performance.now() - t;
   assert.equal(world.population.initial_investors, 2, "the page's settings reach the population");
+  assert.equal(world.ticksPerDay, 4, "ticks a day, from the page's settings");
 
   t = performance.now();
   const frames = [];
@@ -35,6 +37,10 @@ test("the savings world runs days, frames them for the page, and serves the page
                                members: world.pop.members.length }));
   const f = frames.at(-1);
   assert.equal(f.day, 2);
+  // The clock: four ticks a day, each a quarter of a day in, the day still its own.
+  const now = (await session.client.getBlock()).timestamp;
+  const epoch = world.world.householdEpoch;
+  assert.ok(now >= epoch + 2n * 86400n + 3n * 21600n && now < epoch + 3n * 86400n, "the last tick is late in day 2");
   const r = row(f);
   assert.ok(r.k > 0.5 && r.k < 1, `K ${r.k}`);
   assert.ok(r.bv > 0.9 && r.bv < 1.1, `BVIB ${r.bv}`);

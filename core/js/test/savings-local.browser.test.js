@@ -109,5 +109,20 @@ test("the Savings tab runs its world in the tab: watch, save, pause and step, sh
     await page.click("#panel-savings button:text-is('Run')");
     await idle();
     await nextDay();
+
+    // The pace, live: 0 s a day runs the world as fast as it goes.
+    await page.fill("#panel-savings input[aria-label='seconds per day']", "0");
+    await page.dispatchEvent("#panel-savings input[aria-label='seconds per day']", "change");
+    await idle();
+    await page.waitForFunction(() => globalThis.savings?.status?.pace === 0, null, { timeout: DAY_MS });
+
+    // A new world at eight ticks a day.
+    assert.equal(await page.evaluate(() => globalThis.savings.info.ticks_per_day), 4, "four ticks a day by default");
+    await page.getByText("World settings", { exact: true }).click();
+    await page.getByLabel("ticks per day", { exact: true }).selectOption("8");
+    page.once("dialog", (dlg) => dlg.accept());
+    await page.getByRole("button", { name: "New world", exact: true }).click();
+    await page.waitForFunction(() => globalThis.savings?.info?.ticks_per_day === 8
+      && (globalThis.savings.rows.at(-1)?.day ?? -1) >= 1, null, { timeout: WORLD_MS });
     assert.deepEqual(errors, []);
   });
