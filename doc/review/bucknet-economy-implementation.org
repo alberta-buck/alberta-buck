@@ -4659,6 +4659,32 @@ identical in every parameter but the one toggled -- a general, understandable pa
   =alberta_buck/sim/control_lab/=, =doc/control-lab*.toml=, its targets and its tests (strict
   expected failures since the triage).
 
+*** C3, read (2026-11-15): the shocks comparison reads as the lab's ladder did
+
+48 runs of 120 days (=build/runs/shocks.*=, =make nix-venv-compare-report COMPARE=shocks=), at the
+quoted BVIB (before a5467eb6):
+
+| cast | K end | mean abs(BVIB - 1) | supply M end | reading |
+|------+-------+--------------------+--------------+---------|
+| basket (K held at 0.75) | 0.750 | 0.26-0.66% | 24.3-24.8 | the upkeep alone keeps the basket at parity through the cycle; the walk moves the BUCK's dollar price, not BVIB |
+| k (K moves, no households) | 0.73-0.77 | the basket's, to the digit | the basket's | K drifts with the error but nothing responds to it: no actor issues or retires, so BVIB is unchanged (the lab's stage 06) |
+| households | 0.66-0.70 | 0.97-1.90% | 27.3-27.9 | the households issue (+3M) and K falls: the issuance phase; the error widens |
+| lifecycle | 0.71-0.74 | 0.38-0.84% | 25.9-27.2 | the lifecycle mix issues less and holds nearer parity |
+
+The step (LABR 30% dearer for ten days from day 45) is absorbed in every cast: it moves K's end by
+0.003 or less and the mean error by about 0.001, less than the seed does. So the paired reading the
+lab gave -- what each layer adds -- reads here from the cast axis, on the standard system, with the
+households in place of the lab's abstract buyer and issuer.
+
+/C5 needs the owner's word on its scope/: the lab is not one piece. Its chain-driven half (=engine=,
+=cli=, =campaign=, the interactive page, the 14 strict expected failures) no longer runs and is
+replaced. Its EVM-free half (=model=, =book=, =block_pairs=, =basket_sizing=, =basket_research=,
+=historical=, =noise=) is imported by the basket sizing and research tools and their tests, by
+=pair_observer_lab=, and by four evidence scripts in =doc/review= (=lean-trial.py=, =wheel-gas.py=,
+=price-forcing.py=, =rebalance-benchmark.py=). Recommendation: remove the chain-driven half and its
+targets now, and move the EVM-free half to =alberta_buck/sim/research/= (imports updated, the evidence
+scripts still runnable), rather than delete it.
+
 ** Python five-year economy, before the leak (2026-11-14, evening)
 
 =economy.toml= on pyrevm for five years with K0 0.75 and no leak (=build/runs/economy-5y=),
