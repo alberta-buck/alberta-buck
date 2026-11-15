@@ -306,10 +306,11 @@ export function mountSavings(ctx) {
   // Where the world runs decides the intro: a sim server's economy, or this tab's (connect()).
   const intro = h("p", { class: "intro" });
   const describe = (local) => fill(intro, local
-    ? ["A whole Alberta Buck economy runs in this tab, in a background worker: the BuckBasket and its work ",
-       "wheel, K, arbitrageurs pinning every TOKEN to its commodity's reference price (a random walk about ",
-       "its price), and households refinancing, saving and investing.  Watch it day by day, shock it, and ",
-       "save in it: the basket harvests the gaps between BUCK, USDC and the TOKENs for its depositors.  ",
+    ? ["A whole Alberta Buck economy runs in this tab, in a background worker: five years of real commodity ",
+       "prices (or their reverting twins: the same commodities cycling, trend removed), the BuckBasket and its ",
+       "work wheel, K, arbitrageurs pinning every TOKEN to its commodity, and households refinancing, saving ",
+       "and investing.  Watch it day by day, shock it, and save in it: the basket harvests the commodities' ",
+       "cycles and the gaps between BUCK, USDC and the TOKENs for its depositors.  ",
        "Nothing leaves your browser; a reload starts a new world.",
        ctx.savingsOnly ? "" : "  It is a separate world from the other tabs', on a clock of its own."]
     : ["A whole Alberta Buck economy runs on a server: five years of real commodity ",
@@ -639,7 +640,7 @@ export function mountSavings(ctx) {
         "Whether BUCK has stayed cheap or dear beyond the desk's band, and for how many days"),
       stat("To depositors", dollars(last.credited), "The work wheel's harvest, credited to the depositors"),
       stat("Pace", last.pace > 0 ? `${(1 / last.pace).toFixed(1)} s/day` : "–"),
-      stat("Prices", !S.info ? "–" : S.info.local ? "walk"
+      stat("Prices", !S.info ? "–" : S.info.local ? ({ revert: "reverting" }[S.info.prices?.[0]] ?? S.info.prices?.[0] ?? "–")
         : String(S.info.prices?.[0] ?? "").startsWith("rev-") ? "reverting" : "history",
         "Set when the world is made (World settings)"),
     ] : [h("span", { class: "hint" }, S.link ? STATES[S.link.state] : "")]);

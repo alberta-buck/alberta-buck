@@ -1982,6 +1982,8 @@ sandbox-artifacts:	sandbox-deps sim-build $(SANDBOX_ADAPTER)
 	@test -f out/UniswapV3Factory.sol/UniswapV3Factory.json || node scripts/stage-uniswap.mjs
 	node core/js/bin/bundle-artifacts.mjs sandbox
 	node core/js/bin/bundle-artifacts.mjs
+	@# The economy's TOKENs and price paths for the Savings tab's world (standard library only).
+	PYTHONPATH=$(CURDIR) python3 -m alberta_buck.sim.savings_prices --out core/js/artifacts/savings-prices.json
 
 sandbox-build:	sandbox-artifacts core-build-wasm-web
 	cd core/js && npx esbuild sandbox/src/main.js --bundle --format=esm --minify \

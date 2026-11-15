@@ -18,6 +18,9 @@ import { webevmSession } from "../../../src/webevm.js";
 import { loadIdentity } from "../../../src/identity-web.js";
 import { artifact } from "../../../artifacts/bundle.mjs";
 import { SavingsWorld, SAVINGS_NODE_OPTIONS } from "../../../src/scenarios/savings-world.js";
+// The economy's TOKENs and price paths, as the Python world resolves them (make sandbox-artifacts:
+// alberta_buck.sim.savings_prices).
+import prices from "../../../artifacts/savings-prices.json";
 
 const host = {
   world: null, sets: {}, frames: [], day: 0,
@@ -42,7 +45,7 @@ async function build() {
   identity ??= await loadIdentity("./wasm/buck_identity_bg.wasm");
   const session = await webevmSession({ wasm: "./wasm/revm.wasm", nodeOptions: SAVINGS_NODE_OPTIONS });
   const world = new SavingsWorld({ session, identity, artifacts: artifact, urArtifact: artifact("UniversalRouter"),
-                                   sets: host.sets });
+                                   sets: host.sets, prices });
   await world.boot();
   return world;
 }

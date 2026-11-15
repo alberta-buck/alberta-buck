@@ -249,6 +249,17 @@ def build_historical(start=None, end=None, years=5.0, ticks_per_day=1,
     )
 
 
+# The equilibrium worlds' basket (sym, name, decimals, weightBp): the recomposed M2-laggard basket.
+# Order matches gen_historical BINDINGS (== csv_files order); weights sum to 10000 bp and are threaded
+# into addBasketToken at deploy. The savings sandbox's world in the tab reads it too (savings_prices).
+EQUILIBRIUM_TOKENS = (("LABR", "Labour (US wage)", 18, 2400),
+                      ("CNST", "Construction", 18, 2200),
+                      ("FOOD", "Retail Food", 18, 2000),
+                      ("NRGC", "Energy", 18, 2000),
+                      ("PAXG", "PAX Gold", 18, 800),
+                      ("cbBTC", "Coinbase Wrapped BTC", 8, 600))
+
+
 def build_equilibrium(start=None, end=None, years=None, ticks_per_day=48,
                       seed=0xA1BC):
     """The BUCK-K feedback experiment on REAL historical price feeds.
@@ -290,12 +301,7 @@ def build_equilibrium(start=None, end=None, years=None, ticks_per_day=48,
         # (sym, name, decimals, weightBp) -- recomposed M2-laggard basket.
         # Order matches gen_historical BINDINGS (== csv_files order).  Weights
         # sum to 10000 bp; threaded into addBasketToken at deploy.
-        tokens=[("LABR", "Labour (US wage)", 18, 2400),
-                ("CNST", "Construction", 18, 2200),
-                ("FOOD", "Retail Food", 18, 2000),
-                ("NRGC", "Energy", 18, 2000),
-                ("PAXG", "PAX Gold", 18, 800),
-                ("cbBTC", "Coinbase Wrapped BTC", 8, 600)],
+        tokens=list(EQUILIBRIUM_TOKENS),
         csv_files=files,
         agents={"MarketMakerWhale": 1,
                 "AnonymousArbAgent": 3,

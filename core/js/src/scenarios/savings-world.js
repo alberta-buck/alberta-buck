@@ -144,10 +144,14 @@ export class SavingsWorld {
    * @param deps.artifacts  (name) => {abi, bytecode}
    * @param deps.urArtifact the UniversalRouter artifact
    * @param deps.sets       the page's settings: agents.HouseholdPopulationAgent.<key>,
-   *                        scenario.seed, scenario.ticks_per_day
+   *                        scenario.seed, scenario.ticks_per_day, scenario.prices (history | revert)
+   * @param deps.prices     the economy's TOKENs and price paths (alberta_buck.sim.savings_prices:
+   *                        {tokens, series: {history, revert}, start}); without them, eqworld's
+   *                        own TOKENs on seeded walks
    */
-  constructor({ session, identity, artifacts, urArtifact, sets = {}, rng }) {
-    Object.assign(this, { session, identity, artifacts, urArtifact, rng });
+  constructor({ session, identity, artifacts, urArtifact, sets = {}, rng, prices = null }) {
+    Object.assign(this, { session, identity, artifacts, urArtifact, rng, prices });
+    this.priceMode = prices ? (sets["scenario.prices"] === "revert" ? "revert" : "history") : "walk";
     this.day = 0;
     this.seed = Number(sets["scenario.seed"] ?? 41404) || 41404;
     const ticks = Math.floor(Number(sets["scenario.ticks_per_day"] ?? TICKS_PER_DAY));
@@ -166,9 +170,14 @@ export class SavingsWorld {
 
   async boot() {
     this.actAs = installActAs(this.session);
+    const given = this.prices && {
+      tokens: this.prices.tokens.map((t) => ({ sym: t.sym, name: t.name, dec: t.dec, p0: BigInt(t.p0),
+                                                weightBp: t.weightBp })),
+      feeds: this.prices.series[this.priceMode].map((row) => row.map((p) => BigInt(p))),
+    };
     const w = this.world = await buildEquilibriumWorld(this.session, this.artifacts, {
       identity: this.identity, urArtifact: this.urArtifact, rng: this.rng, basket: "machine",
-      feedSeed: this.seed });
+      feedSeed: this.seed, ...(given ?? {}) });
     const T = this.ticksPerDay;
     const arb = new ParityArb({ everyTick: true });
     this.shock = new ShockAgent();
@@ -180,7 +189,9 @@ export class SavingsWorld {
         tokenDec: t.dec, quote: w.usdc.address, everyTick: true,
         refPrice: (d, k = 0) => priceAt(w.feeds[i], d, k, T) })),
       arb,
-      new WheelKeeper({ arb }),
+      // The wheel turned to completion every tick, after the whales' forcing: the arbitrage it opened
+      // and the basket's responses are taken before the tick ends.
+      this.keeper = new WheelKeeper({ arb, complete: true }),
       new PidKeeper(),
       this.shock,
       this.pop,
@@ -216,6 +227,7 @@ export class SavingsWorld {
       day, buckK: String(K), basketVal: String(bvib), buck_usd: Number(spotUB),
       supply: String(supply), refUsd, spotUsdc: spotUsdc.map(Number), spotBuck: spotBuck.map(Number),
       shk_bought_usd: this.shock.boughtUsd, shk_sold_usd: this.shock.soldUsd, shk_active: this.shock.active,
+      wh_turns: this.keeper.turns, wh_work: Number(this.keeper.work),
     };
     try { frame.eq_signal_raw = String(await s.call(w.machine.parity, "rawValue")); } catch { /* no sample yet */ }
     try {
@@ -326,7 +338,8 @@ export class SavingsWorld {
       chain_id: await s.client.getChainId(), buck: w.buck.address, usdc: w.usdc.address,
       basket: w.basket.address, receipt, kctrl: w.kctrl.address, pool_ub: w.poolUB.address,
       router: w.router?.address ?? null, wheel: w.wheel?.address ?? null, director: null,
-      basket_kind: "equity", machine: true, tokens, prices: ["walk"], start_date: null,
+      basket_kind: "equity", machine: true, tokens, prices: [this.priceMode],
+      start_date: this.prices?.start ?? null,
       households: { ...this.population, ...this.settings }, local: true, ticks_per_day: this.ticksPerDay,
     };
   }

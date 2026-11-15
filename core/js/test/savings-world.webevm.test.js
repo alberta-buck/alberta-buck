@@ -19,7 +19,10 @@ const skip = !identity || !artifactsAvailable() || !existsSync(urPath) ? "build 
 
 test("the savings world runs days, frames them for the page, and serves the page's wallet", { skip }, async () => {
   const session = await nodeWebevmSession({ nodeOptions: SAVINGS_NODE_OPTIONS });
-  const world = new SavingsWorld({ session, identity, artifacts: loadAnyArtifact,
+  // The economy's TOKENs and price paths (make sandbox-artifacts writes them).
+  const pricesPath = join(repoRoot(), "core/js/artifacts/savings-prices.json");
+  const prices = existsSync(pricesPath) ? JSON.parse(readFileSync(pricesPath, "utf8")) : null;
+  const world = new SavingsWorld({ session, identity, artifacts: loadAnyArtifact, prices,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")),
     sets: { "agents.HouseholdPopulationAgent.initial_investors": "2", "scenario.seed": "7",
             "scenario.ticks_per_day": "4" } });
@@ -34,7 +37,8 @@ test("the savings world runs days, frames them for the page, and serves the page
   for (let d = 0; d < 3; d++) frames.push(await world.step());
   const dayMs = (performance.now() - t) / 3;
   console.log(JSON.stringify({ bootMs: Math.round(bootMs), dayMs: Math.round(dayMs),
-                               members: world.pop.members.length }));
+                               members: world.pop.members.length,
+                               wheel: frames.map((f) => [f.wh_turns, f.wh_work]) }));
   const f = frames.at(-1);
   assert.equal(f.day, 2);
   // The clock: four ticks a day, each a quarter of a day in, the day still its own.
@@ -46,11 +50,18 @@ test("the savings world runs days, frames them for the page, and serves the page
   assert.ok(r.bv > 0.9 && r.bv < 1.1, `BVIB ${r.bv}`);
   assert.ok(r.bu > 0.9 && r.bu < 1.1, `BUCK/USD ${r.bu}`);
   assert.equal(r.ref.length, world.world.tokens.length);
+  if (prices) {
+    assert.deepEqual(world.world.tokens.map((t) => t.sym), ["LABR", "CNST", "FOOD", "NRGC", "PAXG"],
+      "the economy's five TOKENs");
+    assert.deepEqual(r.ref, prices.series.history.map((s) => s[2]), "each pool pinned to its history");
+  }
   assert.ok(r.su.every((p) => p > 0) && r.sb.every((p) => p > 0), "spot prices on every pool");
   assert.equal(f.sv?.kind, "equity", "the equity basket's savings block");
   assert.ok(r.sp > 0n || Number(f.sv.sp) > 0, "a share price");
   assert.ok(f.households && f.households.active >= 2, "the households' aggregate");
   assert.equal(r.weights.length, world.world.tokens.length, "held and target weights");
+  // The wheel turned to completion: its last turn of the tick found no work, or it hit its cap.
+  assert.ok(f.wh_turns >= 1 && (f.wh_turns < world.keeper.maxTurns || f.wh_work > 0), `wheel ${f.wh_turns}`);
 
   // The page's wallet, through the world's JSON-RPC, exactly as through the Python server's.
   const link = {

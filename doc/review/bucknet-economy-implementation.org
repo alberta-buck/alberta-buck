@@ -4317,6 +4317,22 @@ economy, not Python's exact one: exact parity is the harness's (S2, S3), after.
   cost 0.43 s a day in Node. The pace is live, in seconds a simulated day (default 1; 0 runs as
   fast as it computes), sent as the server's =pace= op, so it steers a server world too. A
   household's own =record= already marks it each day: the world's extra pass went.
+- /The economy's TOKENs and prices/ (plan gap 5): =alberta_buck.sim.savings_prices= (standard library
+  only, so the Pages runner runs it) writes =economy.toml='s five TOKENs (the equilibrium basket
+  narrowed as =keep_tokens= does: LABR 2553, CNST 2340, FOOD 2128, NRGC 2128, PAXG 851 bp; their day-0
+  prices) and their five-year paths from 2020-09-01 (history, and the reverting twin the page's
+  Prices setting chooses) to =core/js/artifacts/savings-prices.json=, 147 KB, bundled into the
+  worker. =buildEquilibriumWorld= takes =opts.feeds=; the world in the tab now runs on the same
+  TOKENs and prices as the server's, and the page dates its days.
+- /The wheel to completion/ (owner: every forcing must be followed by a wheel ticked to completion,
+  so the arbitrage and rebalancing it opens are reaped): =WheelKeeper({complete: true})= turns the
+  wheel again while a turn found work (up to 8 a tick), after the whales and the parity arbitrageur;
+  the frames carry =wh_turns= and =wh_work=. It takes 2 to 3 turns a tick (the extra turns find 2 to
+  10 units of work the first left). =WorkWheel.pending= is no guide: on the machine one slot's due
+  check reverts as a view, and simulating every slot cost more than a turn (it had made a day 7 s).
+  A day of five TOKENs at four ticks now takes 1.6 s in Node (0.95 s with one turn a tick). The
+  Python world turns once a tick (=loop.turn_wheel(rounds=1)=, at most 12 units): not necessarily
+  to completion; the same change there is a behaviour change to measure as a comparison first.
 - /Tests/: =savings-world.webevm.test.js= (Node: days, the frame through =model.row=, the page's own
   =Saver= enrolling and depositing through =rpc()=); =savings-local.browser.test.js= (Chromium, the
   static page: watch, save $10,000, pause, step one day, shock, redeem in BUCK, no console errors);
@@ -5278,6 +5294,17 @@ K reads the sample.
   0.1% over the direct net price; anchoring the marks there would move deposits and exits by about
   that, on a sample up to an hour old (so it would need the route's premium over the live TWAP, a
   wider =Bid= and the venue facet's last bytes). Not worth it now; the owner's call.
+- /The book comparison, two years/ (=comparisons/book.toml=, =build/runs/book.*=): best routes against
+  direct only. K ends 0.490 against 0.499 (mean 0.5816 against 0.5815); the BVIB error, the BUCK's
+  dollar price and supply within 0.5M: the route through USDC (8.5% of TOKEN-days) changes almost
+  nothing. /But/ the book's USDC value was unavailable on 333 of 728 days (46%): on those samples
+  the dollar pool's reading failed (no BUCK bid), so every USDC bid through BUCK fell away and the
+  households valued at their fallback (BVIB x the dollar pool's price). The TOKEN/USDC pools fail
+  alike (275-300 days each). Likely the oracle history: 64 observations cover fewer than the TWAP
+  window's 600 s when every transaction is its own block a second apart (an arbitrage-busy tick
+  writes more than 64 in 600 s), so =consult= reverts "OLD". To fix before the households lean on
+  the book: a deeper cardinality for the route pools (=widen= to more), or a TOKEN's USDC bid through
+  BUCK at the dollar pool's last good reading.
 - /Found on the way: the JS bundle was stale since the net reference/ (a5467eb6). Rebuilding it
   (=make nix-core-js-artifacts=) failed nine refinance vectors in
   =net-equilibrium-bootstrap.webevm.test.js=; they pass under the nominal reference, so the

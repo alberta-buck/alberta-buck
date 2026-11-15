@@ -122,6 +122,8 @@ function isqrt(n) {
  *                        machine needs two or more; weights must be supplied for all or none)
  * @param opts.targetBuck common pool depth, 6-dec (default $10M)
  * @param opts.feedSeed / opts.stepBp / opts.feedDays  the reference walks
+ * @param opts.feeds      given reference paths instead: [constituent][day] -> USDC base units
+ *                        per whole TOKEN (BigInt)
  * @param opts.rng        scalar drawer for the issuer keypair
  */
 export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
@@ -463,9 +465,12 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     [buck.address, usdc.address, v3f.address], { name: "BuckNetSwapGuard", gas }) : null;
 
   // --- reference feeds (the whales' walks; refUsd's ground truth) ------
-  const feeds = tokens.map((t, i) => seededWalk({
+  // The reference prices: given paths (opts.feeds, one array of quote base units per whole TOKEN a
+  // day per constituent), or seeded walks from each first price.
+  const feeds = opts.feeds ?? tokens.map((t, i) => seededWalk({
     seed: (opts.feedSeed ?? 0xF00D5) + i, start: t.p0,
     stepBp: opts.stepBp ?? 80, steps: opts.feedDays ?? 4000 }));
+  if (feeds.length !== tokens.length) throw new Error("opts.feeds needs one price path per constituent");
 
   Object.assign(world, {
     v3f, basket, usdc, simlp, tokens, poolUB, router, weth, permit2, swapGuard, feeds,
@@ -925,13 +930,32 @@ export class DayClock {
  *  wheel, arbitrage).  Does nothing on the pro-rata basket, which has no
  *  wheel. */
 export class WheelKeeper {
-  constructor({ arb = null } = {}) {
-    this.arb = arb;
+  /** opts.complete: keep turning until a turn finds no work, up to opts.maxTurns a tick: every
+   *  arbitrage the forcing opened and every response the basket owes is taken before the tick ends.
+   *  Its last tick's turns and the work they did are in .turns and .work. (WorkWheel.pending is no
+   *  guide here: the machine's due checks do not all run as a view, and simulating them all costs
+   *  more than a turn.) */
+  constructor({ arb = null, complete = false, maxTurns = 8 } = {}) {
+    Object.assign(this, { arb, complete, maxTurns });
+    this.turns = 0;
+    this.work = 0n;
   }
   async act(world, day, tick) {
     if (!world.wheel) return;
     await advanceTime(world, MACHINE.settle);
-    await world.turnWheel({ tag: `wheel:d${day}` });
+    const turn = async (tag) => {
+      await world.turnWheel({ tag });
+      return (world.lastWheelReceipts ?? []).reduce((sum, r) => sum + parseEventLogs(
+        { abi: world.wheel.abi, logs: r.logs, eventName: "Ticked" }).reduce((s, e) => s + e.args.work, 0n), 0n);
+    };
+    let work = await turn(`wheel:d${day}t${tick}`);
+    this.turns = 1;
+    this.work = work;
+    while (this.complete && work > 0n && this.turns < this.maxTurns) {
+      work = await turn(`wheel:d${day}t${tick}:${this.turns}`);
+      this.turns += 1;
+      this.work += work;
+    }
     if (this.arb) await this.arb.act(world, day, tick);
   }
 }
