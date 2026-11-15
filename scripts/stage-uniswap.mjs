@@ -43,6 +43,9 @@ const OUT = join(REPO, "out");
 // Every third-party artifact any of our worlds deploys.  Sourced from the
 // package that publishes it; the versions are pinned exactly in
 // package.json, so this list plus the lockfile fully determines the bytes.
+// The V2 factory, pair and router serve only the legacy UniswapV2Integration
+// suite (no world uses V2 pools; the V2 binding adapter is gone): drop them,
+// and the @uniswap/v2-core pin, when that suite's identity cases move to V3.
 const STAGE = [
   ["@uniswap/v2-core", "build/UniswapV2Factory.json", "UniswapV2Factory"],
   ["@uniswap/v2-core", "build/UniswapV2Pair.json", "UniswapV2Pair"],

@@ -4,48 +4,13 @@ pragma solidity ^0.8.20;
 import { Test } from "forge-std/Test.sol";
 import { BN254 } from "../src/BN254.sol";
 import { IdentityRegistry } from "../src/IdentityRegistry.sol";
-import { UniswapV2BindingAdapter } from "../src/adapters/UniswapV2BindingAdapter.sol";
 import { UniswapV3BindingAdapter } from "../src/adapters/UniswapV3BindingAdapter.sol";
 
 contract MockUniswapPool { }
 
-interface ILiveUniswapV2Factory {
-    function getPair(address tokenA, address tokenB) external view returns (address);
-}
-
 interface ILiveUniswapV3Factory {
     function setOwner(address next) external;
     function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address);
-}
-
-contract MockUniswapV2Factory {
-    address public feeToSetter;
-    mapping(bytes32 => address) internal _pair;
-
-    constructor(address feeToSetter_) {
-        feeToSetter = feeToSetter_;
-    }
-
-    function setFeeToSetter(address next) external {
-        feeToSetter = next;
-    }
-
-    function getPair(address tokenA, address tokenB) external view returns (address) {
-        return _pair[_key(tokenA, tokenB)];
-    }
-
-    function createPair(address tokenA, address tokenB) external returns (address pair) {
-        require(tokenA != tokenB && tokenA != address(0) && tokenB != address(0), "bad tokens");
-        bytes32 key = _key(tokenA, tokenB);
-        require(_pair[key] == address(0), "exists");
-        pair = address(new MockUniswapPool());
-        _pair[key] = pair;
-    }
-
-    function _key(address tokenA, address tokenB) internal pure returns (bytes32) {
-        (address token0, address token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
-        return keccak256(abi.encode(token0, token1));
-    }
 }
 
 contract MockUniswapV3Factory {
@@ -80,9 +45,7 @@ contract MockUniswapV3Factory {
 
 contract UniswapBindingAdaptersTest is Test {
     IdentityRegistry internal reg;
-    MockUniswapV2Factory internal v2Factory;
     MockUniswapV3Factory internal v3Factory;
-    UniswapV2BindingAdapter internal v2Adapter;
     UniswapV3BindingAdapter internal v3Adapter;
 
     address internal constant GOV = address(0xA0);
@@ -118,14 +81,10 @@ contract UniswapBindingAdaptersTest is Test {
         reg.trustIssuer(ISSUER, issuerPk);
         _register("alice", alice);
 
-        v2Factory = new MockUniswapV2Factory(alice);
         v3Factory = new MockUniswapV3Factory(alice);
-        v2Adapter = new UniswapV2BindingAdapter(address(reg), address(v2Factory));
         v3Adapter = new UniswapV3BindingAdapter(address(reg), address(v3Factory));
-        vm.startPrank(GOV);
-        reg.setBindingAdapter(address(v2Adapter), true);
+        vm.prank(GOV);
         reg.setBindingAdapter(address(v3Adapter), true);
-        vm.stopPrank();
     }
 
     function _u(string memory key) internal view returns (uint256) {
@@ -177,9 +136,6 @@ contract UniswapBindingAdaptersTest is Test {
     }
 
     function test_metadataPinsRegistryAndProvenance() public view {
-        assertEq(v2Adapter.registry(), address(reg));
-        assertEq(v2Adapter.provenance(), address(v2Factory));
-        assertEq(v2Adapter.bindingAuthority(), alice);
         assertEq(v3Adapter.registry(), address(reg));
         assertEq(v3Adapter.provenance(), address(v3Factory));
         assertEq(v3Adapter.bindingAuthority(), alice);
@@ -187,13 +143,13 @@ contract UniswapBindingAdaptersTest is Test {
 
     function test_adapterConstructorsRejectInvalidRegistryOrFactory() public {
         vm.expectRevert(bytes("registry=0"));
-        new UniswapV2BindingAdapter(address(0), address(v2Factory));
+        new UniswapV3BindingAdapter(address(0), address(v3Factory));
 
         vm.expectRevert(bytes("registry not a contract"));
-        new UniswapV2BindingAdapter(address(0xBAD), address(v2Factory));
+        new UniswapV3BindingAdapter(address(0xBAD), address(v3Factory));
 
         vm.expectRevert(bytes("factory=0"));
-        new UniswapV2BindingAdapter(address(reg), address(0));
+        new UniswapV3BindingAdapter(address(reg), address(0));
 
         vm.expectRevert(bytes("factory not a contract"));
         new UniswapV3BindingAdapter(address(reg), address(0xBAD));
@@ -204,74 +160,6 @@ contract UniswapBindingAdaptersTest is Test {
         vm.prank(alice);
         vm.expectRevert(bytes("not binding adapter"));
         reg.bindContractFromAdapter(target, alice, true, true);
-    }
-
-    function test_v2CreatePairAndBindIsAtomicAndCopiesAuthorityIdentity() public {
-        vm.prank(alice);
-        address pair = v2Adapter.createPairAndBind(TOKEN_A, TOKEN_B);
-
-        assertEq(v2Factory.getPair(TOKEN_A, TOKEN_B), pair);
-        assertEq(v2Factory.getPair(TOKEN_B, TOKEN_A), pair);
-        _assertCopiedIdentity(pair, alice);
-    }
-
-    function test_v2WorksWithPinnedOfficialFactoryArtifact() public {
-        address liveFactory = deployCode("out/UniswapV2Factory.sol/UniswapV2Factory.json", abi.encode(alice));
-        UniswapV2BindingAdapter liveAdapter = new UniswapV2BindingAdapter(address(reg), liveFactory);
-        vm.prank(GOV);
-        reg.setBindingAdapter(address(liveAdapter), true);
-
-        vm.prank(alice);
-        address pair = liveAdapter.createPairAndBind(TOKEN_A, TOKEN_B);
-        assertEq(ILiveUniswapV2Factory(liveFactory).getPair(TOKEN_B, TOKEN_A), pair);
-        _assertCopiedIdentity(pair, alice);
-    }
-
-    function test_v2BindsExistingCanonicalPair() public {
-        address pair = v2Factory.createPair(TOKEN_A, TOKEN_B);
-        vm.prank(alice);
-        assertEq(v2Adapter.bindExistingPair(TOKEN_B, TOKEN_A), pair);
-        _assertCopiedIdentity(pair, alice);
-    }
-
-    function test_v2RejectsCallerWhoIsNotCurrentFactoryAuthority() public {
-        vm.prank(bob);
-        vm.expectRevert(bytes("not binding authority"));
-        v2Adapter.createPairAndBind(TOKEN_A, TOKEN_B);
-        assertEq(v2Factory.getPair(TOKEN_A, TOKEN_B), address(0));
-    }
-
-    function test_v2RejectsUnregisteredFactoryAuthority() public {
-        address stranger = address(0x515151);
-        v2Factory.setFeeToSetter(stranger);
-        vm.prank(stranger);
-        vm.expectRevert(bytes("authority not registered"));
-        v2Adapter.createPairAndBind(TOKEN_A, TOKEN_B);
-    }
-
-    function test_v2UsesCurrentAuthorityAfterGovernanceRotation() public {
-        _register("bob", bob);
-        v2Factory.setFeeToSetter(bob);
-        vm.prank(bob);
-        address pair = v2Adapter.createPairAndBind(TOKEN_A, TOKEN_C);
-        _assertCopiedIdentity(pair, bob);
-    }
-
-    function test_v2RevocationRollsBackPoolCreation() public {
-        vm.prank(GOV);
-        reg.setBindingAdapter(address(v2Adapter), false);
-
-        vm.prank(alice);
-        vm.expectRevert(bytes("not binding adapter"));
-        v2Adapter.createPairAndBind(TOKEN_A, TOKEN_B);
-        assertEq(v2Factory.getPair(TOKEN_A, TOKEN_B), address(0));
-    }
-
-    function test_v2CannotCreateOverExistingPair() public {
-        v2Factory.createPair(TOKEN_A, TOKEN_B);
-        vm.prank(alice);
-        vm.expectRevert(bytes("pair already exists"));
-        v2Adapter.createPairAndBind(TOKEN_A, TOKEN_B);
     }
 
     function test_v3CreatePoolAndBindIsAtomicAndCopiesAuthorityIdentity() public {
@@ -326,6 +214,23 @@ contract UniswapBindingAdaptersTest is Test {
         vm.prank(bob);
         address pool = v3Adapter.createPoolAndBind(TOKEN_A, TOKEN_C, 100);
         _assertCopiedIdentity(pool, bob);
+    }
+
+    function test_v3RevocationRollsBackPoolCreation() public {
+        vm.prank(GOV);
+        reg.setBindingAdapter(address(v3Adapter), false);
+
+        vm.prank(alice);
+        vm.expectRevert(bytes("not binding adapter"));
+        v3Adapter.createPoolAndBind(TOKEN_A, TOKEN_B, 3_000);
+        assertEq(v3Factory.getPool(TOKEN_A, TOKEN_B, 3_000), address(0));
+    }
+
+    function test_v3CannotCreateOverExistingPool() public {
+        v3Factory.createPool(TOKEN_A, TOKEN_B, 3_000);
+        vm.prank(alice);
+        vm.expectRevert(bytes("pool already exists"));
+        v3Adapter.createPoolAndBind(TOKEN_A, TOKEN_B, 3_000);
     }
 
     function test_v3CannotBindPoolTwice() public {

@@ -1568,9 +1568,10 @@ secret key and an archival node -- without any counterparty's cooperation.
   with its own controller first calls ~authorizeContractBinding~ and commits
   the exact binder, ~(pk,E)~, and policy flags; the binder then calls
   ~bindContract~.  A contract whose authority lives in another protocol uses
-  a narrowly audited, governance-approved adapter.  The supplied Uniswap V2
-  and V3 adapters accept only canonical pools from one immutable factory and
-  only its current registered =feeToSetter= or =owner=, respectively.
+  a narrowly audited, governance-approved adapter.  The supplied Uniswap V3
+  adapter accepts only canonical pools from one immutable factory and only
+  its current registered =owner=.  (BUCK worlds use V3 pools only; the V2
+  adapter was retired with V2 pools.)
   The bound contract is marked
   ~isVerified[target] = true~, and the boolean ~isPublicIdentity[target]~
   is set per the binding.  When the spender or a transfer endpoint is
@@ -1672,23 +1673,25 @@ secret key and an archival node -- without any counterparty's cooperation.
 
 ** Step-by-step: bringing up a BUCK/USDC AMM
 
-   Production pool-admission sequence (the adapter suite exercises admission;
-   the separate V2 integration test exercises AMM transfer mechanics):
+   Production pool-admission sequence (the adapter suite exercises admission
+   against Uniswap's own V3 factory; the separate integration test exercises
+   the AMM transfer mechanics below, still on a V2 pair until it moves to a V3
+   pool -- the transfer rules are the same for any bound pool):
 
-   1. Governance deploys and approves an =UniswapV2BindingAdapter= fixed to
-      the registry and the intended Uniswap V2 factory.  Approval is an audit
+   1. Governance deploys and approves an =UniswapV3BindingAdapter= fixed to
+      the registry and the intended Uniswap V3 factory.  Approval is an audit
       decision about that exact adapter and factory, not a generic factory-call
       privilege.
 
-   2. The factory's registered =feeToSetter= calls
-      =adapter.createPairAndBind(BUCK, USDC)=.  The adapter requires that no
-      pair exists, calls =createPair=, verifies both-order =getPair= lookup and
-      deployed code, then binds the pair Public/Carrying in the same transaction.
-      The registry copies ~pk_op~, ~E_op~, and issuer from the registered
-      =feeToSetter=; the adapter cannot substitute identity material.
+   2. The factory's registered =owner= calls
+      =adapter.createPoolAndBind(BUCK, USDC, fee)=.  The adapter requires that
+      no pool exists at that fee, calls =createPool=, verifies both-order
+      =getPool= lookup and deployed code, then binds the pool Public/Carrying in
+      the same transaction.  The registry copies ~pk_op~, ~E_op~, and issuer
+      from the registered =owner=; the adapter cannot substitute identity
+      material.
 
-      An already-created canonical pair uses =bindExistingPair=.  V3 follows
-      the same pattern with =owner=, =getPool=, and =createPool=.
+      An already-created canonical pool uses =bindExistingPool=.
 
       Stock routers do not expose an owner or governance identity and are not
       covered by these pool adapters.  A deployment-specific router adapter
@@ -1741,7 +1744,7 @@ secret key and an archival node -- without any counterparty's cooperation.
 
    *The operator is the legal counterparty.*  Setting up a BUCK/X AMM
    is permissionless at the factory level (anyone can call
-   ~createPair~).  What gates the pool's usability for BUCK is
+   ~createPool~).  What gates the pool's usability for BUCK is
    ~bindContract~, but an arbitrary first caller cannot claim it: an existing
    pool must authorize the exact binding, while an approved helper can bind a
    newly deployed target atomically.
@@ -2468,9 +2471,9 @@ secret key and an archival node -- without any counterparty's cooperation.
    Pool operator Bob:
      1. Completed KYC (same ceremony as Alice).  His EOA is registered
         in IdentityRegistry with credential (pk_bob, E_bob).
-     2. As the factory's registered feeToSetter, creates and binds the pair:
-        uniswapV2BindingAdapter.createPairAndBind(BUCK, USDT)
-        -> pair at address 0xPOOL bound under Bob's published (pk, E),
+     2. As the factory's registered owner, creates and binds the pool:
+        uniswapV3BindingAdapter.createPoolAndBind(BUCK, USDT, 500)
+        -> pool at address 0xPOOL bound under Bob's published (pk, E),
            with isPublicIdentity[0xPOOL] = true and
            isVerified[0xPOOL]       = true.
         Atomic create+bind leaves no interval for a competing binding; the
@@ -2779,10 +2782,10 @@ secret key and an archival node -- without any counterparty's cooperation.
    decryption key; the operator does, and the operator's ~sk~ decrypts
    every receipt that uses ~_identityHash(pool)~.
 
-   *Provenance, authority, and one-shot binding.*  The Uniswap adapters verify
-   the pool against the immutable factory's canonical mapping and require the
-   invocation from its current registered governance identity (=feeToSetter=
-   for V2, =owner= for V3).  They can create and bind atomically or bind an
+   *Provenance, authority, and one-shot binding.*  The Uniswap V3 adapter
+   verifies the pool against the immutable factory's canonical mapping and
+   requires the invocation from its current registered governance identity
+   (the factory's =owner=).  It can create and bind atomically or bind an
    existing canonical pool.  The first authorized binding remains final, but
    neither an unrelated caller nor a generic factory can select the target.
 
