@@ -1,0 +1,16 @@
+# The null comparison: two runs with the same settings must be the same, frame for frame. If they
+# are not, no comparison can attribute a difference to the setting it varies: something in the world
+# (a wall clock, an unkeyed random draw, a process-dependent order) differs between runs.
+#
+#   python -m alberta_buck.sim.compare run null --here --jobs 2      (make nix-venv-compare-null)
+#   python -m alberta_buck.sim.compare report null                   "diverges: never" is the pass
+question = "Are two runs with the same settings identical, frame for frame?"
+experiment = "economy"
+days = 5
+
+[[axis]]
+name = "twin"
+note = "nothing differs: the second run must reproduce the first"
+[axis.values]
+a = {}
+b = {}

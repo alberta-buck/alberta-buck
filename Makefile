@@ -16,6 +16,7 @@ help:
 	  'Test everything after a change (doc/review/consolidation-plan.org):' \
 	  '  make nix-venv-test-all             # every current test, tier by tier (-k: report every failing tier)' \
 	  '  make nix-venv-test-worlds          # the five-year worlds (hours; WORLDS="life-A econ-F" picks some)' \
+	  '  make nix-venv-compare COMPARE=leak # runs identical but for one setting (alberta_buck/sim/comparisons/)' \
 	  'Build and test (README-build.org):' \
 	  '  make nix-install nix-js-deps        # pinned Solidity and JavaScript dependencies' \
 	  '  make nix-venv-setup                # create/repair .venv; install editable Python packages' \
@@ -108,6 +109,7 @@ test-smoke: sim-build core-build-py
 	SIM_RUNS=build/test/smoke-runs python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy-lifecycle.toml \
 		--backend pyrevm --days 30 --out build/test/smoke-lifecycle.json
 	cd core/js && node bin/eqsim.mjs --days 30
+	$(MAKE) compare-null
 WORLD_DAYS	?= 1825
 WORLDS		?=
 test-worlds: sim-build core-build-py
@@ -922,6 +924,30 @@ economy-smoke: sim-build core-build-py
 	python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy.toml \
 		--backend pyrevm --days $(ECONOMY_SMOKE_DAYS) --out "$(ECONOMY_SMOKE_OUT)"
 	python -m alberta_buck.sim.report "$(ECONOMY_SMOKE_OUT)"
+
+# Comparisons (alberta_buck/sim/compare.py): runs identical in everything but the settings under
+# study. A spec (alberta_buck/sim/comparisons/<name>.toml) names an experiment and its axes; every
+# combination of the axes' values is one run, recorded under $(SIM_RUNS) as <name>.<axis>-<value>...;
+# the report gives each pair that differs on one axis its differences and the day they first diverge,
+# and the dashboard's Compare tab overlays them. The committed tree is frozen first (as for economy-run);
+# COMPARE_ARGS="--here" runs the working tree, "--only AXIS=VALUE" some of the runs.
+#   make nix-venv-compare-plan COMPARE=leak
+#   make nix-venv-compare COMPARE=leak COMPARE_JOBS=6
+#   make nix-venv-compare-report COMPARE=leak
+#   make nix-venv-compare-null          # two runs with the same settings must be the same, frame for frame
+COMPARE		?= null
+COMPARE_JOBS	?= 4
+COMPARE_ARGS	?=
+.PHONY: compare-plan compare compare-report compare-null
+compare-plan:
+	python -m alberta_buck.sim.compare plan $(COMPARE) $(COMPARE_ARGS)
+compare: sim-build core-build-py
+	python -m alberta_buck.sim.compare run $(COMPARE) --jobs $(COMPARE_JOBS) $(COMPARE_ARGS)
+compare-report:
+	python -m alberta_buck.sim.compare report $(COMPARE)
+compare-null: sim-build core-build-py
+	rm -rf build/test/compare-runs
+	python -m alberta_buck.sim.compare run null --here --jobs 2 --runs build/test/compare-runs --identical
 # Run records and the dashboard (README-simulations.org, "Run records and the dashboard"). Every
 # `python -m alberta_buck.sim` run records under $(SIM_RUNS) (default build/runs) as it goes; the
 # dashboard reads them, finished or growing. Local only: it binds 127.0.0.1.

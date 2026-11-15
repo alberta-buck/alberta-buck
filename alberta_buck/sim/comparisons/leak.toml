@@ -1,0 +1,21 @@
+# What the integrator's leak changes, everything else the same (doc/review/bucknet-economy-
+# implementation.org, "The leaky integrator"). Without a leak the integral of a small persistent error
+# the world cannot correct winds K to a rail; with one it settles at k0 + Ki x error x leak.
+question = "What does the integrator's leak change in the household economy?"
+experiment = "economy"
+days = 730
+
+[[axis]]
+name = "leak"
+note = "BuckKControllerDirect.setLeak (deploy.leak_days): 0 is no leak, as deployed before 2026-11-14"
+[axis.values]
+year = {}                                   # the experiment's default: 365 days
+none = { "deploy.leak_days" = 0.0 }
+three-years = { "deploy.leak_days" = 1095.0 }
+
+[[axis]]
+name = "prices"
+note = "the historical price path, or its reverting twin"
+[axis.values]
+history = { "scenario.prices" = "history" }
+revert = { "scenario.prices" = "revert" }
