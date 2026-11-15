@@ -4673,6 +4673,68 @@ failed (it was 61 failed and 11 errors), in 4 min 43 s serially.
 - /Noted, not investigated/: every =equity-ops= world logs =BootstrapDMAgent
   _enter failed: depositToken :: NoValue=.
 
+** BVIB in nominal or net BUCK: the carry in the pools (owner's question, 2026-11-15)
+
+The owner: the TOKEN/BUCK pools hold /Carrying/ BUCK, which grows hollow as it ages (its accrued
+demurrage is carried, not paid), so a pool's nominal 100 BUCK per LABR may be worth 98 net. BVIB
+summed from nominal pool prices may then read 1.02 when it is exactly 1.00 in net BUCK; it must be
+measured in net BUCK. Otherwise a falling K is simply the early issuance phase: more collateral
+pledged and BUCK issued than accumulated to retire liabilities.
+
+*** What the contracts do
+
+- A Carrying account's =balanceOf= is its nominal (gross) BUCK; its net is less by its carried fee
+  (=Buck.feeOwing=, =accountBalancesScaled=). BUCK leaving a Carrying pool delivers its
+  /proportional actual net value/: =net x nominal / gross= (=BuckCash.move=); an ordinary sender
+  pays full value in. So a TOKEN sold into a pool at nominal price P fetches P x r net BUCK, r =
+  the pool's net / gross; a TOKEN bought from it costs P net.
+- =basketValueInBuck= (=BuckBasketUniswapV3=, through =BasketVenueFacet=, K's raw reference) sums
+  basketAmount x the pool's nominal TWAP price, with no r. The basket's own position marks do apply
+  r (=marks=, matched in =snapshot.py=), so the basket values its BUCK net while K's reference is
+  nominal.
+
+*** The evidence (=build/runs/economy-5y=, the five-year economy before the leak)
+
+The pools' hollowness (the basket's =carried_fee= over its nominal held BUCK) rises steadily as the
+BUCK side of the basket's positions ages: 0.6% by day 120, 1.4% at a year, 2.2% at two, 4.7% at
+five. Against BVIB's excess:
+
+| year | mean BVIB - 1 (nominal) | mean 1/r - 1 | net BVIB - 1 (approx.) | mean triangle gap (nominal) |
+|------+-------------------------+--------------+------------------------+-----------------------------|
+| 1 | +1.41% | 0.79% | +0.61% | +0.12% |
+| 2 | +1.66% | 1.93% | -0.27% | +0.08% |
+| 3 | +1.15% | 2.54% | -1.36% | +0.40% |
+| 4 | +0.59% | 3.32% | -2.65% | +0.57% |
+| 5 | +0.59% | 4.33% | -3.58% | +0.57% |
+
+- /Year one is the issuance phase/: net of the carry, BVIB is still about 0.6% high (the shocks
+  comparison agrees: in 120 days K falls only with the households in the cast, 0.75 to 0.66-0.69,
+  while the hollowness is 0.6%).
+- /From year two the carry is the whole signal/, and more: in net BUCK the basket is at or below
+  parity (the BUCK dear), so K should hold or rise, yet nominal BVIB stays above 1 and the
+  integrator keeps driving K down (to 0 from day ~1,000).
+- /The simulated market does not price the carry either/: the nominal triangle (TOKEN through BUCK
+  against through USDC) stays within 0.1-0.6% while the hollowness reaches 4%. The arbitrageurs
+  quote and trade in nominal units (=agents.py=, =router.py= read no net balances) and absorb the
+  loss on every leg that takes BUCK out of a pool. A rational arbitrageur, paid r per nominal BUCK,
+  sells a TOKEN into a pool only at a nominal price higher by 1/r: with rational traders the
+  nominal BVIB would read high by the whole 1/r, as the owner reasons.
+
+*** The fix, and how it is measured
+
+- [ ] /Net BVIB in the contract./ =BasketVenueFacet.basketValueInBuck= multiplies each
+  constituent's TWAP price by its pool's net/gross (=accountBalancesScaled=). A governance flag
+  =nominalReference= (default false: net) keeps the old measure for comparison; it packs into the
+  slot of =wheel=, so no storage moves (the facet has 2,572 bytes of room). Forge tests: an aged
+  pool reads below its nominal; the flag restores it.
+- [ ] /Rational arbitrage in the simulation./ The arbitrageurs value BUCK out of a Carrying pool
+  at net (quote x r), Python first (=router.quote_path=, the cycle arbitrageurs); a scenario flag
+  keeps the naive quoting for comparison. JS later (S3).
+- [ ] /The frames record both/: BVIB nominal and net, and each pool's r (=market.pools=), for the
+  dashboard.
+- [ ] /A comparison/ (=comparisons/carry.toml=): reference (net, nominal) x arbitrage (net, naive)
+  on =economy= for two years, leak on; does K hold near its net equilibrium?
+
 ** Resume here (2026-11-14, evening)
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed to GitHub (owner's
