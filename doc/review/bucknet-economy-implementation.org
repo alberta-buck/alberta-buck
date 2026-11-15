@@ -4345,9 +4345,11 @@ in BUCK, its calendar and the shared policy agree. The gaps are four:
 
 Toward a 30-day harness of =economy.toml=:
 
-1. /The legacy population test/ (below): JS gets its only passing test of
-   =HouseholdPopulationAgent= on the canonical world.
-2. /Four one-line household fixes./
+1. [X] /The legacy population test/ (below): JS gets its only passing test of
+   =HouseholdPopulationAgent= on the canonical world (=net-household-population.webevm.test.js=,
+   35ac72e5).
+2. [X] /Four one-line household fixes./ (Done: the reads guarded, the principal from the
+   facilities, the stamp guard, the recovery's error counted; 132 of 132 household tests.)
    - Guard the population's BVIB and K reads as Python does (ch.js:1403-1404 against
      ch:2313-2320).
    - Read the principal in =resumeNetRepayment= from =netCreditOps.household(...).issued=

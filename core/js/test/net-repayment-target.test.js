@@ -30,9 +30,12 @@ test("daily turns finish only the saved buyback target", async () => {
   agent.netRepaymentReserve = 1n;
   agent.netRepaymentTarget = 25n;
   const requested = [];
-  const world = { accounting: "net", households: {
+  // The facilities' principal, as Python's _resume_net_repayment reads it.
+  let issued = 25n;
+  const world = { accounting: "net", _credits: new Map([[agent.account.address, [7n]]]), holderAddress: (a) => a.address,
+    netCreditOps: { household: async (_owner, ids) => { assert.deepEqual(ids, [7n]); return { issued }; } },
+    households: {
     pending: async () => false,
-    read: async () => ({ drawn: 25n }),
     retire: async (_account, target) => {
       requested.push(target);
       const retired = target < 10n ? target : 10n;
@@ -46,7 +49,7 @@ test("daily turns finish only the saved buyback target", async () => {
   assert.equal(agent.netRepaymentTarget, null);
   assert.equal(agent.started, false);
   agent.netRepaymentReserve = 1n; agent.netRepaymentTarget = 25n;
-  world.households.read = async () => ({ drawn: 0n });
+  issued = 0n;
   await agent.act(world, 0, 0);
   assert.deepEqual(requested, [25n, 15n, 5n]);
   assert.equal(agent.netRepaymentReserve, null);

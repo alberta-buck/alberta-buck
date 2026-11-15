@@ -754,6 +754,7 @@ export class CreditHouseholdAgent {
     } catch (err) {
       this.lastAction = this.netTradeUncertain ? "buy-pending" : this.netCancelUncertain ? "cancel-pending" : "repay-pending";
       this.lastError = `transaction reconciliation: ${err}`.slice(0, 200);
+      (this.refinanceMachine.counters ??= {}).household_err = this.lastError;
       return true;
     }
   }
@@ -953,7 +954,10 @@ export class CreditHouseholdAgent {
       this.lastAction = "repay-pending";
       return true;
     }
-    const issued = (await world.households.read(this.account)).drawn;
+    // The facilities' own principal, as Python reads it (_resume_net_repayment): the household view's
+    // drawn figure marks the whole household and has no relief tolerance.
+    const ids = world._credits.get(this.account.address) ?? [];
+    const issued = ids.length ? (await world.netCreditOps.household(world.holderAddress(this.account), ids)).issued : 0n;
     if (typeof issued !== "bigint" || issued < 0n) throw new Error("invalid current household principal");
     this.netRepaymentTarget = min(this.netRepaymentTarget, issued);
     if (!this.netRepaymentTarget) {
@@ -1400,8 +1404,13 @@ export class HouseholdPopulationAgent {
       this.opened = true;
       for (const role of ROLES) for (let k = 0; k < this.pop[`initial_${role}s`]; k++) await this.arrive(world, role, k, day);
     }
-    const bvib = day >= this.pop.settle_days ? Number(await world.bvib()) / 1e18 : null;
-    const kNow = Number(await world.K()) / 1e18;
+    // An unreadable price leaves the average where it was; an unreadable K leaves the issuers' pace at
+    // its reference (credit_households.HouseholdPopulationAgent.day_start).
+    let bvib = null, kNow = null;
+    if (day >= this.pop.settle_days) {
+      try { bvib = Number(await world.bvib()) / 1e18; } catch { bvib = null; }
+    }
+    try { kNow = Number(await world.K()) / 1e18; } catch { kNow = null; }
     for (const [role, k] of arrivalsStep(this.state, this.seed, this.name, day, this.days, bvib, kNow, this.pop)) {
       await this.arrive(world, role, this.pop[`initial_${role}s`] + k, day);
     }

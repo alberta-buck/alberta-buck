@@ -133,7 +133,10 @@ export class HouseholdCalendar {
     dayValue(day);
     if (day < this.day) throw new Error("household calendar cannot go backwards");
     if (day > this.nextPay) throw new Error("household calendar must observe each payday");
-    if (((await world.session.client.getBlock()).timestamp - this.epoch) / DAY !== BigInt(day)) {
+    // floor((stamp - epoch) / day), as Python's: BigInt division truncates toward zero, so a stamp
+    // before the epoch must be refused rather than read as day 0.
+    const stamp = (await world.session.client.getBlock()).timestamp;
+    if (stamp < this.epoch || (stamp - this.epoch) / DAY !== BigInt(day)) {
       throw new Error("household calendar day does not match chain clock");
     }
     const a = this.agent;
