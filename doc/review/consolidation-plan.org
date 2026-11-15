@@ -81,7 +81,9 @@
   (=test/vectors/= routing, rebalancing, historical, equilibrium, sweep sets)
   and plots (=images/=).
 - Kept, by the earlier decisions: the Python policy models and their paper
-  figures; the control lab; the reference models; price inputs.
+  figures; the reference models; price inputs. The control lab until its port
+  into the economy system as a shock-response campaign with a dashboard Compare
+  view (owner, 2026-11-14; plan steps C1 to C5), then it goes.
 - *To decide:* the catalogue's excursion and attack arms. The plan kept them
   until their stress actors are ported to the economy world. Port them as
   =economy= interventions, then delete the catalogue.
@@ -96,11 +98,12 @@
 | pro-rata | BuckBasketProRata, BuckBasketOps, BuckWithBasketHooks | BasketWheelArb (in basket-arb-test); the JS credit-household, eqsim and eqworld pro-rata options; tevm-membench | delete |
 | pairs director | PairsRebalanceDirector, RebalanceDirectorBase, IRebalanceDirector | the shared storage's =director= field (prune with a storage-layout check, not by file name) | delete |
 | earlier upkeep | BuckBasketEquityWheel, EquityTurnDirector, BasketWheel (+ DirectorKind, SweepKind, EquityKind) | three canonical suites use BasketWheel (BuckCompoundWheelArb, BuckCompoundFundedArb, JubileeWheel); three use BuckBasketEquityWheel; Python's non-machine =equity-ops= mode | unpublish now; delete after the suites move to BasketMachineWheel |
-| shadow controller | BuckKControllerShadow, ShadowObserver, IShadowObserver, SimStabilizer | owner's call: keep the adversarial checks? | delete or keep |
+| shadow controller | BuckKControllerShadow, ShadowObserver, IShadowObserver, SimStabilizer | owner's call (explained in the plan, 2026-11-14 evening): keep as the research path for stabilizers on the machine basket? | delete or keep |
 | USD controller | BuckKController (Chainlink), the legacy =Deploy.s.sol= and =deploy-*= targets | a canonical deploy script (Buck, BuckCredit, BuckKControllerDirect, JubileeFund, the machine) | delete |
 | BuckNet facade | BuckNet, BuckLedger, BuckNetMaturity, BuckNetTokenOps | BuckNetQuote.t.sol is the only test of the published BuckNetQuoter and runs on BuckNet: port it to Buck | delete |
 | signed Buck | BuckLinear | 21 legacy fixture suites (the "LEGACY ACCOUNTING FIXTURE" header) | migrate the suites worth keeping, delete the rest |
-| V2 adapter | UniswapV2BindingAdapter | nothing (one test); production-shaped | owner's call |
+| V2 adapter | UniswapV2BindingAdapter | -- | *deleted* (owner, 2026-11-14: no V2 pools); the adapter suite tests V3 only |
+| V2 integration | UniswapV2Integration (legacy fixture), the staged V2 factory, pair and router, the =@uniswap/v2-core= pin | its identity cases (verified LP, swaps both ways, unverified recipient refused) on canonical Buck and a V3 pool | delete with the V2 staging (WETH9 stays: v2-periphery publishes it) |
 
 ** Before the release (with or without the waves)
 - Publish what the canonical stack deploys and is missing: =BuckBasketReceipt=
@@ -110,7 +113,11 @@
   (=MockERC20=, =SimLP=), and fix the stale labels in
   =scripts/contracts-dist.py= (canonical Buck marked "experimental"; "created
   by BuckNet").
-- =alberta-buck-core='s =webevm= =file:= dependency (recommendation 78).
+- =alberta-buck-core='s =webevm= =file:= dependency (recommendation 78):
+  packed as =alberta-buck-webevm= (=make nix-webevm-fork-pack=); the owner
+  publishes it once by hand, then core depends on it by npm alias
+  (=core/js/vendor/README.md=). The release workflow now refuses a =file:=
+  dependency.
 - EIP-170 margins: BasketWheel 44 bytes (it goes in wave 3), BuckBasketEquity
   52, BuckCredit 60, BasketUpkeepFacet 408. Any change to the first three
   needs bytes found first.

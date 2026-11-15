@@ -207,6 +207,22 @@ jobs:
           fi
           echo "alberta-buck-contracts@$pin is available"
 
+      - name: Every dependency is one npm can serve
+        # A file:, link: or git dependency installs nowhere but here.  webevm
+        # rides in core/js/vendor until alberta-buck-webevm is published and
+        # core depends on it by alias (core/js/vendor/README.md).
+        working-directory: core/js
+        run: |
+          node - <<'EOF'
+          const deps = require("./package.json").dependencies ?? {};
+          const bad = Object.entries(deps).filter(([, v]) => /^(file:|link:|git|github:|https?:)/.test(v));
+          if (bad.length) {
+            console.error("::error::unpublishable dependencies: " + bad.map(([k, v]) => `${k} ${v}`).join(", "));
+            process.exit(1);
+          }
+          console.log("every dependency is a registry version");
+          EOF
+
       - name: Build both wasm targets
         run: make core-build-wasm core-build-wasm-web
 

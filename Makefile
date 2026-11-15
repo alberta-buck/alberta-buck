@@ -270,12 +270,11 @@ fmt:
 fmt-check:
 	forge fmt --check
 
-# Build the Uniswap V2/V3 artifacts (via their compile-trigger stubs under
-# src/uniswap_v*_build and the v3 foundry profile) into the shared out/
-# directory.  Tests that use vm.deployCode("out/Uniswap*.json") (e.g.
-# BuckBasket, UniswapV2Integration, BuckK*V3*) require these.  Also ensures the critical V2 init-code-hash patch
-# has been applied so UniswapV2Router02 computes the same pair addresses as the
-# locally-built V2Factory.
+# Stage the Uniswap and WETH9 artifacts into the shared out/ directory and
+# build.  Tests that use vm.deployCode("out/Uniswap*.json") (BuckBasket,
+# BuckK*V3*, UniswapBindingAdapters) require them; the V2 factory and router
+# serve only the legacy UniswapV2Integration suite, until its identity cases
+# move to a V3 pool (doc/review/consolidation-plan.org, wave 3).
 build-uniswap-artifacts: stage-uniswap
 	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
 
@@ -291,6 +290,19 @@ stage-uniswap:
 
 stage-uniswap-check:
 	node scripts/stage-uniswap.mjs --check
+
+# Our webevm fork, packed as alberta-buck-webevm until upstream releases the
+# node clock (wighawag/webevm#23; core/js/vendor/README.md).  pack rebuilds the
+# vendored tarball from a clean checkout of the fork; publish is by hand, once,
+# after npm login as the alberta-buck packages' maintainer.
+WEBEVM_FORK		?= $(HOME)/src/webevm
+WEBEVM_FORK_VERSION	?= 0.9.1-clock.1
+.PHONY: webevm-fork-pack webevm-fork-publish
+webevm-fork-pack:
+	node scripts/webevm-fork.mjs --fork "$(WEBEVM_FORK)" --version "$(WEBEVM_FORK_VERSION)" --out core/js/vendor
+
+webevm-fork-publish:
+	npm publish core/js/vendor/alberta-buck-webevm-$(WEBEVM_FORK_VERSION).tgz --access public --tag latest
 
 # ── Local Anvil Node ─────────────────────────────────────────────────
 
@@ -1603,15 +1615,20 @@ sim-server:	sim-build
 # and saves in a household economy of its own (one per visitor session).
 # --public answers reads and signed transactions only; SIM_SAVINGS_SESSIONS
 # caps the live worlds (each takes a core while it runs).  Behind a tunnel,
-# point its origin at http://127.0.0.1:$(SIM_SAVINGS_PORT).
+# point its origin at http://127.0.0.1:$(SIM_SAVINGS_PORT).  SIM_SAVINGS_RUNS=DIR
+# records each session's world there, for the dashboard to inspect with every
+# tab (make nix-venv-dashboard SIM_RUNS=DIR, or dashboard-lan); unset, nothing
+# is recorded (a public server would otherwise keep every visitor's world).
 #
 #   make nix-venv-sim-savings             # then open http://127.0.0.1:8797/
+#   make nix-venv-sim-savings SIM_SAVINGS_PORT=8981 SIM_SAVINGS_RUNS=build/savings-runs
 # The page/server starts, but corrected-accounting household decisions are
 # still explicitly gated. Use wallet-sandbox-test for the runnable browser
 # wallet; economy-accounting-test checks the migrated economy components.
 SIM_SAVINGS_HOST     ?= 127.0.0.1
 SIM_SAVINGS_PORT     ?= 8797
 SIM_SAVINGS_SESSIONS ?= 4
+SIM_SAVINGS_RUNS     ?=
 
 .PHONY: sim-savings sim-savings-serve
 sim-savings:	sim-build sandbox-build
@@ -1624,7 +1641,8 @@ sim-savings-serve:
 		--experiment alberta_buck/sim/experiments/economy.toml \
 		--set scenario.agents.ShockAgent=1 \
 		--host $(SIM_SAVINGS_HOST) --port $(SIM_SAVINGS_PORT) --public \
-		--max-sessions $(SIM_SAVINGS_SESSIONS) --static $(SANDBOX_DIST)
+		--max-sessions $(SIM_SAVINGS_SESSIONS) --static $(SANDBOX_DIST) \
+		$(if $(SIM_SAVINGS_RUNS),--runs $(SIM_SAVINGS_RUNS))
 
 sim-sweep:	sim-build
 	python -m alberta_buck.sim.sweep $(EQ_EXPERIMENTS) \

@@ -4179,6 +4179,134 @@ Acceptance: the savings page runs =economy.toml= (or a smaller default) wholly i
 a tab, a visitor's wallet trades in it, and the same page still attaches to a
 Python server world; the parity harness passes 30 days of both worlds.
 
+** The owner's word on the open decisions, and the sandboxes' worlds in the dashboard (2026-11-14, evening)
+
+- *The V2 adapter: discarded* ("we don't use V2 pools anymore").
+  =src/adapters/UniswapV2BindingAdapter.sol= and its eight tests are gone; the
+  adapter suite tests V3 only, and gained the two checks only V2 had (governance
+  revocation rolls back pool creation; no creating over an existing pool): 12 of
+  12. The identity paper's admission steps and walkthrough now name the V3
+  adapter (=createPoolAndBind=, the factory's =owner=). *Kept, deliberately*:
+  the legacy =UniswapV2Integration= suite and its staged V2 factory, pair and
+  router. It is the only end-to-end test of the identity rules through an AMM
+  (verified LP, verified swaps both ways, an unverified recipient refused), on
+  the legacy signed Buck; its cases move to canonical Buck on a V3 pool before
+  it and the V2 staging go (consolidation wave 3).
+- *The shadow controller* (=BuckKControllerShadow=, =ShadowObserver=,
+  =IShadowObserver=, the sim-only =SimStabilizer=; CARRY-CONVEXITY D4 and D7,
+  WAVE3 WP-3a and WP-13): the direct PID on the price error plus a second PID on
+  the fast stabilizers' aggregate /position/ (the BUCK the desk, convertibility
+  undertakings, facility and seeder absorbed or issued), so that K works their
+  inventory back to zero once they have absorbed a dump (mid-ranging) instead of
+  leaving them stranded when their absorption quiets the price error. With the
+  position gains at zero it is the Direct controller state for state. It is
+  deployed only beside the ops (pro-rata) basket's desk; the canonical machine
+  stack and every current world run Direct (now with the leak). Nothing current
+  depends on it. *Still the owner's call*: keep it as the research path for when
+  stabilizers exist on the machine basket, or delete it with the ops family.
+- *The sandboxes stay and grow*; the dashboard should inspect a sandbox's world
+  with all its tabs. Below.
+- *webevm: publish our own build until upstream releases the clock*, never
+  under upstream's name. Prepared (below); the first publish is the owner's, by
+  hand.
+- *The control lab*: worth keeping for its shock responses, without its first
+  no-agent stages and with the households added. Below.
+
+*** The sandboxes' worlds in the dashboard
+
+The dashboard reads run records from a source (=core/js/dashboard/src/sources.js=:
+=HttpRunSource= today, a =BrowserWorldSource= planned), so a sandbox's world is
+inspectable with every tab once it writes one:
+
+- /A server-hosted savings world (=ServerLink=): done./ =python -m
+  alberta_buck.sim.server --runs DIR= (=make nix-venv-sim-savings
+  SIM_SAVINGS_RUNS=DIR=) records each session's world under =DIR= as a run
+  record named =savings-<sid>-<time>=, written by the same recorder as every
+  other run (checked: a session watched five days wrote 6 frames and 252 agent
+  lines). =make nix-venv-dashboard SIM_RUNS=DIR= (or =dashboard-lan=) then shows
+  it, live while it grows. Off by default: a public server would otherwise keep
+  every visitor's world. The record's control address is empty, so the
+  dashboard inspects and does not steer it; the savings page steers.
+- /A world in the tab (=LocalLink=): S4 and S7./ The JS world writes the same
+  frames, agent lines and events (S4); the sandbox bundles the dashboard's pages
+  as an /Inspect/ view whose =BrowserWorldSource= reads them from the Worker's
+  frame channel (the same port the savings view reads). Same-origin and
+  in-memory: no server, the tab's memory as its limit, the record downloadable
+  as a run directory for the Python dashboard to open.
+- The wallet sandbox's world is a session too; once the JS world records (S4)
+  it gets the same Inspect view.
+
+*** webevm, published as alberta-buck-webevm
+
+=webevm= on npm is upstream's (0.9.1); our clock is upstream PR #23 (open,
+mergeable, not yet reviewed). =scripts/webevm-fork.mjs= (=make
+nix-webevm-fork-pack=) builds a clean checkout of the fork and packs it as
+=alberta-buck-webevm@0.9.1-clock.1=: the fork's =dist= and =src= unchanged
+(byte-identical to the tarball vendored before), upstream's README and LICENSE
+with a notice on top, and a =package.json= naming the fork, the commit and the PR
+(=albertaBuckSource=). =core/js= installs it as =webevm= (the dependency's key
+names the folder), so no import changes; the webevm world tests pass on it.
+=npm publish --dry-run= accepts it. The release workflow now refuses an
+alberta-buck-core with a =file:=, =link:= or git dependency. What remains is the
+owner's: =npm login=, =make nix-webevm-fork-publish= once, then
+="webevm": "npm:alberta-buck-webevm@0.9.1-clock.1"= in =core/js/package.json=
+and a relock (=core/js/vendor/README.md=). When upstream releases: depend on
+=webevm= itself and deprecate ours.
+
+*** The control lab in the standard system
+
+/What it is./ =alberta_buck/sim/control_lab/= (2,688 lines; =doc/control-lab.toml=,
+=doc/control-lab-campaign.toml=; =make nix-venv-control-lab-interactive=): eleven
+stages that switch actors on one at a time (01 external prices only, 02 monitor a
+replayed trace, 03 K against the replay, 04 linked markets, 05 basket upkeep, 06
+K moves, 07 the desk, 08 a price-sensitive buyer, 09 a price-sensitive issuer, 10
+both, 11 both and the desk); price profiles (a three-phase sine of 12% over 30
+days, mixed, a 30% ten-day step on one TOKEN at day 45, a decade of
+commodity-like paths at a month per day), random walks at 0, 0.5 and 1, and buyer
+and issuer rates low, medium and high; 891 selector choices from 279 distinct
+120-day pyrevm runs at four samples a day, cached by fingerprint, rendered into
+an offline page with a note per stage. Its value is the /paired/ comparison: the
+same feed, liquidity, seed and starting K in every arm, so the difference between
+two stages is the effect of the actor added.
+
+/Portable; not too unique./ It runs the same contracts (the basket machine with
+its upkeep facet, the Direct controller) on the same pyrevm and day loop. What is
+its own maps onto what the standard system has or nearly has:
+
+| lab | standard system |
+|-----+-----------------|
+| price profiles | =scenario.prices= modes beside =history= and =revert=: =three-phase= and =commodities= (from =control_lab/commodities.py=), with a walk amplification |
+| the step shock and other perturbations | =price_shock {token, mult, from_day, until_day}= interventions (they exist); a ramp and a pulse to add |
+| the stage ladder | a /cast/ axis of an economy campaign: agent classes on and off, paired by the keyed random streams |
+| the abstract buyer and issuer | the households: savers and investors demand BUCKs, debtors supply them; the lifecycle mix sets the balance |
+| 279 cached runs and the selector page | an =alberta_buck.sim.economy= campaign (snapshot, parallel cells, report), each cell a run record carrying its axis values; a /Compare/ view in the dashboard |
+| poking the world and watching | the dashboard's live session with operator shocks (R2), already |
+| four samples a day; the monitor and pair-observer panes (stages 02 to 04) | dropped with those stages, as the owner suggests; daily frames |
+
+/The port, in steps./
+- [ ] /C1. Price profiles./ =three-phase= and =commodities= as =scenario.prices=
+  modes with =walk=; =ramp= and =pulse= interventions beside =price_shock=.
+- [ ] /C2. A frozen-K knob./ The lab's 05 (basket, K fixed) is the baseline
+  every later arm is read against: the controller's gains at zero by a
+  =deploy= setting, recorded in the manifest.
+- [ ] /C3. The =shocks= campaign./ Casts: (a) basket only, K fixed; (b) K
+  moves; (c) households (=economy.toml='s population); (d) the lifecycle mix
+  (=economy-lifecycle.toml=); the desk only if it joins the canonical stack.
+  Profiles: three-phase, step, commodities; walks 0, 0.5, 1; two seeds; 120
+  days. 72 cells; an economy day costs about 17 s on pyrevm here (economy-5y),
+  less while the population is small, so the grid is a few hours on datasim.
+  Each cell a run record whose manifest names its campaign and axis values; the
+  per-cast notes (the lab's stage notes, rewritten for the households) in the
+  campaign file.
+- [ ] /C4. Compare in the dashboard./ Choose a campaign; one selector per axis
+  (the lab page's layout); overlay two or three cells on the Overview charts
+  (K, BVIB, BUCK/USD, supply, holders) with the shock windows shaded from the
+  interventions file; the cast note beside them.
+- [ ] /C5. Retire the lab./ When the campaign reproduces its key comparisons
+  (K moving against K fixed; households against none) on the economy world:
+  remove =control_lab/=, its configs, targets and tests; its rendered page and
+  datasets are outputs, not kept.
+
 ** Resume here (2026-11-14, before a compaction)
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed to GitHub (owner's

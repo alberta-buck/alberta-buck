@@ -175,12 +175,15 @@ class Session:
     """One world: its own pyrevm EVM, sim thread, controls, and fanout."""
 
     def __init__(self, sid, exp_path, sets, basket_impl, loop, pace=0.0, record_root=None, keep=False,
-                 control=None):
+                 control=None, record_name=None):
         """record_root: write each world's run record there (runrecord); keep: never reap it for
         want of watchers (a dashboard session, stopped by its operator); control: the control
-        address written into the record's capabilities."""
+        address written into the record's capabilities; record_name: name the records "<name>
+        <sid>" with a time-stamped id (the savings server's: a restart never meets an earlier
+        record's id), rather than "live-<sid>"."""
         self.sid = sid
         self.record_root = record_root
+        self.record_name = record_name
         self.keep = keep
         self.control_url = control
         self.recorder = None
@@ -253,8 +256,11 @@ class Session:
         if self.record_root is not None:
             from alberta_buck.sim.runrecord import RunRecorder
             n = len(self.records)
-            self.recorder = RunRecorder(self.record_root, f"live session {self.sid}",
-                                        run_id=f"live-{self.sid}" + (f"-r{n}" if n else ""),
+            if self.record_name:
+                name, run_id = f"{self.record_name} {self.sid}", None
+            else:
+                name, run_id = f"live session {self.sid}", f"live-{self.sid}" + (f"-r{n}" if n else "")
+            self.recorder = RunRecorder(self.record_root, name, run_id=run_id,
                                         kind="session", engine="pyrevm", live=self.control_url)
         try:
             summary = run(scenario, anvil, out_path=None, verbose=False,
@@ -735,8 +741,12 @@ class SessionRefused(Exception):
 
 class SimServer:
     def __init__(self, exp_path, basket_impl=None, pace=0.0, public=False,
-                 max_sessions=0, static_dir=None, sets=()):
+                 max_sessions=0, static_dir=None, sets=(), runs=None):
+        """runs: write each session's world as a run record under this directory, so the
+        dashboard (python -m alberta_buck.sim.dashboard --runs DIR) inspects the sandbox's world
+        with every tab; None records nothing."""
         self.exp_path = exp_path
+        self.runs = Path(runs) if runs else None
         self.sets = list(sets)
         self.public = public
         self.static_dir = Path(static_dir).resolve() if static_dir else None
@@ -760,8 +770,9 @@ class SimServer:
                     raise SessionRefused(f"{live} sessions running (max {self.max_sessions})")
                 print(f"[sim.server] building session '{sid}' "
                       f"(sets={sets or '-'})...")
+                record = {"record_root": self.runs, "record_name": "savings"} if self.runs else {}
                 s = Session(sid, self.exp_path, sets, self.basket_impl,
-                            self.loop, pace=self.pace)
+                            self.loop, pace=self.pace, **record)
                 s.public = self.public
                 self.sessions[sid] = s
             return s
@@ -961,10 +972,13 @@ def main(argv=None) -> int:
                     help="refuse new sessions beyond this many live ones (0 = no cap)")
     ap.add_argument("--static", default=None, metavar="DIR",
                     help="serve this directory (the built sandbox) on the websocket port")
+    ap.add_argument("--runs", default=None, metavar="DIR",
+                    help="record each session's world under DIR (run records), for the dashboard "
+                         "to inspect: python -m alberta_buck.sim.dashboard --runs DIR")
     a = ap.parse_args(argv)
     srv = SimServer(a.experiment, basket_impl=a.basket, pace=a.pace,
                     public=a.public, max_sessions=a.max_sessions,
-                    static_dir=a.static, sets=a.set)
+                    static_dir=a.static, sets=a.set, runs=a.runs)
     asyncio.run(srv.serve(a.host, a.port))
     return 0
 
