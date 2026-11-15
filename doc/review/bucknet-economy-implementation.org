@@ -4943,7 +4943,118 @@ worth"; everything else consults it.
 - [ ] /N6. Each behaviour change measured as a comparison/ (the carry, the households' basis, the
   book, fresh BUCK into positions).
 
-** Resume here (2026-11-14, evening)
+** The price book, and the rest of net BUCK: the design to implement (2026-11-15)
+
+Decisions of record (sections above): value at the best route's net bid; push the hollowest BUCK;
+a share is plain pro-rata ownership; households value at what retiring now fetches; fresh deposit
+BUCK straight into the pools; the wheel's sample is the price book, read by everything but
+execution. Done: N1 (=CarryRatio=, =IBuckNetView=, 2f2903fa) and N2 (the venue nets the marks,
+787e13f5). This is the design for N4, N5, the households and N3, worked out before a compaction.
+
+*** N4. The price book (in =BasketReference=, the wheel's Sample slot)
+
+/Where./ =BasketReference= already is the sample the wheel takes first each turn, and the parity
+signal the upkeep facet (=parity.rawValue=) and the desk policy (=signals.rawValue=,
+=marketValues=) read. It becomes the book; no new contract.
+
+/What it learns./ The dollar pool and each TOKEN's USDC pool come from the wheel's arbitrage
+configuration (=ArbKind=: =arbUsdc()=, =poolUb()=, =triangleCount()=, =triangles(k)= = {token,
+poolOwn, poolUsdc, basketIndex}). The book gets =setMarkets(address wheel)=, guarded by
+=basket.governance()=; unset, it prices the direct routes only (today's behaviour).
+
+/What it prices/, per constituent i, from TWAPs over =basket.twapWindow()= (and the same at spot
+for =marketValues='s spot), with a_i the basket amount (18-dec), prices in raw units per TOKEN unit:
+- pB = TOKEN to BUCK on its own pool, quoted (nominal); pU = TOKEN to USDC on its USDC pool;
+  b = BUCK per USDC on the dollar pool (quoted, per 1e6 USDC); u = USDC per BUCK (per 1e6 BUCK);
+  r_i, r_ub = the TOKEN pool's and the dollar pool's net/gross (=CarryRatio.read=).
+- *bid in net BUCK* = max(toNet(r_i, pB), toNet(r_ub, pU x b / 1e6)): sold into its own pool the
+  BUCK arrives at r_i; sold for USDC and the USDC into the dollar pool, at r_ub.
+- *bid in USDC* = max(pU, pB x u / 1e6): through BUCK the hollow BUCK passes the Carrying router at
+  nominal, so no ratio applies.
+- *the BUCK itself*: a net BUCK sold for USDC fetches u (an ordinary seller pays full value); one
+  bought costs u / r_ub (it arrives hollow).
+- the basket: =rawValue= = sum a_i x bidBuck_i (net BVIB, best route), =valueUsdc= = sum a_i x
+  bidUsdc_i (the basket's dollar value: the households' fair value).
+- every pool read is checked spot against TWAP (=maxDeviationBp=); any failing pool refuses the
+  whole reading, as now. Fees are execution costs: the book is mid prices.
+- under the comparison switch (=basket.nominalReference()=) the BUCK bids are the direct quoted
+  prices, the measure before 2026-11-15; the USDC bids are unchanged (no carry in USDC).
+
+/What it stores/ at each =observe()=: =rawValue=, =valueUsdc=, =bidBuck[i]=, =bidUsdc[i]=, the
+route each took, the BUCK's bid and ask in USDC, and the time; =fresh()= as now. Live views
+(=basketValueInBuck()=, =marketValues()=, a =bids()= that returns all of it) for execution-time
+checks. Split per constituent into private helpers (the stack: =marketValues= already needed one).
+
+/K reads it./ The Python world sets K's basket at deploy, before the machine exists, and
+=setBasket= is one-shot, so K keeps reading =basket.basketValueInBuck()=: =BasketVenueFacet= takes
+the book at construction (immutable; 0 for legacy and fixtures) and returns the book's =rawValue=
+while it is fresh, else its live =basketValueInBuck()=; under the comparison switch, the quoted
+value as now. Deploy order: the book before the facet (=basket_machine.activate=, JS =eqworld=);
+the eight test files that construct =BasketVenueFacet()= pass =address(0)=.
+
+/Then the readers/, one at a time, each measured: the parity signal and desk policy (already read
+it); the pair observer (levels at the book's net bids, so a hollow pool no longer opens a pair
+early: finding 3); the marks' TWAP anchor (the venue's =pTwap= from the book, LOW and HIGH against
+the live net spot); the snapshot's =control.bvib= (what K reads) and a new =control.bvib_usdc=.
+
+/Tests./ Forge: unset markets, the book equals today's net direct reference; the existing
+reference tests. Python (pyrevm, the economy world): after a few days the book's bids equal the
+routes recomputed off-chain, the USDC route wins for a TOKEN whose BUCK pool is the hollower, and
+K reads the sample.
+
+*** The households read the book (findings 1 and 6)
+
+No old basis kept and no machinery in the household (the owner). A household's BUCK, receipts and
+TOKEN are worth what retiring them now fetches, in USDC and in net BUCK, at the book's bids; its
+debt costs the BUCK's ask. Its decisions compare the cost of a net BUCK (the dollar pool's quote, as
+now: =NetMarketQuote.buy_cost=) with the basket's dollar value per unit (the book's =valueUsdc=)
+in place of BVIB times the dollar pool's nominal price, in every place listed under finding 1
+(Python and JS alike). The run record carries each household's worth in USDC and in net BUCK
+beside its USD counterfactual (=hypo=); the dashboard's Agents tab shows both, so the years show
+the USD's inflation against the BUCK's demurrage.
+
+*** N5. Fresh deposit BUCK straight into the pools
+
+A BUCK deposit is fresh (full value) and would dilute the wallet's carried BUCK, which purchases
+should push (the hollowest we hold). The deposit's BUCK goes into the basket's pool positions in
+the same transaction or the next upkeep pass, pairing idle TOKEN first (finding 5's sizing:
+the BUCK side a pool asks for at its nominal price, at the wallet's ratio, fixed here). Purchases
+pay from the wallet. Lands in the upkeep facet (762 bytes free) and the shell's deposit (416).
+
+*** N3. The kernel and the simulation's price readers
+
+=carry_to_net= (move's rounding), =carry_to_nominal= (ceil) and a V3 price helper in =buck-math=,
+with cases in =net-math-vectors.json= (Solidity =NetMathVectorsTest=, Rust, Python, JS); one
+block-pinned price reader per language (slot0); the snapshot's spot prices from slot0 (finding 9);
+the JS demo bundle rebuilt (=make nix-core-js-artifacts=); =basket_machine.targets_bp= is right since
+N2.
+
+*** N6. Measure each behaviour change as a comparison
+
+The book (K at the best route against the direct net reference), the households' basis, fresh BUCK
+into the pools; each against the commit before, on =economy= and =economy-lifecycle=, two years.
+
+** Resume here (2026-11-15, before a compaction)
+
+- *Branch*: =feature/household-minimal-ecosystem=, pushed; worktree =.claude/worktrees/buck-compound=,
+  clean at 7cd34241 plus this note.
+- *Next*: N4, the price book, as designed above ("The price book, and the rest of net BUCK"); then
+  the households read it; N5; N3; N6.
+- *Running here*: =comparisons/carry.toml= (net against quoted BVIB x leak, 730 days; runs
+  =build/runs/carry.*=, log =build/test/compare-carry.log=, ~700 days at writing; frozen at 614348c8,
+  before N1/N2, which does not change its question). When done: =make nix-venv-compare-report
+  COMPARE=carry= and the dashboard's Compare tab; record where K settles under each.
+- *Running on datasim*: the five-year lifecycle suite in =~/src/alberta-buck-lifecycle= (old
+  contracts: the quoted-BVIB baseline): life-A, A2, C, E complete; B, D at day 1,720; econ-F at
+  1,120. Digest by mix (L5). Memory: 46 of 94 GB used.
+- *Done today, besides*: =alberta-buck-webevm= published and depended on by alias (8369c3e9); the
+  comparison runner and the dashboard's Compare tab; the control lab as =comparisons/shocks.toml=
+  (48 runs complete, =build/runs/shocks.*=; C5 retires the lab); the V2 adapter removed; the Python
+  tier passing (1,377); the JS population test on the canonical world and the four parity fixes.
+- *Still open from before*: S3's remaining parity gaps (counters, world constants, the lifecycle in
+  JS); consolidation waves 2 and 3; the shadow controller and the catalogue's stress arms (owner).
+
+** Resume here (superseded: 2026-11-14, evening)
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed to GitHub (owner's
   word); worktree =.claude/worktrees/buck-compound=.
