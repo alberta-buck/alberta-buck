@@ -4225,6 +4225,22 @@ Acceptance: the savings page runs =economy.toml= (or a smaller default) wholly i
 a tab, a visitor's wallet trades in it, and the same page still attaches to a
 Python server world; the parity harness passes 30 days of both worlds.
 
+*** The hosted sandboxes (owner's word, 2026-11-15)
+
+- /sandbox.albertabuck.ca/ (the wallet sandbox) is static on Cloudflare Pages, built and deployed
+  by =.github/workflows/sandbox-pages.yml= from master (last: 2026-09-26, the Tevm build). It runs
+  wholly in the tab on webevm now; nothing server-side. Production updates with the release merge;
+  meanwhile a preview of this branch (=workflow_dispatch=) at
+  =feature-household-minimal-ecosystem.alberta-buck-sandbox.pages.dev=.
+- /savings-sandbox.albertabuck.ca/ is the sandbox page served by =alberta_buck/sim/server.py= on
+  datasim (127.0.0.1:8797 and 8798, the tunnel's origins), started by hand 45 days ago from the
+  =savings-sandbox= worktree (5c4733e6, venv 0.3.0); no systemd unit is installed, and lingering is
+  off. /Decision/: leave it up, untouched, and port next: S4 (the JS world from the experiment, in
+  the run record's frames) and S6 (=LocalLink=: the world in a Web Worker on webevm, the page
+  choosing its link) first, S2 and S3 (the parity harness and its gaps) after. When the page runs
+  the savings world in the tab, serve it statically (Pages, like the wallet sandbox) and retire the
+  server. Not to run pyrevm-backed hosted worlds for now.
+
 *** S1. Parity inventory (2026-11-14)
 
 Python against JS, function by function, on a567669a. In short: for a household outside the
