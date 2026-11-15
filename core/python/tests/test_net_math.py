@@ -22,11 +22,15 @@ def test_shared_canonical_integer_vectors():
     assert data["format"] == 1
     assert len(data["cases"]) == data["count"] >= 300
     functions = dict(decay=math.net_decay, fundNetAfter=math.net_fund_after,
-                     targetRelief=math.net_target_relief, mulDiv=math.mul_div_256)
+                     targetRelief=math.net_target_relief, mulDiv=math.mul_div_256,
+                     carryToNet=math.carry_to_net, carryToNetScaled=math.carry_to_net_scaled,
+                     carryToNominal=math.carry_to_nominal, quoteAtTick=math.quote_at_tick)
     for row in data["cases"]:
         args = [int(a, 16) for a in row["args"]]
         if row["op"] == "mulDiv":
             args.append(row["roundUp"])
+        if row["op"] == "quoteAtTick":      # a tick travels as tick + 2^23; then the base, and token0
+            args = [args[0] - 2**23, args[1], bool(args[2])]
         if row["error"]:
             with pytest.raises(ValueError, match=row["error"]):
                 functions[row["op"]](*args)

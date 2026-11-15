@@ -283,3 +283,27 @@ def test_pool_state_falls_back_to_an_uncached_read(monkeypatch):
     st["sp"] = _sqrt_x96(4.0)
     assert gauge.pool_state(bare, POOL_UB)[0] == _sqrt_x96(4.0)
     assert quote_hop(bare.w3, [], POOL_UB, USDC, BUCK, E6, 0) > 0
+
+
+def test_spot_quote_reads_the_slot0_tick_as_the_contracts_quote():
+    # Finding 9 (doc/review/bucknet-economy-implementation.org): the snapshot's spot prices come from
+    # each pool's slot0 tick through the kernel's quote (OracleLibrary.getQuoteAtTick), not balances.
+    token, other = "0x" + "1" * 40, "0x" + "2" * 40
+
+    class Pools:
+        def __init__(self, tick, token0):
+            self.state = (1 << 96, tick, 10**18, token0, other if token0 == token else token)
+
+        def pool_state(self, pool):
+            return self.state
+
+    assert gauge.spot_quote(Pools(0, token), "pool", token, 18) == 10**18, "tick 0: one for one"
+    up = gauge.spot_quote(Pools(100, token), "pool", token, 18)
+    assert up == pytest.approx(1.0001**100 * 10**18, rel=1e-12), "token0: token1 per token0 is 1.0001^tick"
+    assert gauge.spot_quote(Pools(100, other), "pool", token, 18) == pytest.approx(10**18 / 1.0001**100, rel=1e-12)
+
+    class Empty:
+        def pool_state(self, pool):
+            return (0, 0, 0, token, other)
+
+    assert gauge.spot_quote(Empty(), "pool", token, 18) == 0

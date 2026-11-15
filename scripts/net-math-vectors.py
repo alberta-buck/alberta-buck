@@ -50,7 +50,67 @@ def decay(amount, elapsed):
     return amount * factor(remainder) // Q
 
 
+MAX_TICK = 887272
+TICK_OFFSET = 2**23          # a tick travels as tick + 2^23: vector arguments are unsigned
+TICK_FACTORS = [
+    (0x2, 0xfff97272373d413259a46990580e213a), (0x4, 0xfff2e50f5f656932ef12357cf3c7fdcc),
+    (0x8, 0xffe5caca7e10e4e61c3624eaa0941cd0), (0x10, 0xffcb9843d60f6159c9db58835c926644),
+    (0x20, 0xff973b41fa98c081472e6896dfb254c0), (0x40, 0xff2ea16466c96a3843ec78b326b52861),
+    (0x80, 0xfe5dee046a99a2a811c461f1969c3053), (0x100, 0xfcbe86c7900a88aedcffc83b479aa3a4),
+    (0x200, 0xf987a7253ac413176f2b074cf7815e54), (0x400, 0xf3392b0822b70005940c7a398e4b70f3),
+    (0x800, 0xe7159475a2c29b7443b29c7fa6e889d9), (0x1000, 0xd097f3bdfd2022b8845ad8f792aa5825),
+    (0x2000, 0xa9f746462d870fdf8a65dc1f90e061e5), (0x4000, 0x70d869a156d2a1b890bb3df62baf32f7),
+    (0x8000, 0x31be135f97d08fd981231505542fcfa6), (0x10000, 0x9aa508b5b7a84e1c677de54f3e99bc9),
+    (0x20000, 0x5d6af8dedb81196699c329225ee604), (0x40000, 0x2216e584f5fa1ea926041bedfe98),
+    (0x80000, 0x48a170391f7dc42444e8fa2)]
+
+
+def sqrt_ratio_at_tick(tick):
+    """Uniswap V3 TickMath.getSqrtRatioAtTick, in unbounded integers."""
+    a = abs(tick)
+    if a > MAX_TICK:
+        raise ValueError("tick out of range")
+    ratio = 0xfffcb933bd6fad37aa2d162d1a594001 if a & 1 else 1 << 128
+    for bit, factor in TICK_FACTORS:
+        if a & bit:
+            ratio = ratio * factor >> 128
+    if tick > 0:
+        ratio = MAX // ratio
+    return (ratio >> 32) + (1 if ratio % (1 << 32) else 0)
+
+
+def checked(value):
+    if value > MAX:
+        raise ValueError("uint256 overflow")
+    return value
+
+
+def quote_at_tick(tick, base, base_is_token0):
+    """OracleLibrary.getQuoteAtTick: token1 per token0 is 1.0001^tick."""
+    sqrt = sqrt_ratio_at_tick(tick)
+    ratio, one = (sqrt * sqrt, 1 << 192) if sqrt <= 2**128 - 1 else (checked(sqrt * sqrt // (1 << 64)), 1 << 128)
+    return checked(ratio * base // one if base_is_token0 else one * base // ratio)
+
+
 def expected(op, args, round_up):
+    # CarryRatio (src/lib/CarryRatio.sol): an account's (gross, net) and an amount.
+    if op == "carryToNet":
+        gross, net, nominal = args
+        return nominal if gross == 0 or gross == net else nominal * net // gross
+    if op == "carryToNetScaled":
+        gross, net, nominal = args
+        scaled = checked(nominal * Q)
+        return scaled if gross == 0 else scaled * net // gross
+    if op == "carryToNominal":
+        gross, net, value = args
+        if gross == 0 or gross == net:
+            return value
+        if net == 0:
+            raise ValueError("no net value")
+        return -(-value * gross // net)
+    if op == "quoteAtTick":
+        tick, base, token0 = args
+        return quote_at_tick(tick - TICK_OFFSET, base, bool(token0))
     if op == "decay":
         return decay(*args)
     if op == "fundNetAfter":
@@ -114,6 +174,18 @@ def vectors():
     for i, args in enumerate(boundary):
         for up in [False, True]:
             add(f"muldiv-{i}-{'ceil' if up else 'floor'}", "mulDiv", args, up)
+    # The carry: an account's gross and net (both x 1e36) and an amount (raw, or a price).
+    for gross in [0, Q, 100 * 10**6 * Q, 2**200, MAX]:
+        for net in sorted({0, gross // 2, gross * 98 // 100, gross}):
+            for amount in [0, 1, 10**6, 123_456_789, 2**200, MAX]:
+                for op in ("carryToNet", "carryToNetScaled", "carryToNominal"):
+                    add(f"{op}-{gross}-{net}-{amount}", op, [gross, net, amount])
+    # A pool's price at a tick (both orientations), and the quote's limits.
+    for tick in [-MAX_TICK - 1, -MAX_TICK, -MAX_TICK + 1, -500_000, -276_325, -100, -1, 0, 1, 100,
+                 276_324, 500_000, MAX_TICK - 1, MAX_TICK, MAX_TICK + 1]:
+        for base in [1, 10**6, 10**18, 2**128 - 1]:
+            for token0 in (1, 0):
+                add(f"quote-{tick}-{base}-{token0}", "quoteAtTick", [tick + TICK_OFFSET, base, token0])
     return dict(format=1, model="Buck/compounded-cash/per-facility-jubilee/v1", scale=hex(Q), count=len(rows), cases=rows)
 
 

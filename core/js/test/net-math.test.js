@@ -16,10 +16,14 @@ test("canonical shared integer vectors through the BigInt WASM wrapper", () => {
   assert.equal(vectors.format, 1);
   assert.equal(vectors.cases.length, vectors.count);
   assert.ok(vectors.count >= 300);
-  const functions = { decay: math.decay, fundNetAfter: math.fundNetAfter, targetRelief: math.targetRelief, mulDiv: math.mulDiv };
+  const functions = { decay: math.decay, fundNetAfter: math.fundNetAfter, targetRelief: math.targetRelief, mulDiv: math.mulDiv,
+    carryToNet: math.carryToNet, carryToNetScaled: math.carryToNetScaled, carryToNominal: math.carryToNominal,
+    quoteAtTick: math.quoteAtTick };
   for (const row of vectors.cases) {
-    const args = row.args.map(BigInt);
+    let args = row.args.map(BigInt);
     if (row.op === "mulDiv") args.push(row.roundUp);
+    // A tick travels as tick + 2^23; then the base, and whether it is token0.
+    if (row.op === "quoteAtTick") args = [Number(args[0] - (1n << 23n)), args[1], args[2] === 1n];
     if (row.error) assert.throws(() => functions[row.op](...args), { message: row.error }, row.name);
     else assert.equal(functions[row.op](...args), BigInt(row.value), row.name);
   }

@@ -17,7 +17,8 @@ from web3 import Web3
 
 from alberta_buck.sim.chain import load_artifact
 from alberta_buck.sim import acts as _acts_mod
-from alberta_buck.sim.gauge import buck_usd6
+from alberta_buck.sim.gauge import buck_usd6, spot_quote
+from buck_core import buck_math
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_VECTORS = REPO / "test" / "vectors"
@@ -29,10 +30,8 @@ MASK256 = (1 << 256) - 1
 
 def _quoted(net_amount: int, gross: int, net: int) -> int:
     """A net BUCK amount or price from a Carrying account (gross, net) back to the nominal V3 quoted
-    it in, rounded up (lib/CarryRatio.sol toNominal; within a raw unit of the quote)."""
-    if gross == 0 or gross == net:
-        return net_amount
-    return -(-net_amount * gross // net)
+    it in, rounded up (lib/CarryRatio.sol toNominal, in the kernel; within a raw unit of the quote)."""
+    return buck_math.carry_to_nominal(gross, net, net_amount)
 
 def household_summary(states):
     """Compact household books retained by the savings server's lite frames; money is in base units.
@@ -450,8 +449,7 @@ class Snapshotter:
         TOKEN i: raw * ref0_i / 10**dec_i."""
         kind, i = self._kind[Web3.to_checksum_address(addr)]
         if kind == "buck" and buck_ratio is not None:
-            gross, net = buck_ratio
-            return raw * net // gross if gross else 0
+            return buck_math.carry_to_net(*buck_ratio, raw)
         if kind in ("usdc", "buck"):
             return raw
         return raw * self.s.prices.ref(i, 0) // (10 ** self.d.dec[i])
@@ -629,8 +627,10 @@ class Snapshotter:
         ref, su, sb = [], [], []
         for i, tc in enumerate(d.tokens):
             ref.append(self.s.prices.ref(i, day))
-            su.append(_implied(d, d.pool_usdc[i], tc, d.dec[i], d.usdc))
-            sb.append(_implied(d, d.pool_buck[i], tc, d.dec[i], d.buck))
+            # At each pool's slot0 tick, as the contracts quote (finding 9: no longer the balance ratio,
+            # which a concentrated position misreads).
+            su.append(spot_quote(d.chain, d.pool_usdc[i], tc, d.dec[i]))
+            sb.append(spot_quote(d.chain, d.pool_buck[i], tc, d.dec[i]))
         # Floating BUCK/USDC pool: USDC-micro per 1 BUCK from slot0
         # (decision 8: the balance ratio misreads a concentrated position).
         buck_usd = 0

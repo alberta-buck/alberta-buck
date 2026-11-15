@@ -12,6 +12,8 @@ pub enum NetMathError {
     Overflow,
     FundExceedsIssuance,
     InvalidPrincipal,
+    NoNetValue,
+    TickOutOfRange,
 }
 
 impl fmt::Display for NetMathError {
@@ -21,6 +23,8 @@ impl fmt::Display for NetMathError {
             Self::Overflow => "uint256 overflow",
             Self::FundExceedsIssuance => "fund exceeds issuance",
             Self::InvalidPrincipal => "invalid principal",
+            Self::NoNetValue => "no net value",
+            Self::TickOutOfRange => "tick out of range",
         })
     }
 }
@@ -35,6 +39,18 @@ impl U256 {
 
     pub const fn from_u128(value: u128) -> Self {
         Self([value as u64, (value >> 64) as u64, 0, 0])
+    }
+
+    /// The 256-bit value hi * 2^128 + lo.
+    pub const fn from_halves(hi: u128, lo: u128) -> Self {
+        Self([lo as u64, (lo >> 64) as u64, hi as u64, (hi >> 64) as u64])
+    }
+
+    /// 2^n, for n < 256.
+    pub const fn pow2(n: u32) -> Self {
+        let mut limbs = [0; 4];
+        limbs[(n / 64) as usize] = 1 << (n % 64);
+        Self(limbs)
     }
 
     pub fn from_be_bytes(bytes: [u8; 32]) -> Self {

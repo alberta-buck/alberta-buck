@@ -23,6 +23,7 @@
 
 #![no_std]
 
+pub mod carry;
 pub mod demurrage;
 pub mod net_demurrage;
 pub mod uint256;
@@ -30,6 +31,7 @@ pub mod depreciation;
 pub mod pid;
 pub mod wide;
 
+pub use carry::{carry_to_net, carry_to_net_scaled, carry_to_nominal, quote_at_tick, sqrt_ratio_at_tick};
 pub use demurrage::{carrying_transfer, fee_owing, CarryingResult};
 pub use net_demurrage::{net_decay, net_fund_after, net_target_relief};
 pub use uint256::{mul_div_256, NetMathError, U256};

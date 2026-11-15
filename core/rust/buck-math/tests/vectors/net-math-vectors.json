@@ -2,7 +2,7 @@
   "format": 1,
   "model": "Buck/compounded-cash/per-facility-jubilee/v1",
   "scale": "0xc097ce7bc90715b34b9f1000000000",
-  "count": 318,
+  "count": 744,
   "cases": [
     {
       "name": "decay-0-0",
@@ -3728,6 +3728,5118 @@
       "roundUp": true,
       "value": "0x8b57bc274edac2dd54fe17bd196d920b769a56d8313a1a2cf8910b63282b8f0",
       "error": ""
+    },
+    {
+      "name": "carryToNet-0-0-0",
+      "op": "carryToNet",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-0-0-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-0-0-0",
+      "op": "carryToNominal",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-0-0-1",
+      "op": "carryToNet",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-0-0-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xc097ce7bc90715b34b9f1000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-0-0-1",
+      "op": "carryToNominal",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-0-0-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0x0",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-0-0-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x0",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xb7abc627050305adf14a3d9e40000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-0-0-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0x0",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-0-0-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-0-0-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x58936e5254cb73ec7c2963e43dc5000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-0-0-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-0-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-0-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-0-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0x0",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-0-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0x0",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-0-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x0",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-0-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0x0",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-0-0",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-0-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-0-0",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-0-1",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-0-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-0-1",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-0-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-0-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-0-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-0-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-0-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-0-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-500000000000000000000000000000000000-0",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-500000000000000000000000000000000000-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-500000000000000000000000000000000000-0",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-500000000000000000000000000000000000-1",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-500000000000000000000000000000000000-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x604be73de4838ad9a5cf8800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-500000000000000000000000000000000000-1",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x2",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-500000000000000000000000000000000000-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x7a120",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-500000000000000000000000000000000000-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x5bd5e313828182d6f8a51ecf20000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-500000000000000000000000000000000000-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x1e8480",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-500000000000000000000000000000000000-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x3ade68a",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-500000000000000000000000000000000000-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x2c49b7292a65b9f63e14b1f21ee2800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-500000000000000000000000000000000000-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0xeb79a2a",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-500000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x80000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-500000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-500000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x200000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-500000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-500000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-500000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x604be73de4838ad9a5cf8800000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-980000000000000000000000000000000000-0",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-980000000000000000000000000000000000-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-980000000000000000000000000000000000-0",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-980000000000000000000000000000000000-1",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-980000000000000000000000000000000000-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xbcbdbafe6df7954430824800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-980000000000000000000000000000000000-1",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x2",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-980000000000000000000000000000000000-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xef420",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-980000000000000000000000000000000000-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xb3ff60e8cc977115fbd2fef220000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-980000000000000000000000000000000000-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf91f9",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-980000000000000000000000000000000000-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x7362005",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-980000000000000000000000000000000000-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x56cdec1d7c0f1053467a7b7e657e800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-980000000000000000000000000000000000-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x7823efc",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-980000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-980000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-980000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x105397829cbc14e5e0a72f05397829cbc14e5e0a72f0539782a",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-980000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-980000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-980000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xbcbdbafe6df7954430824800000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-1000000000000000000000000000000000000-0",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-1000000000000000000000000000000000000-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-1000000000000000000000000000000000000-0",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-1000000000000000000000000000000000000-1",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-1000000000000000000000000000000000000-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xc097ce7bc90715b34b9f1000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-1000000000000000000000000000000000000-1",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-1000000000000000000000000000000000000-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-1000000000000000000000000000000000000-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xb7abc627050305adf14a3d9e40000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-1000000000000000000000000000000000000-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-1000000000000000000000000000000000000-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-1000000000000000000000000000000000000-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x58936e5254cb73ec7c2963e43dc5000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-1000000000000000000000000000000000000-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-1000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-1000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-1000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1000000000000000000000000000000000000-1000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1000000000000000000000000000000000000-1000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1000000000000000000000000000000000000-1000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xc097ce7bc90715b34b9f1000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-0-0",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-0-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-0-0",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-0-1",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-0-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-0-1",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-0-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-0-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-0-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-0-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-0-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-0-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-0",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-0",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x604be73de4838ad9a5cf8800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x2",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x7a120",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x5bd5e313828182d6f8a51ecf20000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x1e8480",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x3ade68a",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x2c49b7292a65b9f63e14b1f21ee2800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0xeb79a2a",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x80000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x200000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-50000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x23df8cb39efa971bf9208008e880000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-0",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-0",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-1",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xbcbdbafe6df7954430824800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-1",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x2",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xef420",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xb3ff60e8cc977115fbd2fef220000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf91f9",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x7362005",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x56cdec1d7c0f1053467a7b7e657e800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x7823efc",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x105397829cbc14e5e0a72f05397829cbc14e5e0a72f0539782a",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-98000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x464fc1daefeb282c965e6b969480000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-0",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-0",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xc097ce7bc90715b34b9f1000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xb7abc627050305adf14a3d9e40000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x58936e5254cb73ec7c2963e43dc5000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-100000000000000000000000000000000000000000000-100000000000000000000000000000000000000000000-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0x47bf19673df52e37f2410011d100000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-0-0",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-0-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-0-0",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-0-1",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-0-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-0-1",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-0-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-0-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-0-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-0-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-0-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-0-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-0",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-0",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-1",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x604be73de4838ad9a5cf8800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-1",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x2",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x7a120",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x5bd5e313828182d6f8a51ecf20000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x1e8480",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x3ade68a",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x2c49b7292a65b9f63e14b1f21ee2800000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0xeb79a2a",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x80000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x200000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-803469022129495137770981046170581301261101496891396417650688-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x80000000000000000000000000000000000000000000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-0",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-0",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-1",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xbcbdbafe6df79544308247ffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-1",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x2",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xef41f",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xb3ff60e8cc977115fbd2fef21ffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf91f9",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x7362005",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x56cdec1d7c0f1053467a7b7e657e7ffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x7823efc",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x105397829cbc14e5e0a72f05397829cbc14e5e0a72f0539782b",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae13ffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1574799283373810470031122850494339350471758933907136978595348-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-0",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-0",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-1",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xc097ce7bc90715b34b9f1000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-1",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xb7abc627050305adf14a3d9e40000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x58936e5254cb73ec7c2963e43dc5000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-1606938044258990275541962092341162602522202993782792835301376-1606938044258990275541962092341162602522202993782792835301376-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0x100000000000000000000000000000000000000000000000000",
+        "0x100000000000000000000000000000000000000000000000000",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-0",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-0",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-0-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "no net value"
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-0",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-0",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x604be73de4838ad9a5cf87ffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x3",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x7a11f",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x5bd5e313828182d6f8a51ecf1ffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0x1e8481",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x3ade68a",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x2c49b7292a65b9f63e14b1f21ee27ffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0xeb79a2b",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x7fffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x200000000000000000000000000000000000000000000000001",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-57896044618658097711785492504343953926634992332820282019728792003956564819967-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-0",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-0",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-1",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xbcbdbafe6df79544308247ffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-1",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x2",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xef41f",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xb3ff60e8cc977115fbd2fef21ffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf91f9",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x7362005",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x56cdec1d7c0f1053467a7b7e657e7ffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x7823efc",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae14",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x105397829cbc14e5e0a72f05397829cbc14e5e0a72f0539782a",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-113476247452569871515099565308514149696204584972327752758668432327754867047136-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xfae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae0",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-0",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xc097ce7bc90715b34b9f1000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1000000",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1000000",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xb7abc627050305adf14a3d9e40000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1000000",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xf4240"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-123456789",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-123456789",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x58936e5254cb73ec7c2963e43dc5000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-123456789",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x75bcd15"
+      ],
+      "roundUp": false,
+      "value": "0x75bcd15",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-1606938044258990275541962092341162602522202993782792835301376",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0x100000000000000000000000000000000000000000000000000"
+      ],
+      "roundUp": false,
+      "value": "0x100000000000000000000000000000000000000000000000000",
+      "error": ""
+    },
+    {
+      "name": "carryToNet-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNet",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "carryToNetScaled-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNetScaled",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "uint256 overflow"
+    },
+    {
+      "name": "carryToNominal-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935-115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "op": "carryToNominal",
+      "args": [
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "quote--887273-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727617",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote--887273-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727617",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote--887273-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727617",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote--887273-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727617",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote--887273-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727617",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote--887273-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727617",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote--887273-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727617",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote--887273-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727617",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote--887272-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727618",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--887272-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727618",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xfffb12cc34583818d16fadcbae21746b",
+      "error": ""
+    },
+    {
+      "name": "quote--887272-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727618",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--887272-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727618",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf41f4d39469b71df8b1be55a929c5fab4a152",
+      "error": ""
+    },
+    {
+      "name": "quote--887272-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727618",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--887272-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727618",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xde07254f4a2616037d4cad95b070d65a686be81e5d91007",
+      "error": ""
+    },
+    {
+      "name": "quote--887272-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727618",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote--887272-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727618",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xfffb12cc34583818d16fadcbae21746afaaa9b091c01b34fc81b31fa5a96589a",
+      "error": ""
+    },
+    {
+      "name": "quote--887271-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727619",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--887271-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727619",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xfff4855ed723225a560d79233817fd9f",
+      "error": ""
+    },
+    {
+      "name": "quote--887271-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727619",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--887271-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727619",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf4190d812663bdaeeeb8f15a9a6ac11b45be6",
+      "error": ""
+    },
+    {
+      "name": "quote--887271-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727619",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--887271-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727619",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xde01765fa10344504cb2e6ae1a171a9916ecfb68da06ea3",
+      "error": ""
+    },
+    {
+      "name": "quote--887271-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727619",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote--887271-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x727619",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xfff4855ed723225a560d79233817fd9e102d39386e1300bc372045f5152a1fdb",
+      "error": ""
+    },
+    {
+      "name": "quote--500000-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x785ee0",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--500000-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x785ee0",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x1185c99646b0489aecd",
+      "error": ""
+    },
+    {
+      "name": "quote--500000-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x785ee0",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--500000-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x785ee0",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x10b5faf39481f5fddf8e8986",
+      "error": ""
+    },
+    {
+      "name": "quote--500000-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x785ee0",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--500000-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x785ee0",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf32cce6e66b707ed4824fa05db27291be",
+      "error": ""
+    },
+    {
+      "name": "quote--500000-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x785ee0",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xe9c152b5119c86",
+      "error": ""
+    },
+    {
+      "name": "quote--500000-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x785ee0",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x1185c99646b0489aecdfb6a00a3fe35f184dcb6b917265ee374",
+      "error": ""
+    },
+    {
+      "name": "quote--276325-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7bc89b",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--276325-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7bc89b",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xe8da729887",
+      "error": ""
+    },
+    {
+      "name": "quote--276325-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7bc89b",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--276325-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7bc89b",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xde10f3f17ebf535",
+      "error": ""
+    },
+    {
+      "name": "quote--276325-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7bc89b",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf41de",
+      "error": ""
+    },
+    {
+      "name": "quote--276325-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7bc89b",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xc9f7d24bad243fbb27f49fada",
+      "error": ""
+    },
+    {
+      "name": "quote--276325-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7bc89b",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x11972945954a0e3a75797c0",
+      "error": ""
+    },
+    {
+      "name": "quote--276325-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7bc89b",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xe8da729887a8213a8a253957ae52cef8cc1aa22145",
+      "error": ""
+    },
+    {
+      "name": "quote--100-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fff9c",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--100-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fff9c",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote--100-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fff9c",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf1b62",
+      "error": ""
+    },
+    {
+      "name": "quote--100-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fff9c",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf6981",
+      "error": ""
+    },
+    {
+      "name": "quote--100-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fff9c",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xdbd5d874a60e589",
+      "error": ""
+    },
+    {
+      "name": "quote--100-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fff9c",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xe046ad0f28c9b18",
+      "error": ""
+    },
+    {
+      "name": "quote--100-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fff9c",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xfd73f03756694168457cc798bfc7e495",
+      "error": ""
+    },
+    {
+      "name": "quote--100-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fff9c",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x102929d5a0656650806703cf279a76ac7",
+      "error": ""
+    },
+    {
+      "name": "quote--1-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fffff",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote--1-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fffff",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote--1-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fffff",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf41dc",
+      "error": ""
+    },
+    {
+      "name": "quote--1-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fffff",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf42a3",
+      "error": ""
+    },
+    {
+      "name": "quote--1-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fffff",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xde05bc2eae66223",
+      "error": ""
+    },
+    {
+      "name": "quote--1-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fffff",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xde111a6b7de3fff",
+      "error": ""
+    },
+    {
+      "name": "quote--1-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fffff",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xfff97272373d413259a469922355c047",
+      "error": ""
+    },
+    {
+      "name": "quote--1-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x7fffff",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x100068db8bac710cb295e9e193d3adf38",
+      "error": ""
+    },
+    {
+      "name": "quote-0-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800000",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote-0-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800000",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote-0-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800000",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "quote-0-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800000",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf4240",
+      "error": ""
+    },
+    {
+      "name": "quote-0-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800000",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xde0b6b3a7640000",
+      "error": ""
+    },
+    {
+      "name": "quote-0-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800000",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xde0b6b3a7640000",
+      "error": ""
+    },
+    {
+      "name": "quote-0-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800000",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "quote-0-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800000",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xffffffffffffffffffffffffffffffff",
+      "error": ""
+    },
+    {
+      "name": "quote-1-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800001",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote-1-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800001",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-1-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800001",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf42a4",
+      "error": ""
+    },
+    {
+      "name": "quote-1-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800001",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf41dc",
+      "error": ""
+    },
+    {
+      "name": "quote-1-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800001",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xde111a6b7de4000",
+      "error": ""
+    },
+    {
+      "name": "quote-1-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800001",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xde05bc2eae66223",
+      "error": ""
+    },
+    {
+      "name": "quote-1-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800001",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x100068db8bac710cb295e9e1c502d870d",
+      "error": ""
+    },
+    {
+      "name": "quote-1-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800001",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xfff97272373d413259a4698f108b6195",
+      "error": ""
+    },
+    {
+      "name": "quote-100-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800064",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote-100-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800064",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-100-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800064",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf6981",
+      "error": ""
+    },
+    {
+      "name": "quote-100-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800064",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf1b62",
+      "error": ""
+    },
+    {
+      "name": "quote-100-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800064",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xe046ad0f28c9b18",
+      "error": ""
+    },
+    {
+      "name": "quote-100-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800064",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xdbd5d874a60e589",
+      "error": ""
+    },
+    {
+      "name": "quote-100-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800064",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x102929d5a0656650806703cf48e297930",
+      "error": ""
+    },
+    {
+      "name": "quote-100-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x800064",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xfd73f03756694168457cc796b5d10f82",
+      "error": ""
+    },
+    {
+      "name": "quote-276324-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x843764",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xe8d47cb890",
+      "error": ""
+    },
+    {
+      "name": "quote-276324-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x843764",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-276324-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x843764",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xde0b44c1733dcf1",
+      "error": ""
+    },
+    {
+      "name": "quote-276324-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x843764",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-276324-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x843764",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xc9f2a6cf64a86e35ac2b0fbc0",
+      "error": ""
+    },
+    {
+      "name": "quote-276324-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x843764",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xf4242",
+      "error": ""
+    },
+    {
+      "name": "quote-276324-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x843764",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xe8d47cb8900a05f04011335d500b2718f97da7950e",
+      "error": ""
+    },
+    {
+      "name": "quote-276324-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x843764",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x11979c8d80220cd8edc0083",
+      "error": ""
+    },
+    {
+      "name": "quote-500000-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x87a120",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1185c99646b0489cf26",
+      "error": ""
+    },
+    {
+      "name": "quote-500000-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x87a120",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-500000-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x87a120",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x10b5faf39481f5ffcd180de5",
+      "error": ""
+    },
+    {
+      "name": "quote-500000-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x87a120",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-500000-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x87a120",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf32cce6e66b70809560e3b10a786e16c2",
+      "error": ""
+    },
+    {
+      "name": "quote-500000-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x87a120",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-500000-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x87a120",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x1185c99646b0489cf262971de65071582dd1d71d187c16ad078",
+      "error": ""
+    },
+    {
+      "name": "quote-500000-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x87a120",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0xe9c152b5119c86",
+      "error": ""
+    },
+    {
+      "name": "quote-887271-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e7",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xfff4856070d12679471f8679573a934b",
+      "error": ""
+    },
+    {
+      "name": "quote-887271-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e7",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-887271-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e7",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf4190d82ad17361500d80c9a903418a03c7b2",
+      "error": ""
+    },
+    {
+      "name": "quote-887271-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e7",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-887271-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e7",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xde017661045a71f699776931d04f0a1032a2848cd3bd327",
+      "error": ""
+    },
+    {
+      "name": "quote-887271-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e7",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-887271-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e7",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xfff4856070d12679471f8679573a934a0a762d725374770a596b92399677d18a",
+      "error": ""
+    },
+    {
+      "name": "quote-887271-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e7",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote-887272-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e8",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xfffb12cdf108779ad387f409f1a66d1a",
+      "error": ""
+    },
+    {
+      "name": "quote-887272-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e8",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-887272-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e8",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xf41f4d3aeeb1f730636353b7cbb89b644cc7f",
+      "error": ""
+    },
+    {
+      "name": "quote-887272-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e8",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-887272-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e8",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xde072550cbdac2ec2d95f5351ffeb37e4c56301c9040da7",
+      "error": ""
+    },
+    {
+      "name": "quote-887272-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e8",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": ""
+    },
+    {
+      "name": "quote-887272-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e8",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0xfffb12cdf108779ad387f409f1a66d192f56121e7333aa02bfc0d7cbf8a2fdc7",
+      "error": ""
+    },
+    {
+      "name": "quote-887272-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e8",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x1",
+      "error": ""
+    },
+    {
+      "name": "quote-887273-1-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e9",
+        "0x1",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote-887273-1-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e9",
+        "0x1",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote-887273-1000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e9",
+        "0xf4240",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote-887273-1000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e9",
+        "0xf4240",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote-887273-1000000000000000000-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e9",
+        "0xde0b6b3a7640000",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote-887273-1000000000000000000-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e9",
+        "0xde0b6b3a7640000",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote-887273-340282366920938463463374607431768211455-1",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e9",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x1"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
+    },
+    {
+      "name": "quote-887273-340282366920938463463374607431768211455-0",
+      "op": "quoteAtTick",
+      "args": [
+        "0x8d89e9",
+        "0xffffffffffffffffffffffffffffffff",
+        "0x0"
+      ],
+      "roundUp": false,
+      "value": "0x0",
+      "error": "tick out of range"
     }
   ]
 }

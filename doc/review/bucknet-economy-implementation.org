@@ -5180,6 +5180,20 @@ the same transaction or the next upkeep pass, pairing idle TOKEN first (finding 
 the BUCK side a pool asks for at its nominal price, at the wallet's ratio, fixed here). Purchases
 pay from the wallet. Lands in the upkeep facet (762 bytes free) and the shell's deposit (416).
 
+**** Measured before building it (2026-11-15): set aside for the owner
+
+In the two-year economy (=build/runs/carry.reference-net.leak-year=) the basket's BUCK, and its
+carried fee, sit almost wholly in its pool positions: 19.7M held and 0.44M carried (2.2%) at two
+years, while the idle wallet holds 0 to 0.48M (the upkeep pass pairs what arrives within a pass).
+And BUCK the basket sends into a pool carries a proportional share of the wallet's fee whether it
+pays for a purchase or mints a position: both land in the same pool's reserves, shared by its LPs.
+So routing fresh deposit BUCK around a nearly empty wallet moves almost no carry. N5 would spend most
+of the shell's last 416 bytes (the payer of a position's mint callback would become the depositor)
+for an effect too small to see. Recommendation: leave it unbuilt unless a world keeps a large idle
+wallet (a lien drawn ahead of pairing, or a desk holding BUCK); revisit with the demand agents, which
+may hold BUCK in the basket's wallet longer. Finding 5's sizing (a pass's TOKEN left idle) costs gas
+only and stays with it.
+
 *** N3. The kernel and the simulation's price readers
 
 =carry_to_net= (move's rounding), =carry_to_nominal= (ceil) and a V3 price helper in =buck-math=,
@@ -5187,6 +5201,27 @@ with cases in =net-math-vectors.json= (Solidity =NetMathVectorsTest=, Rust, Pyth
 block-pinned price reader per language (slot0); the snapshot's spot prices from slot0 (finding 9);
 the JS demo bundle rebuilt (=make nix-core-js-artifacts=); =basket_machine.targets_bp= is right since
 N2.
+
+**** As built (2026-11-15)
+
+- /The kernel/ (=core/rust/buck-math/src/carry.rs=): =carry_to_net=, =carry_to_net_scaled=,
+  =carry_to_nominal= (=CarryRatio.toNet=, =toNetScaled=, =toNominal=, with the empty-account rule
+  and "no net value"), =sqrt_ratio_at_tick= (Uniswap's TickMath, in 128-bit halves) and
+  =quote_at_tick= (=OracleLibrary.getQuoteAtTick=). Exposed to Python (=buck_core.buck_math=) and
+  JS (=createNetMath=: =carryToNet=, =carryToNetScaled=, =carryToNominal=, =quoteAtTick=).
+- /The vectors/: =scripts/net-math-vectors.py= derives them independently in unbounded integers
+  (744 cases, 426 new: 306 carry and 120 tick quotes, among them overflow, no net value and ticks
+  out of range); Solidity (=NetMathVectorsTest=, through the real =CarryRatio= and
+  =UniswapV3OracleLib=), Rust, Python and JS (Node and Chromium) agree on every one
+  (=make nix-venv-core-net-math-test=).
+- /One price reader in Python/: =gauge.spot_quote= quotes a pool at its =slot0= tick through the
+  kernel; the snapshot's =spotUsdc= / =spotBuck= use it (finding 9: no longer the balance ratio).
+  JS already read =slot0=. The seeder agent still reads balances for its decisions (=_implied=), a
+  behaviour this does not change.
+- /The simulation's conversions/: =snapshot._quoted= is the kernel's =carry_to_nominal=, the LP
+  valuation's net the kernel's =carry_to_net=. The household mark keeps its exact rationals (a
+  price ratio, not an amount). =net_world='s premium mark and its JS twin keep their identical
+  floor division: the JS module has no kernel instance to hand, and the result is the same integer.
 
 *** N6. Measure each behaviour change as a comparison
 

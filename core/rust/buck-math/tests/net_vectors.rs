@@ -1,6 +1,9 @@
 //! The same independently generated integer vectors as Solidity and both
 //! language bindings. This vendored copy also ships with cargo package.
-use buck_math::{mul_div_256, net_decay, net_fund_after, net_target_relief, U256};
+use buck_math::{
+    carry_to_net, carry_to_net_scaled, carry_to_nominal, mul_div_256, net_decay, net_fund_after,
+    net_target_relief, quote_at_tick, U256,
+};
 use serde_json::Value;
 
 fn uint(v: &Value) -> U256 {
@@ -27,6 +30,14 @@ fn canonical_integer_vectors() {
             "fundNetAfter" => net_fund_after(args[0], args[1], args[2]),
             "targetRelief" => net_target_relief(args[0], args[1], args[2]),
             "mulDiv" => mul_div_256(args[0], args[1], args[2], row["roundUp"].as_bool().unwrap()),
+            "carryToNet" => carry_to_net(args[0], args[1], args[2]),
+            "carryToNetScaled" => carry_to_net_scaled(args[0], args[1], args[2]),
+            "carryToNominal" => carry_to_nominal(args[0], args[1], args[2]),
+            // A tick travels as tick + 2^23; the third argument is 1 when the base is token0.
+            "quoteAtTick" => {
+                let tick = args[0].as_u128().unwrap() as i64 - (1 << 23);
+                quote_at_tick(tick as i32, args[1].as_u128().unwrap(), args[2] == U256::ONE)
+            }
             other => panic!("unknown vector operation {other}"),
         };
         let error = row["error"].as_str().unwrap();

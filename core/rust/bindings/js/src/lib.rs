@@ -39,6 +39,29 @@ pub fn mul_div_256(a: &[u8], b: &[u8], denominator: &[u8], round_up: bool) -> Re
     net_result(kernel::mul_div_256(uint256(a)?, uint256(b)?, uint256(denominator)?, round_up))
 }
 
+// Carried BUCK (src/lib/CarryRatio.sol): an account's (gross, net) and an amount or price.
+#[wasm_bindgen]
+pub fn carry_to_net(gross: &[u8], net: &[u8], nominal: &[u8]) -> Result<Vec<u8>, JsError> {
+    net_result(kernel::carry_to_net(uint256(gross)?, uint256(net)?, uint256(nominal)?))
+}
+
+#[wasm_bindgen]
+pub fn carry_to_net_scaled(gross: &[u8], net: &[u8], nominal: &[u8]) -> Result<Vec<u8>, JsError> {
+    net_result(kernel::carry_to_net_scaled(uint256(gross)?, uint256(net)?, uint256(nominal)?))
+}
+
+#[wasm_bindgen]
+pub fn carry_to_nominal(gross: &[u8], net: &[u8], value: &[u8]) -> Result<Vec<u8>, JsError> {
+    net_result(kernel::carry_to_nominal(uint256(gross)?, uint256(net)?, uint256(value)?))
+}
+
+// A pool's price at a tick (OracleLibrary.getQuoteAtTick).
+#[wasm_bindgen]
+pub fn quote_at_tick(tick: i32, base: &[u8], base_is_token0: bool) -> Result<Vec<u8>, JsError> {
+    let amount = uint256(base)?.as_u128().ok_or_else(|| JsError::new("base amount above uint128"))?;
+    net_result(kernel::quote_at_tick(tick, amount, base_is_token0))
+}
+
 #[wasm_bindgen]
 pub fn depreciate(face: u128, dep_type: u8, rate_bp: u32, floor: u128,
                   start_at: u64, now: u64) -> u128 {

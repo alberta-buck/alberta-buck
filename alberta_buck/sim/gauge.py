@@ -58,6 +58,8 @@ from __future__ import annotations
 
 from web3 import Web3
 
+from buck_core import buck_math
+
 from alberta_buck.sim.chain import load_artifact
 
 Q96 = 1 << 96
@@ -140,6 +142,16 @@ def active_reserves(chain, pool: str, token_a, token_b) -> tuple[int, int]:
     the caller's token order: the drop-in for the pair of balanceOf(pool)
     reads it replaces."""
     return oriented(pool_state(chain, pool), token_a, token_b)
+
+
+def spot_quote(chain, pool: str, base, decimals: int) -> int:
+    """The pool's other token per one whole `base` TOKEN (raw units), at its slot0 tick, quoted as the
+    contracts quote (OracleLibrary.getQuoteAtTick, in the kernel: buck_math.quote_at_tick). A BUCK
+    quote is nominal, as the pool quotes it. 0 for an uninitialized pool."""
+    sp, tick, _liq, t0, _t1 = pool_state(chain, pool)
+    if sp <= 0:
+        return 0
+    return buck_math.quote_at_tick(tick, 10 ** decimals, _addr(base) == t0.lower())
 
 
 def buck_usd6(chain, pool: str, buck) -> int:

@@ -17,7 +17,8 @@ function integer(bytes) {
 }
 
 export function createNetMath(kernel) {
-  for (const name of ["net_decay", "net_fund_after", "net_target_relief", "mul_div_256"]) {
+  for (const name of ["net_decay", "net_fund_after", "net_target_relief", "mul_div_256", "carry_to_net",
+    "carry_to_net_scaled", "carry_to_nominal", "quote_at_tick"]) {
     if (typeof kernel?.[name] !== "function") throw new Error(`math kernel missing ${name}; rebuild the kernel`);
   }
   return Object.freeze({
@@ -28,6 +29,17 @@ export function createNetMath(kernel) {
     mulDiv(a, b, denominator, roundUp = false) {
       if (typeof roundUp !== "boolean") throw new TypeError("roundUp requires boolean");
       return integer(kernel.mul_div_256(uint256(a), uint256(b), uint256(denominator), roundUp));
+    },
+    // Carried BUCK (src/lib/CarryRatio.sol): an account's (gross, net) and an amount or price.
+    carryToNet: (gross, net, nominal) => integer(kernel.carry_to_net(uint256(gross), uint256(net), uint256(nominal))),
+    carryToNetScaled: (gross, net, nominal) => integer(kernel.carry_to_net_scaled(uint256(gross), uint256(net), uint256(nominal))),
+    carryToNominal: (gross, net, value) => integer(kernel.carry_to_nominal(uint256(gross), uint256(net), uint256(value))),
+    // A pool's price at a tick (OracleLibrary.getQuoteAtTick): `base` of the base token in the
+    // quote token; `baseIsToken0` when the base token's address is the lower.
+    quoteAtTick(tick, base, baseIsToken0) {
+      if (!Number.isInteger(tick)) throw new TypeError("tick requires an integer Number");
+      if (typeof baseIsToken0 !== "boolean") throw new TypeError("baseIsToken0 requires boolean");
+      return integer(kernel.quote_at_tick(tick, uint256(base), baseIsToken0));
     },
   });
 }

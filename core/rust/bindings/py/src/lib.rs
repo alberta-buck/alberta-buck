@@ -46,6 +46,30 @@ fn mul_div_256(a: &Bound<'_, PyInt>, b: &Bound<'_, PyInt>, denominator: &Bound<'
     net_result(a.py(), kernel::mul_div_256(uint256(a)?, uint256(b)?, uint256(denominator)?, round_up))
 }
 
+// Carried BUCK (src/lib/CarryRatio.sol): an account's (gross, net) and an amount or price.
+#[pyfunction]
+fn carry_to_net(gross: &Bound<'_, PyInt>, net: &Bound<'_, PyInt>, nominal: &Bound<'_, PyInt>) -> PyResult<Py<PyAny>> {
+    net_result(gross.py(), kernel::carry_to_net(uint256(gross)?, uint256(net)?, uint256(nominal)?))
+}
+
+#[pyfunction]
+fn carry_to_net_scaled(gross: &Bound<'_, PyInt>, net: &Bound<'_, PyInt>, nominal: &Bound<'_, PyInt>) -> PyResult<Py<PyAny>> {
+    net_result(gross.py(), kernel::carry_to_net_scaled(uint256(gross)?, uint256(net)?, uint256(nominal)?))
+}
+
+#[pyfunction]
+fn carry_to_nominal(gross: &Bound<'_, PyInt>, net: &Bound<'_, PyInt>, value: &Bound<'_, PyInt>) -> PyResult<Py<PyAny>> {
+    net_result(gross.py(), kernel::carry_to_nominal(uint256(gross)?, uint256(net)?, uint256(value)?))
+}
+
+// A pool's price at a tick (OracleLibrary.getQuoteAtTick): `base` of the base token in the quote
+// token; `base_is_token0` when the base token's address is the lower.
+#[pyfunction]
+fn quote_at_tick(tick: i32, base: &Bound<'_, PyInt>, base_is_token0: bool) -> PyResult<Py<PyAny>> {
+    let amount = uint256(base)?.as_u128().ok_or_else(|| PyValueError::new_err("base amount above uint128"))?;
+    net_result(base.py(), kernel::quote_at_tick(tick, amount, base_is_token0))
+}
+
 #[pyfunction]
 fn depreciate(face: u128, dep_type: u8, rate_bp: u32, floor: u128,
               start_at: u64, now: u64) -> u128 {
@@ -128,6 +152,10 @@ fn buck_math(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(net_fund_after, m)?)?;
     m.add_function(wrap_pyfunction!(net_target_relief, m)?)?;
     m.add_function(wrap_pyfunction!(mul_div_256, m)?)?;
+    m.add_function(wrap_pyfunction!(carry_to_net, m)?)?;
+    m.add_function(wrap_pyfunction!(carry_to_net_scaled, m)?)?;
+    m.add_function(wrap_pyfunction!(carry_to_nominal, m)?)?;
+    m.add_function(wrap_pyfunction!(quote_at_tick, m)?)?;
     m.add("NET_SCALE", kernel::net_demurrage::NET_SCALE)?;
     m.add_function(wrap_pyfunction!(depreciate, m)?)?;
     m.add_function(wrap_pyfunction!(current_value, m)?)?;

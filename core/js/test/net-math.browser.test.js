@@ -21,8 +21,9 @@ test("Chromium replays canonical uint256 vectors through the web WASM entry poin
       await kernel.default({ module_or_path: Uint8Array.from(atob(bytes), (c) => c.charCodeAt(0)) });
       const math = createNetMath(kernel);
       for (const row of vectors.cases) {
-        const args = row.args.map(BigInt);
+        let args = row.args.map(BigInt);
         if (row.op === "mulDiv") args.push(row.roundUp);
+        if (row.op === "quoteAtTick") args = [Number(args[0] - (1n << 23n)), args[1], args[2] === 1n];
         try {
           const value = math[row.op](...args);
           if (row.error || value !== BigInt(row.value)) throw new Error(`mismatch: ${row.name}`);
