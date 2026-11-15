@@ -1,4 +1,4 @@
-// Stage 6/7 gate: the minimal two-agent equilibrium LOOP runs on Tevm.
+// Stage 6/7 gate: the minimal two-agent equilibrium LOOP runs on webevm + revm.
 //
 // DayClock + PinWhale (TOKEN/USDC pinned to the seeded walk) + ParityArb
 // (triangle consistency) + WheelKeeper + PidKeeper + BasketSaver +
@@ -14,9 +14,10 @@
 // Twice.  On the equity basket with the basket machine, the world's
 // default, for 14 days: the wheel pairs the saver's deposit and the exit is
 // paid in BUCK.  A wheel turn is over a million gas, about four seconds on
-// tevm, so a day there costs some twenty seconds and the run is kept short.
-// And on the pro-rata basket for 35 days, as before (~2 min), which also
-// takes the debtor through its first month.
+// Tevm, where a day cost some twenty seconds, so the run was kept short.
+// And on the pro-rata basket for 35 days, as before (~2 min on Tevm, some
+// six seconds on webevm + revm), which also takes the debtor through its
+// first month.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -25,8 +26,7 @@ import { join } from "node:path";
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable, repoRoot } from "../src/nodefs.js";
+import { loadArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
 
 let id = null;
 try {
@@ -54,7 +54,7 @@ async function loop({ basket, days, holdDays }) {
   const { CreditHouseholdAgent } = await import("../src/agents/credit-household.js");
   const { runDays } = await import("../src/world.js");
 
-  const session = await tevmSession();
+  const session = await nodeWebevmSession();
   const world = await buildEquilibriumWorld(session, loadArtifact, {
     identity: id.default, basket,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")),
@@ -125,7 +125,7 @@ async function loop({ basket, days, holdDays }) {
   return { world, session, saver, debtor };
 }
 
-test("eqsim: the two-agent equilibrium loop runs on tevm, on the basket machine", { skip }, async () => {
+test("eqsim: the two-agent equilibrium loop runs on webevm, on the basket machine", { skip }, async () => {
   const { world, session, saver, debtor } = await loop({ basket: "machine", days: 14, holdDays: 8 });
   assert.equal(world.basketKind, "machine", "the machine is the world's default basket");
   // The wheel paired what was deposited: only dust waits in the wallet

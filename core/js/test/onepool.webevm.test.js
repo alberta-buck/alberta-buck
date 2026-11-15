@@ -1,5 +1,5 @@
 // The walking skeleton, standalone: a real Uniswap V3 TOKEN/USDC pool on
-// the in-process Tevm backend, with the PinWhale snapping spot along a
+// the in-process webevm + revm backend, with the PinWhale snapping spot along a
 // reference path and the RoundTripTrader swapping through it -- the same
 // agents that join a Python-deployed anvil sim (bin/join-sim.mjs).
 // Skips when the Foundry artifacts (out/) are not built.
@@ -8,8 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { JournalWriter, parseJournal, mismatches } from "../src/journal.js";
-import { tevmSession } from "../src/backends.js";
-import { artifactsAvailable, loadArtifact } from "../src/nodefs.js";
+import { artifactsAvailable, loadArtifact, nodeWebevmSession } from "../src/nodefs.js";
 import { buildOnePool } from "../src/scenarios/onepool.js";
 import { spotFromSqrtPriceX96 } from "../src/v3.js";
 import { runDays } from "../src/world.js";
@@ -19,9 +18,9 @@ import { RoundTripTrader } from "../src/agents/trader.js";
 const HAVE = artifactsAvailable();
 const PATH = [2_500_000n, 3_000_000n, 2_000_000n];   // $2.50, $3.00, $2.00
 
-test("whale pins + trader round-trips on tevm", { skip: !HAVE }, async () => {
+test("whale pins + trader round-trips on webevm", { skip: !HAVE }, async () => {
   const lines = [];
-  const session = await tevmSession({
+  const session = await nodeWebevmSession({
     journal: new JournalWriter((l) => lines.push(l)),
   });
   const world = await buildOnePool(session, loadArtifact,

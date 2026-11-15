@@ -4,8 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encodeFunctionData } from "viem";
 import { readFileSync } from "node:fs";
-import { tevmSession } from "../src/backends.js";
-import { loadArtifact } from "../src/nodefs.js";
+import { loadArtifact, nodeWebevmSession } from "../src/nodefs.js";
 import { boundActivatedCapacity, deployNetBasket, deployNetStack, issueCoverageCandidates, IssuancePending, netCreditOps, ReductionPending, ReleasePending } from "../src/index.js";
 import { TransactionReceiptPending } from "../src/session.js";
 import { advanceTime } from "../src/buckworld.js";
@@ -49,7 +48,8 @@ test("coverage candidates are bounded and include repair estimates", () => {
 });
 
 test("linked Buck issues, accrues and retires cash-only credit", { skip }, async () => {
-  const s = await tevmSession();
+  // Quotes are re-read at the block they were taken: webevm serves past blocks only within a window.
+  const s = await nodeWebevmSession({ nodeOptions: { stateHistory: { blocks: 256 } } });
   const gov = s.account.address;
   const deploy = (name, args = []) => s.deploy(loadArtifact(name), args, { name });
   const registry = await deploy("IdentityRegistryHarness", [gov]);
@@ -174,7 +174,7 @@ test("linked Buck issues, accrues and retires cash-only credit", { skip }, async
 test("per-NFT operations honor the premium reserve and repay explicitly", { skip }, async () => {
   // The PID controller is real, but has no basket reference in this fixture:
   // this tests its neutral funding gate, not market-driven K or a household.
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const gov = s.account.address;
   const deploy = (name, args = []) => s.deploy(loadArtifact(name), args, { name });
   const registry = await deploy("IdentityRegistryHarness", [gov]);
@@ -552,7 +552,7 @@ test("per-NFT operations honor the premium reserve and repay explicitly", { skip
 test("burn(0) releases coverage no principal needs and refunds its deposit share", { skip }, async () => {
   // Static K, one insurer pool and a contract-held owner: the SDK quotes as
   // the owner, releases, and authenticates each facility's event.
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const gov = s.account.address;
   const deploy = (name, args = []) => s.deploy(loadArtifact(name), args, { name });
   const registry = await deploy("IdentityRegistryHarness", [gov]);
@@ -625,7 +625,7 @@ test("burn(0) releases coverage no principal needs and refunds its deposit share
   assert.equal(after.issued, before.issued);
   assert.equal(after.premiumNominal, before.premiumNominal - done.refund);
   assert.equal(await s.call(buck, "totalIssued"), supply);
-  // Tevm's clock moves with each transaction: the unchanged principal simply
+  // webevm's clock moves a second with each block: the unchanged principal simply
   // kept aging by whole seconds (pyrevm's constant clock checks equality).
   const aged = await s.call(buck, "claimSeconds");
   assert.ok(aged >= seconds && aged % before.issued === 0n);

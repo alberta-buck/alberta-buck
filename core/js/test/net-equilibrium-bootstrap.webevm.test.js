@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { encodeFunctionData, keccak256, toBytes } from "viem";
-import { tevmSession } from "../src/backends.js";
+import { nodeWebevmSession } from "../src/nodefs.js";
 import { buildEquilibriumWorld, DayClock } from "../src/scenarios/eqworld.js";
 import { artifact } from "../artifacts/bundle.mjs";
 import { createInsurerPool, worldRecord } from "../src/buckworld.js";
@@ -25,7 +25,7 @@ const CALENDAR = JSON.parse(readFileSync(new URL("../../../test/fixtures/househo
 const RAW = 1_000_000n;
 
 test("canonical equilibrium bootstrap reuses one fund/basket and issues actual pool money", async (t) => {
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildEquilibriumWorld(s, artifact, { identity,
     wheelArb: false, // Component fault/receipt tests keep their market under explicit control.
     targetBuck: 100_000n * 1_000_000n,

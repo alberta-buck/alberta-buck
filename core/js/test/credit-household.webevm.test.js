@@ -5,8 +5,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { decodeFunctionData, encodeFunctionData } from "viem";
-import { tevmSession } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable, repoRoot } from "../src/nodefs.js";
+import { loadArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
 import { CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent, HouseholdPopulationAgent }
   from "../src/agents/credit-household.js";
 import { issuance } from "../src/agents/household-policy.js";
@@ -23,7 +22,7 @@ const settings = { home_k: 1000, ltv: .2, apr: .055, premium_bp: 50, theta: 3, c
   money_months: 0 };
 
 test("machine bootstrap distributes its capital by declared token weights", { skip }, async () => {
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const tokens = [{ sym: "A", name: "A", dec: 18, p0: 2_500_000n, weightBp: 7500 },
     { sym: "B", name: "B", dec: 18, p0: 4_000_000n, weightBp: 2500 }];
   const w = await buildEquilibriumWorld(s, loadArtifact, { identity, basket: "machine", tokens,
@@ -38,7 +37,7 @@ test("machine bootstrap distributes its capital by declared token weights", { sk
 });
 
 test("household exit retains partial claims, retries release and never sells credit", { skip }, async () => {
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const w = await buildEquilibriumWorld(s, loadArtifact, { identity, basket: "machine",
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
   const a = new CreditSaverAgent({ account: privateKeyToAccount(generatePrivateKey()), member: "exit-retry",
@@ -126,7 +125,7 @@ test("household exit retains partial claims, retries release and never sells cre
 });
 
 for (const basket of ["prorata", "machine"]) test(`households: live ${basket} accounting and reusable credit`, { skip }, async () => {
-  const session = await tevmSession();
+  const session = await nodeWebevmSession();
   const w = await buildEquilibriumWorld(session, loadArtifact, { identity, basket,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
   const make = async (Class, member, overrides = {}) => {
@@ -276,7 +275,7 @@ for (const basket of ["prorata", "machine"]) test(`households: live ${basket} ac
 });
 
 for (const basket of ["prorata", "machine"]) test(`households: ${basket} investors and a live population`, { skip }, async () => {
-  const session = await tevmSession();
+  const session = await nodeWebevmSession();
   const w = await buildEquilibriumWorld(session, loadArtifact, { identity, basket,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
   const make = async (member, overrides = {}) => {

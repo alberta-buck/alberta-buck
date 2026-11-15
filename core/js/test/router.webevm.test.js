@@ -1,4 +1,4 @@
-// Risk-kill gate: the REAL Universal Router deploys and routes on Tevm.
+// Risk-kill gate: the REAL Universal Router deploys and routes on webevm + revm.
 //
 // The SimLP-vs-real-AMM question (platform doc, Risks): the pools were
 // always real; only the periphery was simulated.  This gate proves the
@@ -15,8 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { tevmSession } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable, repoRoot } from "../src/nodefs.js";
+import { loadArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
 import { buildOnePool } from "../src/scenarios/onepool.js";
 import { deployUniversalRouter, encodePath, urExecArgs } from "../src/router.js";
 import { JournalWriter } from "../src/journal.js";
@@ -33,9 +32,9 @@ const skip = !artifactsAvailable()
     ? "vendored UniversalRouter artifact missing"
     : false;
 
-test("router: the real Universal Router deploys and routes on tevm", { skip }, async () => {
+test("router: the real Universal Router deploys and routes on webevm", { skip }, async () => {
   const lines = [];
-  const session = await tevmSession(
+  const session = await nodeWebevmSession(
     { journal: new JournalWriter((l) => lines.push(l)) });
   const world = await buildOnePool(session, loadArtifact);   // $2.50/TOK
   const { token, usdc, factory } = world;
@@ -48,11 +47,11 @@ test("router: the real Universal Router deploys and routes on tevm", { skip }, a
     { weth: weth.address, v3Factory: factory.address,
       poolInitCode: loadArtifact("UniswapV3Pool").bytecode });
 
-  // The deploy must fit tevm's default block gas budget (the risk).
+  // The deploy must fit an in-browser block's gas budget (the risk): 15M, half webevm's default.
   const dep = lines.map(JSON.parse).find((r) => r.tag === "deploy:UniversalRouter");
   assert.ok(dep && dep.outcome === "ok", "UR deploy journaled ok");
-  assert.ok(dep.gas < 15_000_000, `UR deploy gas ${dep.gas} fits tevm`);
-  console.log(`UniversalRouter deploy gasUsed on tevm: ${dep.gas}`);
+  assert.ok(dep.gas < 15_000_000, `UR deploy gas ${dep.gas} fits a 15M block`);
+  console.log(`UniversalRouter deploy gasUsed on webevm: ${dep.gas}`);
 
   // Pre-fund route: 5 TOK -> USDC through the router, no SimLP anywhere.
   const amount = 5n * 10n ** 18n;

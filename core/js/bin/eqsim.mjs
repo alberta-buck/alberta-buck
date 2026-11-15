@@ -47,7 +47,7 @@ const { values: a } = parseArgs({ options: {
   journal: { type: "string", default: "" },
   profile: { type: "string", default: "" },       // write a per-method / per-function timing table here
   prune:   { type: "boolean", default: false },
-  "tick-gas": { type: "string", default: "" },    // the wheel keeper's gas per tick (default 12M)
+  "tick-gas": { type: "string", default: "" },    // the wheel keeper's gas per tick (default 25M)
   without: { type: "string", default: "" },
   k0:      { type: "string", default: "" },       // the controller's buckK0 (default 0.75)
   "leak-days": { type: "string", default: "" },   // the integrator's leak time constant, days (default 365; 0 = none)      // drop cast members: debtor,saver,arb,whales,wheel,pid    // drop Tevm's old state roots and trim the system rings daily

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { tevmSession } from "../src/backends.js";
+import { nodeWebevmSession } from "../src/nodefs.js";
 import { buildEquilibriumWorld } from "../src/scenarios/eqworld.js";
 import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 import { TransactionReceiptPending } from "../src/session.js";
@@ -16,7 +16,7 @@ const spec = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-r
 const BANK = "0x000000000000000000000000000000000000dEaD";
 
 test("automatic debtors stage closing, resume cash and serialize calendar/receipt work", async (t) => {
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildEquilibriumWorld(s, artifact, { identity, wheelArb: false, targetBuck: 1_000_000n * RAW,
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
   });

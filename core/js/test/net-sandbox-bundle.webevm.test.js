@@ -3,9 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { tevmSession } from "../src/backends.js";
 import { deployNetStack } from "../src/net-world.js";
-import { loadArtifact } from "../src/nodefs.js";
+import { loadArtifact, nodeWebevmSession } from "../src/nodefs.js";
 
 const path = new URL("../artifacts/sandbox.mjs", import.meta.url);
 const skip = existsSync(path) ? false : "sandbox artifacts not generated; run make nix-venv-net-demurrage-smoke";
@@ -13,7 +12,7 @@ const skip = existsSync(path) ? false : "sandbox artifacts not generated; run ma
 test("browser bundle links and deploys the Buck stack", { skip }, async () => {
   const { artifact } = await import(path);
   assert.deepEqual(artifact("Buck").linkReferences, loadArtifact("Buck").linkReferences);
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const gov = s.account.address;
   const deploy = (name, args = []) => s.deploy(artifact(name), args, { name });
   const registry = await deploy("IdentityRegistry", [gov]);

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { encodeFunctionData } from "viem";
-import { tevmSession } from "../src/backends.js";
+import { nodeWebevmSession } from "../src/nodefs.js";
 import { buildEquilibriumWorld } from "../src/scenarios/eqworld.js";
 import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
 import { TransactionReceiptPending } from "../src/session.js";
@@ -19,7 +19,7 @@ const f = JSON.parse(readFileSync(new URL("../../../test/fixtures/household-refi
 const b = Object.fromEntries(Object.entries(f.base).map(([k, v]) => [k, BigInt(v)]));
 
 test("household resumes only known cash remainders and keeps original credit", async (t) => {
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildEquilibriumWorld(s, artifact, { identity, wheelArb: false, targetBuck: 1_000_000n * RAW,
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
   });

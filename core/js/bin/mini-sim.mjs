@@ -2,32 +2,35 @@
 // Run the journal-parity mini-scenario (core/vectors/mini-scenario.json)
 // on a chosen backend, writing the journal for cross-platform comparison:
 //
+//   node bin/mini-sim.mjs --journal out.jsonl                   # webevm + revm
 //   node bin/mini-sim.mjs --backend tevm  --journal out.jsonl
 //   node bin/mini-sim.mjs --backend anvil --rpc http://127.0.0.1:8545 \
 //                         --journal out.jsonl
 //
 // The anvil run signs with dev account 0 -- the SAME deployer the Python
 // runner (python -m alberta_buck.sim.mini) uses -- so a fresh anvil gives
-// byte-identical addresses and calldata.
+// byte-identical addresses and calldata.  The in-process backends sign
+// with dev account 0 too.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
 import { anvilSession, tevmSession } from "../src/backends.js";
-import { fileJournalWriter, loadArtifact, repoRoot } from "../src/nodefs.js";
+import { fileJournalWriter, loadArtifact, nodeWebevmSession, repoRoot } from "../src/nodefs.js";
 import { runMini } from "../src/scenarios/mini.js";
 
 const { values: opt } = parseArgs({
   options: {
-    backend: { type: "string", default: "tevm" },
+    backend: { type: "string", default: "webevm" },   // webevm | tevm | anvil
+    engine: { type: "string", default: "revm" },      // webevm only: revm | ethereumjs
     rpc: { type: "string", default: "http://127.0.0.1:8545" },
     journal: { type: "string" },
     scenario: { type: "string" },
   },
 });
-if (!opt.journal) {
-  console.error("usage: mini-sim.mjs --backend tevm|anvil --journal PATH [--rpc URL]");
+if (!opt.journal || !["webevm", "tevm", "anvil"].includes(opt.backend)) {
+  console.error("usage: mini-sim.mjs [--backend webevm|tevm|anvil] --journal PATH [--rpc URL]");
   process.exit(2);
 }
 
@@ -36,9 +39,9 @@ const sc = JSON.parse(readFileSync(
   "utf8"));
 
 const journal = fileJournalWriter(opt.journal);
-const session = opt.backend === "anvil"
-  ? anvilSession(opt.rpc, { accountIndex: 0, journal })
-  : await tevmSession({ journal });
+const session = opt.backend === "anvil" ? anvilSession(opt.rpc, { accountIndex: 0, journal })
+  : opt.backend === "tevm" ? await tevmSession({ journal })
+  : await nodeWebevmSession({ journal, engine: opt.engine });
 
 await runMini(session, loadArtifact, sc);
 

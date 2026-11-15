@@ -8,7 +8,7 @@
 //   holder   activateCredit: Buck.mint against the insured credit
 //   anyone   observe: every transaction decoded, identity material opaque
 //
-// and the world as data: snapshotTevm -> encodeJSON -> restoreTevm +
+// and the world as data: snapshotWebevm -> encodeJSON -> restoreWebevm +
 // attachBuckWorld gives back the state, the credits and the clock.
 //
 // Skips cleanly when the wasm kernels or the contracts are not available.
@@ -17,8 +17,8 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession, snapshotTevm, restoreTevm } from "../src/backends.js";
-import { loadArtifact } from "../src/nodefs.js";
+import { snapshotWebevm, restoreWebevm } from "../src/webevm.js";
+import { loadArtifact, nodeWebevmSession } from "../src/nodefs.js";
 import { encodeJSON, decodeJSON } from "../src/codec.js";
 
 let id = null;
@@ -76,7 +76,7 @@ describe("the ceremonies by role", { skip }, () => {
       const v = seed % id.ORDER;
       return v === 0n ? 1n : v;
     };
-    session = await tevmSession();
+    session = await nodeWebevmSession();
     world = await bw.buildBuckWorld(session, loadArtifact, { identity: id, rng });
   });
 
@@ -247,16 +247,16 @@ describe("the ceremonies by role", { skip }, () => {
   });
 
   it("snapshot -> JSON -> restore gives back the state, the credits and the clock", async (t) => {
-    const snap = await snapshotTevm(session);
+    const snap = await snapshotWebevm(session);
     const { account, ...chloeData } = chloe;
     const saved = encodeJSON({ snap, world: bw.worldRecord(world), chloe: chloeData });
     t.diagnostic(`saved world: ${(saved.length / 1024).toFixed(0)} KiB of JSON`);
 
     const back = decodeJSON(saved);
-    const s2 = await tevmSession();
+    const s2 = await nodeWebevmSession();
     const t0 = performance.now();
-    await restoreTevm(s2, back.snap);
-    t.diagnostic(`restore (${back.snap.block} blocks): ${(performance.now() - t0).toFixed(0)} ms`);
+    await restoreWebevm(s2, back.snap);
+    t.diagnostic(`restore (${back.snap.webevm.blocks.length} blocks): ${(performance.now() - t0).toFixed(0)} ms`);
     const w2 = bw.attachBuckWorld(s2, loadArtifact, back.world, { identity: id });
 
     const h1 = await session.client.getBlock();

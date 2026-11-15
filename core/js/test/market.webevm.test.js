@@ -14,8 +14,7 @@ import { createRequire } from "node:module";
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable } from "../src/nodefs.js";
+import { loadArtifact, artifactsAvailable, nodeWebevmSession } from "../src/nodefs.js";
 
 const require = createRequire(import.meta.url);
 let id = null;
@@ -46,7 +45,7 @@ test("market: whale pins the walk, trader arbs, citizens' clocks tick", { skip }
 
   const lines = [];
   const app = new BuckWorldApp({
-    session: await tevmSession({ journal: new JournalWriter((l) => lines.push(l)) }),
+    session: await nodeWebevmSession({ journal: new JournalWriter((l) => lines.push(l)) }),
     identity: id.default,
     artifacts: loadArtifact,
     makeAccount: () => privateKeyToAccount(generatePrivateKey()),

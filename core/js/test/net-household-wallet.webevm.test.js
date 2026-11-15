@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { encodeFunctionData } from "viem";
-import { tevmSession } from "../src/backends.js";
+import { nodeWebevmSession } from "../src/nodefs.js";
 import { buildEquilibriumWorld } from "../src/scenarios/eqworld.js";
 import { CreditSaverAgent } from "../src/agents/credit-household.js";
 import { moneyTarget, netWalletTarget } from "../src/agents/household-policy.js";
@@ -21,7 +21,7 @@ const fixture = JSON.parse(readFileSync(new URL("../../../test/fixtures/househol
 const life = fixture.lifecycle, flow = fixture.flow;
 
 test("households keep a BUCK working balance in its own custody and tend it after each payday", async (t) => {
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildEquilibriumWorld(s, artifact, { identity, wheelArb: false, targetBuck: 1_000_000n * RAW,
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
   });
@@ -155,7 +155,7 @@ test("households keep a BUCK working balance in its own custody and tend it afte
     assert.ok(held < received, "wallet money carries demurrage like any other");
     assert.equal(await w.advanceNetWallet(world, 60, ctr), true); assert.equal(w.lastAction, "wallet-buy", w.lastError);
     const plan = m.flow.plan, spending = Number(w.incomeAnnual) * w.p.living_frac / 1e6;
-    // Tevm's clock moves with each payday transaction, so the assessed balance is a few units older.
+    // webevm's clock moves a second with each payday transaction, so the assessed balance is a few units older.
     assert.equal(plan.target, wanted(w, 60)); assert.ok(plan.held <= held && held - plan.held < RAW);
     assert.ok(moneyTarget(60, spending, 0, w.p) > moneyTarget(30, spending, 0, w.p), "adoption ramps");
     assert.equal(w.wallet.address, address);

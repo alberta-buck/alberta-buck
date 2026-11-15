@@ -387,6 +387,9 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     world.net.upkeep = upkeep;
     world.net.venue = machineVenue;
     parts = { observer, policy, parity, upkeep, wheel };
+    // A keeper pays up to the block for a tick (recommendation 77): a tick near K = 0 needs 13.9M gas,
+    // and a 12M limit stopped five-year worlds in that regime instead of recording it.
+    const TICK_GAS = 25_000_000n;
     world.turnWheel = async ({ tag } = {}) => {
       const base = tag ?? "eq:wheel";
       const receipts = [];
@@ -398,7 +401,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       do {
         const scan = bounded ? (remaining < 4n ? remaining : 4n) : 0n;
         const receipt = await session.send(wheel, "tick", [bounded ? 1n : budget, scan],
-          { tag: `${base}:tick:${receipts.length}`, gas: world.tickGas ?? 12_000_000n });
+          { tag: `${base}:tick:${receipts.length}`, gas: world.tickGas ?? TICK_GAS });
         receipts.push(receipt);
         const work = parseEventLogs({ abi: wheel.abi, logs: receipt.logs, eventName: "Ticked" })
           .reduce((sum, e) => sum + e.args.work, 0n);

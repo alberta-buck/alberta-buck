@@ -1,4 +1,4 @@
-// Session semantics on the standalone Tevm backend: deploy, sends, both
+// Session semantics on the standalone webevm + revm backend: deploy, sends, both
 // expectation outcomes, journal contents.  Mirrors the Python suite's
 // StubSession tests, but against a real in-process EVM.
 // Skips when the Foundry artifacts (out/) are not built.
@@ -7,8 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { JournalWriter, parseJournal, mismatches } from "../src/journal.js";
-import { tevmSession, devAccount } from "../src/backends.js";
-import { artifactsAvailable, loadArtifact } from "../src/nodefs.js";
+import { devAccount } from "../src/backends.js";
+import { artifactsAvailable, loadArtifact, nodeWebevmSession } from "../src/nodefs.js";
 import { TransactionReverted } from "../src/session.js";
 
 const HAVE = artifactsAvailable();
@@ -16,7 +16,7 @@ const UNIT = 10n ** 18n;
 
 test("erc20 lifecycle with expectations + journal", { skip: !HAVE }, async () => {
   const lines = [];
-  const session = await tevmSession({
+  const session = await nodeWebevmSession({
     journal: new JournalWriter((l) => lines.push(l)),
   });
   const me = session.account.address;

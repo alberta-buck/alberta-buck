@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { encodeFunctionData, parseEventLogs } from "viem";
-import { tevmSession } from "../src/backends.js";
+import { nodeWebevmSession } from "../src/nodefs.js";
 import { buildEquilibriumWorld } from "../src/scenarios/eqworld.js";
 import { CreditHouseholdAgent, CreditSaverAgent } from "../src/agents/credit-household.js";
 import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
@@ -24,7 +24,7 @@ const life = fixture.lifecycle, flow = fixture.flow;
 const show = (v) => JSON.stringify(v, (_, x) => typeof x === "bigint" ? String(x) : x);
 
 test("households save in place, redeem and retire discounted principal through one receipt cursor", async (t) => {
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildEquilibriumWorld(s, artifact, { identity, wheelArb: false, targetBuck: 1_000_000n * RAW,
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
   });

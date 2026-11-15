@@ -17,8 +17,7 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { tevmSession } from "../src/backends.js";
-import { loadAnyArtifact } from "../src/nodefs.js";
+import { loadAnyArtifact, nodeWebevmSession } from "../src/nodefs.js";
 
 let id = null;
 try {
@@ -57,7 +56,7 @@ describe("the BUCK/USDC market through an unbound router", { skip }, () => {
       const v = seed % id.ORDER;
       return v === 0n ? 1n : v;
     };
-    session = await tevmSession();
+    session = await nodeWebevmSession();
     world = await bw.buildBuckWorld(session, loadAnyArtifact, { identity: id, rng });
     insurancePool = world.poolAcct;              // a SimLP the registry binds Carrying
     market = await mk.buildMarket(world, loadAnyArtifact, { rng });

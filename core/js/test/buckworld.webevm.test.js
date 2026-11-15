@@ -1,4 +1,4 @@
-// Phase 4 Stage 1: the REAL BUCK stack on Tevm, wholly in JS.
+// Phase 4 Stage 1: the REAL BUCK stack on webevm + revm, wholly in-process.
 //
 // buildBuckWorld deploys IdentityRegistry + BuckCredit +
 // BuckKControllerDirect + Buck (deploy.py's order); two agents onboard
@@ -13,8 +13,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-import { tevmSession, devAccount } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable } from "../src/nodefs.js";
+import { devAccount } from "../src/backends.js";
+import { loadArtifact, artifactsAvailable, nodeWebevmSession } from "../src/nodefs.js";
 
 const require = createRequire(import.meta.url);
 let id = null;
@@ -43,7 +43,7 @@ test("buckworld: onboard, activate credit, transfer, demurrage == kernel", { ski
     return v === 0n ? 1n : v;
   };
 
-  const session = await tevmSession();
+  const session = await nodeWebevmSession();
   const world = await buildBuckWorld(session, loadArtifact, { identity: id, rng });
 
   // Two real identities: the unicode payer and an ASCII counterparty.

@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseEventLogs } from "viem";
-import { tevmSession } from "../src/backends.js";
+import { nodeWebevmSession } from "../src/nodefs.js";
 import { buildEquilibriumWorld } from "../src/scenarios/eqworld.js";
 import { CreditSaverAgent, CreditHouseholdAgent, HouseholdInvestorAgent } from "../src/agents/credit-household.js";
 import { TransactionReceiptPending } from "../src/session.js";
@@ -25,7 +25,7 @@ const forecasts = fixture.forecasts, flow = fixture.flow;
 const UR = () => JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url)));
 
 async function setting() {
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildEquilibriumWorld(s, artifact, { identity, wheelArb: false, targetBuck: 1_000_000n * RAW, urArtifact: UR() });
   const owner = (a) => world.holderAddress(a.account), ids = (a) => world._credits.get(a.account.address) ?? [];
   let serial = 0;

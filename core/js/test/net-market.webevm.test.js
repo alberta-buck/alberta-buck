@@ -4,7 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { getContractAddress } from "viem";
-import { devAccount, tevmSession } from "../src/backends.js";
+import { devAccount } from "../src/backends.js";
+import { nodeWebevmSession } from "../src/nodefs.js";
 import { buildBuckWorld, onboard, insureAsset, advanceTime, DAY } from "../src/buckworld.js";
 import { netCreditOps } from "../src/net-world.js";
 import { CreditHouseholdAgent } from "../src/agents/credit-household.js";
@@ -34,7 +35,7 @@ test("aged carrying V3 output is guarded and reported in net BUCK in both token 
     seed = (seed * 6364136223846793005n + 1442695040888963407n) & ((1n << 256n) - 1n);
     return seed % (identity.ORDER - 1n) + 1n;
   };
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildBuckWorld(s, artifact, { identity, rng, accounting: "net" });
   const operator = await onboard(world, s.account, fields("Operator"), { rng });
   let lastMarket, lastBuyer;

@@ -4,7 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { parseEventLogs } from "viem";
-import { tevmSession, devAccount, snapshotTevm, restoreTevm } from "../src/backends.js";
+import { devAccount } from "../src/backends.js";
+import { snapshotWebevm, restoreWebevm } from "../src/webevm.js";
+import { nodeWebevmSession } from "../src/nodefs.js";
 import { buildBuckWorld, attachBuckWorld, attachNetBuckWorld, worldRecord, onboard, insureAsset, identityApprove, advanceTime, DAY }
   from "../src/buckworld.js";
 import { netCreditOps } from "../src/net-world.js";
@@ -24,7 +26,7 @@ test("Buck preserves private identity approval and transfer receipts", { skip },
     seed = (seed * 6364136223846793005n + 1442695040888963407n) & ((1n << 256n) - 1n);
     return seed % (identity.ORDER - 1n) + 1n;
   };
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildBuckWorld(s, artifact, { identity, rng, accounting: "net" });
   const fields = (name) => ({
     given_name: name, family_name: "Compatibility", jurisdiction: "Alberta, Canada",
@@ -113,7 +115,7 @@ test("real identities can use and safely restore a cash-only Buck world", { skip
     seed = (seed * 6364136223846793005n + 1442695040888963407n) & ((1n << 256n) - 1n);
     return seed % (identity.ORDER - 1n) + 1n;
   };
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildBuckWorld(s, artifact, { identity, rng, accounting: "net" });
   assert.equal(await s.call(world.reg, "isVerified", [world.net.fund.address]), true);
   assert.equal(await s.call(world.reg, "isCarrying", [world.net.fund.address]), true);
@@ -146,13 +148,13 @@ test("real identities can use and safely restore a cash-only Buck world", { skip
   await ops.reduceAuthorized(holder.account, id, 1_000_000n);
   assert.equal((await ops.facility(id)).issued, 59_000_000n);
 
-  const saved = decodeJSON(encodeJSON({ chain: await snapshotTevm(s), world: worldRecord(world) }));
+  const saved = decodeJSON(encodeJSON({ chain: await snapshotWebevm(s), world: worldRecord(world) }));
   assert.equal(saved.world.net.issueAbiVersion, 7);
   assert.deepEqual(Object.keys(saved.world.net.libraries).sort(),
     ["cashLibrary", "facilitiesLibrary", "renewalLibrary", "transferLibrary"]);
   assert.equal(saved.world.net.accountingModel, await s.call(world.buck, "ACCOUNTING_MODEL"));
-  const restoredSession = await tevmSession();
-  await restoreTevm(restoredSession, saved.chain);
+  const restoredSession = await nodeWebevmSession();
+  await restoreWebevm(restoredSession, saved.chain);
   assert.throws(() => attachBuckWorld(restoredSession, artifact, saved.world, { identity }), /attachNetBuckWorld/);
   const oldRecord = structuredClone(saved.world);
   delete oldRecord.net.issueAbiVersion;

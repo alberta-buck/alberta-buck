@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { encodeFunctionData, parseEventLogs } from "viem";
-import { tevmSession } from "../src/backends.js";
+import { nodeWebevmSession } from "../src/nodefs.js";
 import { buildEquilibriumWorld } from "../src/scenarios/eqworld.js";
 import { artifact } from "../artifacts/bundle.mjs";
 import * as identity from "../src/identity.js";
@@ -12,7 +12,7 @@ import * as identity from "../src/identity.js";
 const RAW = 1_000_000n;
 
 test("canonical JS wheel repairs a USDC withdrawal with funded Carrying-basket arb", async () => {
-  const s = await tevmSession();
+  const s = await nodeWebevmSession();
   const world = await buildEquilibriumWorld(s, artifact, { identity,
     targetBuck: 1_000_000n * RAW,
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),

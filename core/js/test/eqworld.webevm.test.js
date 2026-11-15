@@ -1,10 +1,10 @@
-// Risk-kill gate: the MINIMAL EQUILIBRIUM WORLD fits and runs on Tevm.
+// Risk-kill gate: the MINIMAL EQUILIBRIUM WORLD fits and runs on webevm + revm.
 //
 // The stage-6 question (platform doc): can deploy.py's basket world --
 // the full BUCK stack + BuckBasketProRata/venue + TOKEN/USDC +
 // TOKEN/BUCK + floating BUCK/USDC pools + Universal Router, every
-// BUCK-touching contract identity-bound -- deploy inside tevm's block
-// gas budget, and do its heaviest NEW ops (a basket deposit that mints
+// BUCK-touching contract identity-bound -- deploy inside an in-browser
+// block's gas budget, and do its heaviest NEW ops (a basket deposit that mints
 // BUCK and LPs a real pool; the permissionless PID compute()) execute?
 //
 // This transcribes deploy.py's op order with one basket TOKEN, then:
@@ -22,8 +22,7 @@ import { join } from "node:path";
 
 import { encodeFunctionData } from "viem";
 
-import { tevmSession } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable, repoRoot } from "../src/nodefs.js";
+import { loadArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
 import { buildBuckWorld, advanceTime, DAY } from "../src/buckworld.js";
 import { deployUniversalRouter } from "../src/router.js";
 import { Q96, fullRangeTicks, sqrtPriceX96 } from "../src/v3.js";
@@ -58,10 +57,10 @@ const E18 = 10n ** 18n;
 const G = { X: 1n, Y: 2n };
 const BIND_E = { R: G, C: G };
 
-test("eqworld: the minimal equilibrium world deploys and runs on tevm", { skip }, async () => {
+test("eqworld: the minimal equilibrium world deploys and runs on webevm", { skip }, async () => {
   const t0 = performance.now();
   const lines = [];
-  const session = await tevmSession(
+  const session = await nodeWebevmSession(
     { journal: new JournalWriter((l) => lines.push(l)) });
   const gas = 15_000_000n;
   const me = session.account.address;
@@ -197,7 +196,7 @@ test("eqworld: the minimal equilibrium world deploys and runs on tevm", { skip }
     `every op must match its expectation: ${JSON.stringify(bad[0] ?? null)}`);
   const deploys = recs.filter((r) => r.op === "deploy");
   for (const d of deploys) {
-    assert.ok(d.gas < 15_000_000, `${d.tag} gas ${d.gas} fits tevm`);
+    assert.ok(d.gas < 15_000_000, `${d.tag} gas ${d.gas} fits a 15M block`);
   }
   const total = recs.reduce((s, r) => s + r.gas, 0);
   const ms = Math.round(performance.now() - t0);

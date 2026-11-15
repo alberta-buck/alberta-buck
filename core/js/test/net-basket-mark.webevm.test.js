@@ -3,11 +3,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { parseEventLogs } from "viem";
-import { tevmSession, snapshotTevm, restoreTevm } from "../src/backends.js";
+import { snapshotWebevm, restoreWebevm } from "../src/webevm.js";
 import { buildBuckWorld, attachNetBuckWorld, worldRecord, onboard, insureAsset, identityApprove, advanceTime, DAY } from "../src/buckworld.js";
 import { netCreditOps } from "../src/net-world.js";
 import { markNetBasketPositions } from "../src/basket.js";
-import { loadArtifact } from "../src/nodefs.js";
+import { loadArtifact, nodeWebevmSession } from "../src/nodefs.js";
 
 let identity;
 try { identity = await import("../src/identity.js"); } catch { /* node kernel not built */ }
@@ -23,7 +23,8 @@ test("cash-only net basket receipts expose open basis and mark", { skip }, async
     seed = (seed * 6364136223846793005n + 1442695040888963407n) & ((1n << 256n) - 1n);
     return seed % (identity.ORDER - 1n) + 1n;
   };
-  const s = await tevmSession();
+  // The historical mark reads a past block: webevm serves past blocks only within a window.
+  const s = await nodeWebevmSession({ nodeOptions: { stateHistory: { blocks: 256 } } });
   const world = await buildBuckWorld(s, artifact, { identity, rng, accounting: "net",
     registryArtifact: "IdentityRegistryHarness" });
   const basket = world.net.basket;
@@ -67,9 +68,9 @@ test("cash-only net basket receipts expose open basis and mark", { skip }, async
   const historical = await markNetBasketPositions(s, basket, world.buck, holder.account, ids, { blockNumber: aged.blockNumber });
   assert.equal(historical.basis, aged.basis);
   assert.equal(historical.mark, aged.mark);
-  const saved = { chain: await snapshotTevm(s), world: worldRecord(world) };
-  const restoredSession = await tevmSession();
-  await restoreTevm(restoredSession, saved.chain);
+  const saved = { chain: await snapshotWebevm(s), world: worldRecord(world) };
+  const restoredSession = await nodeWebevmSession();
+  await restoreWebevm(restoredSession, saved.chain);
   const restored = await attachNetBuckWorld(restoredSession, artifact, saved.world, { identity });
   const restoredMark = await markNetBasketPositions(restoredSession, restored.net.basket, restored.buck, holder.account, ids);
   assert.equal(restoredMark.basis, reduced.basis);

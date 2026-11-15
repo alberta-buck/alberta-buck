@@ -1,7 +1,7 @@
-// Phase 4 Stage 0: the full identity ceremony on Tevm, in-process.
+// Phase 4 Stage 0: the full identity ceremony on webevm + revm, in-process.
 //
 // The wasm buck-identity kernel generates the registration NIZK and the
-// REAL IdentityRegistry bytecode verifies it on-chain inside Tevm's EVM
+// REAL IdentityRegistry bytecode verifies it on-chain inside revm's EVM
 // (BN254 add/mul/PAIRING precompiles) -- the capability the in-browser
 // demo rests on.  Also pins the simulated-time controls
 // (evm_setNextBlockTimestamp / evm_mine) the agent world needs.
@@ -11,8 +11,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { tevmSession, devAccount } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable } from "../src/nodefs.js";
+import { devAccount } from "../src/backends.js";
+import { loadArtifact, artifactsAvailable, nodeWebevmSession } from "../src/nodefs.js";
 
 let id = null;
 try {
@@ -31,7 +31,7 @@ const g = (p) => ({ X: p.x, Y: p.y });
 const ct = (E) => ({ R: g(E.R), C: g(E.C) });
 const g2 = (p) => ({ X: [p.x[0], p.x[1]], Y: [p.y[0], p.y[1]] });
 
-test("identity ceremony: wasm NIZK verified by IdentityRegistry on tevm", { skip }, async () => {
+test("identity ceremony: wasm NIZK verified by IdentityRegistry on webevm", { skip }, async () => {
   // Deterministic scalars (an LCG over Fr; live use draws WebCrypto).
   let seed = 0xa1bcb0can;
   const rand = () => {
@@ -40,7 +40,7 @@ test("identity ceremony: wasm NIZK verified by IdentityRegistry on tevm", { skip
     return v === 0n ? 1n : v;
   };
 
-  const session = await tevmSession();
+  const session = await nodeWebevmSession();
   const gas = 15_000_000n;
   const reg = await session.deploy(loadArtifact("IdentityRegistry"),
     [session.account.address], { name: "IdentityRegistry", gas });
@@ -87,7 +87,7 @@ test("identity ceremony: wasm NIZK verified by IdentityRegistry on tevm", { skip
   ];
 
   // THE moment: the real Solidity verifier accepts the wasm proof
-  // in-process (exercises tevm's bn254 pairing precompile).
+  // in-process (exercises revm's bn254 pairing precompile).
   await session.send(reg, "register", args, { tag: "register", gas: 3_000_000n });
   assert.equal(await session.call(reg, "isVerified", [session.account.address]), true);
 

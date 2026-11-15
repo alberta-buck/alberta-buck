@@ -1,14 +1,14 @@
-// Standard simulated bank payments, including real receipt recovery on Tevm.
+// Standard simulated bank payments, including real receipt recovery on webevm + revm.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encodeFunctionData } from "viem";
-import { devAccount, tevmSession } from "../src/backends.js";
-import { artifactsAvailable, loadArtifact } from "../src/nodefs.js";
+import { devAccount } from "../src/backends.js";
+import { artifactsAvailable, loadArtifact, nodeWebevmSession } from "../src/nodefs.js";
 import { settlementOps } from "../src/settlement.js";
 import { TransactionReceiptPending, TransactionReverted } from "../src/session.js";
 
 test("settlement payment requires exact receipt evidence", { skip: !artifactsAvailable() }, async () => {
-  const s = await tevmSession(), payer = s.account, bank = devAccount(1), stranger = devAccount(2);
+  const s = await nodeWebevmSession(), payer = s.account, bank = devAccount(1), stranger = devAccount(2);
   const token = await s.deploy(loadArtifact("MockERC20"), ["USD Coin", "USDC", 6]);
   await s.send(token, "mint", [payer.address, 1000n]);
   const ops = settlementOps(s, token);

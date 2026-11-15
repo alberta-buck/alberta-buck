@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 import { anvilSession, tevmSession } from "../src/backends.js";
-import { loadAnyArtifact, repoRoot, fileJournalWriter } from "../src/nodefs.js";
+import { loadAnyArtifact, repoRoot, fileJournalWriter, nodeWebevmSession } from "../src/nodefs.js";
 import { buildEquilibriumWorld, DayClock, PidKeeper, WheelKeeper }
   from "../src/scenarios/eqworld.js";
 import { PinWhale } from "../src/agents/whale.js";
@@ -34,7 +34,8 @@ import { lineChart, svgDoc } from "../src/chart.js";
 import id from "../src/identity.js";
 
 const { values: a } = parseArgs({ options: {
-  backend: { type: "string", default: "tevm" },   // tevm | anvil (long runs)
+  backend: { type: "string", default: "webevm" }, // webevm | tevm | anvil
+  engine:  { type: "string", default: "revm" },   // webevm only: revm | ethereumjs
   rpc:     { type: "string", default: "http://127.0.0.1:8545" },
   days:    { type: "string", default: "365" },
   step:    { type: "string", default: "80" },     // reference walk, bp/day
@@ -58,9 +59,11 @@ const TOKENS = [
   { sym: "XAU",  name: "Gold",   dec: 18, p0: 2_650_000_000n },
 ];
 
+// webevm + revm (the default) keeps long runs in process; tevm is kept for comparison (it is slow
+// and ran out of memory past about six simulated months); anvil is the fidelity anchor.
 const jopt = a.journal ? { journal: fileJournalWriter(a.journal) } : {};
-const session = a.backend === "anvil"
-  ? await anvilSession(a.rpc, jopt)
+const session = a.backend === "anvil" ? await anvilSession(a.rpc, jopt)
+  : a.backend === "webevm" ? await nodeWebevmSession({ ...jopt, engine: a.engine })
   : await tevmSession(jopt);
 const urArtifact = JSON.parse(readFileSync(
   join(repoRoot(), "alberta_buck", "sim", "artifacts", "UniversalRouter.json"),
