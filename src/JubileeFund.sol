@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
+import {CarryRatio} from "./lib/CarryRatio.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -303,12 +304,12 @@ contract JubileeFund is IERC721Receiver {
         // the matured budget and the current excess, not the cash reserve.
         (uint256 gross, uint256 net) = token.fundBalancesScaled();
         nominal = token.fundNominalForNet(amount);
-        uint256 exactNet = Math.mulDiv(net, nominal * Q, gross);
+        uint256 exactNet = CarryRatio.toNetScaled(gross, net, nominal);
         if (exactNet > budget || exactNet > excess) {
             amount--;
             if (amount == 0) return (0, 0);
             nominal = token.fundNominalForNet(amount);
-            exactNet = Math.mulDiv(net, nominal * Q, gross);
+            exactNet = CarryRatio.toNetScaled(gross, net, nominal);
         }
         if (exactNet < threshold) return (0, 0);
     }

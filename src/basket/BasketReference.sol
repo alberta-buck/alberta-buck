@@ -5,10 +5,7 @@ import {IBasketView} from "./IBasketView.sol";
 import {IBasketReference} from "./IBasketReference.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
-
-interface IBuckCarryView {
-    function accountBalancesScaled(address account) external view returns (uint256 gross, uint256 net);
-}
+import {CarryRatio} from "../lib/CarryRatio.sol";
 
 /// @notice The parity reference: a fast validated raw value of the reference
 ///         basket in BUCKs. No positions, targets or K. Each publication is
@@ -70,25 +67,31 @@ contract BasketReference is IBasketReference {
         if (n == 0 || window == 0) revert InvalidObservation();
         bool net = !basket.nominalReference();
         for (uint256 i; i < n; ++i) {
-            (address token, uint8 dec, uint256 amount,,, address pool,,, bool b0,,) = basket.constituents(i);
-            if (IUniswapV3Pool(pool).liquidity() == 0) revert InvalidObservation();
-            int24 tick = UniswapV3OracleLib.consult(pool, window);
-            (, int24 spotTick,,,,,) = IUniswapV3Pool(pool).slot0();
-            uint256 p = UniswapV3OracleLib.getQuoteAtTick(tick, uint128(10 ** dec), token, _buck(pool, b0));
-            uint256 ps = UniswapV3OracleLib.getQuoteAtTick(spotTick, uint128(10 ** dec), token, _buck(pool, b0));
-            uint256 delta = p > ps ? p - ps : ps - p;
-            if (p == 0 || delta * 10000 > p * maxDeviationBp) revert InvalidObservation();
-            if (net) {
-                (uint256 gross, uint256 netValue) = IBuckCarryView(_buck(pool, b0)).accountBalancesScaled(pool);
-                if (gross != 0) {
-                    p = UniswapV3OracleLib.mulDiv(p, netValue, gross);
-                    ps = UniswapV3OracleLib.mulDiv(ps, netValue, gross);
-                }
-            }
-            twap += int256(UniswapV3OracleLib.mulDiv(amount, p, 1e18));
-            spot += int256(UniswapV3OracleLib.mulDiv(amount, ps, 1e18));
+            (uint256 t, uint256 s) = _constituentValues(i, window, net);
+            twap += int256(t);
+            spot += int256(s);
         }
         if (twap <= 0) revert InvalidObservation();
+    }
+
+    /// @dev One constituent's basket amount at its pool's TWAP and spot prices,
+    ///      both at the pool's net / gross unless the basket reads nominally
+    ///      (lib/CarryRatio.sol). The deviation check compares the pool with
+    ///      itself, so it reads the quoted prices (the ratio cancels).
+    function _constituentValues(uint256 i, uint32 window, bool net) private view returns (uint256, uint256) {
+        (address token, uint8 dec, uint256 amount,,, address pool,,, bool b0,,) = basket.constituents(i);
+        if (IUniswapV3Pool(pool).liquidity() == 0) revert InvalidObservation();
+        address buck = _buck(pool, b0);
+        uint256 p = UniswapV3OracleLib.getQuoteAtTick(UniswapV3OracleLib.consult(pool, window), uint128(10 ** dec), token, buck);
+        (, int24 spotTick,,,,,) = IUniswapV3Pool(pool).slot0();
+        uint256 ps = UniswapV3OracleLib.getQuoteAtTick(spotTick, uint128(10 ** dec), token, buck);
+        uint256 delta = p > ps ? p - ps : ps - p;
+        if (p == 0 || delta * 10000 > p * maxDeviationBp) revert InvalidObservation();
+        if (net) {
+            (uint256 g, uint256 n) = CarryRatio.read(buck, pool);
+            (p, ps) = (CarryRatio.toNet(g, n, p), CarryRatio.toNet(g, n, ps));
+        }
+        return (UniswapV3OracleLib.mulDiv(amount, p, 1e18), UniswapV3OracleLib.mulDiv(amount, ps, 1e18));
     }
 
     function _buck(address pool, bool b0) private view returns (address) {

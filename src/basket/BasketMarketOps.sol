@@ -5,14 +5,14 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IBuckJubilee} from "../IBuckJubilee.sol";
+import {IBuckNetView} from "../IBuckNetView.sol";
+import {CarryRatio} from "../lib/CarryRatio.sol";
 import {UniswapV3OracleLib as V3} from "../lib/UniswapV3OracleLib.sol";
 import {IBuckBasketVenue} from "./IBuckBasketVenue.sol";
 import {IBasketArb} from "./IBasketArb.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 
-interface IMarketCash {
-    function accountBalancesScaled(address account) external view returns (uint256 gross, uint256 net);
-    function netBalanceOf(address account) external view returns (uint256);
+interface IMarketCash is IBuckNetView {
     function approvedCarryingIssuer(address account) external view returns (bool);
 }
 
@@ -132,15 +132,15 @@ library BasketMarketOps {
     /// the requested net amount; rounding cannot borrow fractional inventory.
     function nominalForNet(address token, uint256 value) public view returns (uint256 nominal) {
         if (value == 0) return 0;
-        (uint256 gross, uint256 net) = IMarketCash(token).accountBalancesScaled(address(this));
+        (uint256 gross, uint256 net) = CarryRatio.read(token, address(this));
         if (net == 0) revert NetCashUnavailable();
-        nominal = Math.mulDiv(value, gross, net, Math.Rounding.Ceil);
+        nominal = CarryRatio.toNominal(gross, net, value);
         if (nominal > IERC20(token).balanceOf(address(this))) revert NetCashUnavailable();
     }
 
     function spendableNet(address token) public view returns (uint256) {
-        (uint256 gross, uint256 net) = IMarketCash(token).accountBalancesScaled(address(this));
-        return gross == 0 ? 0 : Math.mulDiv(IERC20(token).balanceOf(address(this)), net, gross);
+        (uint256 gross, uint256 net) = CarryRatio.read(token, address(this));
+        return CarryRatio.toNet(gross, net, IERC20(token).balanceOf(address(this)));
     }
 
     /// @notice Policy amounts are net BUCK; the existing venue remains in
@@ -324,7 +324,7 @@ library BasketMarketOps {
     function _minimum(Context memory c, uint256 amount) private pure returns (uint256) {
         // Fractional/raw rounding cannot turn an unchanged portfolio into
         // paid work. This is a two-raw-unit dust floor, not a gas/bounty hurdle.
-        uint256 netInput = Math.mulDiv(amount, c.walletNet, c.walletGross);
+        uint256 netInput = CarryRatio.toNet(c.walletGross, c.walletNet, amount);
         return Math.max(2, Math.mulDiv(netInput, c.edge, 10000, Math.Rounding.Ceil));
     }
 
@@ -387,9 +387,9 @@ library BasketMarketOps {
         // No spot fallback and no re-marking a TOKEN to manufacture return.
         int24 tick = V3.consult(own, window);
         uint256 nominal = V3.getQuoteAtTick(tick, uint128(m.one), token, c.buck);
-        (uint256 gross, uint256 net) = IMarketCash(c.buck).accountBalancesScaled(own);
+        (uint256 gross, uint256 net) = CarryRatio.read(c.buck, own);
         if (gross == 0 || net == 0) revert InvalidArbMarket();
-        m.mark = Math.mulDiv(nominal, net, gross);
+        m.mark = CarryRatio.toNet(gross, net, nominal);
         if (m.mark == 0) revert InvalidArbMarket();
     }
 
@@ -454,7 +454,7 @@ library BasketMarketOps {
                 Market memory m = c.markets[j];
                 if (m.own != p.pool) continue;
                 uint256 ownedFee = Math.mulDiv(fee, m.owned, p.liquidity);
-                uint256 feeValue = r.input[k] == c.buck ? Math.mulDiv(ownedFee, afterPool.net, afterPool.gross)
+                uint256 feeValue = r.input[k] == c.buck ? CarryRatio.toNet(afterPool.gross, afterPool.net, ownedFee)
                     : Math.mulDiv(ownedFee, m.mark, m.one);
                 q.lpFees += feeValue;
                 if (r.input[k] == c.buck) cashFees += feeValue;
@@ -463,7 +463,7 @@ library BasketMarketOps {
             flowing = out;
             if (k + 1 == r.length) finalNet = receivedNet;
         }
-        q.cashReturn = _netDifference(finalNet, Math.mulDiv(amount * Q, c.walletNet, c.walletGross));
+        q.cashReturn = _netDifference(finalNet, CarryRatio.toNetScaled(c.walletGross, c.walletNet, amount));
         q.totalReturn = q.cashReturn + q.lpReturn;
         if (int256(c.walletNet / Q) + q.cashReturn + int256(cashFees) < int256(c.reserveFloor)) {
             q.totalReturn = -1;
@@ -493,11 +493,11 @@ library BasketMarketOps {
         output = nominal;
         if (input == c.buck) {
             a.gross += amount * Q;
-            a.net += Math.mulDiv(amount * Q, c.walletNet, c.walletGross);
+            a.net += CarryRatio.toNetScaled(c.walletGross, c.walletNet, amount);
         }
         else if ((zero ? p.token1 : p.token0) == c.buck) {
             if (nominal * Q > p.gross) return (a, 0, 0, 0);
-            uint256 netOut = Math.mulDiv(nominal * Q, p.net, p.gross);
+            uint256 netOut = CarryRatio.toNetScaled(p.gross, p.net, nominal);
             a.gross -= nominal * Q; a.net -= netOut;
             netOutput = netOut;
         }
@@ -510,7 +510,7 @@ library BasketMarketOps {
         uint256 a0 = V3.getAmount0ForLiquidity(s, high, m.owned);
         uint256 a1 = V3.getAmount1ForLiquidity(low, s, m.owned);
         (uint256 b, uint256 t) = p.token0 == buck ? (a0, a1) : (a1, a0);
-        return Math.mulDiv(b, p.net, p.gross) + Math.mulDiv(t, m.mark, m.one);
+        return CarryRatio.toNet(p.gross, p.net, b) + Math.mulDiv(t, m.mark, m.one);
     }
 
     function _value(Context memory c) private view returns (uint256 value) {

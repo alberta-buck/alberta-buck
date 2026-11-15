@@ -15,6 +15,7 @@ import {IBuckBasketPosition} from "./IBuckBasketPosition.sol";
 import {IBasketArb} from "./IBasketArb.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BasketMarketOps} from "./BasketMarketOps.sol";
+import {IBuckNetView} from "../IBuckNetView.sol";
 
 
 /// @title BuckBasketEquity -- the BuckBasket as equity: shares, one pooled
@@ -218,7 +219,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     function enableNetAccounting() external onlyGov {
         if (netAccounting || totalShares != 0 || address(credit) != address(0)) revert AlreadyPresent();
         (bool ok, bytes memory data) = address(buck).staticcall(
-            abi.encodeWithSelector(IBuckNetAccount.netBalanceOf.selector, address(this))
+            abi.encodeWithSelector(IBuckNetView.netBalanceOf.selector, address(this))
         );
         if (!ok || data.length != 32) revert InvalidNetToken();
         netAccounting = true;

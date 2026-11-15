@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
+import {IBuckNetView} from "../IBuckNetView.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {BuckBasketStorage}  from "./BuckBasketStorage.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -33,10 +34,9 @@ interface IBuckHolder {
 }
 
 /// @notice Canonical cash and issuance-age views. No signed wallet or holder relief.
-interface IBuckNetAccount {
+/// @notice Buck's net view (IBuckNetView) and the issuance calls the basket makes.
+interface IBuckNetAccount is IBuckNetView {
     function approvedCarryingIssuer(address owner) external view returns (bool);
-    function netBalanceOf(address a) external view returns (uint256);
-    function accountBalancesScaled(address a) external view returns (uint256 gross, uint256 net);
     function totalIssued() external view returns (uint256);
     function maturitiesPending() external view returns (bool);
     function jubilee() external view returns (address);

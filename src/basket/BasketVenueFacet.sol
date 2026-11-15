@@ -4,10 +4,7 @@ pragma solidity ^0.8.20;
 import {BuckBasketUniswapV3} from "./BuckBasketUniswapV3.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
-
-interface IBuckCarry {
-    function accountBalancesScaled(address account) external view returns (uint256 gross, uint256 net);
-}
+import {CarryRatio} from "../lib/CarryRatio.sol";
 
 /// @notice Venue for the replacement machine. Missing TWAP history is an
 ///         unavailable price, including on K's raw reference path. Pools
@@ -30,9 +27,8 @@ contract BasketVenueFacet is BuckBasketUniswapV3 {
         int256 total;
         for (uint256 i = 0; i < constituents.length; i++) {
             Constituent storage c = constituents[i];
-            uint256 p = _readPoolPrice(c, twapWindow);
-            (uint256 gross, uint256 net) = IBuckCarry(address(buck)).accountBalancesScaled(c.pool);
-            if (gross != 0) p = UniswapV3OracleLib.mulDiv(p, net, gross);
+            (uint256 gross, uint256 net) = CarryRatio.read(address(buck), c.pool);
+            uint256 p = CarryRatio.toNet(gross, net, _readPoolPrice(c, twapWindow));
             total += int256(UniswapV3OracleLib.mulDiv(c.basketAmount, p, 1e18));
         }
         return total;

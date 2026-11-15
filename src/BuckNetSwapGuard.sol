@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
+import {CarryRatio} from "./lib/CarryRatio.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -132,7 +133,7 @@ contract BuckNetSwapGuard is IUniswapV3SwapCallback {
         private view returns (uint256 delivered)
     {
         if (nominal > gross / Q) revert BadPool();
-        delivered = nominal == 0 ? 0 : Math.mulDiv(net, nominal * Q, gross);
+        delivered = CarryRatio.toNetScaled(gross, net, nominal);   // what move delivers
         (uint256 afterGross, uint256 afterNet) = buck.accountBalancesScaled(pool);
         if (afterGross != gross - nominal * Q || afterNet != net - delivered) revert BadPool();
     }
