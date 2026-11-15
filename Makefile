@@ -868,14 +868,21 @@ economy-smoke: sim-build core-build-py
 # `python -m alberta_buck.sim` run records under $(SIM_RUNS) (default build/runs) as it goes; the
 # dashboard reads them, finished or growing. Local only: it binds 127.0.0.1.
 #   make nix-venv-dashboard [DASHBOARD_PORT=8890]
+#   make nix-venv-dashboard-lan [DASHBOARD_PORT=8890]   # read-only on every interface (a trusted LAN)
 #   make nix-venv-run-import VECTORS="build/sim/economy-smoke-365.json ..."   # earlier vectors
 #   make nix-venv-dashboard-test
 #   make nix-dashboard-live-check          # the page's live controls, against a running dashboard
 # Live sessions (New live session on the page) run inside the dashboard, one EVM each.
 DASHBOARD_PORT ?= 8890
-.PHONY: dashboard run-import dashboard-test dashboard-live-check
+.PHONY: dashboard dashboard-lan run-import dashboard-test dashboard-live-check
 dashboard:
 	python -m alberta_buck.sim.dashboard --port $(DASHBOARD_PORT)
+# Every interface, read only: anyone who can reach the port reads the run records; nobody can start or
+# steer a session (the server also refuses live sessions off loopback). No authentication or TLS:
+# a trusted LAN only, never a forwarded port. For live control, tunnel to `dashboard` instead
+# (ssh -L 8890:127.0.0.1:8890 host).
+dashboard-lan:
+	python -m alberta_buck.sim.dashboard --host 0.0.0.0 --port $(DASHBOARD_PORT) --no-live
 run-import:
 	python -m alberta_buck.sim.runrecord import $(VECTORS)
 dashboard-test:
