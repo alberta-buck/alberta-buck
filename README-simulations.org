@@ -546,6 +546,7 @@ The dashboard (=core/js/dashboard=, served by =alberta_buck/sim/dashboard.py=) h
   its net worth against its counterfactual, its credit and holdings, its cash and mortgage over
   time, and every step of its state machine, newest first; in a live session, "Change its
   settings" opens it in the settings form.
+- /Compare/: runs identical but for the settings under study (below), side by side.
 - /Insurers and pools/ and /Events/ are named and not yet built.
 The run's interventions are marked on every chart. Hovering one chart moves a crosshair on all of
 them; each chart has a table view. A running record is polled every two seconds; one not updated
@@ -554,6 +555,66 @@ capabilities (=core/js/dashboard/src/sources.js=), and live control through an o
 which actions it supports (=src/live.js=), so the same page can later show a small world running in
 the browser tab without a page of its own. The plan is in
 [[file:doc/review/bucknet-economy-implementation.org][the implementation plan]], "One run record, one dashboard".
+
+* Comparisons: change one thing, keep everything else
+
+Most questions about the economy are of one form: what does this one setting change, everything
+else the same? A /comparison/ answers it. Its spec (=alberta_buck/sim/comparisons/<name>.toml=) names
+an experiment, the settings every run shares, and one or more /axes/; an axis names its values, and
+each value the settings (the keys =--set= takes) that make it. The first value of an axis is its
+/reference/. Every combination of the axes' values is one run:
+
+#+begin_src toml
+question = "What does the integrator's leak change in the household economy?"
+experiment = "economy"                       # alberta_buck/sim/experiments/economy.toml
+days = 730
+[[axis]]
+name = "leak"
+note = "BuckKControllerDirect.setLeak (deploy.leak_days): 0 is no leak"
+[axis.values]
+year = {}                                    # the reference: the experiment's own setting
+none = { "deploy.leak_days" = 0.0 }
+[[axis]]
+name = "prices"
+[axis.values]
+history = { "scenario.prices" = "history" }
+revert = { "scenario.prices" = "revert" }
+#+end_src
+
+#+begin_src sh
+make nix-venv-compare-plan COMPARE=leak       # the runs and their settings
+make nix-venv-compare COMPARE=leak COMPARE_JOBS=6   # run them (COMPARE_ARGS="--here" for the working tree)
+make nix-venv-compare-report COMPARE=leak     # the differences, as text
+make nix-venv-dashboard                       # the Compare tab
+make nix-venv-compare-null                    # two runs with the same settings: identical?
+#+end_src
+
+All the runs share the experiment, the shared settings, the seed and the price path, and the keyed
+random streams draw the same arrivals and decisions in each until a setting that differs first acts.
+So two runs that differ on one axis differ only by what that axis changed. The null comparison
+(=comparisons/null.toml=, part of =make nix-venv-test-smoke=) checks the premise: two runs with the
+same settings are the same, frame for frame.
+
+=run= freezes the committed tree under =build/sim/compare/<name>/= and runs from there, so later
+edits cannot reach a running comparison; each run is an ordinary run record named
+=<name>.<axis>-<value>[...]= in =build/runs= (or =--runs=), and a run already complete is skipped.
+The index =build/runs/<name>.comparison.json= names the axes and which run is which; =report= adds
+each run's headline figures and, for every pair of runs that differ on one axis only, their
+differences and the first day they diverge ("never" means the setting changed nothing in the days
+run, or was not wired). A different horizon is a different comparison: name it anew.
+
+The dashboard's /Compare/ tab chooses a comparison, the axis to vary and the value to hold each other
+axis at, and draws the chosen runs one line each on K, BVIB, BUCK/USD, supply, the basket's lien,
+household principal, households by role and refusals, marking the day each departs from the
+reference; a table gives each run's figures and their differences from the reference. "Any two
+runs" compares two records directly and lists the settings that differ between them, read from
+their manifests.
+
+=comparisons/shocks.toml= carries the retired control lab's question (how each layer of the economy
+answers a price cycle and a shock) into this system: casts (the basket with K held, K moving, the
+households, the lifecycle mix) against prices (the lab's three-phase cycle, =scenario.prices =
+"three-phase"=, with or without a walk, or history), a shock (none, or one constituent 30% dearer
+for ten days) and two seeds.
 
 * Inspect, smoke-test, run
 

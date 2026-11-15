@@ -4586,29 +4586,33 @@ its own maps onto what the standard system has or nearly has:
 | poking the world and watching | the dashboard's live session with operator shocks (R2), already |
 | four samples a day; the monitor and pair-observer panes (stages 02 to 04) | dropped with those stages, as the owner suggests; daily frames |
 
-/The port, in steps./
-- [ ] /C1. Price profiles./ =three-phase= and =commodities= as =scenario.prices=
-  modes with =walk=; =ramp= and =pulse= interventions beside =price_shock=.
-- [ ] /C2. A frozen-K knob./ The lab's 05 (basket, K fixed) is the baseline
-  every later arm is read against: the controller's gains at zero by a
-  =deploy= setting, recorded in the manifest.
-- [ ] /C3. The =shocks= campaign./ Casts: (a) basket only, K fixed; (b) K
-  moves; (c) households (=economy.toml='s population); (d) the lifecycle mix
-  (=economy-lifecycle.toml=); the desk only if it joins the canonical stack.
-  Profiles: three-phase, step, commodities; walks 0, 0.5, 1; two seeds; 120
-  days. 72 cells; an economy day costs about 17 s on pyrevm here (economy-5y),
-  less while the population is small, so the grid is a few hours on datasim.
-  Each cell a run record whose manifest names its campaign and axis values; the
-  per-cast notes (the lab's stage notes, rewritten for the households) in the
-  campaign file.
-- [ ] /C4. Compare in the dashboard./ Choose a campaign; one selector per axis
-  (the lab page's layout); overlay two or three cells on the Overview charts
-  (K, BVIB, BUCK/USD, supply, holders) with the shock windows shaded from the
-  interventions file; the cast note beside them.
-- [ ] /C5. Retire the lab./ When the campaign reproduces its key comparisons
-  (K moving against K fixed; households against none) on the economy world:
-  remove =control_lab/=, its configs, targets and tests; its rendered page and
-  datasets are outputs, not kept.
+/The port, in steps/ (the owner, 2026-11-14: port it, and make the paired comparison -- runs
+identical in every parameter but the one toggled -- a general, understandable part of the system):
+- [X] /C0. Comparisons as a concept/ (=alberta_buck/sim/compare.py=, b13fa11f; README-simulations.org,
+  "Comparisons"). A spec names an experiment, shared settings and axes of labelled values (the first
+  the reference); every combination is a run, recorded as an ordinary run record
+  =<name>.<axis>-<value>...=; the index =<name>.comparison.json= says which run is which; the report
+  gives every pair that differs on one axis only its differences and the first day the two diverge.
+  Runs from a frozen snapshot of the committed tree. *The premise holds*: the null comparison (two
+  runs, same settings) is identical frame for frame (=make nix-venv-compare-null=, in the smoke
+  tier); a 20-day leak comparison departs on day 0 (K +0.0017 at day 20 without a leak).
+- [X] /C4. Compare in the dashboard/ (63036d80): choose a comparison, the axis to vary, the value to
+  hold each other axis at; the runs drawn one line each, the day each departs marked, a table of
+  figures and differences from the reference. "Any two runs" lists the settings that differ between
+  two records, from their manifests. Checked in Chromium (=make nix-dashboard-compare-check=).
+- [X] /C1. Price profiles/ (00bdf259): =scenario.prices = "three-phase"= (12% over 30 days, evenly
+  out of phase about each constituent's first price; =scenario.walk= scales a log walk whose steps
+  the seed alone keys). The lab's step shock is the existing =price_shock= intervention. Not ported:
+  the lab's =commodities= decade (the history is real commodity paths); =ramp= and =pulse= when a
+  question needs them.
+- [X] /C2. Frozen K/: no code: =deploy.kp = 0.0=, =deploy.ki = 0.0= hold K at k0.
+- [-] /C3. =comparisons/shocks.toml=/: casts (basket with K held; K moving; households; the
+  lifecycle mix as settings) x prices (cycle, cycle with a walk, history) x shock (none; LABR 30%
+  dearer days 45 to 55) x seeds a, b; 120 days, 48 runs. Each cast smoke-tested for 3 days. Running
+  on the Mac (datasim's memory is held by the five-year suite: 53 of 94 GB at day ~900).
+- [ ] /C5. Retire the lab/ when the shocks comparison reads as the lab's did: remove
+  =alberta_buck/sim/control_lab/=, =doc/control-lab*.toml=, its targets and its tests (strict
+  expected failures since the triage).
 
 ** Python five-year economy, before the leak (2026-11-14, evening)
 
@@ -4680,13 +4684,18 @@ failed (it was 61 failed and 11 errors), in 4 min 43 s serially.
   by mix (L5), and record it here.
 - *Running locally*: the five-year economy world on the old defaults
   (=build/runs/economy-5y=), at day 1,790 of 1,825 after 507 minutes.
-- *Owner's to do*: =npm login= and =make nix-webevm-fork-publish= (then core
-  depends on =alberta-buck-webevm= by alias); decide the shadow controller and
-  the catalogue's stress arms.
-- *Next work, in order*: S1's inventory into this plan, then S2 and S3 (JS
-  household parity); the lifecycle suite's results; C1 to C4 (the shock
-  campaign and Compare); wave 2 and 3 retirements as decided; then S4 to S7 and
-  C5.
+- *Owner's to do*: approve the staged publish of =alberta-buck-webevm@0.9.1-clock.1= on npmjs.com
+  (npm shows only its =0.0.0-stage= placeholder); then core depends on it by alias
+  (=core/js/vendor/README.md=). Decide the shadow controller and the catalogue's stress arms.
+- *Running locally*: the =shocks= comparison (48 runs of 120 days, =make nix-venv-compare
+  COMPARE=shocks COMPARE_JOBS=8=, log =build/test/compare-shocks.log=); read it in the dashboard's
+  Compare tab (=make nix-venv-dashboard=), then C5.
+- *Watch*: datasim's memory. The seven five-year worlds hold 7 to 8 GB each at day ~900 (53 of 94
+  GB used); the Python five-year economy here reached 19.8 GB resident by day 1,825. If they
+  grow as fast, the suite may exhaust datasim before it ends; then rerun fewer at once.
+- *Next work, in order*: S3 (JS household parity: the four one-line fixes, the shared counters,
+  the world constants), the shocks comparison's reading and C5, the lifecycle suite's results,
+  wave 2 and 3 retirements as decided, then S2 and S4 to S7.
 ** Resume here (superseded: 2026-11-14, before a compaction)
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed to GitHub (owner's
