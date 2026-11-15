@@ -4230,8 +4230,12 @@ Python server world; the parity harness passes 30 days of both worlds.
 - /sandbox.albertabuck.ca/ (the wallet sandbox) is static on Cloudflare Pages, built and deployed
   by =.github/workflows/sandbox-pages.yml= from master (last: 2026-09-26, the Tevm build). It runs
   wholly in the tab on webevm now; nothing server-side. Production updates with the release merge;
-  meanwhile a preview of this branch (=workflow_dispatch=) at
-  =feature-household-minimal-ecosystem.alberta-buck-sandbox.pages.dev=.
+  meanwhile a preview of this branch (=workflow_dispatch=), deployed 2026-11-15 at
+  https://feature-household-minimal-ec.alberta-buck-sandbox.pages.dev/ (the webevm build; its
+  browser test passed on the runner). The workflow needed two fixes first: =make install= (the
+  pinned Solidity libraries; since 0880db04 the sandbox bundles the whole tree's build, and lib/ is
+  not committed) and =ubuntu-24.04= (=ubuntu-latest= is 26.04, where Playwright has no Chromium yet).
+  Production would have failed the same way on the next push to master.
 - /savings-sandbox.albertabuck.ca/ is the sandbox page served by =alberta_buck/sim/server.py= on
   datasim (127.0.0.1:8797 and 8798, the tunnel's origins), started by hand 45 days ago from the
   =savings-sandbox= worktree (5c4733e6, venv 0.3.0); no systemd unit is installed, and lingering is
