@@ -13,13 +13,13 @@ import { createRequire } from "node:module";
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { loadArtifact, artifactsAvailable, nodeWebevmSession } from "../src/nodefs.js";
+import { loadArtifact, artifactsAvailable, nodeWebevmSession } from "../../src/nodefs.js";
 
 const require = createRequire(import.meta.url);
 let id = null;
 let math = null;
 try {
-  id = await import("../src/identity.js");
+  id = await import("../../src/identity.js");
   math = require("alberta-buck-kernel/math");
 } catch {
   // kernels not built
@@ -31,7 +31,7 @@ const skip = !id || !math
     : false;
 
 test("demo controller: citizens, handshake, payments, time, demurrage", { skip }, async () => {
-  const { BuckWorldApp, SAMPLE_CITIZENS } = await import("../demo/src/app.js");
+  const { BuckWorldApp, SAMPLE_CITIZENS } = await import("../../demo/src/app.js");
 
   let seed = 0xdecafbadn;
   const rng = () => {

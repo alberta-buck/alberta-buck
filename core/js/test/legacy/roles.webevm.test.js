@@ -17,13 +17,13 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { snapshotWebevm, restoreWebevm } from "../src/webevm.js";
-import { loadArtifact, nodeWebevmSession } from "../src/nodefs.js";
-import { encodeJSON, decodeJSON } from "../src/codec.js";
+import { snapshotWebevm, restoreWebevm } from "../../src/webevm.js";
+import { loadArtifact, nodeWebevmSession } from "../../src/nodefs.js";
+import { encodeJSON, decodeJSON } from "../../src/codec.js";
 
 let id = null;
 try {
-  id = await import("../src/identity.js");
+  id = await import("../../src/identity.js");
 } catch {
   // kernels not built
 }
@@ -69,7 +69,7 @@ describe("the ceremonies by role", { skip }, () => {
   const head = async (s = session) => (await s.client.getBlock()).number;
 
   before(async () => {
-    bw = await import("../src/buckworld.js");
+    bw = await import("../../src/buckworld.js");
     let seed = 0x5a4db0en;
     rng = () => {
       seed = (seed * 6364136223846793005n + 1442695040888963407n) & ((1n << 256n) - 1n);
@@ -203,7 +203,7 @@ describe("the ceremonies by role", { skip }, () => {
     await session.send(world.buck, "transfer", [bob.account.address, 1_234n * BUCK],
       { account: chloe.account, gas: 1_000_000n, tag: "pay:bob" });
 
-    const { observe } = await import("../src/observer.js");
+    const { observe } = await import("../../src/observer.js");
     const rows = await observe(world, 0n);
     const find = (fn, pred = () => true) => rows.filter((r) => r.fn === fn && pred(r));
     const arg = (r, name) => r.args.find((a) => a.name === name);
@@ -277,7 +277,7 @@ describe("the ceremonies by role", { skip }, () => {
     assert.ok((await bw.accountView(w2, bob.account.address)).feeOwing >= 0n);
     assert.ok((await bw.creditView(w2, homeId)).currentValue
               < (await bw.creditView(world, homeId)).currentValue);
-    const { observe } = await import("../src/observer.js");
+    const { observe } = await import("../../src/observer.js");
     const fresh = await observe(w2, back.snap.block + 1n);
     assert.deepEqual(fresh.map((r) => r.fn), ["transfer"]);
     assert.equal(session.mismatches.length, 0);

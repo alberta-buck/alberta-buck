@@ -26,7 +26,7 @@ import { join } from "node:path";
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { loadArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
+import { loadAnyArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
 
 let id = null;
 try {
@@ -55,7 +55,7 @@ async function loop({ basket, days, holdDays }) {
   const { runDays } = await import("../src/world.js");
 
   const session = await nodeWebevmSession();
-  const world = await buildEquilibriumWorld(session, loadArtifact, {
+  const world = await buildEquilibriumWorld(session, loadAnyArtifact, {
     identity: id.default, basket,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")),
     feedSeed: 0xF005, stepBp: 120 });

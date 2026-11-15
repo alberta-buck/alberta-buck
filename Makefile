@@ -13,6 +13,9 @@ SHELL		= /bin/bash
 .PHONY: help
 help:
 	@printf '%s\n' \
+	  'Test everything after a change (doc/review/consolidation-plan.org):' \
+	  '  make nix-venv-test-all             # every current test, tier by tier (-k: report every failing tier)' \
+	  '  make nix-venv-test-worlds          # the five-year worlds (hours; WORLDS="life-A econ-F" picks some)' \
 	  'Build and test (README-build.org):' \
 	  '  make nix-install nix-js-deps        # pinned Solidity and JavaScript dependencies' \
 	  '  make nix-venv-setup                # create/repair .venv; install editable Python packages' \
@@ -37,7 +40,7 @@ help:
 	  '  make nix-match-BasketMachineIdentityTest  # certified wheel, private keepers and nominal rewards' \
 	  '  make nix-wallet-sandbox-test       # build and test canonical wallet UI, trades and restore' \
 	  '  make nix-match-BuckNetMintMathTest # bounded issuance inversion and integer fuzzing' \
-	  '  make nix-match-BuckNetMintCompatibilityTest  # ordinary-owner mint and batch quotes' \
+	  '  make nix-match-BuckNetMintCompatibilityTest  # the BuckNet facade (legacy): mint and batch quotes' \
 	  '  make nix-match-BuckNetBurnMathTest # proposed retirement calculation and fuzzing' \
 	  '  make nix-match-BuckNetBurnRoundingTest  # proposed calculation vs real settlements' \
 	  '  make nix-match-BuckNetBurnCompatibilityTest  # ordinary-owner burn and block limits' \
@@ -66,6 +69,49 @@ help:
 	  '  make nix-contracts-dist-check      # compiler and size checks on built artifacts' \
 	  '  make nix-third-party-notices-check # package licences and generated notices' \
 	  'Use make help without Nix or a venv; it starts no services or simulations.'
+
+# ── Test everything (doc/review/consolidation-plan.org) ───────────────────────────────────────
+# After any change to the BUCK ecosystem, one command runs every current test, tier by tier, stopping at
+# the first failure (make -k goes on and reports every failing tier):
+#   make nix-venv-test-all
+# Each tier also runs alone as nix-venv-<tier>:
+#   test-contracts   every forge suite (the same as `test`)
+#   test-kernels     the Rust kernels and the cross-language vectors
+#   test-python-all  core/python and every alberta_buck test (after the contracts and kernels are built)
+#   test-js          every current JS test on webevm (core/js/test/*.test.js; test/legacy/ is retiring)
+#   test-browsers    the net-math, wallet-sandbox and savings-sandbox pages in Chromium
+#   test-packaging   the published contracts, licence notices, Uniswap staging and formatting
+#   test-smoke       30-day economy and lifecycle worlds (Python) and the 30-day JS world
+# The five-year worlds are their own command (hours; datasim.local runs them in parallel):
+#   make nix-venv-test-worlds [WORLD_DAYS=1825] [WORLDS="life-A econ-F"]
+TEST_TIERS	= test-contracts test-kernels test-python-all test-js test-browsers test-packaging test-smoke
+.PHONY: test-all test-contracts test-kernels test-python-all test-js test-browsers test-packaging test-smoke test-worlds
+test-all: $(TEST_TIERS)
+	@echo "test-all: every tier passed"
+test-contracts:
+	$(MAKE) test
+test-kernels:
+	$(MAKE) core-vectors-check poseidon-constants-check core-test-rust
+test-python-all: sim-build core-build-py
+	$(MAKE) core-test-py test-python
+test-js: sim-build core-build-wasm core-build-wasm-web
+	node core/js/bin/bundle-artifacts.mjs
+	$(MAKE) core-test-js
+test-browsers:
+	$(MAKE) core-net-math-test wallet-sandbox-test sandbox-savings-test
+test-packaging:
+	$(MAKE) contracts-dist-check third-party-notices-check stage-uniswap-check fmt-check
+test-smoke: sim-build core-build-py
+	rm -rf build/test/smoke-runs
+	SIM_RUNS=build/test/smoke-runs python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy.toml \
+		--backend pyrevm --days 30 --out build/test/smoke-economy.json
+	SIM_RUNS=build/test/smoke-runs python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy-lifecycle.toml \
+		--backend pyrevm --days 30 --out build/test/smoke-lifecycle.json
+	cd core/js && node bin/eqsim.mjs --days 30
+WORLD_DAYS	?= 1825
+WORLDS		?=
+test-worlds: sim-build core-build-py
+	DAYS=$(WORLD_DAYS) scripts/world-suite.sh $(WORLDS)
 
 # RPC endpoints for forking.  Override via environment or .env file.
 # Free tier: https://dashboard.alchemy.com/ or https://infura.io/
@@ -833,7 +879,7 @@ SIM_TEST	= alberta_buck/test/test_routing_sim_web3.py
 # ── Supported household economy ─────────────────────────────────────
 # One baseline, parameterized policy comparisons and explicit stress arms. Long runs
 # use committed, frozen sources; run economy-smoke to test working-tree edits.
-# These currently deploy legacy signed Buck, not the experimental BuckNet/JubileeFund.
+# They deploy the canonical stack: Buck, BuckCredit, JubileeFund and the basket machine.
 # Saved new vectors and PDFs name the accounting model; older vectors may not.
 # See README-simulations.org for the axes, acceptance rules and output schema.
 #   make nix-venv-economy-plan CELLS=grid    # also centre, policies, stress, probe, paydown
@@ -897,7 +943,7 @@ dashboard-live-check:
 economy-test: sim-build core-build-py core-build-wasm
 	python -m pytest alberta_buck/test/test_carry.py alberta_buck/test/test_household_policy.py alberta_buck/test/test_credit_households.py \
 		alberta_buck/test/test_economy.py alberta_buck/test/test_sim_report.py $(PYTEST_ARGS)
-	cd core/js && node --test test/household-policy.test.js test/credit-household.webevm.test.js
+	cd core/js && node --test test/household-policy.test.js test/legacy/credit-household.webevm.test.js
 
 # Render saved standalone vectors, including short diagnostics, without starting an EVM.
 # SIM_REPORT_VECTORS accepts a space-separated list or shell glob; PDFs are adjacent to JSON.
@@ -917,41 +963,6 @@ sim-report:
 # alone does not redirect them. Use a separate worktree for isolated builds.
 sim-build:	$(ROUTING_ARTIFACT) $(PERMIT2_ARTIFACT) $(ROUTING_PRICES) stage-uniswap
 	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
-
-# ── Uniswap V2 init-code-hash patch ──────────────────────────────────────
-#
-# UniswapV2Library.pairFor hardcodes a CREATE2 init-code-hash constant
-# (lib/v2-periphery/contracts/libraries/UniswapV2Library.sol).  The
-# upstream value is for the mainnet-deployed UniswapV2Pair bytecode; when
-# we compile UniswapV2Pair locally (0.5.16, default optimizer) the
-# bytecode -- and therefore its init-code-hash -- differs, so
-# UniswapV2Router02 computes pair addresses the local factory did not
-# deploy and every router call reverts with "call to non-contract
-# address".
-#
-# Fix: after the local UniswapV2Pair artifact exists, compute its
-# init-code-hash with `cast keccak` and patch UniswapV2Library.sol in
-# place.  Subsequent forge builds recompile Router02 against the
-# corrected library so router.pairFor() == factory.getPair().
-#
-# `lib/` is gitignored (forge install --no-git), so this target is also
-# the source of truth for re-applying the patch on a fresh dependency
-# install.  Run `make v2-patch-init-code-hash` (or any `sim-build`
-# derivative) after `forge install` to re-apply.
-.PHONY: v2-patch-init-code-hash
-v2-patch-init-code-hash:
-	@# Phase 1: ensure UniswapV2Pair artifact exists so we can hash it.
-	@test -f out/UniswapV2Pair.sol/UniswapV2Pair.json || \
-		node scripts/stage-uniswap.mjs >/dev/null
-	@HASH=$$(cast keccak $$(jq -r '.bytecode.object' out/UniswapV2Pair.sol/UniswapV2Pair.json) | sed 's/^0x//'); \
-		LIB=lib/v2-periphery/contracts/libraries/UniswapV2Library.sol; \
-		CURRENT=$$(grep -oE "hex'[0-9a-f]*' // init code hash" $$LIB | sed -E "s/hex'([0-9a-f]*)'.*/\1/"); \
-		if [ "$$CURRENT" = "$$HASH" ]; then \
-			echo "v2-patch: UniswapV2Library hash already correct ($$HASH)"; \
-		else \
-			sed -i.bak "s/hex'[0-9a-f]*' \/\/ init code hash/hex'$$HASH' \/\/ init code hash/" $$LIB; \
-			echo "v2-patch: patched UniswapV2Library init-code-hash $$CURRENT -> $$HASH"; \
-		fi
 
 sim-run:	sim-build
 	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
@@ -2168,6 +2179,8 @@ core-build:	core-build-py core-build-wasm
 core-test-py:
 	python -m pytest core/python/tests -q
 
+# The current JS tests; JS_TEST_ARGS='test/legacy/*.test.js' runs the retiring ones.
+JS_TEST_ARGS	?= 'test/*.test.js'
 core-test-js: core-js-check-worktree
 	@test -d core/js/node_modules || { echo "core/js deps missing; run: make nix-core-js-deps"; exit 1; }
 	cd core/js && node --test $(JS_TEST_ARGS)

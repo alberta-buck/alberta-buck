@@ -11,11 +11,11 @@ import { join } from "node:path";
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { loadArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
+import { loadArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../../src/nodefs.js";
 
 let id = null;
 try {
-  id = await import("../src/identity.js");
+  id = await import("../../src/identity.js");
 } catch {
   // kernel not built
 }
@@ -31,7 +31,7 @@ const skip = !id ? "identity kernel not built (make nix-core-build-wasm)"
   : false;
 
 test("eqapp: dynamic savers/debtors + live chart panels", { skip }, async () => {
-  const { EqWorldApp } = await import("../demo/src/eqapp.js");
+  const { EqWorldApp } = await import("../../demo/src/eqapp.js");
 
   const app = new EqWorldApp({
     session: await nodeWebevmSession(),

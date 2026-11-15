@@ -17,11 +17,11 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { loadAnyArtifact, nodeWebevmSession } from "../src/nodefs.js";
+import { loadAnyArtifact, nodeWebevmSession } from "../../src/nodefs.js";
 
 let id = null;
 try {
-  id = await import("../src/identity.js");
+  id = await import("../../src/identity.js");
 } catch {
   // kernels not built
 }
@@ -48,8 +48,8 @@ describe("the BUCK/USDC market through an unbound router", { skip }, () => {
   let uma;
 
   before(async () => {
-    bw = await import("../src/buckworld.js");
-    mk = await import("../src/market.js");
+    bw = await import("../../src/buckworld.js");
+    mk = await import("../../src/market.js");
     let seed = 0x3a5e7n;
     rng = () => {
       seed = (seed * 6364136223846793005n + 1442695040888963407n) & ((1n << 256n) - 1n);

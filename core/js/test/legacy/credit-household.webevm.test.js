@@ -5,15 +5,15 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { decodeFunctionData, encodeFunctionData } from "viem";
-import { loadArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
+import { loadAnyArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../../src/nodefs.js";
 import { CreditHouseholdAgent, CreditSaverAgent, HouseholdInvestorAgent, HouseholdPopulationAgent }
-  from "../src/agents/credit-household.js";
-import { issuance } from "../src/agents/household-policy.js";
-import { buildEquilibriumWorld } from "../src/scenarios/eqworld.js";
-import { advanceTime, DAY } from "../src/buckworld.js";
+  from "../../src/agents/credit-household.js";
+import { issuance } from "../../src/agents/household-policy.js";
+import { buildEquilibriumWorld } from "../../src/scenarios/eqworld.js";
+import { advanceTime, DAY } from "../../src/buckworld.js";
 
 let identity;
-try { identity = (await import("../src/identity.js")).default; } catch { /* kernel unavailable */ }
+try { identity = (await import("../../src/identity.js")).default; } catch { /* kernel unavailable */ }
 const urPath = join(repoRoot(), "alberta_buck/sim/artifacts/UniversalRouter.json");
 const skip = !identity || !artifactsAvailable() || !existsSync(urPath) ? "build kernels and contract artifacts first" : false;
 const E6 = 1_000_000n;
@@ -25,7 +25,7 @@ test("machine bootstrap distributes its capital by declared token weights", { sk
   const s = await nodeWebevmSession();
   const tokens = [{ sym: "A", name: "A", dec: 18, p0: 2_500_000n, weightBp: 7500 },
     { sym: "B", name: "B", dec: 18, p0: 4_000_000n, weightBp: 2500 }];
-  const w = await buildEquilibriumWorld(s, loadArtifact, { identity, basket: "machine", tokens,
+  const w = await buildEquilibriumWorld(s, loadAnyArtifact, { identity, basket: "machine", tokens,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
   const declared = await Promise.all(tokens.map((_, i) => s.call(w.basket, "constituents", [BigInt(i)])));
   assert.deepEqual(declared.map((c) => Number(c[9])), [7500, 2500]);
@@ -38,7 +38,7 @@ test("machine bootstrap distributes its capital by declared token weights", { sk
 
 test("household exit retains partial claims, retries release and never sells credit", { skip }, async () => {
   const s = await nodeWebevmSession();
-  const w = await buildEquilibriumWorld(s, loadArtifact, { identity, basket: "machine",
+  const w = await buildEquilibriumWorld(s, loadAnyArtifact, { identity, basket: "machine",
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
   const a = new CreditSaverAgent({ account: privateKeyToAccount(generatePrivateKey()), member: "exit-retry",
     settings: { ...settings, carry_utilization: .3, max_impact_bp: 2000, surplus_policy: "basket" } });
@@ -126,7 +126,7 @@ test("household exit retains partial claims, retries release and never sells cre
 
 for (const basket of ["prorata", "machine"]) test(`households: live ${basket} accounting and reusable credit`, { skip }, async () => {
   const session = await nodeWebevmSession();
-  const w = await buildEquilibriumWorld(session, loadArtifact, { identity, basket,
+  const w = await buildEquilibriumWorld(session, loadAnyArtifact, { identity, basket,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
   const make = async (Class, member, overrides = {}) => {
     const a = new Class({ account: privateKeyToAccount(generatePrivateKey()), member, settings: { ...settings, ...overrides } });
@@ -276,7 +276,7 @@ for (const basket of ["prorata", "machine"]) test(`households: live ${basket} ac
 
 for (const basket of ["prorata", "machine"]) test(`households: ${basket} investors and a live population`, { skip }, async () => {
   const session = await nodeWebevmSession();
-  const w = await buildEquilibriumWorld(session, loadArtifact, { identity, basket,
+  const w = await buildEquilibriumWorld(session, loadAnyArtifact, { identity, basket,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
   const make = async (member, overrides = {}) => {
     const a = new HouseholdInvestorAgent({ account: privateKeyToAccount(generatePrivateKey()), member, settings: {

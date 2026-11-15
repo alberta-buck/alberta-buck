@@ -13,14 +13,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-import { devAccount } from "../src/backends.js";
-import { loadArtifact, artifactsAvailable, nodeWebevmSession } from "../src/nodefs.js";
+import { devAccount } from "../../src/backends.js";
+import { loadArtifact, artifactsAvailable, nodeWebevmSession } from "../../src/nodefs.js";
 
 const require = createRequire(import.meta.url);
 let id = null;
 let math = null;
 try {
-  id = await import("../src/identity.js");
+  id = await import("../../src/identity.js");
   math = require("alberta-buck-kernel/math");
 } catch {
   // kernels not built
@@ -33,7 +33,7 @@ const skip = !id || !math
 
 test("buckworld: onboard, activate credit, transfer, demurrage == kernel", { skip }, async () => {
   const { buildBuckWorld, onboard, createCredit, identityApprove, advanceTime, DAY } =
-    await import("../src/buckworld.js");
+    await import("../../src/buckworld.js");
 
   // Deterministic scalar stream (live use draws WebCrypto).
   let seed = 0xb0c4a11cen;

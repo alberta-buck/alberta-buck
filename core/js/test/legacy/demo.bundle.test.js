@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const demoDir = join(dirname(fileURLToPath(import.meta.url)), "..", "demo");
+const demoDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "demo");
 const bundle = join(demoDir, "app.js");
 const skip = existsSync(bundle) && existsSync(join(demoDir, "wasm-web", "buck_identity_bg.wasm"))
   ? false
