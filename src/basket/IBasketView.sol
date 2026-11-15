@@ -7,6 +7,8 @@ interface IBasketView {
     function governance() external view returns (address);
     function equity() external view returns (uint256);
     function twapWindow() external view returns (uint32);
+    /// @dev The observations the basket's own pools keep (the price book widens its other pools to it).
+    function observationCardinality() external view returns (uint16);
     /// @dev True while the references price pools in nominal rather than net
     ///      BUCK (BasketVenueFacet.setNominalReference; comparison only).
     function nominalReference() external view returns (bool);

@@ -32,7 +32,7 @@ abstract contract BasketDeskFixture is BuckBasketEquityFixture {
         desk = new BasketDesk(address(buck), address(ctrl), address(b), GOV);
         _bind(address(desk), false);                      // its own account: non-Carrying
         vm.startPrank(GOV);
-        desk.setVenue(address(new BasketVenueFacet()));
+        desk.setVenue(address(new BasketVenueFacet(address(0))));
         desk.mirrorConstituents();
         desk.openCredit(address(credit), FACE);
         desk.setMonetaryDirector(address(md));

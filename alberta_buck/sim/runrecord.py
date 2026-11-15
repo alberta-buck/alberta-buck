@@ -144,6 +144,7 @@ def frame_record(flat: dict, tokens) -> dict:
         "block": net.get("block"),
         "control": dict(k=_ratio(flat.get("buckK")), bvib=_ratio(flat.get("basketVal")),
                         bvib_nominal=_ratio(flat.get("basketValNominal")),
+                        bvib_usdc=_ratio(flat.get("eq_book_usdc")) or None,
                         pid=dict(p=flat.get("pid_p"), i=flat.get("pid_i"), d=flat.get("pid_d"))),
         "market": dict(buck_usd=_price(flat.get("buck_usd")),
                        tokens=[dict(symbol=s, ref_usd=_price(r), usdc=_price(u), buck=_price(b))
@@ -151,6 +152,12 @@ def frame_record(flat: dict, tokens) -> dict:
                        pools=[dict(symbol=s, buck=_scaled(row.get("nominal_scaled")), net=_carry(row))
                               for s, row in zip(tokens, carried)] if carried else None,
                        dollar_pool_net=_carry((net.get("carrying") or {}).get("buck_usdc")),
+                       book=dict(buck_bid=_price(flat.get("eq_book_buck_bid")) or None,
+                                 buck_ask=_price(flat.get("eq_book_buck_ask")) or None,
+                                 bids=[dict(symbol=s, buck=_price(row[0]), usdc=_price(row[1]) or None,
+                                            via_usdc=bool(row[2]), via_buck=bool(row[3]))
+                                       for s, row in zip(tokens, flat.get("eq_book_bids") or [])])
+                       if flat.get("eq_book_bids") else None,
                        arb=dict(cycles=flat.get("cycleTrades"), direct=flat.get("directTrades"), ub=flat.get("ubTrades"))),
         "supply": dict(total=supply, active_principal=net.get("active_principal"),
                        deferred_principal=net.get("deferred_principal"), basket_lien=flat.get("eq_lien"),

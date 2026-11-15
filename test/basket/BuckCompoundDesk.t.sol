@@ -114,7 +114,7 @@ abstract contract BuckCompoundDeskFixture is JubileeEquityFixture {
         _bind(address(desk), false, address(this));
         vm.startPrank(GOV);
         desk.enableNetAccounting();
-        desk.setVenue(address(new BasketVenueFacet()));
+        desk.setVenue(address(new BasketVenueFacet(address(0))));
         desk.mirrorConstituents();
         desk.openCredit(address(credit), face);
         desk.setMonetaryDirector(address(policy));

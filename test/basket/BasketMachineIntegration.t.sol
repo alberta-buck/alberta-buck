@@ -25,7 +25,7 @@ contract BasketMachineIntegrationTest is BasketDeskFixture {
         machine = new BasketMachineWheel(address(buck), address(0xDEAD), GOV, 0, 0);
         bindCarryingPool(reg, address(machine));
         vm.startPrank(GOV);
-        b.setVenue(address(new BasketVenueFacet()));
+        b.setVenue(address(new BasketVenueFacet(address(0))));
         b.setEquityWheel(address(new BasketUpkeepFacet(address(new ControlledPairIntent(address(b))), address(service), 0, 0)));
         b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, 0, 0));
         b.setNetMark(true);

@@ -6,24 +6,38 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 import {UniswapV3OracleLib} from "../lib/UniswapV3OracleLib.sol";
 import {CarryRatio} from "../lib/CarryRatio.sol";
 
+interface IPriceBook {
+    function basket() external view returns (address);
+    function fresh() external view returns (bool);
+    function rawValue() external view returns (int256);
+}
+
 /// @notice Venue for the replacement machine. Missing TWAP history is an
 ///         unavailable price, including on K's raw reference path. Pools
 ///         must be seeded and aged before the basket accepts valued entries.
 contract BasketVenueFacet is BuckBasketUniswapV3 {
+    /// @notice The basket's price book (BasketReference), read by K while its
+    ///         sample is fresh; 0 for a shell without one.
+    IPriceBook public immutable book;
+
     error UnavailablePrice();
 
-    /// @notice The basket's value in NET BUCK: K's raw reference. A TOKEN/BUCK
-    ///         pool holds Carrying BUCK, whose accrued demurrage is carried, not
-    ///         paid: BUCK leaving the pool delivers net x nominal / gross of
-    ///         full-value BUCK (BuckCash.move), so a TOKEN sold into the pool at
-    ///         its nominal price P fetches P x net / gross. Each constituent's
-    ///         TWAP price is taken at its pool's ratio, as the desk's marks are
-    ///         (BasketDesk._venueMarks). Read nominally while governance sets
-    ///         the nominal reference (the measure before 2026-11-15), for
-    ///         comparison only.
+    constructor(address book_) {
+        book = IPriceBook(book_);
+    }
+
+    /// @notice The basket's value in NET BUCK: K's raw reference. While the
+    ///         basket's price book is fresh, its last sample: each TOKEN at
+    ///         what its best route fetches in net BUCK. Otherwise read live,
+    ///         directly: a TOKEN/BUCK pool holds Carrying BUCK, whose accrued
+    ///         demurrage is carried, not paid, so a TOKEN sold into the pool at
+    ///         its nominal price P fetches P x net / gross (lib/CarryRatio.sol).
+    ///         Read nominally while governance sets the nominal reference (the
+    ///         measure before 2026-11-15), for comparison only.
     function basketValueInBuck() public view override returns (int256) {
         if (twapWindow == 0) revert UnavailablePrice();
         if (_nominalReference || constituents.length == 0 || !_netShell()) return super.basketValueInBuck();
+        if (address(book) != address(0) && book.basket() == address(this) && book.fresh()) return book.rawValue();
         int256 total;
         for (uint256 i = 0; i < constituents.length; i++) {
             Constituent storage c = constituents[i];

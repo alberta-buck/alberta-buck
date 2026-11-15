@@ -349,40 +349,6 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
       assert.ok(await s.call(buck, "balanceOf", [owner]) >= plan.candidate.reserveRequired);
     }
   });
-  await t.test("available activated credit issues without redundant reserve purchases", async () => {
-    for (const [i, keepReserve] of [true, false].entries()) {
-      const account = { address: `0x${(0xabe20n + BigInt(i)).toString(16).padStart(40, "0")}` };
-      const a = new CreditHouseholdAgent({ account, member: `existing-room-${i}`, settings: { pay_day: 0, home_k: 1000, premium_bp: 100,
-        apr: .06, ltv: .4, theta: 3, risk: 0, switch_k: 0, max_impact_bp: 100, penalty_months: 0, utilization: .0001, divest_rate: 0 } });
-      await a.setup(world); await world.households.openTrading(account);
-      const owner = world.holderAddress(account), [id] = world._credits.get(account.address), proxy = await world.proxyFor(account);
-      await s.send(world.usdc, "mint", [owner, a.buffer]);
-      await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
-        functionName: "transfer", args: [owner, 20n * RAW] })]);
-      const insurer = await s.call(credit, "insurerOf", [id]);
-      await world.netCreditOps.issue(owner, id, 100n * RAW, 40n * RAW, 10n * RAW, await s.call(buck, "insurerPool", [insurer]));
-      a.joined = true;
-      if (!keepReserve) await s.send(proxy, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
-        functionName: "transfer", args: [world.simlp.address, await s.call(buck, "balanceOf", [owner])] })]);
-      const oldReserve = await s.call(buck, "balanceOf", [owner]);
-      await advanceTime(world, 365 * DAY + 6 * 3600);
-      await s.send(world.kctrl, "compute"); // normal external control work precedes the read-only decision
-      const actualReserve = await s.call(buck, "balanceOf", [owner]);
-      assert.ok(keepReserve ? actualReserve < oldReserve : actualReserve === 0n && oldReserve === 0n);
-      const book = await world.netCreditOps.household(owner, [id]);
-      const assessed = await a.assessNetRefinance(world, 1, { expected_relief_rate: .02, expected_refund_growth: -.02,
-        expected_wallet_growth: -.02, reserve_floor: oldReserve });
-      const { plan, context } = assessed;
-      assert.ok(plan !== null); assert.equal(plan.candidate.coverage, 0n); assert.equal(plan.candidate.premium, 0n);
-      assert.equal(plan.reserve_buy_net, 0n); assert.equal(plan.reserve_buy_max_usdc, 0n); assert.equal(plan.reserve_floor, actualReserve);
-      assert.ok(plan.export_buck > 0n);
-      await a.startNetRefinance(world, plan, 1, {}, { context });
-      assert.equal(a.refinanceMachine.status().status, "complete", JSON.stringify({ error: a.lastError,
-        phase: a.refinanceMachine.status(), refusal: s.lastRevertReason }, (_, v) => typeof v === "bigint" ? String(v) : v));
-      assert.equal((await world.netCreditOps.household(owner, [id])).issued, book.issued + plan.candidate.requestedSpendable);
-      assert.ok(await s.call(buck, "balanceOf", [owner]) >= actualReserve);
-    }
-  });
   await t.test("household refinancing commits receipt-backed phases and exact public histories", async (t) => {
     const b = Object.fromEntries(Object.entries(REFINANCE.base).map(([k, v]) => [k, BigInt(v)]));
     for (const [index, vector] of REFINANCE.cases.entries()) await t.test(vector.name, async () => {
@@ -531,6 +497,43 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
         assert.equal(machine.status().status, "pending");
       }
     });
+  });
+  // After the refinancing vectors: this one ages the shared world a year, and an idle year leaves
+  // the pools' BUCK 2% hollow at unchanged quotes, so the net BVIB reads the BUCK 2% dear and the
+  // funding factor (the vectors' reserve requirement) falls to zero.
+  await t.test("available activated credit issues without redundant reserve purchases", async () => {
+    for (const [i, keepReserve] of [true, false].entries()) {
+      const account = { address: `0x${(0xabe20n + BigInt(i)).toString(16).padStart(40, "0")}` };
+      const a = new CreditHouseholdAgent({ account, member: `existing-room-${i}`, settings: { pay_day: 0, home_k: 1000, premium_bp: 100,
+        apr: .06, ltv: .4, theta: 3, risk: 0, switch_k: 0, max_impact_bp: 100, penalty_months: 0, utilization: .0001, divest_rate: 0 } });
+      await a.setup(world); await world.households.openTrading(account);
+      const owner = world.holderAddress(account), [id] = world._credits.get(account.address), proxy = await world.proxyFor(account);
+      await s.send(world.usdc, "mint", [owner, a.buffer]);
+      await s.send(world.simlp, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
+        functionName: "transfer", args: [owner, 20n * RAW] })]);
+      const insurer = await s.call(credit, "insurerOf", [id]);
+      await world.netCreditOps.issue(owner, id, 100n * RAW, 40n * RAW, 10n * RAW, await s.call(buck, "insurerPool", [insurer]));
+      a.joined = true;
+      if (!keepReserve) await s.send(proxy, "exec", [buck.address, encodeFunctionData({ abi: buck.abi,
+        functionName: "transfer", args: [world.simlp.address, await s.call(buck, "balanceOf", [owner])] })]);
+      const oldReserve = await s.call(buck, "balanceOf", [owner]);
+      await advanceTime(world, 365 * DAY + 6 * 3600);
+      await s.send(world.kctrl, "compute"); // normal external control work precedes the read-only decision
+      const actualReserve = await s.call(buck, "balanceOf", [owner]);
+      assert.ok(keepReserve ? actualReserve < oldReserve : actualReserve === 0n && oldReserve === 0n);
+      const book = await world.netCreditOps.household(owner, [id]);
+      const assessed = await a.assessNetRefinance(world, 1, { expected_relief_rate: .02, expected_refund_growth: -.02,
+        expected_wallet_growth: -.02, reserve_floor: oldReserve });
+      const { plan, context } = assessed;
+      assert.ok(plan !== null); assert.equal(plan.candidate.coverage, 0n); assert.equal(plan.candidate.premium, 0n);
+      assert.equal(plan.reserve_buy_net, 0n); assert.equal(plan.reserve_buy_max_usdc, 0n); assert.equal(plan.reserve_floor, actualReserve);
+      assert.ok(plan.export_buck > 0n);
+      await a.startNetRefinance(world, plan, 1, {}, { context });
+      assert.equal(a.refinanceMachine.status().status, "complete", JSON.stringify({ error: a.lastError,
+        phase: a.refinanceMachine.status(), refusal: s.lastRevertReason }, (_, v) => typeof v === "bigint" ? String(v) : v));
+      assert.equal((await world.netCreditOps.household(owner, [id])).issued, book.issued + plan.candidate.requestedSpendable);
+      assert.ok(await s.call(buck, "balanceOf", [owner]) >= actualReserve);
+    }
   });
   await t.test("household calendar recovers actual flows without stopping the shadow", async (t) => {
     const phases = ["income", "living", "insurance", "mortgage"], BANK = "0x000000000000000000000000000000000000dEaD";

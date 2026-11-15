@@ -476,7 +476,24 @@
    "ubTrades": 5,
    "eq_headroom": -250000,
    "eq_mark": 14660000,
-   "basketValNominal": 1027500000000000000
+   "basketValNominal": 1027500000000000000,
+   "eq_book_usdc": 1030000000000000000,
+   "eq_book_buck_bid": 1010000,
+   "eq_book_buck_ask": 1012020,
+   "eq_book_bids": [
+    [
+     247000,
+     252000,
+     true,
+     false
+    ],
+    [
+     7780000,
+     7900000,
+     false,
+     true
+    ]
+   ]
   }
  ],
  "frames": [
@@ -487,6 +504,7 @@
     "k": 0.75,
     "bvib": 0.99,
     "bvib_nominal": null,
+    "bvib_usdc": null,
     "pid": {
      "p": -100,
      "i": -2000,
@@ -522,6 +540,7 @@
      }
     ],
     "dollar_pool_net": null,
+    "book": null,
     "arb": {
      "cycles": 10,
      "direct": 5,
@@ -632,6 +651,7 @@
     "k": 0.749,
     "bvib": 1.01,
     "bvib_nominal": 1.015,
+    "bvib_usdc": null,
     "pid": {
      "p": -100,
      "i": -2000,
@@ -667,6 +687,7 @@
      }
     ],
     "dollar_pool_net": null,
+    "book": null,
     "arb": {
      "cycles": 17,
      "direct": 7,
@@ -777,6 +798,7 @@
     "k": 0.747,
     "bvib": 1.02,
     "bvib_nominal": 1.0275,
+    "bvib_usdc": 1.03,
     "pid": {
      "p": -100,
      "i": -2000,
@@ -812,6 +834,26 @@
      }
     ],
     "dollar_pool_net": 0.998,
+    "book": {
+     "buck_bid": 1.01,
+     "buck_ask": 1.01202,
+     "bids": [
+      {
+       "symbol": "LABR",
+       "buck": 0.247,
+       "usdc": 0.252,
+       "via_usdc": true,
+       "via_buck": false
+      },
+      {
+       "symbol": "CNST",
+       "buck": 7.78,
+       "usdc": 7.9,
+       "via_usdc": false,
+       "via_buck": true
+      }
+     ]
+    },
     "arb": {
      "cycles": 24,
      "direct": 9,

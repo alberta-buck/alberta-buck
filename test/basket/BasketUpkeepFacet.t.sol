@@ -78,7 +78,7 @@ contract BasketUpkeepFacetTest is BuckBasketEquityTest {
         intent = new ControlledPairIntent(address(b));
         parity = new ParityStub();
         vm.startPrank(GOV);
-        b.setVenue(address(new BasketVenueFacet()));
+        b.setVenue(address(new BasketVenueFacet(address(0))));
         b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(parity), parityGain, parityGainDear)));
         b.setResponse(BuckBasketEquityStorage.ResponseParams(3000, 1800, 0, 0));
         b.setNetMark(true);

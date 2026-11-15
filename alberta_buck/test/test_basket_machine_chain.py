@@ -9,6 +9,7 @@ pytest.importorskip("web3")
 pytest.importorskip("pyrevm")
 
 from alberta_buck.sim import basket_machine
+from alberta_buck.sim.chain import load_artifact
 from alberta_buck.sim import experiment as expmod
 from alberta_buck.sim.loop import run
 from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
@@ -74,6 +75,54 @@ def test_an_experiment_selects_and_sizes_the_machine(tmp_path):
         assert d.basket.functions.netMark().call()
         assert last["eq_lien"] > 0 and last["eq_held_buck"] > 0 and last["eq_liquidity"] > 0
         assert abs(last["eq_lien"] - last["eq_held_buck"]) < last["eq_equity"] // 2
+
+
+def _twap_tick(pool, window):
+    """A V3 pool's mean tick over the window, rounded toward minus infinity (OracleLibrary.consult)."""
+    cumulatives = pool.functions.observe([window, 0]).call()[0]
+    return (cumulatives[1] - cumulatives[0]) // window
+
+
+def _quote(tick, amount, base, quote):
+    """`amount` of `base` in `quote` at the tick (getQuoteAtTick, in floating point)."""
+    price = 1.0001 ** tick                      # token1 per token0
+    return amount * price if int(base, 16) < int(quote, 16) else amount / price
+
+
+def test_the_price_book_takes_each_tokens_best_net_route_and_k_reads_it(tmp_path):
+    # Owner, 2026-11-15: a TOKEN is worth what selling it fetches in net BUCK by the best route --
+    # into its own pool at that pool's net / gross, or for USDC and the USDC into the dollar pool at
+    # the dollar pool's. Recomputed here from the pools, against the book's live reading.
+    with simulated(tmp_path, "equity-machine", days=3) as (d, frames):
+        book = d.signals
+        assert book.functions.markets().call() == d.wheel.address
+        assert d.wheel.functions.triangleCount().call() == len(d.tokens), "the routes through USDC"
+        window = int(d.basket.functions.twapWindow().call())
+        pool_abi, _ = load_artifact("UniswapV3Pool")
+        pool = lambda a: d.w3.eth.contract(address=a, abi=pool_abi)
+        ratio = lambda a: (lambda g, n: n / g if g else 1.)(*d.buck.functions.accountBalancesScaled(a).call())
+        buck, usdc = d.buck.address, d.usdc.address
+        dollar = _twap_tick(pool(d.pool_ub), window)
+        twap, _spot, value_usdc, bid, ask, bids = book.functions.prices().call()
+        routes = []
+        for i, token in enumerate(d.tokens):
+            unit = 10 ** d.dec[i]
+            p_b = _quote(_twap_tick(pool(d.pool_buck[i]), window), unit, token.address, buck)
+            p_u = _quote(_twap_tick(pool(d.pool_usdc[i]), window), unit, token.address, usdc)
+            direct = p_b * ratio(d.pool_buck[i])
+            via = _quote(dollar, p_u, usdc, buck) * ratio(d.pool_ub)
+            got_buck, got_usdc, via_usdc, via_buck = bids[i]
+            assert got_buck == pytest.approx(max(direct, via), rel=1e-5), d.tokens[i]
+            assert via_usdc == (via > direct) or abs(via - direct) < direct * 1e-5
+            assert got_usdc == pytest.approx(max(p_u, _quote(dollar, p_b, buck, usdc)), rel=1e-5)
+            routes.append(via_usdc)
+        assert value_usdc > 0 and bid > 0 and ask >= bid
+        assert ask == pytest.approx(bid / ratio(d.pool_ub), rel=1e-5), "a bought BUCK arrives hollow"
+        # K reads the book's sample while it is fresh; the frames record it.
+        assert book.functions.fresh().call()
+        assert d.basket.functions.basketValueInBuck().call() == book.functions.rawValue().call()
+        assert frames[-1]["basketVal"] == frames[-1]["eq_signal_raw"]
+        assert frames[-1]["eq_book_usdc"] > 0 and len(frames[-1]["eq_book_bids"]) == len(d.tokens)
 
 
 def test_machine_settings_are_the_experiments_then_the_environments_then_the_labs(monkeypatch):

@@ -44,7 +44,7 @@ contract BasketMachineTest is BuckBasketEquityTest {
         ControlledPairIntent intent = new ControlledPairIntent(address(b));
         intent.setRate(0);
         vm.startPrank(GOV);
-        b.setVenue(address(new BasketVenueFacet()));
+        b.setVenue(address(new BasketVenueFacet(address(0))));
         vm.stopPrank();
         if (withSignal) {
             signals = new BasketReference(address(b), 1800, 3600, 500);

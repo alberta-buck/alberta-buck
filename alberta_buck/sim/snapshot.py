@@ -255,6 +255,13 @@ def _eqsave_frame(d, ctr) -> dict:
         f["eq_signal_fresh"] = bool(d.signals.functions.fresh().call())
         f["eq_signal_at"] = int(d.signals.functions.lastSampleAt().call())
         f["eq_signal_raw"] = int(d.signals.functions.rawValue().call())
+        # The price book's last sample (BasketReference): the basket in USDC, the BUCK's bid and
+        # ask in USDC, and each TOKEN's best-route bids (raw per TOKEN unit) and routes.
+        book = d.signals.functions
+        f["eq_book_usdc"] = int(book.valueUsdc().call())
+        f["eq_book_buck_bid"] = int(book.buckBid().call())
+        f["eq_book_buck_ask"] = int(book.buckAsk().call())
+        f["eq_book_bids"] = [list(book.bids(i).call()) for i in range(int(book.sampledConstituents().call()))]
         policy = getattr(d, "monetary_policy", None)
         if policy is not None:
             f["desk_side"] = int(policy.functions.side().call())

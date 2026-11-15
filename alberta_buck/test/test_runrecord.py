@@ -25,11 +25,16 @@ def test_frame_record_groups_a_snapshot_frame_by_component():
     assert sum(held.values()) == f["supply"]["total"], "everyone else is supply less the Carrying accounts"
     assert held == dict(dollar_pool=14_800_000, token_pools=15_600_000, basket=250_000, others=11_850_000)
     assert f["health"] == dict(errors=2, relief_unavailable=0, faults=1, events=2)
-    assert f["jubilee"]["relief_available"] == 1_500_000 and f["control"] == dict(k=.747, bvib=1.02, bvib_nominal=1.0275, pid=dict(p=-100, i=-2000, d=3))
+    assert f["jubilee"]["relief_available"] == 1_500_000 and f["control"] == dict(k=.747, bvib=1.02, bvib_nominal=1.0275, bvib_usdc=1.03,
+                                                                       pid=dict(p=-100, i=-2000, d=3))
     assert f["market"]["tokens"][1] == dict(symbol="CNST", ref_usd=7.8, usdc=7.79, buck=7.81)
     # The pools' BUCK net of its carried fee (BVIB is read at it; bvib_nominal is the quoted measure).
     assert [x["net"] for x in f["market"]["pools"]] == [.99, .995] and f["market"]["dollar_pool_net"] == .998
     assert FIXTURE["frames"][0]["market"]["pools"][0]["net"] is None, "a fresh pool's ratio is not recorded as 1"
+    # The price book: each TOKEN's best-route bids, and the BUCK's bid and ask in USDC; absent before it samples.
+    assert f["market"]["book"]["bids"][0] == dict(symbol="LABR", buck=.247, usdc=.252, via_usdc=True, via_buck=False)
+    assert (f["market"]["book"]["buck_bid"], f["market"]["book"]["buck_ask"]) == (1.01, 1.01202)
+    assert FIXTURE["frames"][0]["market"]["book"] is None and FIXTURE["frames"][0]["control"]["bvib_usdc"] is None
     # A world without the canonical reads or households records their absence, never a zero.
     bare = runrecord.frame_record(dict(day=4, supply=10, buckK=7 * 10**17), [])
     assert bare["supply"]["holders"] is None and bare["jubilee"] is None and bare["households"] is None

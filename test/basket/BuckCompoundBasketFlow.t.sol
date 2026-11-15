@@ -34,6 +34,34 @@ contract CutKAfterCompoundPosition is BuckBasketUniswapV3 {
     }
 }
 
+interface IV3Factory {
+    function createPool(address a, address b, uint24 fee) external returns (address);
+}
+
+interface IV3Init {
+    function initialize(uint160 sqrtPriceX96) external;
+    function slot0() external view returns (uint160, int24, uint16, uint16, uint16, uint8, bool);
+}
+
+/// @dev The wheel's arbitrage configuration, as the price book reads it (ArbKind).
+contract BookMarkets {
+    struct Triangle { address token; address own; address usd; uint256 index; }
+    address public arbBuck;
+    address public arbUsdc;
+    address public poolUb;
+    Triangle[] public triangles;
+
+    constructor(address buck_, address usdc_, address ub_) {
+        (arbBuck, arbUsdc, poolUb) = (buck_, usdc_, ub_);
+    }
+
+    function add(address token, address own, address usd, uint256 index) external {
+        triangles.push(Triangle(token, own, usd, index));
+    }
+
+    function triangleCount() external view returns (uint256) { return triangles.length; }
+}
+
 /// @dev Actual Buck, claim book, fund, credit NFT and V3 pools. Harness probes
 ///      isolate funding/rollback boundaries; BasketPublicLifecycleTest covers
 ///      the unmodified shell's public opening and complete V3 lifecycle.
@@ -83,7 +111,7 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         ControlledPairIntent intent = new ControlledPairIntent(address(basket));
         intent.setRate(0);
         vm.startPrank(GOV);
-        basket.setVenue(address(new BasketVenueFacet()));
+        basket.setVenue(address(new BasketVenueFacet(address(0))));
         basket.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(0), 0, 0)));
         vm.stopPrank();
     }
@@ -132,6 +160,109 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         assertEq(venue.basketValueInBuck(), netValue);
         vm.expectRevert();
         BasketVenueFacet(address(basket)).setNominalReference(true);   // governance only
+    }
+
+    /// @dev A full-range V3 pool of `base` at `quoteRaw` per `baseRaw`, initialized, empty.
+    function _newPool(address base, address quote, uint256 baseRaw, uint256 quoteRaw) private returns (address pool) {
+        pool = IV3Factory(address(basket.v3Factory())).createPool(base, quote, 3000);
+        (uint256 num, uint256 den) = base < quote ? (quoteRaw, baseRaw) : (baseRaw, quoteRaw);
+        IV3Init(pool).initialize(uint160(Math.sqrt(Math.mulDiv(num, 1 << 192, den))));
+    }
+
+    /// @dev The dollar pool at a USDC per BUCK, fresh; TOKENs 0 and 1 at a USDC each (as in
+    ///      BUCK), TOKEN 2 at 0.95; and the wheel's triangles naming them.
+    function _bookMarkets() private returns (BookMarkets m, address[3] memory usd) {
+        EqToken usdc = new EqToken("USD Coin", "USDC", 6);
+        usdc.mint(address(this), 1_000_000e6);
+        address dollar = _newPool(address(buck), address(usdc), 1e6, 1e6);
+        _bind(dollar, true, address(this));
+        IPool(dollar).mint(address(this), -887220, 887220, 1e9, "");
+        m = new BookMarkets(address(buck), address(usdc), dollar);
+        for (uint256 i; i < 3; ++i) {
+            usd[i] = _newPool(address(assets[i]), address(usdc), 1e18, i == 2 ? 0.95e6 : 1e6);
+            IPool(usd[i]).mint(address(this), -887220, 887220, 1e14, "");
+            m.add(address(assets[i]), pools[i], usd[i], i);
+        }
+    }
+
+    // The price book (owner, 2026-11-15): each TOKEN at what its best route fetches in net
+    // BUCK -- its own pool at that pool's net / gross, or USDC and the USDC into the dollar
+    // pool at the dollar pool's -- and in USDC, directly or through BUCK. K reads the book's
+    // sample while it is fresh, the live direct net reference after.
+    function test_priceBookPricesEachTokenByItsBestNetRoute() public {
+        _pools();
+        _machine();
+        BasketReference book = new BasketReference(address(basket), 1800, 3600, 500);
+        vm.warp(vm.getBlockTimestamp() + YEAR);            // the TOKEN/BUCK pools age a year, idle
+        (BookMarkets m, address[3] memory usd) = _bookMarkets();
+        vm.expectRevert(BasketReference.NotGovernance.selector);
+        book.setMarkets(address(m));
+        vm.prank(GOV);
+        book.setMarkets(address(m));
+        (,,,, uint16 next,,) = IV3Init(usd[0]).slot0();
+        assertEq(next, basket.observationCardinality(), "the book widens its routes' oracles");
+
+        // Without history over the window the routes through USDC are skipped, not refused.
+        BasketVenueFacet venue = BasketVenueFacet(address(basket));
+        BasketReference.Book memory b = book.prices();
+        assertEq(b.twap, venue.basketValueInBuck(), "unreadable routes: the direct net reference");
+        assertEq(b.usdc, 0, "no USDC value unless every TOKEN has a USDC route");
+
+        vm.warp(vm.getBlockTimestamp() + 601);
+        int256 direct = venue.basketValueInBuck();
+        b = book.prices();
+        uint256 sumBuck;
+        uint256 sumUsdc;
+        for (uint256 i; i < 3; ++i) {
+            (,, uint256 amount,,,,,,,,) = basket.constituents(i);
+            uint256 own = IBuckBasketVenue(address(basket)).marks(i, basket.liquidityOf(i)).pTwap;
+            BasketReference.Bid memory bid = b.bids[i];
+            if (i < 2) {
+                // A USDC buys about a full BUCK from the fresh dollar pool; the aged pool
+                // delivers only its net share of one.
+                assertTrue(bid.buckViaUsdc, "through USDC");
+                assertGt(bid.buck, own, "beats the hollow pool");
+                assertApproxEqRel(bid.buck, 1e6, 2e14);
+            } else {
+                assertFalse(bid.buckViaUsdc, "0.95 USDC fetches less than the hollow pool's net");
+                assertEq(bid.buck, own, "the direct route, at its pool's ratio");
+                assertTrue(bid.usdcViaBuck, "and more USDC through BUCK than directly");
+                assertApproxEqRel(bid.usdc, 1e6, 2e14);
+            }
+            sumBuck += Math.mulDiv(amount, bid.buck, 1e18);
+            sumUsdc += Math.mulDiv(amount, bid.usdc, 1e18);
+        }
+        assertEq(b.twap, int256(sumBuck), "the basket at its bids");
+        assertGt(b.twap, direct, "best routes fetch more than the direct net reference");
+        assertEq(b.usdc, sumUsdc, "and in USDC");
+        assertApproxEqRel(b.buckBid, 1e6, 2e14, "a USDC per BUCK");
+        assertGe(b.buckAsk, b.buckBid, "a bought BUCK arrives at the dollar pool's ratio");
+
+        book.observe();
+        assertTrue(book.fresh());
+        assertEq(book.rawValue(), b.twap);
+        assertEq(book.valueUsdc(), b.usdc);
+        assertEq(book.buckBid(), b.buckBid);
+        (uint112 bidBuck, uint112 bidUsdc, bool viaUsdc, bool viaBuck) = book.bids(2);
+        assertEq(bidBuck, b.bids[2].buck);
+        assertEq(bidUsdc, b.bids[2].usdc);
+        assertTrue(!viaUsdc && viaBuck, "the routes are recorded");
+
+        // K reads the sample through the venue while it is fresh; stale, the live direct reference.
+        address withBook = address(new BasketVenueFacet(address(book)));
+        vm.prank(GOV);
+        basket.setVenue(withBook);
+        assertEq(venue.basketValueInBuck(), b.twap, "K reads the book");
+        vm.warp(vm.getBlockTimestamp() + 3601);
+        assertFalse(book.fresh());
+        assertLt(venue.basketValueInBuck(), b.twap, "stale: the live direct net reference");
+
+        // Under the comparison switch the BUCK bids are the direct quoted prices, as before.
+        vm.prank(GOV);
+        venue.setNominalReference(true);
+        b = book.prices();
+        for (uint256 i; i < 3; ++i) assertFalse(b.bids[i].buckViaUsdc, "quoted: direct");
+        assertEq(b.twap, venue.basketValueInBuck(), "the quoted reference");
     }
 
     function test_budgetUsesExistingCashThenIssuesOnlyItsShortfall() public {

@@ -209,9 +209,13 @@ def activate(d, given=None, turn_seconds=0) -> None:
     # User trading starts only after the full observation window exists.
     window = int(basket.functions.twapWindow().call())
     d.anvil.warp_to(d.w3.eth.get_block("latest")["timestamp"] + window + 1)
-    venue = chain.deploy("BasketVenueFacet")
+    # The price book first: the venue hands K its sample while it is fresh. It prices the routes
+    # through USDC from the wheel's arbitrage triangles (widened again once they are set,
+    # deploy.equity_arb_on).
     interval = int(s["interval"])
     signals = chain.deploy("BasketReference", basket.address, interval, int(s["max_age"]), 500)
+    chain.send(signals.functions.setMarkets(wheel.address), sender=gov)
+    venue = chain.deploy("BasketVenueFacet", signals.address)
     # Both quote routes inform the pair observer. The policy's reference is each
     # constituent's declared price, never a live one.
     observer = chain.deploy("PairSignals", [t.address for t in d.tokens], [d.buck.address, d.usdc.address],

@@ -323,7 +323,11 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
                          { tag: `eq:seed:${t.sym}-buck` });
     }
     await advanceTime(world, MACHINE.settle);
-    const machineVenue = await session.deploy(artifacts("BasketVenueFacet"), [],
+    // The price book first: the venue hands K its sample while it is fresh.
+    const parity = await session.deploy(artifacts("BasketReference"),
+      [basket.address, MACHINE.interval, MACHINE.maxAge, MACHINE.deviationBp],
+      { name: "BasketReference", gas });
+    const machineVenue = await session.deploy(artifacts("BasketVenueFacet"), [parity.address],
       { name: "BasketVenueFacet", gas });
     await session.send(basket, "setVenue", [machineVenue.address],
                        { tag: "eq:setVenue:machine" });
@@ -339,9 +343,6 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     const policy = await session.deploy(artifacts("PairRebalancePolicy"),
       [observer.address, basket.address, reference, MACHINE.sizing],
       { name: "PairRebalancePolicy", gas });
-    const parity = await session.deploy(artifacts("BasketReference"),
-      [basket.address, MACHINE.interval, MACHINE.maxAge, MACHINE.deviationBp],
-      { name: "BasketReference", gas });
     const upkeep = await session.deploy(linkArtifact(artifacts("BasketUpkeepFacet"), {
       "src/basket/BasketJubileeMath.sol:BasketJubileeMath": world.net.basketValuationLibrary.address,
       "src/basket/BasketMarketOps.sol:BasketMarketOps": world.net.basketMarketLibrary.address }),
@@ -349,6 +350,8 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       { name: "BasketUpkeepFacet", gas });
     const wheel = await session.deploy(artifacts("BasketMachineWheel"),
       [buck.address, usdc.address, me, 0, 0n], { name: "BasketMachineWheel", gas });
+    // The book prices the routes through USDC from the wheel's arbitrage triangles.
+    await session.send(parity, "setMarkets", [wheel.address], { tag: "eq:book.setMarkets" });
     await session.send(basket, "setEquityWheel", [upkeep.address], { tag: "eq:setEquityWheel" });
     // These two service bindings use their actual governed authorization
     // APIs, even though the registry harness is still needed for synthetic
@@ -442,6 +445,8 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       for (const [i, t] of tokens.entries()) await session.send(wheel, "setTriangle",
         [BigInt(i), [t.erc20.address, t.poolBuck.address, t.poolUsdc.address, BigInt(i)]],
         { tag: `eq:arb.register:${t.sym}` });
+      // The book reads these routes' TWAPs: their pools keep the basket's observations.
+      await session.send(parity, "widen", [], { tag: "eq:book.widen", gas: 12_000_000n });
     }
   }
 

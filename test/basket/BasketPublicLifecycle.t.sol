@@ -38,7 +38,7 @@ contract BasketPublicLifecycleTest is JubileeEquityFixture {
         if (machine) {
             ControlledPairIntent intent = new SinglePoolIntent(address(basket)); intent.setRate(0);
             vm.startPrank(GOV);
-            basket.setVenue(address(new BasketVenueFacet()));
+            basket.setVenue(address(new BasketVenueFacet(address(0))));
             basket.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(0), 0, 0)));
             vm.stopPrank();
         }

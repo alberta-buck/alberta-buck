@@ -4984,7 +4984,9 @@ worth"; everything else consults it.
 - [ ] /N3. The kernel and the simulation/: the carry functions and a price reader in =buck-math= with
   vectors; the simulation's helpers call them; finding 1 (a household setting keeps the old basis
   for a comparison), 6 and 9; the JS bundle rebuilt.
-- [ ] /N4. The price book/ (next): the wheel's sample (=BasketReference=) publishes, for each
+- [X] /N4. The price book/ (2026-11-15; forge 1,551, Python integration): done as designed in "The
+  price book, and the rest of net BUCK", with the refinements recorded there under "N4 as built".
+- [ ] (as planned) /N4. The price book/ (next): the wheel's sample (=BasketReference=) publishes, for each
   constituent, its best-route bid in net BUCK (directly at the pool's ratio, or through USDC at the
   dollar pool's) and in USDC (directly, or through BUCK, which passes the Carrying router at
   nominal), from TWAPs, with the time; and the basket's value in both. The pools come from the
@@ -5053,6 +5055,76 @@ reference tests. Python (pyrevm, the economy world): after a few days the book's
 routes recomputed off-chain, the USDC route wins for a TOKEN whose BUCK pool is the hollower, and
 K reads the sample.
 
+**** N4 as built (2026-11-15)
+
+- /The book/ (=src/basket/BasketReference.sol=): =setMarkets(wheel)= (governance), =prices()= (the
+  live =Book=: net BUCK value at the TWAPs and at the spots, USDC value, the BUCK's bid and ask,
+  and per constituent a =Bid= of net BUCK and USDC with the route each took), stored at =observe()=
+  as =rawValue=, =valueUsdc=, =buckBid=, =buckAsk= and =bids(i)= (one packed slot each).
+  =marketValues()= and =basketValueInBuck()= are the live book's BUCK values, so the desk policy
+  and the upkeep facet's parity read best routes too. 12.5 KB (12.1 KB free).
+- /Refinement: a route through USDC that cannot be read is skipped, not a refusal./ The TOKEN/USDC
+  pools and the dollar pool keep one observation unless widened (=PairSignals= keeps its own
+  track), so a TWAP over the window often cannot be read; refusing the whole book for it would stop
+  K's sample and the parity signal for a missing /alternative/. The constituent's own pool still
+  refuses the reading (empty, no history, or spot off its TWAP); a USDC pool or the dollar pool
+  that fails the same checks drops only its routes, and the direct route prices that TOKEN. The
+  basket's USDC value is published only when every TOKEN has a USDC route (else 0).
+- /The book widens its routes' oracles/: =setMarkets= and the permissionless =widen()= raise the
+  dollar pool's and each triangle's USDC pool's =observationCardinalityNext= to the basket's own
+  (=IBasketView.observationCardinality=, 64 in the worlds: 5.65M gas once for four pools in the
+  forge test). The worlds call =widen()= again after the wheel's triangles are set
+  (=deploy.equity_arb_on=, JS =eqworld=).
+- /K/: =BasketVenueFacet(book)= returns the book's =rawValue= while it is fresh and the book is
+  this shell's (=book.basket() == this=: the Python world hands the same venue instance to the
+  desk); stale or absent, the facet's own live direct net reference (not the book's live view,
+  which refuses on a dislocated spot and would stop K). Under the comparison switch, the quoted
+  value as before. The venue facet has 1,075 bytes free (was 1,494).
+- /Units/: BUCK and USDC both have 6 decimals in the worlds; the BUCK's bid and ask quote one BUCK
+  (=10**decimals=), and the bids are raw units per TOKEN unit (=10**decimals= of the TOKEN).
+- /Cost/: a reading of three constituents with their USDC routes costs 209k gas (153k with the
+  routes skipped); the first =observe= 483k (new slots), later ones less.
+- /Frames/: =control.bvib= is what K reads (the sample while fresh); new =control.bvib_usdc= (the
+  basket's USDC value per reference unit: the BUCK's fair dollar price at parity) and
+  =market.book= (=buck_bid=, =buck_ask=, =bids= with =via_usdc= / =via_buck=). The run-record
+  fixture and its Python test carry them.
+- /Tests/: forge =test_priceBookPricesEachTokenByItsBestNetRoute= (pools aged a year: the USDC
+  route wins where the TOKEN/BUCK pool is hollower than the dollar pool, the direct route where
+  the USDC price is lower; the USDC bid goes through BUCK where that fetches more; unreadable
+  routes are skipped; K reads the sample while fresh and the live direct reference after; the
+  comparison switch prices direct and quoted). Python
+  =test_the_price_book_takes_each_tokens_best_net_route_and_k_reads_it= (pyrevm, the machine world,
+  three days): each bid equals max(direct at the pool's ratio, through USDC at the dollar pool's)
+  recomputed off-chain from the pools' TWAPs to 1e-5, the ask is the bid over the dollar pool's
+  ratio, and K reads the sample.
+- /Still to read the book/ (each a behaviour change, each measured): the pair observer (finding
+  3), the marks' TWAP anchor, and the households (next section).
+- /Found on the way: the JS bundle was stale since the net reference/ (a5467eb6). Rebuilding it
+  (=make nix-core-js-artifacts=) failed nine refinance vectors in
+  =net-equilibrium-bootstrap.webevm.test.js=; they pass under the nominal reference, so the
+  net reference caused them, not N4. The cause: the subtests share one world, and an earlier
+  subtest ages it a year /idle/. An idle year leaves the pools' BUCK 2% hollow at unchanged
+  quotes, so the net BVIB reads the BUCK 2% dear and the funding factor (0 at 2% dear) zeroes the
+  reserve the vectors expect. That is right for an idle market (a TOKEN sold into the pool does
+  fetch 2% less net BUCK), so the test changed, not the contracts: the year-long subtest now runs
+  after the vectors. JS equilibrium suite 132 passed; world tests 11 passed.
+
+**** Observations and recommendations (N4)
+
+- /Five-year runs/: K now reads the book's sample (up to =max_age=, 3,600 s, old) and the best
+  route. In the datasim suite's worlds the arbitrage keeps the triangles closed, so the best
+  route should differ from the direct net by the difference in carry between each TOKEN/BUCK pool
+  and the dollar pool (the dollar pool's 2.7-2.9% at two years against the TOKEN pools' 2.2%: the
+  direct route mostly wins there). Measure it (N6): =control.bvib= against a direct-only run
+  (=setMarkets(0)=, a machine setting to add).
+- /Sandbox and savings sandbox/: an idle sandbox is the case the JS test met. A visitor who
+  advances time without trading sees the BUCK grow dear in net terms at unchanged quotes, the
+  funding factor fall to 0 and K respond: correct, and worth a sentence on the page (the quoted
+  BVIB beside the net one shows it). The book's =market.book= and =control.bvib_usdc= are in the
+  frames for the dashboard; no chart reads them yet.
+- /Rebuild the JS bundle with every contract change/: =core-equilibrium-bootstrap-test= rebuilds
+  it, but a forge-only cycle leaves it stale, so the JS worlds silently run older contracts.
+
 *** The households read the book (findings 1 and 6)
 
 No old basis kept and no machinery in the household (the owner). A household's BUCK, receipts and
@@ -5089,8 +5161,9 @@ into the pools; each against the commit before, on =economy= and =economy-lifecy
 
 - *Branch*: =feature/household-minimal-ecosystem=, pushed; worktree =.claude/worktrees/buck-compound=,
   clean at 7cd34241 plus this note.
-- *Next*: N4, the price book, as designed above ("The price book, and the rest of net BUCK"); then
-  the households read it; N5; N3; N6.
+- *Next*: N4 is done ("N4 as built"); the households read the book; the pair observer and the
+  marks' TWAP anchor read it; N5; N3; N6. Run tests and simulations on two cores while the owner's
+  machine is busy (forge =-j 2= in =FORGE_OPTS=, =COMPARE_JOBS=2=, =--test-concurrency=2=).
 - *Done*: =comparisons/carry.toml=, digested above ("Result: the measure moves the market, not K"):
   K falls alike under either measure (0.48 at two years with the leak); the net reference moves the
   market by the carry, and the wind-down is the issuance phase. Runs =build/runs/carry.*=.
