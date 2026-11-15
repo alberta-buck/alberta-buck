@@ -4859,12 +4859,25 @@ exact-this-moment valuation.
 - /4. Carry on the basket's own buys and pairing/: *answered*. Push the hollowest BUCK available,
   never the fresh BUCK a client deposit brings (decision 1 below: how, given one wallet).
 - /5. The pair observer/: *answered*. Levels at the same net best-route prices.
-- /6. A sponsored redeemer/: open (decision 3 below).
+- /6. A sponsored redeemer/: *not a fault* (the owner): a demurrage sponsor is the holder's own
+  fee account, so its regular accounts always show full net value. When the basket pays a sponsored
+  redeemer, the main account is credited the nominal sent and the holder's own fee account pays the
+  carry; across the holder's accounts the net received is exactly the payment. Finding 7 withdrawn.
 - /7. The Jubilee retirement job/: dormant for the Carrying machine basket; left so, recorded.
 - /8. referencePrice/: *answered*: a net price (a comment fix).
 - /9. Nominal arbitrage/: *answered*. Carry-aware at a route's two ends, nominal in between. The
   basket's planner already does so; the simulated arbitrageurs whose routes end in BUCK in their own
   wallet must too.
+
+*** The owner's decisions (2026-11-15)
+
+- /Fresh deposit BUCK goes straight into the basket's pool positions/ (pairing idle TOKEN), refreshing
+  the pools' carry; purchases pay from the wallet, whose BUCK came back from the pools carrying their
+  fees.
+- /The price book is read by everything but execution/: K's reference, the parity signal, the pair
+  observer, the marks' TWAP anchor, the desk and the simulation; deposits and exits keep live LOW and
+  HIGH bounds (the book against the spot); trades check their slippage against the book.
+- /No Buck change for sponsored accounts/ (question 6).
 
 *** The wheel as the price book
 
@@ -4878,7 +4891,9 @@ worth"; everything else consults it.
 
 *** Work, in order
 
-- [ ] /N1. One declaration, one library/ (no behaviour change): =CarryRatio=; the five interface
+- [X] /N1. One declaration, one library/ (2f2903fa; forge 1,550 passed; +22 to +172 bytes where
+  used, the shell and upkeep facet unchanged). Plain (gross, net) arguments: a memory struct cost
+  twice the bytes. (no behaviour change): =CarryRatio=; the five interface
   copies to =IBuckCashView=; every hand conversion through the library; sizes measured; forge
   unchanged.
 - [ ] /N2. The venue as the boundary/: net prices and marks in net mode; the re-netting deleted;
@@ -4887,7 +4902,12 @@ worth"; everything else consults it.
 - [ ] /N3. The kernel and the simulation/: the carry functions and a price reader in =buck-math= with
   vectors; the simulation's helpers call them; finding 1 (a household setting keeps the old basis
   for a comparison), 6 and 9; the JS bundle rebuilt.
-- [ ] /N4. The owner's answers/ (questions 1-9), each change measured as a comparison.
+- [ ] /N4. The price book/: the wheel's sample publishes each constituent's best-route net bid
+  (TOKEN to BUCK directly, or through USDC), from TWAPs, with the route and the time; K's reference,
+  parity, the pair observer, the marks' TWAP anchor and the desk read it; the simulation reads it.
+- [ ] /N5. Fresh deposit BUCK straight into positions/; purchases pay the wallet's carried BUCK.
+- [ ] /N6. Each behaviour change measured as a comparison/ (the carry, the households' basis, the
+  book, fresh BUCK into positions).
 
 ** Resume here (2026-11-14, evening)
 
