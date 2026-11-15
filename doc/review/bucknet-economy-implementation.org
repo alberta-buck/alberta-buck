@@ -4076,8 +4076,51 @@ the lifecycle decides which role a household plays and when it stops earning):
   current population; the incoming mortgage scaled by the economy's capacity
   (the BUCK/USDC route's depth, which bounded refinancing before), from car-sized
   loans in an empty economy up to the full range.
-- [ ] /L5. The equilibrium./ Five-year runs from an empty economy, varying the
-  mix; where K settles (with the one-year leak) and BVIB about 1.
+- [-] /L5. The equilibrium./ Five-year runs from an empty economy, varying the
+  mix; where K settles (with the one-year leak) and BVIB about 1. The quoted-BVIB
+  baseline is done (below); the same suite on the net-BUCK contracts runs next.
+
+*** L5, the baseline: five years by mix, on the quoted BVIB (datasim, 2026-11-15)
+
+=~/src/alberta-buck-lifecycle= at 8eb97de0 (before the net BVIB: K read the pools' quoted prices),
+one-year leak, =economy-lifecycle= (A: 4 young families, 4 middle-aged savers, 12 middle-aged
+investors, 6 retirees, young families arriving at 5% of the members a year) and its variations:
+
+| run | mix | K y1 | K y2 | K y3 | K y4 | K y5 | BVIB y5 | supply M y5 | lien M y5 | households' principal M y5 | members y5 (young/mid/retired) | nw - hypo M y5 |
+|-----+-----+------+------+------+------+------+---------+-------------+-----------+----------------------------+--------------------------------+----------------|
+| life-A | balanced | 0.614 | 0.496 | 0.456 | 0.441 | 0.450 | 1.0064 | 34.22 | 15.04 | 1.19 | 14 / 179 / 17 | 0.76 |
+| life-A2 | balanced, seed 7 | 0.597 | 0.498 | 0.463 | 0.456 | 0.460 | 1.0273 | 34.43 | 15.44 | 1.00 | 13 / 195 / 18 | 0.83 |
+| life-B | young-heavy (10 debtors, 8%/yr, 3 retirees) | 0.554 | 0.458 | 0.456 | 0.456 | 0.437 | 1.0106 | 34.76 | 14.62 | 2.15 | 29 / 176 / 14 | 0.68 |
+| life-C | retiree-heavy (15 retirees, 2%/yr) | 0.618 | 0.499 | 0.471 | 0.473 | 0.468 | 1.0040 | 36.50 | 17.55 | 0.95 | 9 / 177 / 26 | 1.17 |
+| life-D | investor-heavy (24 investors, 8 savers, 3 retirees) | 0.588 | 0.467 | 0.451 | 0.452 | 0.449 | 1.0274 | 35.44 | 16.13 | 1.31 | 17 / 208 / 15 | 1.17 |
+| life-E | no young arrivals | 0.621 | 0.508 | 0.474 | 0.470 | 0.472 | 1.0045 | 33.39 | 14.93 | 0.46 | 3 / 169 / 17 | 0.71 |
+| econ-F | the economy world (day 1,332) | 0.551 | 0.486 | 0.473 | 0.502 (d1332) | | 1.0043 | 52.83 | 31.35 | 3.49 | 463 members | 0.67 |
+
+**** Measured
+
+- /The leak holds K/: in every mix K stops falling after two years and settles between 0.44 and
+  0.47 for years three to five (K0 0.75). Without the leak the two-year economy had reached 0.15.
+- /The mix moves the settling K, a little/: young-heavy lowest (0.437), retiree-heavy and no
+  arrivals highest (0.468, 0.472), balanced and investor-heavy between (0.45); a spread of 0.035,
+  the same order as the seed's (0.010 between A and A2). More young families (more issuance, and
+  their BUCK sold for mortgages) settle K lower; fewer settle it higher, as the owner expected.
+- /The quoted BVIB stays 0.4-2.7% above 1/ through year five. With the pools 3-5% hollow by then,
+  the net BVIB was below parity in the later years (as in =economy-5y=): K settled where the quoted
+  reading balanced the leak, not where the BUCK was at par.
+- /Supply is the basket's lien/: 27 to 34-37M over five years, the lien 8.6 to 15-17.6M, the
+  households' principal 0.5-2.2M. The middle-aged count keeps growing (40 to 170-210) as investors
+  arrive; retirees 6 to 14-26; a few households leave by year five.
+- /Households beat their USD counterfactual/ in every mix (0.68-1.17M in aggregate at five years),
+  most where retirees or investors dominate.
+
+**** Recommendations
+
+- /The same suite on the net-BUCK contracts/ (=~/src/alberta-buck-net= at 3dee6d85: net BVIB, the
+  price book, the households at the book, the net pair observer): where K settles by mix when it
+  reads the net BUCK. Launched on datasim.
+- /The demand agents/ (owner): the K levels above reflect a world with no standing BUCK demand;
+  the next casting adds every agent's short-term BUCK balances and BUCK payroll, and the suite
+  reruns on it.
 
 The JavaScript port of the household agents follows L1 (the policy is mirrored
 now); its agent behaviour for L2 to L4 follows once the Python worlds show the
