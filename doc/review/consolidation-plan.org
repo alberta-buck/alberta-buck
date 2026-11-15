@@ -1,0 +1,133 @@
+#+TITLE: Consolidation: one test command, one simulation layout, retired contracts
+#+DATE: 2026-11-14
+
+# The owner's direction (2026-11-14): gather every simulation and test into one
+# organized structure, removing duplicates; make the Makefile simple enough that
+# one obvious command runs the full spectrum of tests after any change to the
+# BUCK ecosystem; identify the Solidity contracts that are now obsolete and begin
+# retiring them before the merge to master and the next release (PyPI, npm,
+# crates.io). Built from a read-only inventory of the Makefile (2,270 lines),
+# 117 forge, 102 Python and 52 JS test files, 65 experiment files and every
+# contract under src/.
+
+* Where things stand
+
+- *No single test command.* The full spectrum today is about a dozen targets,
+  overlapping: =nix-test= (all 117 forge suites, legacy included),
+  =nix-venv-test-python= (all 91 Python files; it builds nothing first),
+  =nix-venv-core-test= (core Python, every JS file, Rust; the browser and bundle
+  tests skip themselves unless built), =core-net-math-test=,
+  =economy-accounting-test=, =economy-test=, =net-demurrage-smoke=,
+  =dashboard-test= (its files also run in two other targets),
+  =wallet-sandbox-test=, =sandbox-savings-test=, and the packaging checks
+  (=contracts-dist-check=, =third-party-notices-check=, =stage-uniswap-check=,
+  =fmt-check=).
+- *About half the Makefile is legacy simulation:* the pro-rata and ops basket
+  modes, the rebalancing-eq matrix, the sweeps and their judges, the catalogue
+  grid, the K-design steps, the TUI, the pair-observer prototype, the routing
+  scenario, and four grid runners where one (=alberta_buck.sim.economy=) is
+  current. Several recipes are duplicates (=sim-plot= / =plot-routing= /
+  routing image; =sim-run-basket-off= / =sim-run-ops-off=); one is dead
+  (=v2-patch-init-code-hash=: lib/v2-periphery is gone).
+- *One simulation layout already exists and is current:* a world is a TOML
+  experiment under =alberta_buck/sim/experiments/=, run by =python -m
+  alberta_buck.sim= (or a grid of them by =alberta_buck.sim.economy=), recorded
+  as a run record under =build/runs/= and read by one dashboard. 2 of the 65
+  experiment files are current (=economy.toml=, =economy-lifecycle.toml=); about
+  60 are legacy presets. The JS world is =core/js/bin/eqsim.mjs= (its run record
+  is plan step R4).
+
+* The target layout
+
+- *Tests stay in their languages' places* (=test/= forge, =alberta_buck/test/=
+  and =core/python/tests/= pytest, =core/js/test/= node): that is where each
+  toolchain finds them. What changes is that every test belongs to one tier and
+  every legacy one is retired or ported.
+- *Simulations live in one place*: experiments in
+  =alberta_buck/sim/experiments/= (current worlds only, plus the stress arms
+  still to be ported), one runner, one grid, one record format, one dashboard.
+  Five-year suites run on datasim.local from a worktree (a suite script per
+  campaign under its =build/=).
+- *Three test tiers, one name each* (the rest of the Makefile is build,
+  documents, releases and simulations, grouped under their own headings):
+
+| tier | runs | when | about |
+|------+------+------+-------|
+| =make nix-test= (renamed from the forge-only target, which becomes =nix-test-contracts=) | the canonical forge suites; Python and JS unit tests (no EVM) | every change | minutes |
+| =make nix-test-all= | everything below, in order, stopping at the first failure: contracts (forge, all current suites); kernels and vectors (Rust, vector checks); Python (=core/python=, =alberta_buck/test=, after =sim-build= and =core-build-py=); JS (unit and webevm worlds, after the bundles it needs); browser (net-math, wallet sandbox, savings sandbox); packaging (=contracts-dist-check=, notices, Uniswap staging, =fmt-check=); worlds (the 30-day economy and lifecycle worlds, the 30-day JS world) | before a commit that changes behaviour; before a merge | an hour on webevm (the JS world tests took 66 minutes on Tevm) |
+| =make nix-test-worlds= | the five-year suites (=economy=, the lifecycle mixes), here or on datasim | before a release; for research | hours |
+
+* Retirement in waves
+
+** Wave 1: nothing depends on these (now)
+- =src/RegressVerifier.sol= (obsolete: RegressionTest imports the generated
+  copy under build/snark/regression).
+- Makefile: =v2-patch-init-code-hash=; the duplicate routing plot recipes and
+  =sim-run-basket-off=; the pair-observer prototype targets and modules
+  (=pair_observer*.py=, =pair_spectrum.py=; slated for removal in
+  BASKET-MACHINE-TASKS.org); =scripts/test-block-pairs-browser.cjs= (its
+  campaign is gone); stale comments (the economy "deploys legacy signed Buck";
+  the sandbox "bundles a legacy stack"; =help= labels
+  =BuckNetMintCompatibilityTest= canonical).
+- The Tevm baseline copies left by the conversion (=core/js/zz-tevm-baseline/=):
+  a bare =node --test= would run them.
+
+** Wave 2: legacy simulations (needs the owner's word on the stress arms)
+- The pro-rata, ops, director, TUI, matrix, sweep and K-design targets and
+  modules (=sim.tui=, =sim.sweep=, =sim.star=, =sim.eqmetrics=,
+  =sim.compare_ops=, =sim.kdesign=, =sim.basket_flow=, =basket_harvest=, the
+  second timeline engine =driver.SimDriver= once the TUI and its two tests go),
+  and about 60 legacy experiment files with their committed vectors
+  (=test/vectors/= routing, rebalancing, historical, equilibrium, sweep sets)
+  and plots (=images/=).
+- Kept, by the earlier decisions: the Python policy models and their paper
+  figures; the control lab; the reference models; price inputs.
+- *To decide:* the catalogue's excursion and attack arms. The plan kept them
+  until their stress actors are ported to the economy world. Port them as
+  =economy= interventions, then delete the catalogue.
+- Python tests that run only on the legacy baskets (=test_credit_households=,
+  =test_debtor_policy=) move to the machine basket or go;
+  =test_debtor_ledger= keeps =isolation.toml= until then.
+
+** Wave 3: contracts (each family after its last current user moves)
+
+| family | contracts | blocked by | then |
+|--------+-----------+------------+------|
+| pro-rata | BuckBasketProRata, BuckBasketOps, BuckWithBasketHooks | BasketWheelArb (in basket-arb-test); the JS credit-household, eqsim and eqworld pro-rata options; tevm-membench | delete |
+| pairs director | PairsRebalanceDirector, RebalanceDirectorBase, IRebalanceDirector | the shared storage's =director= field (prune with a storage-layout check, not by file name) | delete |
+| earlier upkeep | BuckBasketEquityWheel, EquityTurnDirector, BasketWheel (+ DirectorKind, SweepKind, EquityKind) | three canonical suites use BasketWheel (BuckCompoundWheelArb, BuckCompoundFundedArb, JubileeWheel); three use BuckBasketEquityWheel; Python's non-machine =equity-ops= mode | unpublish now; delete after the suites move to BasketMachineWheel |
+| shadow controller | BuckKControllerShadow, ShadowObserver, IShadowObserver, SimStabilizer | owner's call: keep the adversarial checks? | delete or keep |
+| USD controller | BuckKController (Chainlink), the legacy =Deploy.s.sol= and =deploy-*= targets | a canonical deploy script (Buck, BuckCredit, BuckKControllerDirect, JubileeFund, the machine) | delete |
+| BuckNet facade | BuckNet, BuckLedger, BuckNetMaturity, BuckNetTokenOps | BuckNetQuote.t.sol is the only test of the published BuckNetQuoter and runs on BuckNet: port it to Buck | delete |
+| signed Buck | BuckLinear | 21 legacy fixture suites (the "LEGACY ACCOUNTING FIXTURE" header) | migrate the suites worth keeping, delete the rest |
+| V2 adapter | UniswapV2BindingAdapter | nothing (one test); production-shaped | owner's call |
+
+** Before the release (with or without the waves)
+- Publish what the canonical stack deploys and is missing: =BuckBasketReceipt=
+  (the shell creates it, as Buck creates the published JubileeClaimBook), and
+  =UniswapV3BindingAdapter= (the sandbox's pool binding).
+- Take the simulation helpers out of the production package or mark them
+  (=MockERC20=, =SimLP=), and fix the stale labels in
+  =scripts/contracts-dist.py= (canonical Buck marked "experimental"; "created
+  by BuckNet").
+- =alberta-buck-core='s =webevm= =file:= dependency (recommendation 78).
+- EIP-170 margins: BasketWheel 44 bytes (it goes in wave 3), BuckBasketEquity
+  52, BuckCredit 60, BasketUpkeepFacet 408. Any change to the first three
+  needs bytes found first.
+
+* Running suites in parallel
+- The first world on a fresh checkout builds the shared identity cache
+  (=test/vectors/identity-cache.json=); seven first runs started together
+  raced to build it and five reverted =approve :: InvalidIdentityProof= at
+  their bootstrap (2026-11-14, datasim). Start one world first (or stagger
+  starts by a minute) on a fresh checkout; =nix-test-worlds= must do the same.
+
+* Order of work
+1. Wave 1, and the three test tiers with =help= rewritten around them, once the
+   JS conversion to webevm lands (it edits the Makefile now).
+2. The release fixes above that need no decision.
+3. Wave 3's first moves that need no decision: unpublish the earlier upkeep
+   family; port BuckNetQuote.t.sol to Buck; move BasketWheelArb and the three
+   canonical wheel suites to the machine wheel.
+4. Wave 2 and the rest of wave 3 after the owner's word on the stress arms, the
+   shadow controller and the V2 adapter.
