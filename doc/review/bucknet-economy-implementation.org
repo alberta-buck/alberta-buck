@@ -5507,6 +5507,26 @@ missing on almost half its days: to re-run.
   expired each block and every settle ran to its cap (16 to 20 s a day).
 - /JS savings world/ (four ticks a day): 15 to 20 ticks a settle, every settle complete, 3.2 s a day
   in Node (1.6 s with the turns-while-work keeper, 0.95 s with one turn).
+- /The book comparison, re-run on this commit/ (=comparisons/book.toml=, 730 days, frozen at 3270fae8;
+  the earlier runs and snapshot kept in =build/runs/archive-book-before-3270/=):
+
+  | run (routes) | USDC value missing | USDC route wins | K end | K mean | BVIB end | mean abs(BVIB-1) | supply M |
+  |--------------+--------------------+-----------------+-------+--------+----------+------------------+----------|
+  | best, now    | 0 of 730 days      | 20.2% of TOKEN-days | 0.523 | 0.6156 | 1.0165 | 0.0126 | 37.2 |
+  | direct, now  | (none published)   | 0               | 0.475 | 0.5854 | 1.0231 | 0.0161 | 39.6 |
+  | best, before | 334 of 730 (46%)   | 8.5%            | 0.490 | 0.5816 | -      | -      | -    |
+  | direct, before | (none published) | 0               | 0.499 | 0.5815 | -      | -      | -    |
+
+  With the route present every day it now matters: pricing by the best route holds K 0.03 higher on
+  average (0.048 at the end) and the BVIB a third closer to parity, on 2.4M fewer BUCKs. (Before,
+  the arms were indistinguishable because the route was missing on almost half the days.)
+- /The wheel over the two years/ (best routes; against the frozen 0dfc9438 run, which also had 0 s
+  between a tick's blocks and one rotation a tick): 2,190 settles, 38,408 ticks (17.5 a settle),
+  7 hit the cap (0.3%); the wheel's work 14,076 against 10,947 (+29%) and its arbitrage cycles 6,249
+  against 4,135 (+51%), while the outside arbitrageurs' cycles fell from 2,689 to 413: the wheel
+  now takes what each forcing opens before they arrive. The basket's response trades fell (buys
+  1,314 against 2,209, sells 821 against 1,857, each about half the volume): with its pools kept
+  consistent the basket has less to correct.
 - /Why the old JS note said pending() reverts/: gas. A settled wheel evaluates every slot (fifteen
   arbitrage plans); at the default call gas it ran out. The keeper's view call now carries 200M.
 
@@ -5534,11 +5554,11 @@ missing on almost half its days: to re-run.
 
 *** Observations and recommendations
 
-- /Five-year runs/: re-run the book comparison (=comparisons/book.toml=) and the datasim net suite on
-  this commit: the USDC route is now present every day, the wheel reaps each forcing to completion,
-  and the clock is 12 s a block, so none of the earlier two-year or five-year numbers carry over.
-  Expect more arbitrage income retained by the basket and the TOKEN/BUCK pools tracking the
-  TOKEN/USDC pools within a tick.
+- /Five-year runs/: re-run the datasim net suite on this commit: the USDC route is now present every
+  day, the wheel reaps each forcing to completion, and the clock is 12 s a block, so none of the
+  earlier five-year numbers carry over. The book comparison (above) already shows the direction: K
+  higher and the BVIB closer to parity with the best route, the wheel taking the arbitrage the
+  outside arbitrageurs used to.
 - /Savings sandbox/: a day now costs about 3 s at four ticks, so the default pace (1 s a day) runs
   at the world's own speed. If that is too slow: two ticks a day by default, or a lower settle cap
   in the tab (=WheelKeeper({maxTicks})=), each trading completeness for speed.
@@ -5561,8 +5581,8 @@ missing on almost half its days: to re-run.
   pools widened whoever sets the triangles ("The wheel to completion, Ethereum's block clock and the
   book's routes"). Before that: several ticks a day and a live pace, the economy's TOKENs and prices
   in the tab (e49a2989, 63f4cbc2).
-- *Next*: re-run =comparisons/book.toml= and the datasim net suite on this commit (none of the earlier
-  numbers carry over); regenerate the pinned vectors at 12 s and drop the pins; the owner's calls on
+- *Next*: the datasim net suite on this commit (the book comparison is re-run and recorded; none of
+  the earlier five-year numbers carry over); regenerate the pinned vectors at 12 s and drop the pins; the owner's calls on
   =tickAt=, narrower memo keys, and the arbitrage's funding (recommendations there).
 - *Unchanged from the late-evening notes below*: the savings sandbox's step 6 and its gaps; S2/S3 and
   S7; the owner's calls on N5, the marks' anchor and the shadow controller; the persistent BUCK
