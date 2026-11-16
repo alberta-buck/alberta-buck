@@ -69,7 +69,128 @@ help:
 	  '  make nix-contracts-dist            # emit npm and Python ABI/bytecode bundles' \
 	  '  make nix-contracts-dist-check      # compiler and size checks on built artifacts' \
 	  '  make nix-third-party-notices-check # package licences and generated notices' \
-	  'Use make help without Nix or a venv; it starts no services or simulations.'
+	  'Use make help without Nix or a venv; it starts no services or simulations.' \
+	  'Every simulation and validation run -- start, re-run, steer, read the results: make help-runs'
+
+# make help-runs prints the guide below, straight from this file.
+.PHONY: help-runs
+help-runs:
+	@sed -n '/^# ── Runs: /,/^# ── End of the runs guide/p' $(firstword $(MAKEFILE_LIST)) | sed -e 's/^# \{0,1\}//'
+
+# ── Runs: start, re-run and read every simulation and validation run ─────────────────────────────
+#
+# `make help-runs` prints this guide. Run everything from the repository root. The prefix picks the
+# environment: nix- the pinned toolchain (forge, node, Chromium, emacs), venv- this checkout's Python
+# packages, nix-venv- both (use it when in doubt). The values shown are the defaults.
+#
+# 0  Before the first run, and after pulling changes
+#      make nix-install nix-js-deps        Solidity libraries (lib/) and npm packages; once per checkout
+#      make nix-venv-setup                 .venv with the three Python packages, editable
+#      make nix-venv-sim-build             the contracts and Uniswap artifacts every EVM run loads
+#      make nix-venv-core-build-py         the Python kernels (buck_core)
+#      make nix-core-js-artifacts          the JS contract bundle: rebuild it after ANY contract change,
+#                                          or the JS worlds and the sandbox run the old contracts
+#
+# 1  Everything, as one group
+#      make nix-venv-test-all              the seven validation tiers of section 2, in order; stops at
+#                                          the first failing tier
+#      make -k nix-venv-test-all           ... or runs every tier and names each one that failed
+#      make nix-venv-test-worlds WORLD_JOBS=4    then the five-year worlds (3c; hours)
+#
+# 2  Validation, one tier at a time (each is make nix-venv-<tier>)
+#      test-contracts    every forge suite (make nix-test). Narrower: make nix-match-<Contract>Test,
+#                        make nix-unit-<test_function>, make nix-path-<File.t.sol> (its name, not its path)
+#      test-kernels      the Rust kernels and the cross-language vectors
+#      test-python-all   core/python, then alberta_buck/test (one process; about five minutes). Narrower:
+#                        make nix-venv-test-python PYTEST_FILES=alberta_buck/test/test_x.py PYTEST_ARGS="-q -k y"
+#      test-js           every current JS test on webevm, after rebuilding the contract bundle. Narrower:
+#                        make nix-core-test-js JS_TEST_ARGS="test/x.webevm.test.js" (paths in core/js)
+#      test-browsers     the net-math, wallet-sandbox and savings-sandbox pages in Chromium
+#      test-packaging    the published contract packages, licence notices, Uniswap staging, formatting
+#      test-smoke        30-day economy and lifecycle worlds, a 30-day JS world, the null comparison
+#
+# 3  Simulations, one at a time
+#   a  One world from an experiment, alberta_buck/sim/experiments/<name>.toml (the working tree)
+#      make nix-venv-sim-experiment-economy EQ_SETS="--days 365 --set scenario.seed=7"
+#      EQ_SETS passes any argument of python -m alberta_buck.sim: --days N, --set KEY=VALUE (any key of
+#      the TOML), --out FILE.json, --run-id ID. The same run directly, inside make nix-venv:
+#        python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy.toml --days 365
+#   b  The household economy campaign: the acceptance grid, on a frozen commit (see 4)
+#      make nix-venv-economy-plan   CAMPAIGN=NAME CELLS=centre          the runs and their exact settings
+#      make nix-venv-economy-run    CAMPAIGN=NAME CELLS=centre JOBS=2   [ECONOMY_DAYS=N] [ECONOMY_SEED=N]
+#      make nix-venv-economy-report CAMPAIGN=NAME
+#      CELLS: centre (two runs, both price paths), probe, paydown, policies, stress, grid, rest, all.
+#      make nix-venv-economy-smoke [ECONOMY_SMOKE_DAYS=30]   one short run of the working tree, and its PDF
+#   c  The five-year worlds (scripts/world-suite.sh; the working tree)
+#      make nix-venv-test-worlds [WORLDS="life-A econ-F"] [WORLD_DAYS=1825] [WORLD_JOBS=0] [WORLD_STAGGER=90]
+#      Worlds: econ-F (the economy), life-A, life-A2 (another seed), life-B to life-E (population mixes).
+#      WORLD_JOBS=0 starts every world at once (seven cores); WORLD_STAGGER is the seconds between starts.
+#      Each world: log build/logs/<id>.log with a .done or .failed marker beside it, vector
+#      build/sim/<id>.json (and its PDF at five years), run record build/runs/<id>.
+#   d  Comparisons: runs identical but for the settings under study (alberta_buck/sim/comparisons/)
+#      make nix-venv-compare-plan   COMPARE=book                    the runs and their settings
+#      make nix-venv-compare        COMPARE=book COMPARE_JOBS=2     [COMPARE_ARGS=...]
+#      make nix-venv-compare-report COMPARE=book
+#      Specs: book, carry, leak, null, shocks. COMPARE_ARGS: --here (the working tree, not frozen),
+#      --only AXIS=VALUE (some of the runs), --days N (a shorter horizon, under a name of its own).
+#   e  JavaScript worlds (core/js, on webevm in Node)
+#      make nix-core-eqsim [JS_EQ_ARGS="--days 14 --policy adaptive"]   charts in build/sim/js-eqsim.svg
+#      Directly, inside make nix-venv: cd core/js && node bin/eqsim.mjs --days 30 (or bin/farmsim.mjs)
+#   f  Interactive worlds
+#      make nix-sandbox-local [SANDBOX_LOCAL_PORT=8988]   the sandbox, its Savings world running in the tab
+#      make nix-venv-sim-savings SIM_SAVINGS_PORT=8981    the Savings world on a Python server (on this
+#                                                         machine never 8000, 8797 or 8798: tunnel origins)
+#      make nix-venv-sim-tui                              a curses inspector over a live world
+#      The dashboard (5) starts live sessions too: New live session, on its page.
+#   g  Historical studies, kept for reference and not acceptance (each is documented where it is
+#      defined below; README-simulations.org says which still matter): sim-run (routing),
+#      sim-equilibrium, sim-rebalancing-eq[-<name>], sim-rebalancing-eq-matrix, sim-catalogue[-<name>],
+#      sim-sweep[-<name>], sim-metrics, sim-debtors, sim-isolation, sim-policy, sim-director, sim-flow,
+#      sim-monetary-ops, sim-basket-ops, sim-historical and the other sim-* targets.
+#
+# 4  Re-running
+#    - Working-tree runs (3a, 3c, 3e, economy-smoke, COMPARE_ARGS=--here) run whatever is checked out,
+#      as it is. The five-year worlds skip a world whose record is complete: remove build/runs/<id>.
+#    - Campaigns and comparisons (3b, 3d) refuse uncommitted tracked changes, and on their first run
+#      freeze the commit into build/sim/economy/<CAMPAIGN>/ or build/sim/compare/<COMPARE>/. Every later
+#      run of that name uses the frozen sources whatever HEAD is (it prints "campaign frozen at ...")
+#      and skips its completed runs. To run new code: a new CAMPAIGN name; for a comparison, move
+#      build/sim/compare/<COMPARE> and build/runs/<COMPARE>.* aside first.
+#
+# 5  Results: where they land, how to view them, how to draw them again
+#    Run records   every python -m alberta_buck.sim run records under build/runs/<run-id>/ as it goes
+#                  (manifest, frames, events, agents); SIM_RUNS=DIR records elsewhere.
+#    Dashboard     make nix-venv-dashboard [DASHBOARD_PORT=8890] [SIM_RUNS=DIR], then open
+#                  http://127.0.0.1:8890/: every run, finished or still growing, tab by tab; the Compare
+#                  tab for comparisons; live sessions. Read-only on a trusted LAN: make nix-venv-dashboard-lan.
+#                  Older JSON vectors into records: make nix-venv-run-import VECTORS="build/sim/x.json ..."
+#    Run PDFs      a completed run of five years or more writes its JSON (--out, or build/sim/completed/)
+#                  and a PDF beside it; shorter runs write JSON only when given --out. Draw saved JSON
+#                  again, with no EVM: make nix-venv-sim-report SIM_REPORT_VECTORS="build/sim/econ-F.json ..."
+#                  [JOBS=2] [SIM_REPORT_INDEX=build/sim/index.html]
+#    Campaign      make nix-venv-economy-report CAMPAIGN=NAME -> build/sim/economy/NAME/index.html and
+#                  summary.json (each run judged against the acceptance tests; PDFs beside the vectors)
+#    Comparison    make nix-venv-compare-report COMPARE=NAME: its table on the terminal; the index
+#                  build/runs/NAME.comparison.json is what the dashboard's Compare tab reads
+#    Papers        make nix-doc-<org basename> -> images/<name>.txt and .pdf. The executable papers re-run
+#                  their code first: make nix-venv-doc-flow (or -paper, -receipt, -proofs, -privacy,
+#                  -identity-example); all six: make nix-venv-docs
+#
+# 6  What steers a run: make VAR=value on the command line (make print-VAR shows a value)
+#    Cores         COMPARE_JOBS=4  JOBS=2 (economy-run, sim-report)  WORLD_JOBS=0 (0: every world at once)
+#                  EQ_JOBS=3 (sim-sweep)  CAT_JOBS=10 (sim-catalogue)  FORGE_JOBS= (forge's threads;
+#                  unset: every core)  JS_TEST_ARGS="--test-concurrency=4" (node's test workers; default
+#                  cores - 1). pytest runs one process. On a shared machine keep the sum to the cores
+#                  you can spare, e.g. FORGE_JOBS=4 COMPARE_JOBS=2 WORLD_JOBS=4.
+#    Horizon, seed WORLD_DAYS  ECONOMY_DAYS  ECONOMY_SEED  ECONOMY_SMOKE_DAYS
+#                  EQ_SETS="--days N --set scenario.seed=N"  COMPARE_ARGS="--days N"
+#    Settings      EQ_SETS="--set KEY=VALUE ..." (any experiment key)  CELLS  COMPARE  CAMPAIGN
+#    The EVM       SIM_BACKEND=pyrevm (in-process; or anvil)
+#                  SIM_BLOCK_SECONDS=12: seconds between blocks, Ethereum's slot; read by the Python
+#                  backends and the Node worlds (the browser worlds always use 12)
+#    Where         SIM_RUNS=build/runs (run records)
+#
+# ── End of the runs guide ────────────────────────────────────────────────────────────────────────
 
 # ── Test everything (doc/review/consolidation-plan.org) ───────────────────────────────────────
 # After any change to the BUCK ecosystem, one command runs every current test, tier by tier, stopping at
@@ -84,7 +205,7 @@ help:
 #   test-packaging   the published contracts, licence notices, Uniswap staging and formatting
 #   test-smoke       30-day economy and lifecycle worlds (Python) and the 30-day JS world
 # The five-year worlds are their own command (hours; datasim.local runs them in parallel):
-#   make nix-venv-test-worlds [WORLD_DAYS=1825] [WORLDS="life-A econ-F"]
+#   make nix-venv-test-worlds [WORLD_DAYS=1825] [WORLDS="life-A econ-F"] [WORLD_JOBS=4]
 TEST_TIERS	= test-contracts test-kernels test-python-all test-js test-browsers test-packaging test-smoke
 .PHONY: test-all test-contracts test-kernels test-python-all test-js test-browsers test-packaging test-smoke test-worlds
 test-all: $(TEST_TIERS)
@@ -112,8 +233,10 @@ test-smoke: sim-build core-build-py
 	$(MAKE) compare-null
 WORLD_DAYS	?= 1825
 WORLDS		?=
+WORLD_JOBS	?= 0
+WORLD_STAGGER	?= 90
 test-worlds: sim-build core-build-py
-	DAYS=$(WORLD_DAYS) scripts/world-suite.sh $(WORLDS)
+	DAYS=$(WORLD_DAYS) JOBS=$(WORLD_JOBS) STAGGER=$(WORLD_STAGGER) scripts/world-suite.sh $(WORLDS)
 
 # RPC endpoints for forking.  Override via environment or .env file.
 # Free tier: https://dashboard.alchemy.com/ or https://infura.io/
@@ -132,7 +255,10 @@ FORK_BLOCK		?=
 # and the uniswap_v*_build skips now live in [profile.default] in
 # foundry.toml -- on a command line they applied only where somebody
 # remembered them, and the bare builds below are exactly where nobody did.
-FORGE_OPTS		?= --optimize --optimizer-runs 200 $(FORGE_SKIP_GENERATED)
+# FORGE_JOBS=N caps forge's threads (compile and test); unset, forge uses every core.
+FORGE_JOBS		?=
+FORGE_THREADS		= $(if $(FORGE_JOBS),--threads $(FORGE_JOBS))
+FORGE_OPTS		?= --optimize --optimizer-runs 200 $(FORGE_THREADS) $(FORGE_SKIP_GENERATED)
 
 # test/RegressionTest.sol imports a Groth16 verifier that the SNARK
 # toolchain GENERATES into build/snark/ (gitignored).  foundry resolves the
@@ -202,10 +328,13 @@ test: build-uniswap-artifacts
 SNARK_TEST_SUITES	= MintVerifierTest|MintVerifierA2Test|NotesA2TieTest|SpendVerifierTest
 FORGE_SKIP_SNARK_TESTS	= $(if $(wildcard build/snark/mint_batch_a2_n1/fixtures/basic.json),,\
 			     --no-match-contract '$(SNARK_TEST_SUITES)')
+# One test function, one test file, one contract's suite:
+#   make nix-unit-test_some_function    make nix-path-WorkWheel.t.sol    make nix-match-WorkWheelTest
+# path- takes the file's NAME (found in any directory): make cannot match a pattern target with a slash.
 unit-%:
 	forge test $(FORGE_OPTS) --match-test $* -vvv
 path-%:
-	forge test $(FORGE_OPTS) --match-path $* -vvv
+	forge test $(FORGE_OPTS) --match-path '**/$*' -vvv
 match-%:
 	forge test $(FORGE_OPTS) --match-contract '$*' -vvv
 
@@ -915,7 +1044,7 @@ sim-report:
 # The simulation loaders and Uniswap staging also expect out/; FOUNDRY_OUT
 # alone does not redirect them. Use a separate worktree for isolated builds.
 sim-build:	$(ROUTING_ARTIFACT) $(PERMIT2_ARTIFACT) $(ROUTING_PRICES) stage-uniswap
-	forge build --skip test --skip script $(FORGE_SKIP_GENERATED)
+	forge build --skip test --skip script $(FORGE_THREADS) $(FORGE_SKIP_GENERATED)
 
 sim-run:	sim-build
 	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \

@@ -1,9 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # The five-year worlds (make test-worlds; doc/review/consolidation-plan.org): the canonical economy and the
 # household lifecycle mixes, one process each, in parallel, from the repository root inside the venv.
+# (Bash 4.3 or later: the nix shell's. macOS's /bin/bash 3.2 has no associative arrays or wait -n.)
 #
-#   scripts/world-suite.sh                 # all worlds, 1825 days
+#   scripts/world-suite.sh                 # all worlds, 1825 days, all at once
 #   DAYS=365 scripts/world-suite.sh life-A econ-F    # some worlds, a year
+#   JOBS=4 scripts/world-suite.sh          # at most four running at a time (a core each)
 #
 # Each writes its run record under $SIM_RUNS (build/runs), its vector under build/sim/<id>.json, and its log
 # with a done or failed marker under build/logs. Starts are staggered: the first world on a fresh checkout
@@ -13,6 +15,7 @@
 cd "$(dirname "$0")/.." || exit 1
 DAYS=${DAYS:-1825}
 STAGGER=${STAGGER:-90}
+JOBS=${JOBS:-0}             # worlds running at once; 0: all of them
 L=alberta_buck/sim/experiments/economy-lifecycle.toml
 E=alberta_buck/sim/experiments/economy.toml
 P=agents.HouseholdPopulationAgent
@@ -33,6 +36,9 @@ for id in "${ORDER[@]}"; do
   args=${WORLDS[$id]:?unknown world $id (known: ${!WORLDS[*]})}
   if grep -qs '"status": "complete"' "${SIM_RUNS:-build/runs}/$id/manifest.json"; then
     echo "$id: complete; skipped"; continue
+  fi
+  if [ "$JOBS" -gt 0 ]; then
+    while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
   fi
   [ $first -eq 1 ] || sleep "$STAGGER"
   first=0

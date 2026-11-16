@@ -618,6 +618,11 @@ for ten days) and two seeds.
 
 * Inspect, smoke-test, run
 
+=make help-runs= prints the Makefile's guide to every simulation and validation run: each one alone
+and all of them together, re-running, the variables that steer them (cores, horizon, seed, settings,
+the EVM's block spacing) and where their results land (run records, the dashboard, PDFs, campaign
+and comparison reports, the papers). The commands below are the campaign's.
+
 #+begin_src sh
 make nix-venv-economy-plan CELLS=centre
 make nix-venv-economy-smoke ECONOMY_SMOKE_DAYS=30
