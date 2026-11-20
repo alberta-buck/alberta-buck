@@ -5676,6 +5676,12 @@ operation, fault or unavailable relief in any frame of any world.
   entries. In the economy world, whose wheel ticks and oracle reads touch hundreds of slots, that is
   about 86 kB a transaction and 11 MB a day: about 20 GB by five years in a lifecycle world, more in
   econ-F. That killed the three worlds, not the frames.
+- /Our pyrevm build/ (=core/python/vendor/pyrevm=, =make nix-venv-pyrevm-patched=, the owner's
+  decision below): it releases the journal and the log list after each call with no checkpoint
+  outstanding. The 30-day lifecycle world writes byte-identical records and vectors on it and on
+  0.3.7 (gas and state untouched); the 120-day world holds 170 MB at day 100 against 1,603 MB
+  (1,690 on HEAD's package), growing about 1 MB a day instead of 12. The seeded suite runs on it on
+  datasim (launched 2026-11-20).
 
 *** Observations and recommendations
 
@@ -5719,6 +5725,72 @@ operation, fault or unavailable relief in any frame of any world.
   receipt before spending dollars. /Deferred/ (the owner's earlier direction): K's slide, the leak's
   standing error and whether K bounds the basket's gross lien, until the demand cast.
 
+** Fresh BUCK in the pools, and flash mint/burn: the design (2026-11-20)
+
+The owner's decision (previous section): BUCK should not sit in the pools growing hollow; the basket
+and an arbitrage facility issue on demand from their credit lines, burn what they do not need, and
+borrow very large arbitrage legs for the length of one transaction. What the contracts do today (a
+read-only map at cb35bcc3):
+
+- /Issuing/: the basket issues only through =_fundCash= (=BuckBasketEquityStorage=), the shortfall over
+  its wallet cash, always spent at once into a position or a market leg; Buck checks the facility's K
+  room, its maturity, the funding factor (trivial at the basket's zero premium), recomputes K and
+  checkpoints the fund. Nothing rations issuance per block.
+- /Retiring/: only =retireCredit= (=BuckBasketEquity=, through the fund's =reduce=), after an exit
+  (=_holdShortfall=, as much as keeps the K shortfall from growing) or by governance. The Jubilee
+  kind's retirement job skips a Carrying basket, so the canonical basket never retires surplus cash.
+  A retirement is no inverse of an issue: it pays the basket relief on the slice's age, removes that
+  age from the claim, draws on the fund's per-operation (10% of its cash) and per-block relief
+  budgets, and reverts while any pool's spot is outside its TWAP band (=MarkPriceDeviation=, when the
+  fund holds a basket receipt): so issue-then-retire cannot serve as a flash loan.
+- /Arbitrage/: the machine's cycles (=BasketArb= / =BasketMarketOps.execute=) start in BUCK from the
+  basket's wallet: at most the wallet's BUCK and =cap= (at most 5%) of the first pool's reserve. The
+  profit stays in the wallet as BUCK. The older wheel's =ArbKind= borrows its first leg from the
+  pool by a V3 flash swap (no mint).
+- /Where the basket's BUCK sits/: the BUCK half of its full-range positions (it pairs every TOKEN at
+  once: the pools' depth is the basket's TOKEN value) and its wallet (sale proceeds and exits' change,
+  never retired).
+- /Room/: Buck 2,781 bytes under the limit, =BuckFacilities= 633, =BuckCash= 16,252, the basket's
+  shell 416 (its fallback routes the arbitrage to the components facet and anything else to the
+  venue facet, 1,075), the upkeep facet 762, =BasketMarketOps= 4,349, the machine wheel 5,063,
+  =BasketDesk= 3,025. No arbitrage facility contract exists; the desk holds its own credit line.
+
+The proposal, in the order to build:
+
+1. /=Buck.flashIssue(creditId, amount, data)=/ (the primitive). An approved Carrying issuer with a
+   live facility credits itself =amount= fresh BUCK (nominal and net alike), Buck calls it back
+   (=onBuckFlash(amount, data)=), and on return debits exactly =amount= nominal and net from it, or
+   the whole transaction reverts. No facility state moves: no principal, claim age, relief,
+   coverage or K recomputation; supply is unchanged after the call. Bounded by the facility's room
+   to issue now (K x value - principal, and the account's and supply's room), so the borrowed BUCK
+   is always BUCK the line could have issued. One at a time (a transient flag); Buck's own lock is
+   held only around the credit and the debit, so the callback can trade. Tests first: exact supply
+   and balances after, a short repayment reverts, the room bound, no relief or age change, nested
+   refused, a Carrying borrower's fee ratio restored.
+2. /Flash arbitrage/ (the machine's cycles). When the cycle's best size exceeds the wallet, the basket
+   borrows the difference through =flashIssue= and runs the cycle in the callback; the cycle's BUCK
+   return repays it; the gain stays. Size: =cap= of the first pool's reserve (raised from 5% if the
+   gap warrants) within the facility's room. Each cycle sells fresh BUCK into the first pool: the
+   arbitrage itself refreshes the pools it trades through.
+3. /Burn what is idle/. After each settle, the basket retires its wallet BUCK above a small working
+   float (=retireCredit=, chunked to the relief budgets, skipped while a pool is displaced and retried
+   at the next settle), and issues again on demand (=_fundCash=, unchanged). The lien then tracks what
+   the positions hold, supply falls by the idle BUCK, and no hollow BUCK accumulates in the wallet.
+4. /Deposits into the pools/ (N5). A BUCK deposit pairs idle TOKEN into positions with the
+   depositor's full-value BUCK before any issuance.
+5. /After withdrawals/: the book's sells restore each pool's target (as the upkeep does today), and
+   their proceeds are retired by 3 instead of waiting in the wallet.
+
+Measured as a comparison (=economy=, two years; each of 2, 3 and 4 on and off against today): the
+pools' net/gross, the book's spread, supply and lien, K and BVIB, the arbitrage's share against
+outside arbitrageurs, and the relief paid on retirements.
+
+/The owner's answers (2026-11-20)/: a flash is bounded by the credit line's room to issue now; the
+basket itself is the arbitrage facility (its machine-run cycles flash on its own line; the desk
+does not flash); the basket keeps pairing every TOKEN (full pairing; measure the hollowness with
+arbitrage and deposits adding fresh BUCK before any depth targets); the float kept when burning
+idle BUCK is the basket's liquidity target.
+
 ** Resume here (2026-11-20)
 
 - *Branch*: =feature/household-minimal-ecosystem=; worktree =.claude/worktrees/buck-compound=.
@@ -5726,11 +5798,19 @@ operation, fault or unavailable relief in any frame of any world.
   worlds died"); smaller Python stores for long runs (receipts as tuples, compacted frame history,
   shared account snapshots); killed runs read as killed; seeds for the suite; =runrecord years=; the
   cause of the deaths found in pyrevm's journal; the owner's decisions on every open question.
-- *Next, in order*: a pyrevm that clears its journal, then the seeded suite on datasim; the design
-  of fresh BUCK in the pools and flash mint/burn (then contracts, SDKs, worlds, a comparison); the
-  keepers' =tickAt= and memo keys; the households' fixes; the shadow controller's deletion and the
-  stress arms' port; then the demand cast. Also: regenerate the pinned vectors at 12 s; the savings
-  sandbox's step 6.
+- *Also done*: our pyrevm build (bounded journal; =make nix-venv-pyrevm-patched=); the households'
+  fixes (the USD fund in net worth and in its counterfactual, a retired investor accumulating
+  nothing, normal draws for home value, income and savings); the design of fresh BUCK in the pools
+  and flash mint/burn, with the owner's answers.
+- *Running on datasim*: the seeded suite in =~/src/alberta-buck-net= at 4d7497aa on our pyrevm:
+  life-A, C and E again at their own seed, and every mix at seeds 11 and 13 (fifteen worlds;
+  =build/logs/suite-default.log=, =suite-seeds.log=, =build/logs/suites.done= when both end). Its
+  lifecycle worlds predate the households' fixes and normal draws (and so are the baseline of
+  today's model); read with =python -m alberta_buck.sim.runrecord years build/runs/<id> ...=.
+- *Next, in order*: =Buck.flashIssue= (tests first), flash arbitrage in the machine, burning idle
+  BUCK, deposits into the pools, then their comparison; the keepers' =tickAt= and memo keys; the
+  shadow controller's deletion and the stress arms' port; then the demand cast. Also: regenerate
+  the pinned vectors at 12 s; the savings sandbox's step 6.
 
 ** Resume here (superseded: 2026-11-15, night)
 

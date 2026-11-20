@@ -225,6 +225,7 @@ def test_a_retired_investor_draws_its_savings_down_as_monthly_income(household_w
     cash = _books(d, a)["cash"]
     a.advance_net_investor(d, 30, ctr)
     assert a.usd_fund == month // 2, "half of the wages went to the fund"
+    assert a.hypo_fund == a.usd_fund, "its counterfactual saved the same in its own fund"
     receipt = a._basket_receipts[0]
     shares0, fund0 = a._receipt_book[receipt][1], a.usd_fund
     # Retired from day 45: on day 46 a month's share of the receipt is redeemed home in BUCK, and the
@@ -235,6 +236,7 @@ def test_a_retired_investor_draws_its_savings_down_as_monthly_income(household_w
     shares1 = a._receipt_book[receipt][1]
     assert shares0 - shares1 == pytest.approx(shares0 * share, rel=.01) and ctr["hhDrawdowns"] == 1
     assert a.usd_fund_paid == pytest.approx(fund0 * share, rel=.01) and a.usd_fund == fund0 - a.usd_fund_paid
+    assert a.hypo_fund == a.usd_fund, "the counterfactual's fund paid (and spent) the same"
     assert _books(d, a)["buck"] > RAW and a._drawdown_to_sell > 0
     # The next days sell what the redemption paid, a capped bite a day, and nothing else.
     for day in range(47, 52):
@@ -252,7 +254,18 @@ def test_a_retired_investor_draws_its_savings_down_as_monthly_income(household_w
     cash, fund = _books(d, a)["cash"], a.usd_fund
     a.advance_net_investor(d, 60, ctr)
     assert _books(d, a)["cash"] <= cash, "no wages once retired"
-    assert a.usd_fund >= fund
+    assert a.usd_fund >= fund and a.hypo_fund == a.usd_fund
+    # Between drawdowns a retired investor accumulates nothing: its usual cadence would have bought BUCK
+    # with the dollars its drawdown raised (owner, 2026-11-20).
+    for day in range(61, 70):
+        _surplus_day(d, a, day)
+        books = _books(d, a)
+        assert a.advance_net_investor(d, day, ctr) is False, (day, a.last_action)
+        assert _books(d, a) == books, "no purchase and no deposit while retired"
+    # Its worth counts the fund, and the counterfactual's its own: the comparison sees the basket alone.
+    st = a.octl_state(d)
+    assert st["hypo_fund"] == a.hypo_fund and st["usd_fund"] == a.usd_fund
+    assert st["hypo"] == a.hypo_cash + a.hypo_fund - a.hypo_mortgage - st["hypo_arrears"]
     assert not d.chain.mismatches
 
 
@@ -283,10 +296,14 @@ def test_a_retired_saver_lives_on_its_pension_and_draws_down_the_rest(household_
     a._proxy_exec(d, d.usdc.address, d.usdc.encode_abi("transfer", args=[d.simlp.address, cash - RAW]))
     _surplus_day(d, a, 32)
     fund, shares0 = a.usd_fund, a._receipt_book[a._basket_receipts[0]][1]
+    hypo_fund, hypo_cash = a.hypo_fund, a.hypo_cash
+    assert hypo_fund == fund, "the counterfactual saved the same in its own fund"
     assert a.advance_net_drawdown(d, 32, ctr) is True and a.last_action == "drawdown", a.last_error
     context = [e for e in a.refinance_machine.events if e.get("kind") == "exit" and e["status"] == "planned"][-1]["context"]
     need, from_basket = int(context["need_usdc"]), int(context["basket_usdc"])
     assert 0 < a.usd_fund_paid < fund and a.usd_fund == fund - a.usd_fund_paid, "both pay their share"
+    assert a.hypo_fund == a.usd_fund and a.hypo_cash == hypo_cash + a.usd_fund_paid, \
+        "the counterfactual's fund paid the same into its dollars"
     assert a.usd_fund_paid + from_basket == need, "together they cover the shortfall"
     assert a._receipt_book[a._basket_receipts[0]][1] < shares0 and a._drawdown_to_sell > 0
     # The redemption is no market trade: the same day sells what it paid, the day's one market bite.

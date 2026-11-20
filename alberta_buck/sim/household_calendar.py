@@ -205,7 +205,9 @@ class HouseholdCalendar:
                 # retired. Any other household saves usd_fund_share of what its wages leave after its
                 # bills in the fund while it works; retired, it earns pension_frac of its wages while its
                 # living costs stay, and draws its savings down for the rest (advance_net_drawdown).
-                a.usd_fund = int(a.usd_fund * policy.fund_growth(a.p["usd_fund_return"], 30))
+                growth = policy.fund_growth(a.p["usd_fund_return"], 30)
+                a.usd_fund = int(a.usd_fund * growth)
+                a.hypo_fund = int(a.hypo_fund * growth)          # the counterfactual's fund, alike
                 share = int(a.p["usd_fund_share"] * 10**9)
                 working = policy.stage(a.p, a.arrive_day, day) == "working"
                 if a.investor:
@@ -218,6 +220,7 @@ class HouseholdCalendar:
                 else:
                     fund, income = 0, wages * int(a.p["pension_frac"] * 10**9) // 10**9
                 a.usd_fund += fund
+                a.hypo_fund += fund
             full = 0 if a._sold else a._face0 * a.premium_rate // 10_000 // 12
             premium = a._external_premium_due(d, full)  # read before committing this period
             for amount in (income, living, full, premium):

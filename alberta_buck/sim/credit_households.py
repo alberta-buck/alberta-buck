@@ -74,6 +74,9 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             self._exit_day      = self.arrive_day + max(0, int(policy.YEAR_DAYS * years_left))
         self.usd_fund           = 0                     # the external USD fund (off chain), raw dollars
         self.usd_fund_paid      = 0                     # what it has paid out as retirement income
+        # The counterfactual's fund (owner, 2026-11-20: net worth counts the fund): the same contributions,
+        # growth and withdrawals, so the comparison with dollars sees the basket, never the fund.
+        self.hypo_fund          = 0
         self._next_drawdown     = None                  # the next day a retired investor draws its month
         self._drawdown_to_sell  = 0                     # BUCK a month's redemption paid, still to sell
         self._divest_day        = (None if self.investor
@@ -561,6 +564,16 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         finally:
             self._net_dispatching = False
 
+    def _fund_out(self, amount, *, to_cash):
+        """Take `amount` out of the external fund, and the same out of the counterfactual's (as far as it
+        holds): into its dollars when the household's dollars receive it, else spent alike."""
+        self.usd_fund          -= amount
+        self.usd_fund_paid     += amount
+        mirror                  = min(amount, self.hypo_fund)
+        self.hypo_fund         -= mirror
+        if to_cash:
+            self.hypo_cash     += mirror
+
     def _drawdown_step(self, d, day, ctr):
         """One step of a retired investor's monthly income (household_policy.drawdown_share).
 
@@ -573,8 +586,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
             return self._drawdown_sell(d, day, ctr)
         share                   = policy.drawdown_share(self.p, self.arrive_day, day)
         paid                    = int(self.usd_fund * share)
-        self.usd_fund          -= paid
-        self.usd_fund_paid     += paid
+        self._fund_out(paid, to_cash=False)             # an investor's fund income is spent off chain
         self._next_drawdown     = day + policy.MONTH_DAYS
         self.last_action        = "drawdown"
         return self._drawdown_redeem(d, day, ctr, share, dict(reason="drawdown", share=share, fund_paid=paid))
@@ -674,8 +686,7 @@ class CreditHouseholdAgent(_HouseholdAccounts):
         from_basket             = min(worth, need - take)
         if take > 0:
             d.chain.send(d.usdc.functions.mint(self.address, take))     # the fund pays out, off chain to on
-            self.usd_fund      -= take
-            self.usd_fund_paid += take
+            self._fund_out(take, to_cash=True)
             self.last_action    = "drawdown-fund"
         if from_basket < PARITY:
             return take > 0
@@ -715,6 +726,10 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 return False
             if self.lifecycle and self._drawdown_pending(day):
                 return self._drawdown_step(d, day, ctr)
+            if self.lifecycle and policy.stage(self.p, self.arrive_day, day) != "working" and not m.surplus_due:
+                # Retired, it draws its savings down and accumulates nothing: its usual cadence would buy
+                # BUCK (or deposit) with the dollars its drawdown has just raised (owner, 2026-11-20).
+                return False
             if self._net_surplus_day == day or day < self._next_decision and not m.surplus_due:
                 return False
             self._net_surplus_day = day
@@ -2141,10 +2156,12 @@ class CreditHouseholdAgent(_HouseholdAccounts):
                 insurance_age   = min(st["deposit"], fee * st["deposit"] // raw) if raw else st["deposit"]
             held                = max(0, d.buck.functions.signedBalanceOf(self.proxy.address).call())
             wallet              = (d.buck.functions.balanceOf(self._wallet.address).call() if self._wallet is not None else 0)
-            financial           = st["cash"] + pending - self.mortgage - arrears + int(
+            financial           = st["cash"] + pending + self.usd_fund - self.mortgage - arrears + int(
                 (basket + st["deposit"] - insurance_age - st["drawn"] + st["jub"] + st["savings_held"] + held + wallet) * spot)
-        st.update(nw=financial, hypo=self.hypo_cash - self.hypo_mortgage - hypo_arrears,
-                  hypo_cash=self.hypo_cash, hypo_mortgage=self.hypo_mortgage, arrears=arrears,
+        # The external fund is financial worth (owner, 2026-11-20; household_mark counts it on canonical
+        # accounting); its counterfactual holds its own.
+        st.update(nw=financial, hypo=self.hypo_cash + self.hypo_fund - self.hypo_mortgage - hypo_arrears,
+                  hypo_cash=self.hypo_cash, hypo_fund=self.hypo_fund, hypo_mortgage=self.hypo_mortgage, arrears=arrears,
                   hypo_arrears=hypo_arrears, external_paid=self.external_paid, hypo_paid=self.hypo_paid,
                   insurance_age=insurance_age, exited=self.exited, withdrawn_usd=self.withdrawn_usd, held_buck=held,
                   wallet_buck=wallet, wallet_bought=self.wallet_bought,

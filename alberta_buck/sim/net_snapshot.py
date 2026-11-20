@@ -215,7 +215,8 @@ def household_mark(d, agent):
     numerator, denominator = bid if scaled >= 0 else ask
     valued = _tdiv(scaled * numerator, Q * denominator)
     arrears = agent.living_arrears + agent.premium_arrears
-    usd = sum(cash.values()) + pending - agent.mortgage - arrears
+    # Its external USD fund (the lifecycle) is dollars it owns, off chain (owner, 2026-11-20).
+    usd = sum(cash.values()) + pending + getattr(agent, "usd_fund", 0) - agent.mortgage - arrears
     # The same worth in net BUCK: dollars bought into BUCK at the ask, or a dollar debt paid by
     # selling BUCK at the bid.
     numerator, denominator = ask if usd >= 0 else bid

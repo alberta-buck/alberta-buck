@@ -1,8 +1,12 @@
 // Portable policy, in whole currency units. Python: alberta_buck/sim/household_policy.py and carry.py.
 import { netPurchaseExpected, netPurchaseCost, netSaleExpected } from "../net-market-quote.js";
 export const DEFAULTS = {
-  home_k: [200, 1500], ltv: [.05, .85], income_frac: [.20, .35], living_frac: [.55, .70],
-  cash_k: [20, 60], apr: [.045, .075], premium_bp: [25, 100], theta: [.5, 3],
+  // Home value, income (a share of the home's value) and savings are normal about the middle of their
+  // former uniform ranges, a quarter of the range a standard deviation, held within them (owner,
+  // 2026-11-20). A [lo, hi] setting is still uniform.
+  home_k: { mean: 850, sd: 325, lo: 200, hi: 1500 }, ltv: [.05, .85],
+  income_frac: { mean: .275, sd: .0375, lo: .20, hi: .35 }, living_frac: [.55, .70],
+  cash_k: { mean: 40, sd: 10, lo: 20, hi: 60 }, apr: [.045, .075], premium_bp: [25, 100], theta: [.5, 3],
   // A fixed yearly cost per insured asset, in dollars, on top of the premium rate: premium_bp +
   // premium_fixed_usd / value, so a small loan's premium is proportionally higher. 0: the rate alone.
   premium_fixed_usd: 0,
@@ -26,7 +30,8 @@ export const DEFAULTS = {
   // is not cheap (0: it borrows only at a premium).
   carry_utilization: 0,
   // The investor: opening savings and yearly saving ($k), and the years before it withdraws.
-  invest_cash_k: [10, 100], invest_income_k: [2, 20], hold_years: [3, 15],
+  invest_cash_k: { mean: 55, sd: 22.5, lo: 10, hi: 100 }, invest_income_k: { mean: 11, sd: 4.5, lo: 2, hi: 20 },
+  hold_years: [3, 15],
   // How far the basket's price in BUCK may stand above 1 while an investor still puts its BUCK into
   // the basket; above it, it holds BUCK for K to fall. Normal about 1%, bounded to 0..2%.
   bvib_tolerance: { mean: .01, sd: .005, lo: 0, hi: .02 },
