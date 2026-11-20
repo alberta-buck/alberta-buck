@@ -14,6 +14,12 @@
 # build it (five of seven reverted InvalidIdentityProof at their bootstrap, 2026-11-14). A world whose
 # record is already complete is skipped; remove build/runs/<id> to run it again.
 cd "$(dirname "$0")/.." || exit 1
+# pyrevm 0.3.7 keeps every transaction's journal: about 20 GB by five years, which killed three of seven
+# worlds on 2026-11-16. Our build bounds it (core/python/vendor/pyrevm/README.md).
+if ! python -c "import importlib.metadata as m, sys; sys.exit('+alberta' not in m.version('pyrevm'))"; then
+  echo "pyrevm is not our patched build (its journal grows ~11 MB a simulated day): make nix-venv-pyrevm-patched" >&2
+  exit 2
+fi
 DAYS=${DAYS:-1825}
 STAGGER=${STAGGER:-90}
 JOBS=${JOBS:-0}             # worlds running at once; 0: all of them

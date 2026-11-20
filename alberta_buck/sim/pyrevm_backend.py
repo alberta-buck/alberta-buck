@@ -398,6 +398,11 @@ class PyrevmAnvil:
         # =to= as the sender wrote it (the receipt has always echoed it unchanged), one shared string.
         self.receipts[txh] = (self.block, self._name(frm), to and sys.intern(to), gas_used, ok,
                               contract_addr, tuple(logs))
+        if self.block == 1000 and self.evm.journal_len > 100:
+            # pyrevm 0.3.7 keeps every transaction's journal: about 11 MB a simulated day in an economy
+            # world. Our build releases it (core/python/vendor/pyrevm/README.md).
+            print("[pyrevm] this pyrevm keeps every transaction's journal (memory grows without bound); "
+                  "for long runs: make nix-venv-pyrevm-patched", file=sys.stderr, flush=True)
         return txh
 
     def _name(self, address) -> str:

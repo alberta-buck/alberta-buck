@@ -1,0 +1,45 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "pyrevm"
+-version = "0.3.7"
++version = "0.3.7+alberta.1"
+ edition = "2021"
+ 
+ [lib]
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "pyrevm"
+-version = "0.3.7"
++version = "0.3.7+alberta.1"
+ requires-python = ">=3.7"
+ classifiers = [
+     "Programming Language :: Rust",
+--- a/src/evm.rs
++++ b/src/evm.rs
+@@ -417,6 +417,22 @@
+         );
+         self.context = evm_context;
+         self.result = result.as_ref().ok().cloned();
++        self.release_journal();
+         result
+     }
++
++    /// alberta-buck patch: the executor keeps every call's journal open (it skips revm's
++    /// finalization so state persists between calls), so the journal of state accesses and the
++    /// log list grew with every call for the life of the EVM (about 86 kB a transaction in a
++    /// five-year simulation). With no checkpoint outstanding, nothing can revert into them, and
++    /// the call's logs are already in its result: reset both to their initial state. The state
++    /// itself (accounts, storage, their warm status) is untouched, so execution and gas are
++    /// unchanged.
++    fn release_journal(&mut self) {
++        let journaled = &mut self.context.journaled_state;
++        if self.checkpoints.is_empty() && journaled.depth == 0 {
++            journaled.journal = vec![vec![]];
++            journaled.logs = Vec::new();
++        }
++    }
+ }

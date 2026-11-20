@@ -88,6 +88,8 @@ help-runs:
 #      make nix-venv-setup                 .venv with the three Python packages, editable
 #      make nix-venv-sim-build             the contracts and Uniswap artifacts every EVM run loads
 #      make nix-venv-core-build-py         the Python kernels (buck_core)
+#      make nix-venv-pyrevm-patched        our pyrevm (bounded journal): needed for runs of years;
+#                                          pyrevm 0.3.7's memory grows ~11 MB a simulated day
 #      make nix-core-js-artifacts          the JS contract bundle: rebuild it after ANY contract change,
 #                                          or the JS worlds and the sandbox run the old contracts
 #
@@ -243,6 +245,21 @@ WORLDS		?=
 WORLD_JOBS	?= 0
 WORLD_STAGGER	?= 90
 WORLD_SEEDS	?=
+# pyrevm 0.3.7 keeps every transaction's journal (about 20 GB by five years): build ours, with a bounded
+# journal, into the venv (core/python/vendor/pyrevm/README.md). make nix-venv-pyrevm-patched
+PYREVM_VERSION	= 0.3.7
+PYREVM_SHA256	= 9fc770ec166a44a037da9a6dcdfa3e1757dbd3e0a2cdee97d7679ff5ce6a8f74
+PYREVM_PATCH	= core/python/vendor/pyrevm/pyrevm-$(PYREVM_VERSION)-journal.patch
+.PHONY: pyrevm-patched
+pyrevm-patched:
+	rm -rf build/pyrevm && mkdir -p build/pyrevm/dist
+	echo "pyrevm==$(PYREVM_VERSION) --hash=sha256:$(PYREVM_SHA256)" > build/pyrevm/requirements.txt
+	python -m pip download --no-deps --no-binary :all: --require-hashes -r build/pyrevm/requirements.txt -d build/pyrevm
+	tar -xzf build/pyrevm/pyrevm-$(PYREVM_VERSION).tar.gz -C build/pyrevm
+	patch -d build/pyrevm/pyrevm-$(PYREVM_VERSION) -p1 < $(PYREVM_PATCH)
+	python -m pip wheel --no-deps build/pyrevm/pyrevm-$(PYREVM_VERSION) -w build/pyrevm/dist
+	python -m pip install --force-reinstall --no-deps build/pyrevm/dist/pyrevm-$(PYREVM_VERSION)+alberta.*.whl
+	python -c "import importlib.metadata as m; print('pyrevm', m.version('pyrevm'))"
 test-worlds: sim-build core-build-py
 	DAYS=$(WORLD_DAYS) JOBS=$(WORLD_JOBS) STAGGER=$(WORLD_STAGGER) SEEDS="$(WORLD_SEEDS)" scripts/world-suite.sh $(WORLDS)
 
