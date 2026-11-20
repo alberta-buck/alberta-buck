@@ -11,6 +11,8 @@ import {IBuckJubilee} from "../IBuckJubilee.sol";
 import {IBasketArb} from "../basket/IBasketArb.sol";
 import {BN254} from "../BN254.sol";
 import {IdentityRegistry} from "../IdentityRegistry.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 interface IWheelSample {
     function isDue() external view returns (bool);
@@ -94,6 +96,7 @@ abstract contract SampleKind is WorkWheel {
 ///         components. Arb precedes capital deployment. Unconfigured kinds add no slots. The initial
 ///         observation precedes all portfolio work; Ops also refreshes it.
 contract BasketMachineWheel is WorkWheel, CompletionMemo, SampleKind, JubileeKind, ComputeKind, ArbKind, OpsKind, ResponseKind {
+    using SafeERC20 for IERC20;
     constructor(address buck, address stable, address gov, uint16 kappa, uint256 reserveCap)
         WorkWheel(buck, gov, kappa, reserveCap) ArbKind(buck, stable) {}
 
@@ -109,6 +112,39 @@ contract BasketMachineWheel is WorkWheel, CompletionMemo, SampleKind, JubileeKin
     }
 
     function setStartMode(uint8) public override onlyGov { revert InvalidArbConfiguration(); }
+
+    /// @notice The basket borrows each cycle's BUCK fresh from its credit line for the cycle's length
+    ///         (Buck.flashIssue; owner, 2026-11-20) instead of spending its wallet: cycles as large as
+    ///         the line's room, and fresh BUCK into the pool each cycle sells into. Off by default.
+    bool public arbFlash;
+    event ArbFlashSet(bool on);
+    function setArbFlash(bool on) external onlyGov { arbFlash = on; emit ArbFlashSet(on); }
+
+    error NoSuchSlot();
+
+    /// @notice A keeper's direct entry (owner, 2026-11-20): run `slot` now if it has work, without
+    ///         passing the slots before it, as one step of tick would (the same memory of idle slots,
+    ///         reward and Ticked event). pending() names the slot: (cursor + steps) % slotCount(). The
+    ///         cursor moves past it.
+    function tickAt(uint256 slot) external workGuard returns (uint256 work, uint256 reservePay) {
+        uint256 n = _slotCount();
+        if (slot >= n) revert NoSuchSlot();
+        if (!_settled(slot) && _due(slot)) {
+            work = _run(slot);
+            if (work == 0) _ranIdle(slot);
+            else _moved();
+        }
+        cursor = (slot + 1) % n;
+        if (work > 0) {
+            scannedIdle = 0;
+            reservePay = reserve * kappaBp / 10000;
+            if (reservePay > 0) {
+                reserve -= reservePay;
+                payToken.safeTransfer(msg.sender, reservePay);
+            }
+        }
+        emit Ticked(msg.sender, work, reservePay);
+    }
 
     function plan(uint256 route) public view override returns (uint256 amount, uint8 direction, uint256 gain) {
         try IBasketArb(creditee).basketArbPlan(route) returns (IBasketArb.ArbPlan memory p) {

@@ -29,6 +29,9 @@ abstract contract BasketArb is BuckBasketEquityStorage, IBasketArb {
     /// cycle improves net wallet + LP value at the same frozen TOKEN marks;
     /// fees count once, no credit shortfall grows, and actual collateral is
     /// refreshed. Any refusal rolls back all swaps, fee collections and books.
+    ///      With the wheel's arbFlash, the cycle's BUCK leg is borrowed fresh from the basket's credit
+    ///      line for the cycle's length (Buck.flashIssue; owner, 2026-11-20) and the cycle runs in
+    ///      onBuckFlash: no wallet cash is spent and supply is unchanged after.
     function executeBasketArb(uint256 route, uint8 direction, uint256 amount, uint256 minimumGain)
         external arbLock returns (ArbPlan memory result)
     {
@@ -36,7 +39,13 @@ abstract contract BasketArb is BuckBasketEquityStorage, IBasketArb {
         if (!netAccounting) revert CanonicalArbRequired();
         controller.compute();
         uint256 shortfall = _shortfallS(_snap());
-        result = BasketMarketOps.execute(address(buck), wheel, route, direction, amount, minimumGain, idleToken);
+        result = BasketMarketOps.run(address(buck), wheel, creditId, route, direction, amount, minimumGain, idleToken);
         _finishBuy(shortfall);
+    }
+
+    /// @dev Buck's flash callback: only inside this basket's own executeBasketArb (its lock held).
+    function onBuckFlash(uint256, uint256 amount, bytes calldata data) external returns (bytes memory) {
+        if (msg.sender != address(buck) || !_positionEntered) revert NotWheel();
+        return BasketMarketOps.flashLeg(address(buck), wheel, amount, data, idleToken);
     }
 }

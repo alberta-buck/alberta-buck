@@ -5675,7 +5675,8 @@ operation, fault or unavailable relief in any frame of any world.
   checkpoints"; there are none), and a snapshot/commit bracket around each transaction doubles the
   entries. In the economy world, whose wheel ticks and oracle reads touch hundreds of slots, that is
   about 86 kB a transaction and 11 MB a day: about 20 GB by five years in a lifecycle world, more in
-  econ-F. That killed the three worlds, not the frames.
+  econ-F. That killed the three worlds, not the frames. An allocation trace agrees: from day 20 to
+  50 Python's own allocations grew 10 MB while the process grew 259 MB (96% native).
 - /Our pyrevm build/ (=core/python/vendor/pyrevm=, =make nix-venv-pyrevm-patched=, the owner's
   decision below): it releases the journal and the log list after each call with no checkpoint
   outstanding. The 30-day lifecycle world writes byte-identical records and vectors on it and on
@@ -5784,6 +5785,54 @@ The proposal, in the order to build:
 Measured as a comparison (=economy=, two years; each of 2, 3 and 4 on and off against today): the
 pools' net/gross, the book's spread, supply and lien, K and BVIB, the arbitrage's share against
 outside arbitrageurs, and the relief paid on retirements.
+
+*** As built: steps 1 and 2 (2026-11-20)
+
+- /=Buck.flashIssue(id, amount, data) returns (bytes)=/: an approved Carrying issuer owning facility
+  =id= is credited =amount= fresh BUCK (=BuckCash.flashCredit=: nominal and net alike, to supply,
+  attributed to no NFT); Buck calls its =onBuckFlash(id, amount, data)= and passes back what that
+  returns, then debits exactly =amount=, nominal and net (=flashRepay=), or the transaction reverts.
+  Bounded by =flashRoom(id)= (K x the activated value - principal; zero once matured); one at a time
+  (a transient flag); Buck's lock is held around the credit and the debit only, so the callback
+  trades. Buck 21,795 to 23,930 bytes (646 left). Tests (=test/BuckFlash.t.sol=, seven): nothing
+  changed after (supply, principal, claim age, coverage, both balances), the room's bound, a short
+  repayment reverting everything, no nesting, the callback trading through a Carrying relay with a
+  year-hollow borrower's carried fee restored to the unit, only an approved Carrying owner, not once
+  matured.
+- /Flash arbitrage/: the machine wheel's =arbFlash= (governance; off by default). With it, the basket's
+  =executeBasketArb= has =BasketMarketOps.run= borrow the cycle's whole BUCK leg by =flashIssue= on its
+  credit line; Buck calls the basket back (=onBuckFlash=, routed by the shell to the upkeep facet,
+  refused unless Buck calls inside the basket's own arbitrage), which runs the unchanged cycle
+  (=flashLeg= -> =execute=, the borrowed leg kept out of the reserve the basket must keep) and returns
+  its result. The planner's budget is the line's room, not the wallet. The upkeep facet 24,274 bytes
+  (302 left), the shell 24,184 (392), =BasketMarketOps= 23,149 (1,427). Tests
+  (=test/wheel/BuckCompoundFlashArb.t.sol=, seven): an empty wallet arbitrages nothing without the
+  flash, and with it recovers the shock with supply, lien and shares unchanged and the wallet no
+  poorer; a year-hollow pool's net ratio rises (fresh BUCK into the first pool); the cycle fits the
+  line's room and shrinks with it; only Buck inside the basket's own arbitrage reaches the leg; a
+  wheel tick runs a flash cycle; everything fits. The JavaScript arbitrage world runs both ways (one
+  =FlashIssued= a cycle with the flash). Forge 1,571 passed.
+- /Step 3, burning what is idle/: the Jubilee wheel's existing retirement job (=JubileeKind=, both
+  wheels) was written for the ordinary canonical basket of 2026-11-05 and skipped a Carrying one;
+  it now takes the Carrying basket too and reads its cash net, as its liquidity target is (the older
+  wheel shrank 243 bytes). It retires principal from the cash above the target, at most the policy's
+  cap a job, paying the basket the relief due, and the basket issues again on demand (=_fundCash=).
+  Tests (=CarryingBasketRetirementWheelTest=): a Carrying basket burns its idle BUCK down to the target
+  and clears its lien; a year-hollow one spends only its net cash above the target. Its world setting is
+  the existing =deploy.basket_retirement_cap_m= (0, off, by default).
+- /In the worlds/: =machine.arb_flash= (Python, default false) and =arbFlash= (JS =buildEquilibriumWorld=);
+  the comparison =comparisons/flash.toml= (=economy=, two years): arb wallet or flash x burn keep or
+  burn (1M a job), four runs.
+- /The keepers' =tickAt(slot)=/ (machine wheel only, the owner's choice): runs the slot =pending()=
+  names, as one step of =tick= would (the idle memory, reward and =Ticked=), without passing the
+  slots before it; the cursor moves past it. Tests: it runs the named slot's work; on a quiet market
+  every slot does nothing; a missing slot is refused. The machine wheel 19,922 bytes (4,654 left).
+  The per-kind memo keys are next (each kind keyed on what its view reads, so an arbitrage cycle
+  stops reopening the desk and the response slots); the keepers in both worlds then call =tickAt=.
+- /A first look/ (=economy=, 20 days, flash against wallet, both keeping idle BUCK): too short for the
+  pools' hollowness (0.9989 in both), but BVIB ends nearer parity (1.0050 against 1.0082), the outside
+  arbitrageurs complete fewer cycles (28 against 34), and the basket's wallet stays empty (43 BUCK
+  against 52,382): its cycles no longer spend it.
 
 /The owner's answers (2026-11-20)/: a flash is bounded by the credit line's room to issue now; the
 basket itself is the arbitrage facility (its machine-run cycles flash on its own line; the desk

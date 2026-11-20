@@ -138,7 +138,7 @@ help-runs:
 #      make nix-venv-compare-plan   COMPARE=book                    the runs and their settings
 #      make nix-venv-compare        COMPARE=book COMPARE_JOBS=2     [COMPARE_ARGS=...]
 #      make nix-venv-compare-report COMPARE=book
-#      Specs: book, carry, leak, null, shocks. COMPARE_ARGS: --here (the working tree, not frozen),
+#      Specs: book, carry, flash, leak, null, shocks. COMPARE_ARGS: --here (the working tree, not frozen),
 #      --only AXIS=VALUE (some of the runs), --days N (a shorter horizon, under a name of its own).
 #   e  JavaScript worlds (core/js, on webevm in Node)
 #      make nix-core-eqsim [JS_EQ_ARGS="--days 14 --policy adaptive"]   charts in build/sim/js-eqsim.svg

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
+import {IBuckNetView} from "../IBuckNetView.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {WorkWheel} from "./WorkWheel.sol";
@@ -185,21 +186,22 @@ abstract contract JubileeKind is WorkWheel {
     }
 
     /// @dev Read authoritative NFT principal, never infer it from cash. Only
-    ///      the fund's own ordinary canonical basket is eligible, with a
-    ///      matching facility. Refund/premium rules stay with its monetary
+    ///      the fund's own canonical basket is eligible, with a matching
+    ///      facility; its cash is read net, as its liquidity target is (a
+    ///      Carrying basket burns its idle BUCK too: owner, 2026-11-20, "burn
+    ///      BUCKs instead of leave them standing idle"). Refund/premium rules stay with its monetary
     ///      retirement API. Fully aged facilities need the
     ///      owner's separate maturity release, not repeated repayment attempts.
     function _basketRetirement(JubileeFund f) private view returns (uint256 id, uint256 principal, uint256 amount) {
         if (jubileePolicy.retirementCap == 0) return (0, 0, 0);
         IWheelBasketCredit b = IWheelBasketCredit(address(f.basket()));
         IBuckJubilee token = f.token();
-        if (!b.netAccounting() || b.credit() != address(token.buckCredit())
-            || token.identity().isCarrying(address(b))) return (0, 0, 0);
+        if (!b.netAccounting() || b.credit() != address(token.buckCredit())) return (0, 0, 0);
         id = b.creditId();
         uint256 seconds_;
         (principal, seconds_) = token.buckCredit().issuanceOf(id);
         if (principal == 0 || seconds_ == principal * (50 * (365 days + 6 hours))) return (id, principal, 0);
-        uint256 cash = token.balanceOf(address(b));
+        uint256 cash = IBuckNetView(address(token)).netBalanceOf(address(b));
         uint256 target = b.liquidityTarget();
         if (cash <= target) return (id, principal, 0);
         amount = Math.min(principal, Math.min(cash - target, jubileePolicy.retirementCap));
@@ -231,7 +233,7 @@ abstract contract JubileeKind is WorkWheel {
         IWheelBasketCredit b = IWheelBasketCredit(address(f.basket()));
         b.retireCredit(amount, amount, relief);
         (uint256 afterPrincipal,) = token.buckCredit().issuanceOf(id);
-        if (afterPrincipal != principal - amount || token.balanceOf(address(b)) < b.liquidityTarget()) {
+        if (afterPrincipal != principal - amount || IBuckNetView(address(token)).netBalanceOf(address(b)) < b.liquidityTarget()) {
             revert RetirementInvariant();
         }
         return amount < jubileePolicy.retirementMinimum ? 0 : 1;

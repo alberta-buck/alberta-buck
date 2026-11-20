@@ -9,6 +9,7 @@ import {IBuckNetView} from "../IBuckNetView.sol";
 import {CarryRatio} from "../lib/CarryRatio.sol";
 import {UniswapV3OracleLib as V3} from "../lib/UniswapV3OracleLib.sol";
 import {IBuckBasketVenue} from "./IBuckBasketVenue.sol";
+import {IBuckFlash} from "../IBuckFlashBorrower.sol";
 import {IBasketArb} from "./IBasketArb.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 
@@ -34,6 +35,7 @@ interface IArbMarkets {
 interface IArbBasket {
     function constituents(uint256 i) external view returns (address, uint8, uint256, uint256, uint24,
         address, int24, int24, bool, uint256, uint128);
+    function creditId() external view returns (uint256);
     function liquidityOf(uint256 i) external view returns (uint128);
     function liquidityTarget() external view returns (uint256);
     function v3Factory() external view returns (address);
@@ -84,6 +86,7 @@ library BasketMarketOps {
         uint256 walletGross;
         uint256 walletNet;
         uint256 reserveFloor;
+        bool flash;
     }
     struct Route {
         Pool[4] pools;
@@ -271,14 +274,36 @@ library BasketMarketOps {
     /// cycle. LP principal is valued on both sides at the same frozen marks.
     /// Every intermediate spend must be complete. Existing custody cannot
     /// finance an unreported remainder. A revert undoes all collections/swaps.
+    /// @notice One cycle, funded from the wallet or, with the wheel's arbFlash, by a flash on the basket's
+    /// credit line (Buck.flashIssue calls the basket back, which runs flashLeg).
+    function run(address buck, address wheel, uint256 creditId, uint256 route, uint8 direction, uint256 amount,
+                 uint256 minimumGain, mapping(uint256 => uint256) storage idle)
+        public returns (IBasketArb.ArbPlan memory)
+    {
+        if (!flashing(wheel)) return execute(buck, wheel, route, direction, amount, minimumGain, 0, idle);
+        return abi.decode(IBuckFlash(buck).flashIssue(creditId, amount, abi.encode(route, direction, minimumGain)),
+                          (IBasketArb.ArbPlan));
+    }
+
+    /// @notice The cycle inside a flash: the borrowed leg is the cycle's input, kept out of the reserve.
+    function flashLeg(address buck, address wheel, uint256 amount, bytes memory data,
+                      mapping(uint256 => uint256) storage idle) public returns (bytes memory)
+    {
+        (uint256 route, uint8 direction, uint256 minimumGain) = abi.decode(data, (uint256, uint8, uint256));
+        return abi.encode(execute(buck, wheel, route, direction, amount, minimumGain, amount, idle));
+    }
+
+    /// `borrowed`: BUCK the basket holds by flash for this cycle (repaid after it), so excluded from the
+    /// reserve it must keep.
     function execute(address buck, address wheel, uint256 route, uint8 direction, uint256 amount,
-                     uint256 minimumGain, mapping(uint256 => uint256) storage idle)
+                     uint256 minimumGain, uint256 borrowed, mapping(uint256 => uint256) storage idle)
         public returns (IBasketArb.ArbPlan memory result)
     {
         if (direction > 1 || amount == 0) revert InvalidArbRoute();
         Context memory c = _context(buck, wheel, route);
         _sync(c, idle);
         c = _context(buck, wheel, route);
+        c.reserveFloor = Math.min(c.reserveFloor, spendableNet(buck) - borrowed);
         Route memory r = _route(c, direction);
         if (amount > _cap(c, r)) revert ArbBudget();
         uint256 required = Math.max(minimumGain, _minimum(c, amount));
@@ -296,7 +321,7 @@ library BasketMarketOps {
         (, uint256 afterCash) = IMarketCash(buck).accountBalancesScaled(address(this));
         result.cashReturn = _netDifference(afterCash, cash);
         result.lpFees = _sync(c, idle);
-        if (spendableNet(buck) < c.reserveFloor) revert ArbBudget();
+        if (spendableNet(buck) < c.reserveFloor + borrowed) revert ArbBudget();
         result.totalReturn = _difference(_value(c), beforeValue);
         result.lpReturn = result.totalReturn - result.cashReturn;
         if (result.totalReturn < int256(required)) revert NoPortfolioGain();
@@ -370,6 +395,18 @@ library BasketMarketOps {
         // deficit that already exists. No outside financing is introduced.
         c.reserveFloor = Math.min(cash, target);
         c.budget = c.walletNet == 0 ? 0 : IERC20(buck).balanceOf(address(this));
+        // Flash arbitrage (owner, 2026-11-20): the wheel's arbFlash borrows each cycle's BUCK leg fresh
+        // from the basket's credit line for the cycle's length (Buck.flashIssue), so the line's room
+        // to issue, not the wallet, bounds it.
+        c.flash = flashing(wheel);
+        if (c.flash) c.budget = Math.max(c.budget, IBuckFlash(buck).flashRoom(IArbBasket(address(this)).creditId()));
+    }
+
+    /// @notice Whether the wheel has the basket borrow its cycles' BUCK by flash (a wheel without the
+    ///         setting does not).
+    function flashing(address wheel) public view returns (bool) {
+        (bool ok, bytes memory r) = wheel.staticcall(abi.encodeWithSignature("arbFlash()"));
+        return ok && r.length == 32 && abi.decode(r, (bool));
     }
 
     function _market(Context memory c, IArbMarkets w, uint256 index) private view returns (Market memory m) {

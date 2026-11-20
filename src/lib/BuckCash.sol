@@ -109,6 +109,36 @@ library BuckCash {
         self.issued += raw;
     }
 
+    /// @dev A flash (the host's flashIssue): fresh nominal and net to the
+    ///      borrower and to supply, attributed to no NFT, repaid by flashRepay
+    ///      in the same call or the transaction reverts.
+    function flashCredit(Book storage self, address owner, uint256 raw, bool carrying) public {
+        _ordinaryAddress(self, owner);
+        if (raw == 0) revert BadAmount();
+        if (raw > type(uint256).max / Q - self.issued) revert IssuanceOverflow();
+        _checkpointFund(self);
+        _bind(self, owner, carrying);
+        _touch(self, owner);
+        _credit(self, owner, raw * Q, raw * Q, carrying);
+        self.issued += raw;
+    }
+
+    /// @dev Exactly what flashCredit added, nominal and net alike, so a
+    ///      Carrying borrower keeps its carried fee to the unit.
+    function flashRepay(Book storage self, address owner, uint256 raw, bool carrying) public {
+        _bind(self, owner, carrying);
+        _touch(self, owner);
+        Account storage a = self.accounts[owner];
+        uint256 value = raw * Q;
+        if (value > a.net) revert InsufficientSpendableBalance();
+        if (carrying) {
+            if (value > self.nominal[owner]) revert InsufficientNominalBalance();
+            self.nominal[owner] -= value;
+        }
+        a.net -= uint200(value);
+        self.issued -= raw;
+    }
+
     /// @dev Preconditions: selected principal, marked full-value relief and
     ///      insurer refund are authorized by the host; its cash budget is
     ///      consumed atomically. Net owner cash plus net fund cash burn raw.

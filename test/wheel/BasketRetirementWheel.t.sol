@@ -212,3 +212,61 @@ contract BasketRetirementWheelTest is JubileeWheelFixture {
         assertEq(basket.liquidityOf(0), 0, "no forced portfolio operation");
     }
 }
+
+/// @notice The canonical basket is Carrying: the retirement job burns its idle BUCK above its liquidity
+///         target too (owner, 2026-11-20: "burn BUCKs instead of leave them standing idle"), its cash
+///         read net, as its target is.
+contract CarryingBasketRetirementWheelTest is JubileeWheelFixture {
+    function _carryingBasket() internal pure override returns (bool) { return true; }
+
+    function _policy() internal pure override returns (JubileeKind.JubileePolicy memory p) {
+        p = JubileeWheelFixture._policy();
+        p.retirementMinimum = 1e6;
+        p.retirementCap = 10e6;
+    }
+
+    function _cashDebt(uint256 principal) private returns (CompoundBasketHarness b) {
+        _credit(ALICE, 10_000e6);
+        vm.startPrank(ALICE);
+        buck.approve(address(basket), type(uint256).max);
+        basket.deposit(address(buck), 1000e6, 0);
+        vm.stopPrank();
+        b = CompoundBasketHarness(address(basket));
+        vm.startPrank(GOV);
+        b.openAccountingCredit(address(credit), 1e15);
+        b.issueForAccounting(principal);
+        vm.stopPrank();
+    }
+
+    function test_aCarryingBasketBurnsItsIdleBuckAboveItsTarget() public {
+        assertTrue(identity.isCarrying(address(basket)));
+        _cashDebt(40e6);
+        JubileeKind w = _attach(false);
+        uint256 supply = buck.totalIssued();
+        uint256 cash = buck.netBalanceOf(address(basket));
+        (uint256 work,) = w.tick(4, 0);
+        assertEq(work, 1);
+        assertEq(basket.lien(), 30e6);
+        assertEq(buck.totalIssued(), supply - 10e6);
+        assertEq(buck.netBalanceOf(address(basket)), cash - 10e6);
+        for (uint256 i; i < 3; ++i) {
+            vm.roll(vm.getBlockNumber() + 1); (work,) = w.tick(4, 0);
+            assertEq(work, 1);
+        }
+        assertEq(basket.lien(), 0);
+        assertGe(buck.netBalanceOf(address(basket)), basket.liquidityTarget());
+    }
+
+    function test_anAgedCarryingBasketSpendsOnlyItsNetCashAboveTheTarget() public {
+        _cashDebt(40e6);
+        vm.warp(block.timestamp + 365 days);            // its BUCK now carry a year's fee
+        (uint256 gross, uint256 net) = buck.accountBalancesScaled(address(basket));
+        assertGt(gross, net, "hollow: nominal above net");
+        JubileeKind w = _attach(false);
+        uint256 lien = basket.lien();
+        (uint256 work,) = w.tick(4, 0);
+        assertEq(work, 1);
+        assertLt(basket.lien(), lien, "it retired principal");
+        assertGe(buck.netBalanceOf(address(basket)), basket.liquidityTarget(), "never below the target, net");
+    }
+}

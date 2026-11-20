@@ -13,6 +13,7 @@ import {PortfolioMath} from "./PortfolioMath.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {IBuckBasketPosition} from "./IBuckBasketPosition.sol";
 import {IBasketArb} from "./IBasketArb.sol";
+import {IBuckFlashBorrower} from "../IBuckFlashBorrower.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BasketMarketOps} from "./BasketMarketOps.sol";
 import {IBuckNetView} from "../IBuckNetView.sol";
@@ -727,7 +728,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
 
     fallback() external {
         bool arb = msg.sig == IBasketArb.executeBasketArb.selector
-                || msg.sig == IBasketArb.basketArbPlan.selector;
+                || msg.sig == IBasketArb.basketArbPlan.selector
+                || msg.sig == IBuckFlashBorrower.onBuckFlash.selector;
         bool setup = msg.sig == IBasketUpkeep.initializeEquityCredit.selector
                   || msg.sig == IBasketUpkeep.authorizeIdentityBinding.selector
                   || msg.sig == IBasketUpkeep.revokeIdentityBinding.selector;

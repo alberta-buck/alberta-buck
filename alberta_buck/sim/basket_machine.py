@@ -53,6 +53,9 @@ DEFAULTS = {
     # prices the direct routes only, for comparison; households then read the basket at BVIB x the
     # dollar pool's price (the book publishes no USDC value without every USDC route).
     "book_markets": True,
+    # Flash arbitrage (owner, 2026-11-20): the basket borrows each cycle's BUCK leg fresh from its credit
+    # line for the cycle's length (Buck.flashIssue; BasketMachineWheel.setArbFlash), not from its wallet.
+    "arb_flash": False,
 }
 ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_AGE", "dt_max": "SIM_MACHINE_DT_MAX",
                "leash_bp": "SIM_MACHINE_LEASH_BP", "tilt": "SIM_MACHINE_TILT", "lean_cap_bp": "SIM_MACHINE_LEAN_CAP_BP",
@@ -266,6 +269,8 @@ def activate(d, given=None, turn_seconds=0) -> None:
     signals = chain.deploy("BasketReference", basket.address, interval, int(s["max_age"]), 500)
     if s.get("book_markets", True):
         chain.send(signals.functions.setMarkets(wheel.address), sender=gov)
+    if s.get("arb_flash"):
+        chain.send(wheel.functions.setArbFlash(True), sender=gov)
     venue = chain.deploy("BasketVenueFacet", signals.address)
     # Both quote routes inform the pair observer. The policy's reference is each
     # constituent's declared price, never a live one.

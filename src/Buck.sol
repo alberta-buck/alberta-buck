@@ -13,6 +13,7 @@ import {BuckFacilities, IBuckIssuanceK, IBuckFund} from "./lib/BuckFacilities.so
 import {BuckRenewal, BuckRenewalConsent} from "./BuckRenewalConsent.sol";
 import {JubileeClaimBook} from "./JubileeClaimBook.sol";
 import {IBuckJubilee} from "./IBuckJubilee.sol";
+import {IBuckFlashBorrower} from "./IBuckFlashBorrower.sol";
 
 interface IBuckK is IBuckIssuanceK {}
 
@@ -61,6 +62,7 @@ contract Buck is IERC20Metadata, IBuckJubilee {
     mapping(address => address) public demurragePayerRequest;
     bool private _configured;
     bool private transient _entered;
+    bool private transient _flashing;
 
     error ZeroCredit(); error ZeroController(); error ZeroIdentityRegistry();
     error ZeroInsurancePool(); error ZeroJubilee(); error InvalidConfiguration();
@@ -111,6 +113,7 @@ contract Buck is IERC20Metadata, IBuckJubilee {
     event MaturedFacilityReleased(address indexed owner, uint256 indexed tokenId, uint256 deferredPrincipal);
     event MaturedPremiumRefunded(address indexed owner, uint256 indexed tokenId, address indexed pool, uint256 nominal);
     event DeferredJubileeBurned(uint256 principal, uint256 nominalFundSpentScaled);
+    event FlashIssued(address indexed borrower, uint256 indexed tokenId, uint256 amount);
 
     /// @dev Token-wide transient mutex, retained from Buck. Any cross-account
     ///      reentry reverts. Valuation-only wheel reads can observe state;
@@ -394,6 +397,51 @@ contract Buck is IERC20Metadata, IBuckJubilee {
             BuckFacilities.Issue(id, coverage, spendable, maxPremium, expectedPool));
         IBuckFund(jubilee).checkpointIssuance();
         if (buckK.currentBuckK() != k || buckK.fundingFactor() != factor) revert CreditExceeded();
+    }
+    /// @notice Borrow `amount` fresh BUCK for the length of one call (owner, 2026-11-20: very large
+    ///         arbitrage without permanently increasing supply). The caller, an approved Carrying
+    ///         issuer that owns facility `id`, is credited the BUCK; Buck calls its
+    ///         `onBuckFlash(id, amount, data)` and on return debits exactly `amount`, nominal and net
+    ///         alike, or the transaction reverts. No facility state moves (principal, claim age, relief,
+    ///         coverage, K), and supply is unchanged after the call. At most what `id` could issue now:
+    ///         K times its activated value, less its principal (flashRoom). Returns what the callback
+    ///         returned.
+    /// @dev Buck's lock is held around the credit and the debit, not the callback, so the borrower
+    ///      can trade; a second flash inside the first is refused.
+    function flashIssue(uint256 id, uint256 amount, bytes calldata data) external returns (bytes memory result) {
+        if (_flashing) revert Reentrant();
+        _flashing = true;
+        _flashOpen(id, amount);
+        result = IBuckFlashBorrower(msg.sender).onBuckFlash(id, amount, data);
+        _flashClose(amount);
+        _flashing = false;
+    }
+    function _flashOpen(uint256 id, uint256 amount) private nonReentrant {
+        _ready();
+        if (amount == 0) revert BadAmount();
+        if (buckCredit.ownerOf(id) != msg.sender) revert NotCreditOwner();
+        if (!identity.isVerified(msg.sender)) revert SenderNotVerified();
+        if (!identity.isCarrying(msg.sender) || !_facilities.carryingIssuer[msg.sender]) {
+            revert CarryingIssuerNotApproved();
+        }
+        (uint256 principal, uint256 age) = buckCredit.issuanceOf(id);
+        if (principal != 0 && age == principal * T) revert FacilityMatured();
+        if (amount > flashRoom(id)) revert CreditExceeded();
+        _cash.flashCredit(msg.sender, amount, true);
+        emit Transfer(address(0), msg.sender, amount);
+        emit FlashIssued(msg.sender, id, amount);
+    }
+    /// @notice The most one flash on facility `id` may borrow now: what it could issue (K times its
+    ///         activated value, less its principal); zero once matured.
+    function flashRoom(uint256 id) public view returns (uint256) {
+        (uint256 principal, uint256 age) = buckCredit.issuanceOf(id);
+        uint256 limit = Math.mulDiv(buckCredit.currentValue(id), buckK.currentBuckK(), K_SCALE);
+        return (principal != 0 && age == principal * T) || limit <= principal ? 0 : limit - principal;
+    }
+    function _flashClose(uint256 amount) private nonReentrant {
+        if (!identity.isCarrying(msg.sender)) revert CarryingModeChanged();
+        _cash.flashRepay(msg.sender, amount, true);
+        emit Transfer(msg.sender, address(0), amount);
     }
     function _deps() private view returns (BuckFacilities.Dependencies memory) {
         return BuckFacilities.Dependencies(buckCredit, IBuckIssuanceK(address(buckK)), identity, claimBook, jubilee);

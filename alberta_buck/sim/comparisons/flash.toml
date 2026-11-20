@@ -1,0 +1,26 @@
+# Fresh BUCK in the pools (the owner's decision of 2026-11-20, doc/review/bucknet-economy-implementation.org,
+# "Fresh BUCK in the pools, and flash mint/burn: the design"), steps 2 and 3:
+#   arb:  the basket's arbitrage cycles borrow their BUCK leg fresh from its credit line for the cycle's
+#         length (Buck.flashIssue) instead of spending its wallet; cycles as large as the line's room,
+#         each selling fresh BUCK into its first pool.
+#   burn: the Jubilee wheel retires the basket's idle BUCK above its liquidity target (at most 1M a job),
+#         and the basket issues again on demand.
+# Do they keep the pools from growing hollow (their net/gross, the book's spread), and what do they
+# move: K and BVIB, supply and lien, the arbitrage's share against outside arbitrageurs, relief paid?
+question = "Do flash arbitrage and burning idle BUCK keep the pools from growing hollow, and what else do they move?"
+experiment = "economy"
+days = 730
+
+[[axis]]
+name = "arb"
+note = "the basket's arbitrage cycles: funded from its wallet, or borrowed by flash from its credit line"
+[axis.values]
+wallet = {}
+flash = { "machine.arb_flash" = true }
+
+[[axis]]
+name = "burn"
+note = "the basket's idle BUCK above its liquidity target: kept, or retired by the Jubilee wheel"
+[axis.values]
+keep = {}
+burn = { "deploy.basket_retirement_cap_m" = 1.0 }

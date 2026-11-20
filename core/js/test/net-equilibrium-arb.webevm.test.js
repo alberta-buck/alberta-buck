@@ -11,12 +11,15 @@ import * as identity from "../src/identity.js";
 
 const RAW = 1_000_000n;
 
-test("canonical JS wheel repairs a USDC withdrawal with funded Carrying-basket arb", async () => {
+for (const arbFlash of [false, true]) test(`canonical JS wheel repairs a USDC withdrawal with ${arbFlash
+  ? "flash-borrowed" : "funded"} Carrying-basket arb`, async () => {
   const s = await nodeWebevmSession();
-  const world = await buildEquilibriumWorld(s, artifact, { identity,
+  const world = await buildEquilibriumWorld(s, artifact, { identity, arbFlash,
     targetBuck: 1_000_000n * RAW,
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
   });
+  assert.equal(await s.call(world.wheel, "arbFlash"), arbFlash);
+  const supply0 = await s.call(world.buck, "totalIssued");
   const { buck, basket, wheel, simlp, poolUB, tokens } = world;
   assert.equal(await s.call(world.reg, "isCarrying", [basket.address]), true);
   assert.equal(await s.call(buck, "approvedCarryingIssuer", [basket.address]), true);
@@ -53,6 +56,14 @@ test("canonical JS wheel repairs a USDC withdrawal with funded Carrying-basket a
   assert.ok(flow.every(({ args }) => args.nominal > 0n && args.netScaled > 0n));
   const after = (await s.call(poolUB, "slot0"))[0];
   assert.ok(b0 ? after > before : after < before, "arb repairs the withdrawal price shock");
+  const flashes = parseEventLogs({ abi: buck.abi, logs, eventName: "FlashIssued" });
+  assert.equal(flashes.length > 0, arbFlash, "with arbFlash every cycle borrows its leg; without, none does");
+  if (arbFlash) {
+    assert.equal(flashes.length, arb.length, "one flash a cycle");
+    assert.ok(flashes.every(({ args }) => args.borrower.toLowerCase() === basket.address.toLowerCase()));
+  }
+  // A flash adds nothing to the standing supply: only the deposit and the keeper's own issuance moved it.
+  if (arbFlash) assert.ok(await s.call(buck, "totalIssued") >= supply0);
   for (const receipt of receipts) {
     assert.ok(receipt.gasUsed < 12_000_000n);
     const ticks = parseEventLogs({ abi: wheel.abi, logs: receipt.logs, eventName: "Ticked" });
