@@ -21,7 +21,8 @@ const TABS = [
 const AGENTS_MS = 10000;
 const STATUS = {
   running: ["Running", "good"], complete: ["Complete", "neutral"], failed: ["Failed", "critical"],
-  stale: ["Stale: not updated for 2 minutes", "warning"], incomplete: ["Incomplete", "warning"],
+  stale: ["Stale: not updated for 10 minutes", "warning"], incomplete: ["Incomplete", "warning"],
+  killed: ["Killed: its process ended without closing the record", "critical"],
   stopped: ["Stopped", "neutral"], reset: ["Reset: a new record follows", "neutral"], paused: ["Paused", "neutral"],
 };
 

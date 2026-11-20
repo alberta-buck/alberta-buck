@@ -33,6 +33,33 @@ def _quoted(net_amount: int, gross: int, net: int) -> int:
     it in, rounded up (lib/CarryRatio.sol toNominal, in the kernel; within a raw unit of the quote)."""
     return buck_math.carry_to_nominal(gross, net, net_amount)
 
+
+# What readers of a whole run take from each household on each day: the report's charts (report.py),
+# plot_octl, plot_rebalancing's position marks, the economy's judge and the digest. A household's full
+# state (86 fields) stays on the newest frame only; the run record keeps its daily books
+# (agents.jsonl) and every step (events.jsonl). Kept whole on every frame, a five-year world's frames
+# held 0.5 to 1.9 GB of JSON, several times that in memory (2026-11-16 datasim suite: three of seven
+# worlds killed). Add a field here before a new whole-run reader reads it.
+HISTORY_FIELDS                  = frozenset((
+    "idx", "member", "role", "active", "exited", "joined", "theta", "pattern", "surplus_policy",
+    "nw", "hypo", "mortgage", "drawn", "limit", "deploys", "held_buck",
+    "basket", "basket_mark", "basket_at_risk", "basket_receipts",
+    "error", "relief_unavailable", "exit_started"))
+
+
+def compact_history(frame) -> None:
+    """Reduce a frame that is no longer the newest to what whole-run readers use: each household's
+    HISTORY_FIELDS, and no copy of the basket's positions where the households' own marks stand in
+    for them (plot_rebalancing.household_position reads those first). Other agents' states are kept."""
+    states                      = frame.get("octl")
+    if not states or not any("member" in a for a in states):
+        return
+    frame["octl"]               = [{k: v for k, v in a.items() if k in HISTORY_FIELDS} if "member" in a else a
+                                   for a in states]
+    if any(a.get("member") and a.get("active") for a in states):
+        frame.pop("basket_positions", None)
+
+
 def household_summary(states):
     """Compact household books retained by the savings server's lite frames; money is in base units.
 
@@ -570,6 +597,10 @@ class Snapshotter:
                 dm_init_val: int | None = None,
                 ledger=None) -> None:
         d = self.d
+        # The previous day's frame has been recorded and streamed (loop.run, the server): keep only
+        # what whole-run readers need of it (compact_history).
+        if self.frames:
+            compact_history(self.frames[-1])
         # Per-agent telemetry (TELEMETRY.md, v1).  Static facts once into
         # meta; per-frame records under frame["ag"] for agents due at this
         # day (day % TELEMETRY_STRIDE == 0).  Agents opt in by implementing

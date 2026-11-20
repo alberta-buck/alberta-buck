@@ -148,6 +148,10 @@ def main(argv=None) -> int:
         from alberta_buck.sim.runrecord import RunRecorder
         name = Path(a.out).stem if a.out else (getattr(getattr(sc, "experiment", None), "name", None) or sc.name)
         recorder = RunRecorder(a.record, name, run_id=a.run_id, engine=a.backend)
+    # A terminated run (kill, a batch system's time limit) closes its record as failed; Python's default
+    # SIGTERM would end the process without unwinding. SIGKILL cannot be caught: runrecord.liveness reads it.
+    import signal
+    signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
     try:
         with Backend(port=a.port) as anvil:
             summary = run(sc, anvil, out_path=a.out, basket_impl=basket_impl,

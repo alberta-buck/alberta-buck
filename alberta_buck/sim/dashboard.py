@@ -293,7 +293,7 @@ def make_handler(root: Path, static: Path = STATIC, live: LiveSessions | None = 
                     if directory is None:
                         return self._json({"error": "no such run"}, 404)
                     if parts[3] == "manifest":
-                        return self._json(json.loads((directory / "manifest.json").read_text()))
+                        return self._json(runrecord.liveness(json.loads((directory / "manifest.json").read_text())))
                     if parts[3] == "frames":
                         since = int((parse_qs(url.query).get("since") or ["-1"])[0])
                         return self._json([f for f in cache.frames(directory) if f["day"] > since])

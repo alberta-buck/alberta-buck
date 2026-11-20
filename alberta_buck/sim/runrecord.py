@@ -32,8 +32,10 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import sys
+import time
 
 SCHEMA                          = "buck-run/1"
 RAW                             = 10**6
@@ -47,6 +49,7 @@ AGENT_FIELDS                    = ("role", "nw", "nw_buck", "hypo", "drawn", "li
                                    # the lifecycle (household_policy.stage): present only for households with an age
                                    "age", "stage", "usd_fund", "usd_fund_paid")
 MANIFEST_EVERY                  = 10        # days between manifest refreshes while running
+MANIFEST_SECONDS                = 30        # ... or seconds, whichever comes first (a five-year day can take 30 s)
 
 
 def default_root() -> Path:
@@ -200,8 +203,10 @@ class RunRecorder:
     """Writes one run's directory as the run goes.
 
     open(...) before the first day; frame(flat, applied=...) after each captured day; close(status)
-    at the end. A failed run is closed with status "failed" and its error; a process killed mid-run
-    leaves status "running" with an old =updated= time, which readers show as stale."""
+    at the end. A failed run is closed with status "failed" and its error. A process killed mid-run
+    (SIGKILL: the kernel's out-of-memory killer) cannot close its record: it stays "running", and
+    runs() reads it as "killed" when its =host= is this machine and its =pid= is gone; from another
+    machine, the page shows it stale once =updated= is old."""
 
     def __init__(self, root=None, name="run", *, run_id=None, kind="simulation", engine="pyrevm", live=None):
         stamp                   = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -216,6 +221,7 @@ class RunRecorder:
         self._handles: dict     = {}
         self._accounts: dict    = {}        # each household's last written =accounts= snapshot
         self.days               = 0
+        self._written           = 0.        # monotonic time of the last manifest write
 
     # --- writing ------------------------------------------------------------------------------- #
     def _append(self, key, rows):
@@ -228,6 +234,7 @@ class RunRecorder:
         h.flush()
 
     def _write_manifest(self):
+        self._written = time.monotonic()
         self.manifest["updated"] = _now()
         self.manifest["frames"] = self.days
         tmp = self.dir / "manifest.json.tmp"
@@ -270,7 +277,7 @@ class RunRecorder:
         contract = meta.get("buck_contract") or {}
         self.manifest = dict(
             schema=SCHEMA, id=self.id, name=self.name, kind=self.kind, engine=self.engine, status="running",
-            started=_now(), finished=None, revision=revision(),
+            started=_now(), finished=None, revision=revision(), host=socket.gethostname(), pid=os.getpid(),
             scenario=dict(name=(meta.get("experiment") or {}).get("name") or getattr(scenario, "name", run.get("scenario")),
                           seed=getattr(scenario, "seed", run.get("seed")),
                           days=getattr(scenario, "days", run.get("days")),
@@ -298,7 +305,7 @@ class RunRecorder:
         self._append("interventions", [_jsonable({"day": iv.get("applied_day", day), "source": "scenario", **iv})
                                        for iv in new])
         self.days += 1
-        if self.days % MANIFEST_EVERY == 0:
+        if self.days % MANIFEST_EVERY == 0 or time.monotonic() - self._written >= MANIFEST_SECONDS:
             self._write_manifest()
 
     def _event(self, day, e: dict) -> dict:
@@ -344,12 +351,34 @@ def read_lines(path: Path, offset: int = 0) -> tuple[list[dict], int]:
     return rows, offset + end
 
 
+def _alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError, TypeError, ValueError):
+        return True             # someone else's process, or no pid: not provably gone
+    return True
+
+
+def liveness(manifest: dict) -> dict:
+    """A "running" manifest whose process ran on this machine and is gone was killed: it could not
+    close its record (SIGKILL, typically the kernel's out-of-memory killer). Read it as "killed"; the
+    file is left as written. Records from other machines are left to the page's staleness test."""
+    if (manifest.get("status") == "running" and manifest.get("pid") and manifest.get("host") == socket.gethostname()
+            and not _alive(manifest["pid"])):
+        return {**manifest, "status": "killed",
+                "error": manifest.get("error") or f"process {manifest['pid']} ended without closing its record "
+                                                  f"at day {manifest.get('frames', 0)} (SIGKILL: out of memory?)"}
+    return manifest
+
+
 def runs(root=None) -> list[dict]:
     """Every run under =root=, newest first: its manifest, or a note for an unreadable one."""
     out = []
     for m in Path(root or default_root()).glob("*/manifest.json"):
         try:
-            out.append(json.loads(m.read_text()))
+            out.append(liveness(json.loads(m.read_text())))
         except (OSError, ValueError) as e:
             out.append(dict(id=m.parent.name, status="unreadable", error=str(e)[:200]))
     return sorted(out, key=lambda r: r.get("started") or "", reverse=True)
@@ -390,6 +419,67 @@ def import_vector(path, root=None, run_id=None) -> Path:
     return rec.dir
 
 
+# --- a long run, year by year --------------------------------------------------------------------- #
+def years(directory, every=365, tail=730) -> dict:
+    """One record's state at the end of each year (and its last day), with the means of its last
+    =tail= days: what a five-year suite's table reads (doc/review/bucknet-economy-implementation.org)."""
+    directory = Path(directory)
+    manifest = liveness(json.loads((directory / "manifest.json").read_text()))
+    frames, _ = read_lines(directory / "frames.jsonl")
+    if not frames:
+        return dict(id=directory.name, status=manifest.get("status"), rows=[], tail=None)
+
+    def row(f):
+        c, m, s, b = f.get("control") or {}, f.get("market") or {}, f.get("supply") or {}, f.get("basket") or {}
+        h, pop = f.get("households") or {}, f.get("population") or {}
+        pools = [p["net"] for p in m.get("pools") or [] if p.get("net") is not None]
+        book = m.get("book") or {}
+        bid, ask = book.get("buck_bid"), book.get("buck_ask")
+        stages = pop.get("stages") or {}
+        return dict(day=f["day"], k=c.get("k"), bvib=c.get("bvib"), bvib_nominal=c.get("bvib_nominal"),
+                    pool_net=sum(pools) / len(pools) if pools else None, dollar_pool_net=m.get("dollar_pool_net"),
+                    spread=(ask / bid - 1) if bid and ask else None, buck_usd=m.get("buck_usd"),
+                    supply=(s.get("total") or 0) / RAW, lien=(s.get("basket_lien") or 0) / RAW,
+                    households_principal=(s.get("household_principal") or 0) / RAW,
+                    unpaid_relief=(b.get("unpaid_relief") or 0) / RAW, active=h.get("active"), exited=h.get("exited"),
+                    young=stages.get("young"), middle=stages.get("middle"), retired=stages.get("retired"),
+                    nw_vs_usd=((h.get("nw") or 0) - (h.get("hypo") or 0)) / RAW,
+                    errors=(f.get("health") or {}).get("errors"), faults=(f.get("health") or {}).get("faults"))
+
+    last = frames[-1]
+    rows = [row(f) for f in frames if f["day"] % every == every - 1]
+    if not rows or rows[-1]["day"] != last["day"]:
+        rows.append(row(last))
+    window = [f for f in frames if f["day"] > last["day"] - tail]
+    bvib = [f["control"]["bvib"] for f in window if (f.get("control") or {}).get("bvib") is not None]
+    ks = [f["control"]["k"] for f in window if (f.get("control") or {}).get("k") is not None]
+    return dict(id=directory.name, status=manifest.get("status"), commit=(manifest.get("revision") or {}).get("commit"),
+                rows=rows, tail=dict(days=len(window), bvib_dev=sum(abs(v - 1) for v in bvib) / len(bvib) if bvib else None,
+                                     bvib_above=sum(v > 1 for v in bvib) / len(bvib) if bvib else None,
+                                     k_mean=sum(ks) / len(ks) if ks else None,
+                                     k_low=min(ks) if ks else None, k_high=max(ks) if ks else None))
+
+
+def _years_table(y) -> str:
+    out = [f"{y['id']}  ({y['status']}, {y.get('commit') or 'no commit'})"]
+    out.append(f"  {'day':>4} {'K':>6} {'BVIB':>7} {'quoted':>7} {'pools':>6} {'$pool':>6} {'spread':>6} {'BUCK$':>6} "
+               f"{'supplyM':>8} {'lienM':>7} {'hhM':>6} {'act':>4} {'exit':>4} {'y/m/r':>11} {'vsUSD M':>8} {'err':>3}")
+    f = lambda v, fmt: format(v, fmt) if v is not None else "-"
+    for r in y["rows"]:
+        stages = "/".join(str(r[k]) if r[k] is not None else "-" for k in ("young", "middle", "retired"))
+        out.append(f"  {r['day']:>4} {f(r['k'], '6.3f')} {f(r['bvib'], '7.4f')} {f(r['bvib_nominal'], '7.4f')} "
+                   f"{f(r['pool_net'], '6.4f')} {f(r['dollar_pool_net'], '6.4f')} "
+                   f"{f(r['spread'] and 100 * r['spread'], '5.2f')}% {f(r['buck_usd'], '6.3f')} "
+                   f"{r['supply'] / 1e6:8.2f} {r['lien'] / 1e6:7.2f} {r['households_principal'] / 1e6:6.2f} "
+                   f"{f(r['active'], '>4')} {f(r['exited'], '>4')} {stages:>11} {r['nw_vs_usd'] / 1e6:8.2f} "
+                   f"{f(r['errors'], '>3')}")
+    t = y["tail"]
+    if t and t["bvib_dev"] is not None:
+        out.append(f"  last {t['days']} days: mean |BVIB - 1| {100 * t['bvib_dev']:.2f}%, BVIB above 1 on "
+                   f"{100 * t['bvib_above']:.0f}% of days, K {t['k_low']:.3f} to {t['k_high']:.3f} (mean {t['k_mean']:.3f})")
+    return "\n".join(out)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m alberta_buck.sim.runrecord", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -398,10 +488,17 @@ def main(argv=None) -> int:
     im.add_argument("--runs", default=None, help="runs directory (default $SIM_RUNS or build/runs)")
     ls = sub.add_parser("list", help="list recorded runs")
     ls.add_argument("--runs", default=None)
+    yr = sub.add_parser("years", help="each record's state at every year's end, and its last two years' means")
+    yr.add_argument("records", nargs="+", help="run directories (build/runs/<id>)")
+    yr.add_argument("--json", action="store_true", help="print JSON instead of tables")
     a = ap.parse_args(argv)
     if a.cmd == "import":
         for v in a.vectors:
             print(import_vector(v, a.runs))
+        return 0
+    if a.cmd == "years":
+        got = [years(r) for r in a.records]
+        print(json.dumps(got, indent=1) if a.json else "\n".join(_years_table(y) for y in got))
         return 0
     for r in runs(a.runs):
         print(f"{r.get('id'):50s} {r.get('status', ''):10s} {r.get('frames', 0):5} days  {r.get('started', '')}")

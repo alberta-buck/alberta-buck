@@ -4078,7 +4078,9 @@ the lifecycle decides which role a household plays and when it stops earning):
   loans in an empty economy up to the full range.
 - [-] /L5. The equilibrium./ Five-year runs from an empty economy, varying the
   mix; where K settles (with the one-year leak) and BVIB about 1. The quoted-BVIB
-  baseline is done (below); the same suite on the net-BUCK contracts runs next.
+  baseline is done (below); the net-BUCK suite ran on 2026-11-16 ("The five-year
+  net suite, and why three of its worlds died", near the end): K 0.47-0.55 at five
+  years; the mixes are to be re-run over seeds.
 
 *** L5, the baseline: five years by mix, on the quoted BVIB (datasim, 2026-11-15)
 
@@ -5573,7 +5575,164 @@ missing on almost half its days: to re-run.
   BUCK, so a large gap takes many cycles (the opening's two settles hit 96). A flash-style first
   leg (the older =ArbKind='s), or a float for it, would close a gap in one or two (owner's call).
 
-** Resume here (2026-11-15, night)
+** The five-year net suite, and why three of its worlds died (2026-11-20)
+
+The owner re-ran the seven five-year worlds on datasim at c70e9724 (=~/src/alberta-buck-net=,
+=build/net-suite.sh=, started 2026-11-16 12:55 PST, all seven at once): the net-BUCK contracts, the
+price book, the wheel settled after every forcing, 12 s blocks, 128 observations. Four completed
+(life-A2, B, D and econ-F, in 14 to 31 hours); three stopped without a word at days 1,744 (life-A),
+1,179 (life-C) and 1,489 (life-E). Their logs end mid-run with no traceback and their records still
+said "running"; datasim's kernel log is not readable as =perry=, but nothing else on that machine
+kills a process silently, and the memory measured below makes the kernel's out-of-memory killer the
+cause. The tables come from =python -m alberta_buck.sim.runrecord years build/runs/<id> ...=.
+
+*** Results
+
+| run | mix | K y1 | K y2 | K y3 | K y4 | K y5 | K y5, quoted baseline | BVIB y5 | quoted BVIB y5 | pools net/gross y5 | BUCK spread y5 | supply M | lien M | households' principal M | members y5 (young/mid/retired) | vs USD M |
+|-----+-----+------+------+------+------+------+------------------------+---------+----------------+--------------------+----------------+----------+--------+-------------------------+--------------------------------+----------|
+| life-A | balanced | 0.662 | 0.561 | 0.523 | 0.500 | 0.497 (d1744) | 0.450 | 1.0134 | 1.0789 | 0.940 | 7.0% | 34.37 | 15.48 | 0.89 | 15 / 143 / 15 | 1.13 |
+| life-A2 | balanced, seed 7 | 0.643 | 0.560 | 0.526 | 0.538 | 0.523 | 0.460 | 1.0061 | 1.0877 | 0.937 | 7.3% | 34.80 | 16.13 | 0.67 | 13 / 161 / 14 | 1.08 |
+| life-B | young-heavy | 0.604 | 0.524 | 0.492 | 0.475 | 0.472 | 0.437 | 1.0129 | 1.0791 | 0.939 | 6.7% | 35.69 | 15.91 | 1.78 | 28 / 161 / 14 | 1.10 |
+| life-C | retiree-heavy | 0.673 | 0.565 | 0.546 | 0.541 (d1179) | | 0.468 | 1.0133 | 1.0615 | 0.955 | 5.0% | 34.26 | 15.67 | 0.60 | 5 / 96 / 16 | 0.85 |
+| life-D | investor-heavy | 0.648 | 0.554 | 0.510 | 0.487 | 0.490 | 0.449 | 1.0035 | 1.0761 | 0.939 | 7.2% | 35.71 | 16.89 | 0.82 | 15 / 172 / 14 | 1.39 |
+| life-E | no young arrivals | 0.665 | 0.571 | 0.538 | 0.520 | 0.520 (d1489) | 0.472 | 1.0041 | 1.0651 | 0.947 | 6.4% | 33.11 | 14.73 | 0.38 | 3 / 125 / 11 | 0.66 |
+| econ-F | the economy world | 0.606 | 0.523 | 0.507 | 0.523 | 0.546 | 0.502 (d1332) | 1.0016 | 1.0630 | 0.960 | 4.0% | 61.27 | 40.09 | 3.18 | 550 members | 4.83 |
+
+Over each world's last two years: mean |BVIB - 1| 1.1% to 1.5%, BVIB above 1 on 96% (econ-F) to
+100% of days, K within 0.03 to 0.05 (life-C 0.10, which died in its third year). No refused
+operation, fault or unavailable relief in any frame of any world.
+
+*** Measured
+
+- /K settles higher on the net contracts/: 0.47 to 0.55 at five years against 0.44 to 0.47 on the
+  quoted baseline, and higher from the first year (0.60 to 0.67 against 0.55 to 0.62). It is flat
+  over year five in every lifecycle world (within 0.003, life-A2 0.015); econ-F's turns up (0.507 at
+  three years, 0.546 at five) as its first households leave (30 exits).
+- /The mix orders K as before/: young-heavy lowest (0.472), investor-heavy next (0.490), balanced
+  0.497 and 0.523 (two seeds), no arrivals and retiree-heavy highest (0.520, 0.541 at their deaths).
+  But the two seeds of the balanced mix differ by 0.026, against 0.010 on the baseline: the mixes
+  are 0.05 apart at most, so one seed per mix cannot separate the mix from chance.
+- /BVIB stays above parity/: the leak's standing error (recommendation of "Result: the measure moves
+  the market, not K"), 1.1-1.5% in net BUCK; the quoted reading carries the pools' hollowness on top
+  (6-9% at five years).
+- /The pools grow hollow without a floor/: the TOKEN/BUCK pools' net/gross falls by about 1.25% a
+  year (0.982 at one year, 0.937-0.947 at five in the lifecycle worlds; econ-F's busier pools 0.960),
+  the dollar pool's alike. Since a Carrying pool pays out its BUCK at its net ratio, the book's ask
+  for BUCK (dollars per net BUCK delivered into an ordinary account) stands 1/r above its bid: 1.9%
+  at one year, 6.7-7.3% at five. A household or an employer buying BUCK pays the demurrage accrued
+  on the pool's inventory, which the LPs held; nothing in the worlds brings r back up but fresh BUCK
+  sold into the pool.
+- /Memory/ (a 120-day lifecycle world on the Mac, deep sizes; the larger cause, pyrevm's own journal,
+  is under "Checked"): three Python stores grew with every simulated day and were never released.
+  The EVM backend kept every
+  receipt with its logs as JSON-RPC dicts (about 5 kB a transaction: 76 MB by day 120 for 15,379
+  transactions; a five-year world mines about 220,000), every frame kept every household's full
+  state (86 fields: =octl=, 15 MB by day 120 for 29 households) and a copy of the basket's positions,
+  and every household's state machine kept an accounts snapshot in each of its events, most of them
+  equal to the one before. Extrapolated, 3 to 4 GB of live objects in a lifecycle world and about 9
+  GB in econ-F by five years, before the checkpoints' JSON copies (the vectors: 0.5 to 1.9 GB). The
+  process grew far faster than that (about 12 MB a day: the 2026-11-14 note had seven worlds at 7 to
+  8 GB each by day 900): the rest is pyrevm's journal ("Checked").
+
+*** As built (bounded memory, killed runs visible, seeds)
+
+- /Receipts as tuples/ (=pyrevm_backend.py=): each transaction keeps (block, from, to, gas, status,
+  created, logs as (address, topics, data) bytes), one shared string per address; =receipt()=
+  renders the same JSON-RPC receipt when asked (a household still reconciles a flow by its hash days
+  later, so none is dropped). Block times are a packed array.
+- /History compacted/ (=snapshot.compact_history=, run on the previous frame at each capture): a frame
+  that is no longer the newest keeps each household's =HISTORY_FIELDS= (23 of 86: what the report,
+  =plot_octl=, =plot_rebalancing=, the economy's judge and the digest read on every frame) and drops
+  the basket's positions where the households' own marks stand in for them. The newest frame stays
+  whole; the run record keeps every household's daily books and every step.
+- /Shared accounts snapshots/ (=net_household._event=): an event whose accounts equal the previous
+  one's shares that object.
+- /Killed runs read as killed/: a record's manifest names its =host= and =pid=; =runrecord.runs()=
+  (the dashboard's list and =list=) reads a "running" record whose process on this machine is gone as
+  "killed", with the day it reached; from another machine the page shows it stale after 10 minutes
+  (it was 2: a five-year day can take 30 s, and the manifest was refreshed only every ten days; now
+  also every 30 s). SIGTERM now closes a run's record as failed. The suite's =.failed= marker holds
+  the exit status (137: SIGKILL).
+- /Seeds/ (=WORLD_SEEDS= / =SEEDS=): each world at each seed, as =<world>-s<seed>=.
+- /The yearly table/: =python -m alberta_buck.sim.runrecord years <record dirs>= (=--json= too).
+
+*** Checked
+
+- /Unchanged outputs/: the same 30-day lifecycle world run from HEAD's package and from the working
+  tree wrote byte-identical =frames=, =events=, =agents= and =interventions= files, and identical
+  vector frames once HEAD's are compacted (the manifests differ only in the new =host= and =pid=).
+- /Unchanged reports/: rendering a vector as written and compacted draws the same data on every
+  page (every line, bar and point compared), with the same digest and judge: =exits-365= (118 to
+  52 MB) here and the suite's =life-A2= on datasim (710 to 283 MB).
+- /What the fixes save, and what they do not/ (the 30-day lifecycle world at day 29): frames 10.3
+  to 5.8 MB (=octl= 3.7 to 0.9, the positions' copy 1.1 to 0), receipts 24.6 to 7.4 MB. But resident
+  memory grows about 12 MB a simulated day either way (HEAD 575 to 827 MB from day 20 to 40, the
+  working tree 556 to 795): the Python stores were the smaller part.
+- /The rest is pyrevm's journal/ (a probe on the backend alone): pyrevm 0.3.7 keeps the journal of
+  every transaction (each state access and change, for reverting to a checkpoint) and never clears
+  it: =journal_len= grows by one a transaction (30,000 token transfers: 3 to 30,003, 54 MB), while
+  calls (snapshot and revert) add nothing. Its =commit()= underflows the journal's depth (it "clears
+  checkpoints"; there are none), and a snapshot/commit bracket around each transaction doubles the
+  entries. In the economy world, whose wheel ticks and oracle reads touch hundreds of slots, that is
+  about 86 kB a transaction and 11 MB a day: about 20 GB by five years in a lifecycle world, more in
+  econ-F. That killed the three worlds, not the frames.
+
+*** Observations and recommendations
+
+- /Five-year runs/: with a pyrevm that clears its journal (the owner's decision below), re-run the
+  suite with seeds (=WORLD_SEEDS=, the worlds without life-A2: fifteen lifecycle worlds and three
+  econ-F on datasim) and read each mix over its seeds. Until then at most three or four five-year
+  worlds at once on datasim's 94 GB.
+- /The pools' hollowness is the largest open question/ (decided below: fresh BUCK into the pools,
+  issued on demand and burned rather than left idle): at five years a household buying BUCK pays 7%
+  more per net BUCK than one selling receives, and the demand cast's agents (balances, payroll) will
+  buy BUCK into ordinary accounts every month.
+- /K and the leak/: K is level by year four in every world, at 0.47 to 0.55 with BVIB 1.1-1.5% above
+  parity: the leak's standing error, unchanged by the net measure (as the carry comparison found).
+  Per the owner, not to be tuned before the demand cast.
+- /Sandbox and savings sandbox/: none of this changes the in-tab worlds (JavaScript, webevm); the
+  savings world's quote of the BUCK should show the ask beside the bid once the pools age.
+
+** The owner's decisions on the open questions (2026-11-20)
+
+- /The pools' hollowness, N5 and the arbitrage's funding/, in the owner's words: "We need to put
+  fresh BUCKs into the pools from deposits, and from arb activity. The buck basket and the arb
+  facility should be able to issue large amounts of (mint) BUCKs on demand from their standing
+  BuckCredit lines; BUCK/TOKEN positions are sold to replenish the pool target credit limits after
+  paying out withdrawals. We should "burn" BUCKs instead of leave them standing idle in pools. We
+  need to be able to do the equivalent of large "flash loans" of BUCKs to perform arb as well -- so
+  there should be the ability to do very large arb transactions without permanently increasing the
+  standing BUCK supply." And for the arbitrage: "implement flash-loan mint/burn around large arb
+  transactions". The design is the next section; N5 is part of it.
+- /The demand cast/: after the pools fix, so the demand is not measured against a 7% spread.
+- /Keepers/: =tickAt(slot)= and per-kind memo keys, in the machine wheel only.
+- /pyrevm/: patch our own build (the source and its crates downloaded, built in the nix shell),
+  packaged under our own name as webevm was; its publication is the owner's step.
+- /The shadow controller/: delete it (=BuckKControllerShadow=, =ShadowObserver=, =SimStabilizer=).
+- /The catalogue's stress arms/: port them as economy interventions, run as comparisons against the
+  machine basket, then delete the catalogue.
+- /Households/: include the USD fund in net worth and its counterfactual; stop a retired investor
+  buying BUCK with the dollars its drawdown just raised; draw income, savings and home value from
+  clipped normal distributions centred in today's ranges; keep the face-value home sale.
+- /Taken as confirmed/ (implemented as proposed, no objection): the switching fee before the first
+  issue; a known refused remainder abandoned when the household leaves; a retire plan redeeming a
+  receipt before spending dollars. /Deferred/ (the owner's earlier direction): K's slide, the leak's
+  standing error and whether K bounds the basket's gross lien, until the demand cast.
+
+** Resume here (2026-11-20)
+
+- *Branch*: =feature/household-minimal-ecosystem=; worktree =.claude/worktrees/buck-compound=.
+- *Done today*: the datasim net suite recorded ("The five-year net suite, and why three of its
+  worlds died"); smaller Python stores for long runs (receipts as tuples, compacted frame history,
+  shared account snapshots); killed runs read as killed; seeds for the suite; =runrecord years=; the
+  cause of the deaths found in pyrevm's journal; the owner's decisions on every open question.
+- *Next, in order*: a pyrevm that clears its journal, then the seeded suite on datasim; the design
+  of fresh BUCK in the pools and flash mint/burn (then contracts, SDKs, worlds, a comparison); the
+  keepers' =tickAt= and memo keys; the households' fixes; the shadow controller's deletion and the
+  stress arms' port; then the demand cast. Also: regenerate the pinned vectors at 12 s; the savings
+  sandbox's step 6.
+
+** Resume here (superseded: 2026-11-15, night)
 
 - *Branch*: =feature/household-minimal-ecosystem=; worktree =.claude/worktrees/buck-compound=.
 - *Done tonight*: the work wheel's completion view and settles in both worlds, Ethereum's 12 s block

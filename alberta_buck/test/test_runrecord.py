@@ -87,6 +87,41 @@ def test_recorder_writes_a_growing_run_that_reads_like_a_finished_one(tmp_path):
     assert retry.dir.name == "cell" and (tmp_path / "cell-earlier-1" / "manifest.json").exists()
 
 
+def test_a_killed_process_reads_as_killed_not_running(tmp_path):
+    """Three of the seven five-year worlds of 2026-11-16 died at days 1,180 to 1,740 with no traceback
+    (SIGKILL, out of memory) and their records said "running" for days. The record names its host and
+    process; a reader on that host sees the process gone."""
+    import os, socket, subprocess, sys
+    rec = runrecord.RunRecorder(tmp_path, run_id="world").open()
+    m = json.loads((rec.dir / "manifest.json").read_text())
+    assert m["host"] == socket.gethostname() and m["pid"] == os.getpid()
+    assert runrecord.runs(tmp_path)[0]["status"] == "running", "this process is alive"
+    gone = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True)
+    m.update(pid=int(gone.stdout), frames=1180)
+    (rec.dir / "manifest.json").write_text(json.dumps(m))
+    seen = runrecord.runs(tmp_path)[0]
+    assert seen["status"] == "killed" and "day 1180" in seen["error"]
+    assert json.loads((rec.dir / "manifest.json").read_text())["status"] == "running", "the reader does not rewrite"
+    m["host"] = "another-machine"
+    (rec.dir / "manifest.json").write_text(json.dumps(m))
+    assert runrecord.runs(tmp_path)[0]["status"] == "running", "another machine's process cannot be probed"
+
+
+def test_years_reads_a_record_at_each_years_end_and_its_tail(tmp_path, capsys):
+    rec = runrecord.RunRecorder(tmp_path, run_id="world").open(tokens=FIXTURE["tokens"])
+    for flat in FIXTURE["flat"]:
+        rec.frame(flat)
+    rec.close("complete")
+    y = runrecord.years(rec.dir, every=2)
+    frames = FIXTURE["frames"]
+    assert [r["day"] for r in y["rows"]] == [1, 2], "each period's last day, then the record's last day"
+    assert y["rows"][-1]["k"] == frames[-1]["control"]["k"] and y["rows"][-1]["supply"] == frames[-1]["supply"]["total"] / 1e6
+    assert y["status"] == "complete" and y["tail"]["days"] == len(frames)
+    bvibs = [f["control"]["bvib"] for f in frames]
+    assert y["tail"]["bvib_dev"] == pytest.approx(sum(abs(b - 1) for b in bvibs) / len(bvibs))
+    assert runrecord.main(["years", str(rec.dir)]) == 0 and "world  (complete" in capsys.readouterr().out
+
+
 def test_an_events_accounts_are_written_only_when_they_change(tmp_path):
     """Recommendation 57: an event repeats its household's account snapshot most of the time; the
     record writes it once and a reader carries it forward."""

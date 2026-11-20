@@ -361,8 +361,9 @@ export function tiles(frames, manifest) {
 }
 
 // A run's state as the page shows it: a "running" run whose manifest has not been
-// refreshed for staleSeconds is stale (its process probably died).
-export function runStatus(manifest, now = Date.now(), staleSeconds = 120) {
+// refreshed for staleSeconds is stale (its process probably died). A recorder refreshes it
+// every 30 s or 10 days; the server reads a dead process on its own machine as "killed".
+export function runStatus(manifest, now = Date.now(), staleSeconds = 600) {
   const status = manifest?.status ?? "unknown";
   if (status !== "running") return status;
   const updated = Date.parse(manifest.updated ?? manifest.started ?? "");

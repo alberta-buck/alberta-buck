@@ -6,6 +6,7 @@
 #   scripts/world-suite.sh                 # all worlds, 1825 days, all at once
 #   DAYS=365 scripts/world-suite.sh life-A econ-F    # some worlds, a year
 #   JOBS=4 scripts/world-suite.sh          # at most four running at a time (a core each)
+#   SEEDS="41404 7 11" JOBS=21 scripts/world-suite.sh   # each world at three seeds: ids <world>-s<seed>
 #
 # Each writes its run record under $SIM_RUNS (build/runs), its vector under build/sim/<id>.json, and its log
 # with a done or failed marker under build/logs. Starts are staggered: the first world on a fresh checkout
@@ -16,6 +17,7 @@ cd "$(dirname "$0")/.." || exit 1
 DAYS=${DAYS:-1825}
 STAGGER=${STAGGER:-90}
 JOBS=${JOBS:-0}             # worlds running at once; 0: all of them
+SEEDS=${SEEDS:-}            # seeds to run every world at (ids <world>-s<seed>); empty: each world's own
 L=alberta_buck/sim/experiments/economy-lifecycle.toml
 E=alberta_buck/sim/experiments/economy.toml
 P=agents.HouseholdPopulationAgent
@@ -32,10 +34,10 @@ ORDER=(life-A econ-F life-A2 life-B life-C life-D life-E)
 [ $# -gt 0 ] && ORDER=("$@")
 mkdir -p build/logs build/sim
 first=1
-for id in "${ORDER[@]}"; do
-  args=${WORLDS[$id]:?unknown world $id (known: ${!WORLDS[*]})}
+start() {     # start ID ARGS...: one world, unless its record is complete
+  local id=$1; shift
   if grep -qs '"status": "complete"' "${SIM_RUNS:-build/runs}/$id/manifest.json"; then
-    echo "$id: complete; skipped"; continue
+    echo "$id: complete; skipped"; return
   fi
   if [ "$JOBS" -gt 0 ]; then
     while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n; done
@@ -43,10 +45,25 @@ for id in "${ORDER[@]}"; do
   [ $first -eq 1 ] || sleep "$STAGGER"
   first=0
   rm -f "build/logs/$id.done" "build/logs/$id.failed"
-  ( python -m alberta_buck.sim --backend pyrevm --days "$DAYS" --run-id "$id" --out "build/sim/$id.json" $args \
-      > "build/logs/$id.log" 2>&1 && touch "build/logs/$id.done" || touch "build/logs/$id.failed" ) &
+  # The failed marker holds the exit status: 137 is SIGKILL (on Linux, usually the kernel's out-of-memory
+  # killer), which leaves no traceback in the log and cannot close the run record.
+  ( python -m alberta_buck.sim --backend pyrevm --days "$DAYS" --run-id "$id" --out "build/sim/$id.json" "$@" \
+      > "build/logs/$id.log" 2>&1
+    rc=$?
+    if [ $rc -eq 0 ]; then touch "build/logs/$id.done"
+    else echo "exit $rc$([ $rc -eq 137 ] && echo ' (SIGKILL: out of memory?)') at $(date -u +%FT%TZ)" > "build/logs/$id.failed"; fi ) &
   echo "$id: started (log build/logs/$id.log)"
+}
+for id in "${ORDER[@]}"; do
+  args=${WORLDS[$id]:?unknown world $id (known: ${!WORLDS[*]})}
+  if [ -z "$SEEDS" ]; then
+    start "$id" $args
+  else
+    for seed in $SEEDS; do start "$id-s$seed" $args --set scenario.seed="$seed"; done
+  fi
 done
 wait
-ls build/logs/*.failed 2>/dev/null && exit 1
-exit 0
+failed=$(ls build/logs/*.failed 2>/dev/null)
+[ -z "$failed" ] && exit 0
+for f in $failed; do echo "$(basename "$f" .failed): $(cat "$f")"; done
+exit 1

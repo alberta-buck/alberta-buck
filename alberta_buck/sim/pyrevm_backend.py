@@ -32,6 +32,8 @@ Fidelity notes (vs anvil):
 
 from __future__ import annotations
 
+from array import array
+import sys
 import time
 from typing import Any, Optional
 
@@ -191,13 +193,13 @@ class _RevmProvider(BaseProvider):
         return self.b.execute(frm, to, data, value, txh="0x" + keccak(raw).hex())
 
     def rpc_getTransactionReceipt(self, p):
-        r = self.b.receipts.get(p[0])
+        r = self.b.receipt(p[0])
         if r is None:
             raise _RpcError({"code": -32000, "message": "receipt not found"})
         return r
 
     def rpc_getTransactionByHash(self, p):
-        r = self.b.receipts.get(p[0])
+        r = self.b.receipt(p[0])
         if r is None:
             return None
         return {"hash": p[0], "blockNumber": r["blockNumber"],
@@ -262,10 +264,16 @@ class PyrevmAnvil:
         self.block_seconds = block_seconds if block_seconds is not None else BLOCK_SECONDS
         self._next_ts: Optional[int] = None         # a timestamp set for the next block
         self.late = 0                               # warps that found the clock already past them
-        self.block_times: dict[int, int] = {}
+        # Every block and every receipt stays readable for the whole run (a household reconciles a
+        # flow by its hash, days later). A five-year world mines about 220,000 blocks: the block
+        # times are a packed array, and a receipt is kept as a tuple (block, from, to, gas, ok,
+        # created, logs as (address, topics, data) bytes), rendered as JSON-RPC only when asked
+        # for (receipt()); as dicts of hex strings they held gigabytes.
+        self.block_times = array("q")
         self.block_hashes: dict[str, int] = {}
         self.nonces: dict[str, int] = {}
-        self.receipts: dict[str, dict] = {}
+        self.receipts: dict[str, tuple] = {}
+        self._names: dict = {}                      # one shared str per address seen in a log
         self.w3: Optional[Web3] = None
 
     # -- lifecycle ---------------------------------------------------------- #
@@ -347,7 +355,9 @@ class PyrevmAnvil:
     # -- execution core ------------------------------------------------------ #
 
     def _push_block_env(self) -> None:
-        self.block_times[self.block] = self.ts
+        # Block numbers only grow by one (start pushes block 0, every later block its successor).
+        assert len(self.block_times) == self.block, "blocks are pushed in order"
+        self.block_times.append(self.ts)
         self.block_hashes[_h32(b"blk" + self.block.to_bytes(8, "big"))] = self.block
         self.evm.set_block_env(pyrevm.BlockEnv(
             number=self.block, timestamp=self.ts))
@@ -377,38 +387,56 @@ class PyrevmAnvil:
 
         logs = []
         if ok and res:
-            for idx, lg in enumerate(res.logs):
-                topics = [t if isinstance(t, str) else "0x" + bytes(t).hex()
-                          for t in lg.topics]
+            for lg in res.logs:
+                topics = b"".join(bytes.fromhex(t[2:]) if isinstance(t, str) else bytes(t) for t in lg.topics)
                 ldata = lg.data
                 if isinstance(ldata, (tuple, list)):   # (raw topics, data)
                     ldata = ldata[-1] if ldata else b""
-                if not isinstance(ldata, str):
-                    ldata = "0x" + bytes(ldata).hex()
-                logs.append({
-                    "address": to_checksum_address(lg.address),
-                    "topics": topics, "data": ldata,
-                    "blockNumber": _hex(self.block), "blockHash": blockh,
-                    "transactionHash": txh, "transactionIndex": "0x0",
-                    "logIndex": _hex(idx), "removed": False,
-                })
+                ldata = bytes.fromhex(ldata[2:]) if isinstance(ldata, str) else bytes(ldata)
+                logs.append((self._name(lg.address), topics, ldata))
 
-        self.receipts[txh] = {
+        # =to= as the sender wrote it (the receipt has always echoed it unchanged), one shared string.
+        self.receipts[txh] = (self.block, self._name(frm), to and sys.intern(to), gas_used, ok,
+                              contract_addr, tuple(logs))
+        return txh
+
+    def _name(self, address) -> str:
+        """The checksummed address, one shared string per address (a log names a few contracts
+        hundreds of thousands of times)."""
+        name = self._names.get(address)
+        if name is None:
+            name = self._names[address] = to_checksum_address(address)
+        return name
+
+    def receipt(self, txh: str) -> Optional[dict]:
+        """The JSON-RPC receipt of a mined transaction, or None."""
+        kept = self.receipts.get(txh)
+        if kept is None:
+            return None
+        block, frm, to, gas_used, ok, contract_addr, logs = kept
+        number, blockh = _hex(block), _h32(b"blk" + block.to_bytes(8, "big"))
+        return {
             "transactionHash": txh, "transactionIndex": "0x0",
-            "blockHash": blockh, "blockNumber": _hex(self.block),
+            "blockHash": blockh, "blockNumber": number,
             "from": frm, "to": to,
             "cumulativeGasUsed": _hex(gas_used), "gasUsed": _hex(gas_used),
-            "contractAddress": contract_addr, "logs": logs,
+            "contractAddress": contract_addr,
+            "logs": [{"address": address,
+                      "topics": ["0x" + topics[i:i + 32].hex() for i in range(0, len(topics), 32)],
+                      "data": "0x" + data.hex(),
+                      "blockNumber": number, "blockHash": blockh,
+                      "transactionHash": txh, "transactionIndex": "0x0",
+                      "logIndex": _hex(idx), "removed": False}
+                     for idx, (address, topics, data) in enumerate(logs)],
             "logsBloom": BLOOM, "status": "0x1" if ok else "0x0",
             "effectiveGasPrice": "0x0", "type": "0x0",
         }
-        return txh
 
     # -- block view ------------------------------------------------------------ #
 
     def block_dict(self, number=None) -> Optional[dict]:
         number = self.block if number is None else number
-        if number not in self.block_times:
+        if not 0 <= number < len(self.block_times):
             return None
         return {
             "number": _hex(number), "hash": _h32(b"blk" + number.to_bytes(8, "big")),

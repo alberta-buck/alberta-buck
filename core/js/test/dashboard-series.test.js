@@ -45,8 +45,11 @@ test("windows, tiles, status, formats and ticks", () => {
   assert.deepEqual(tiles([], {}), []);
   const now = Date.parse("2026-11-14T12:00:00Z");
   assert.equal(runStatus({ status: "running", updated: "2026-11-14T11:59:30Z" }, now), "running");
-  assert.equal(runStatus({ status: "running", updated: "2026-11-14T11:50:00Z" }, now), "stale");
+  // A five-year day can take 30 s: five minutes without a refresh is still running; fifteen is stale.
+  assert.equal(runStatus({ status: "running", updated: "2026-11-14T11:55:00Z" }, now), "running");
+  assert.equal(runStatus({ status: "running", updated: "2026-11-14T11:45:00Z" }, now), "stale");
   assert.equal(runStatus({ status: "complete" }, now), "complete");
+  assert.equal(runStatus({ status: "killed", updated: "2026-11-14T11:59:30Z" }, now), "killed");
   assert.equal(format(null, "ratio"), "n/a"); assert.equal(format(1.02044, "ratio"), "1.0204");
   assert.equal(format(31_927_606, "buck"), "31.93M"); assert.equal(format(950, "buck"), "950.00");
   assert.equal(format(1234.4, "count"), "1,234");

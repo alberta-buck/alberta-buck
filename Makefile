@@ -123,10 +123,15 @@ help-runs:
 #      make nix-venv-economy-smoke [ECONOMY_SMOKE_DAYS=30]   one short run of the working tree, and its PDF
 #   c  The five-year worlds (scripts/world-suite.sh; the working tree)
 #      make nix-venv-test-worlds [WORLDS="life-A econ-F"] [WORLD_DAYS=1825] [WORLD_JOBS=0] [WORLD_STAGGER=90]
+#                                [WORLD_SEEDS="41404 7 11"]
 #      Worlds: econ-F (the economy), life-A, life-A2 (another seed), life-B to life-E (population mixes).
 #      WORLD_JOBS=0 starts every world at once (seven cores); WORLD_STAGGER is the seconds between starts.
-#      Each world: log build/logs/<id>.log with a .done or .failed marker beside it, vector
-#      build/sim/<id>.json (and its PDF at five years), run record build/runs/<id>.
+#      WORLD_SEEDS runs each named world at each seed, as <world>-s<seed> (name the worlds without
+#      life-A2): a mix's effect on K is about the size of a seed's, so compare mixes over seeds.
+#      Each world: log build/logs/<id>.log with a .done or .failed marker beside it (the marker holds
+#      the exit status; 137 is SIGKILL, on Linux usually out of memory), vector build/sim/<id>.json (and
+#      its PDF at five years), run record build/runs/<id>. A suite's table, year by year:
+#      python -m alberta_buck.sim.runrecord years build/runs/life-* build/runs/econ-F
 #   d  Comparisons: runs identical but for the settings under study (alberta_buck/sim/comparisons/)
 #      make nix-venv-compare-plan   COMPARE=book                    the runs and their settings
 #      make nix-venv-compare        COMPARE=book COMPARE_JOBS=2     [COMPARE_ARGS=...]
@@ -159,7 +164,9 @@ help-runs:
 #
 # 5  Results: where they land, how to view them, how to draw them again
 #    Run records   every python -m alberta_buck.sim run records under build/runs/<run-id>/ as it goes
-#                  (manifest, frames, events, agents); SIM_RUNS=DIR records elsewhere.
+#                  (manifest, frames, events, agents); SIM_RUNS=DIR records elsewhere. A record whose
+#                  process died unannounced (SIGKILL) reads "killed" on the machine that ran it.
+#                  python -m alberta_buck.sim.runrecord list | years <run dirs>: status; yearly table.
 #    Dashboard     make nix-venv-dashboard [DASHBOARD_PORT=8890] [SIM_RUNS=DIR], then open
 #                  http://127.0.0.1:8890/: every run, finished or still growing, tab by tab; the Compare
 #                  tab for comparisons; live sessions. Read-only on a trusted LAN: make nix-venv-dashboard-lan.
@@ -182,7 +189,7 @@ help-runs:
 #                  unset: every core)  JS_TEST_ARGS="--test-concurrency=4" (node's test workers; default
 #                  cores - 1). pytest runs one process. On a shared machine keep the sum to the cores
 #                  you can spare, e.g. FORGE_JOBS=4 COMPARE_JOBS=2 WORLD_JOBS=4.
-#    Horizon, seed WORLD_DAYS  ECONOMY_DAYS  ECONOMY_SEED  ECONOMY_SMOKE_DAYS
+#    Horizon, seed WORLD_DAYS  WORLD_SEEDS  ECONOMY_DAYS  ECONOMY_SEED  ECONOMY_SMOKE_DAYS
 #                  EQ_SETS="--days N --set scenario.seed=N"  COMPARE_ARGS="--days N"
 #    Settings      EQ_SETS="--set KEY=VALUE ..." (any experiment key)  CELLS  COMPARE  CAMPAIGN
 #    The EVM       SIM_BACKEND=pyrevm (in-process; or anvil)
@@ -235,8 +242,9 @@ WORLD_DAYS	?= 1825
 WORLDS		?=
 WORLD_JOBS	?= 0
 WORLD_STAGGER	?= 90
+WORLD_SEEDS	?=
 test-worlds: sim-build core-build-py
-	DAYS=$(WORLD_DAYS) JOBS=$(WORLD_JOBS) STAGGER=$(WORLD_STAGGER) scripts/world-suite.sh $(WORLDS)
+	DAYS=$(WORLD_DAYS) JOBS=$(WORLD_JOBS) STAGGER=$(WORLD_STAGGER) SEEDS="$(WORLD_SEEDS)" scripts/world-suite.sh $(WORLDS)
 
 # RPC endpoints for forking.  Override via environment or .env file.
 # Free tier: https://dashboard.alchemy.com/ or https://infura.io/

@@ -1037,9 +1037,14 @@ class HouseholdRefinance:
             block = None
         if f and f.get("kind") in ("surplus", "wallet", "invest", "exit"):
             detail.setdefault("kind", f["kind"])
+        # Most events repeat the previous one's accounts (63% of an event log's bytes); an equal
+        # snapshot shares the previous one's object, so a five-year household holds each once.
+        accounts = self._accounts(d)
+        if self.events and self.events[-1]["accounts"] == accounts:
+            accounts = self.events[-1]["accounts"]
         self.events.append({"schema": 1, "seq": len(self.events) + 1, "member": self.agent.member,
                             "decision": self.decisions, "day": day, "block": block,
-                            "phase": f["phase"] if f else "idle", "status": status, "accounts": self._accounts(d),
+                            "phase": f["phase"] if f else "idle", "status": status, "accounts": accounts,
                             **_wire(detail)})
 
     def start_wallet(self, d, plan, day, ctr, *, context=None):
