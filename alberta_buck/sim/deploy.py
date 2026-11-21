@@ -181,7 +181,7 @@ class Deployment:
     fee_usdc: int = FEE_USDC
     fee_buck: int = FEE_BUCK      # TOKEN/BUCK pools
     fee_ub: int = FEE_BUCK_UB     # floating BUCK/USDC pool
-    basket_impl: str = "prorata"  # "prorata" (default) | "ops" | "equity" | "equity-ops"
+    basket_impl: str = "equity-ops"  # "equity-ops" (default: with the machine) | "equity" | "prorata" | "ops"
     buck_artifact: str = ""       # actual deployed contract, recorded in saved vectors
     buck_accounting: str = ""     # accounting model implemented by that deployment
     net_stack: Any = None         # canonical token, fund, quoter and four monetary libraries
@@ -224,13 +224,15 @@ def _erc20_abi() -> list:
 
 
 def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
-           basket_impl="prorata", director_impl="pairs",
+           basket_impl="equity-ops", director_impl="pairs",
            controller_impl="direct", equity_machine=None) -> Deployment:
     w3 = chain.w3
     accts = w3.eth.accounts
     deployer, gov, issuer_addr = accts[0], accts[1], accts[3]
     credit_holder = basket_impl in ("equity", "equity-ops")
-    machine = (os.environ.get("SIM_EQUITY_MACHINE", "0") == "1"
+    # The basket machine is the equity basket's upkeep (owner, 2026-11-20: the earlier upkeep is
+    # retired); SIM_EQUITY_MACHINE=0 keeps the earlier one reachable until its sources go (plan R4).
+    machine = (os.environ.get("SIM_EQUITY_MACHINE", "1" if credit_holder else "0") == "1"
                if equity_machine is None else bool(equity_machine))
     if machine and (not credit_holder or controller_impl != "direct"):
         raise ValueError("the basket machine requires an equity basket and the direct K controller")
@@ -360,7 +362,9 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
             eq_facet = chain.deploy("BuckBasketEquityWheel", abi=abi, bytecode=bytecode)
             chain.send(basket.functions.setEquityWheel(eq_facet.address), sender=gov)
         union, seen = [], set()
-        for art in (name, "BuckBasketUniswapV3", "BuckBasketEquityWheel"):
+        facets = (("BasketVenueFacet", "BasketUpkeepFacet") if machine
+                  else ("BuckBasketUniswapV3", "BuckBasketEquityWheel"))
+        for art in (name, *facets):
             abi, _ = load_artifact(art)
             for e in abi:        # the shell's entry wins a shared signature
                 key = (e.get("type"), e.get("name"),

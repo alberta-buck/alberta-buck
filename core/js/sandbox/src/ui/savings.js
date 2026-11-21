@@ -110,13 +110,6 @@ export function mountSavings(ctx) {
   // act at each, so more ticks track the commodities through the day more closely (and cost more).
   const ticksSel = h("select", { "aria-label": "ticks per day" },
     ...[1, 2, 4, 8, 12, 24].map((n) => h("option", { value: String(n) }, String(n))));
-  // An equity basket's upkeep: the older director and its Deploy / Fund / Trim
-  // steps, or the basket machine (the server's scenario.basket).
-  const upkeepOf = (machine) => (machine ? "equity-machine" : "equity-ops");
-  const upkeepSel = h("select", { "aria-label": "basket upkeep" },
-    h("option", { value: upkeepOf(false) }, "The director and its steps (older)"),
-    h("option", { value: upkeepOf(true) }, "The basket machine"));
-  const upkeepField = h("label", { class: "field" }, h("span", { class: "field-label" }, "Upkeep"), upkeepSel);
   const householdChoices = {
     surplus_policy: ["Surplus cash", [["adaptive", "Adaptive saving / discounted paydown"],
       ["basket", "Always invest"], ["retire", "Always retire liability"], ["discount", "Retire only at discount"]]],
@@ -160,13 +153,12 @@ export function mountSavings(ctx) {
               "Connect"))),
         h("div", { class: "row" },
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Prices"), pricesSel),
-          upkeepField,
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Seed"), seedIn),
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Ticks / day"), ticksSel)),
         h("div", { class: "row" }, ...householdFields),
         h("div", { class: "row" },
           h("button", { type: "button", class: "danger", onclick: () => newWorld() }, "New world")),
-        h("p", { class: "hint" }, "A new world runs from its first day with these prices, upkeep, seed and household settings; ",
+        h("p", { class: "hint" }, "A new world runs from its first day with these prices, seed and household settings; ",
           "this one keeps running on the server until it is idle for ten minutes.  ",
           "The link to this world (anyone holding it can watch and steer it): "), worldLink)));
 
@@ -458,8 +450,6 @@ export function mountSavings(ctx) {
           S.saver = new Saver({ link: S.link, info, key });
           fill(howLine, HOW[info.basket_kind] ?? HOW.prorata);
           showUpkeep(!!info.machine);
-          upkeepField.hidden = info.basket_kind !== "equity";
-          upkeepSel.value = upkeepOf(info.machine);
           for (const [key, select] of Object.entries(householdSelects)) {
             select.value = String(info.households?.[key] ?? householdDefaults[key]);
           }
@@ -564,7 +554,6 @@ export function mountSavings(ctx) {
     if (pricesSel.value !== "history") sets["scenario.prices"] = pricesSel.value;
     if (seedIn.value.trim()) sets["scenario.seed"] = seedIn.value.trim();
     sets["scenario.ticks_per_day"] = ticksSel.value;
-    if (S.info?.basket_kind === "equity") sets["scenario.basket"] = upkeepSel.value;
     const chain = S.status?.chain;
     if (chain && chain !== "l2") sets["agents.BasketWheelAgent.chain"] = chain;
     prefs.set("savings:sets", JSON.stringify(sets));

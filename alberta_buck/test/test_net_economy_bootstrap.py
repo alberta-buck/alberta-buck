@@ -141,7 +141,7 @@ def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(mo
 
 @pytest.mark.parametrize("basket_impl", ["equity", "equity-ops"])
 def test_component_comparisons_keep_their_own_wheel_on_canonical_money(basket_impl, monkeypatch):
-    monkeypatch.delenv("SIM_EQUITY_MACHINE", raising=False)
+    monkeypatch.setenv("SIM_EQUITY_MACHINE", "0")     # the machine is the default; the earlier upkeep goes in R4
     monkeypatch.delenv("SIM_WHEEL_ARB", raising=False)
     scenario = replace(ROUTING, tokens=ROUTING.tokens[:2], csv_files=ROUTING.csv_files[:2], days=1, agents={})
     rng = idmod.seeded_rng(scenario.seed)

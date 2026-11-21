@@ -36,9 +36,9 @@ def main(argv=None) -> int:
     ap.add_argument("--basket", default=None,
                     choices=["prorata", "ops", "equity", "equity-ops", "equity-machine"],
                     help="basket implementation: the equity basket on the "
-                         "basket machine (equity-machine, default), the "
-                         "equity basket with its earlier upkeep (equity), "
-                         "and the desk beside it (equity-ops), "
+                         "basket machine (equity-machine, default; equity and "
+                         "equity-ops are the same machine since 2026-11-20 "
+                         "unless SIM_EQUITY_MACHINE=0), "
                          "BuckBasketProRata (prorata), or BuckBasketOps "
                          "(ops -- prorata plus the monetary-operations desk "
                          "on the director's common mode)")

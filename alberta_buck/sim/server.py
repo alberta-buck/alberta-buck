@@ -718,9 +718,9 @@ PUBLIC_RPC = frozenset({
 # The session overrides a --public server accepts (?set=key=value): the
 # page's toggles and bounded household settings; arbitrary cast sizing is refused.
 PUBLIC_SETS = ("scenario.seed=", "scenario.prices=", "agents.BasketWheelAgent.chain=")
-# ... and the page's choice of the equity basket's upkeep, as exactly these.
-PUBLIC_CHOICES = ("scenario.basket=equity-ops", "scenario.basket=equity-machine")
-PUBLIC_CHOICES += tuple(f"agents.HouseholdPopulationAgent.{key}={value}"
+# ... and the page's household settings, as exactly these (the basket's upkeep is the machine's; the
+# earlier upkeep is retired, 2026-11-20).
+PUBLIC_CHOICES = tuple(f"agents.HouseholdPopulationAgent.{key}={value}"
                        for key, values in (("initial_debtors", (0, 6, 12, 24, 30, 60)),
                                            ("initial_savers", (0, 6, 12, 24, 30, 60)),
                                            ("initial_investors", (0, 6, 12, 24, 30, 60)),

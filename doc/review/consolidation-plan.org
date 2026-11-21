@@ -168,6 +168,16 @@ Order, each step qualified (forge, Python, JS) and committed:
 - R5. /Shared code/: ArbKind's flash-swap path, =DirectorKind=, =SweepKind=, =EquityKind=, the
   =IStabilizer= seam, and the storage's dead fields behind a new layout check.
 
+** R2 as done: the canonical path on the machine (2026-11-20)
+
+=deploy()= and =SimDriver= default to the equity basket with its desk ("equity-ops"), and every
+equity basket gets the machine unless =SIM_EQUITY_MACHINE=0= asks for the earlier upkeep (kept
+reachable only until R4 deletes it; =test_component_comparisons_...= sets it). The basket handle's
+ABI is the shell plus =BasketVenueFacet= and =BasketUpkeepFacet= on the machine. The savings page
+lost its upkeep selector and the server its =scenario.basket= public choices; a page's
+=scenario.basket= set is now refused. The deploying Python suites (economy bootstrap, machine
+chain, household setup, server, JS join, market): 108 passed.
+
 ** R3 as done: the fixtures on the machine (2026-11-20)
 
 Every shared Solidity fixture now installs the machine's facets: =BasketVenueFacet= and

@@ -1,8 +1,8 @@
 """Configure the existing basket machine after its pools have TWAP history.
 
 An experiment selects it with `[scenario] basket = "equity-machine"` (loop.run), and sizes it in its
-`[machine]` table; SIM_EQUITY_MACHINE=1 beside basket "equity-ops" selects it for a scenario that carries
-no experiment. Canonical deployment installs one machine wheel directly and
+`[machine]` table; deploy() installs it on every equity basket (SIM_EQUITY_MACHINE=0 keeps the earlier
+upkeep reachable until its sources go, retirement step R4). Canonical deployment installs one machine wheel directly and
 seeds independent liquidity before this setup, then agents deposit into it.
 The old comparison path can still replace earlier upkeep. No deployed chain
 is migrated by this simulation helper.

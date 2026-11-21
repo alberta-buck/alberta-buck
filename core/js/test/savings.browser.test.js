@@ -89,8 +89,6 @@ test("the Savings tab: watch, save, pause and step, shock, redeem, reload", { sk
     }
     assert.ok(panelText.includes(machine ? "paired" : "bought for the director"),
       "the wheel's work is charted by what this upkeep does");
-    assert.equal(await page.locator('#panel-savings select[aria-label="basket upkeep"]').inputValue(),
-      machine ? "equity-machine" : "equity-ops", "the world settings show the upkeep that is running");
     assert.equal(await page.locator("#panel-savings .chart-grid.small").count(), 2,
       "the lean and the commodities, one small chart per commodity");
     // Hover: a guide at the nearest day, and the legend reads that day.

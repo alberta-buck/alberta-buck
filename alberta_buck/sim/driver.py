@@ -48,7 +48,7 @@ class SimDriver:
     so the chain is at "tick 0, day 0, nothing acted yet" when it returns.
     """
 
-    def __init__(self, scenario, anvil, basket_impl="prorata",
+    def __init__(self, scenario, anvil, basket_impl="equity-ops",
                  director_impl="pairs", verbose=False):
         self.scenario = scenario
         self.report_path = report.output_path(None, scenario.days)
