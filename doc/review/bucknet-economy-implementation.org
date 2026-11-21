@@ -5874,7 +5874,121 @@ does not flash); the basket keeps pairing every TOKEN (full pairing; measure the
 arbitrage and deposits adding fresh BUCK before any depth targets); the float kept when burning
 idle BUCK is the basket's liquidity target.
 
-** Resume here (2026-11-20)
+** The flash comparison and the seeded suite, read (2026-11-21)
+
+*** The flash comparison (=comparisons/flash.toml=, =economy=, two years, a5e1de68)
+
+Four runs on datasim (=~/src/alberta-buck-flash=, all complete): the basket's arbitrage funded from
+its wallet or borrowed by =flashIssue=, crossed with its idle BUCK kept or retired by the Jubilee
+wheel (=deploy.basket_retirement_cap_m= = 1, a million a job). At day 729:
+
+| arbitrage, idle BUCK | K end | K mean | BVIB end | mean abs(BVIB-1) | supply M | basket lien M | household drawn M | pools net/gross | book spread | basket cycles |
+|----------------------+-------+--------+----------+------------------+----------+---------------+-------------------+-----------------+-------------+---------------|
+| wallet, keep         | 0.500 |  0.596 |   1.0135 |            1.42% |     38.9 |          17.2 |               3.6 |           0.977 |       2.70% |           677 |
+| flash, keep          | 0.508 |  0.602 |   1.0122 |            1.33% |     38.2 |          16.5 |               3.7 |           0.976 |       2.73% |         1,325 |
+| wallet, burn         | 0.767 |  0.763 |   0.9898 |            0.86% |     29.4 |           0.0 |              11.4 |           0.973 |       2.42% |           474 |
+| flash, burn          | 0.773 |  0.771 |   0.9930 |            1.04% |     30.9 |           0.0 |              12.9 |           0.975 |       2.27% |         1,188 |
+
+- /Burning the idle BUCK is the large effect./ The basket's lien is retired to zero within the first
+  year (1.8M at day 180, none from day 365) and stays there. Supply is 7.3 to 9.5M lower, K holds at
+  0.74 to 0.79 from day 180 on (against 0.65 at day 180 sliding to 0.50 when kept), BVIB stays within
+  a point and a half of parity and ends just under it, and the mean deviation falls by a third.
+- /The economy answers it./ With K high, the proportional population's arrivals shift from investors
+  to debtors and savers (at two years 103 to 109 investors, 24 to 26 debtors and 25 to 30 savers,
+  against 215 to 229, 14 and 10): BUCK comes from households' credit (11 to 13M drawn) instead of the
+  basket's own lien. The households' net worth is lower (5M against 13 to 14M), but compositionally:
+  fewer investors' holdings and more drawn debt; the basket's equity is the same (20 to 21M).
+- /Flash arbitrage is nearly neutral./ About twice the basket's cycles; K and BVIB within noise
+  (slightly better with the idle BUCK kept, slightly worse with it burned); supply within 1.5M.
+- /Neither keeps the pools from growing hollow./ The TOKEN/BUCK pools' net/gross falls from 0.992 to
+  0.973-0.977 in two years in all four runs, the BUCK/USDC pool (SimLP's) the same, and the book's
+  buy/sell spread widens from 0.8% to 2.3-2.7% (burning a little narrower). Fresh BUCK through
+  arbitrage legs, and retiring the wallet's idle BUCK, do not touch the BUCK ageing inside the pools.
+
+*** The seeded five-year suite (4d7497aa, on our pyrevm; still running on datasim)
+
+Fifteen worlds in =~/src/alberta-buck-net= (life-A to E at seeds 11 and 13, life-A/C/E at their own
+seed again, econ-F at 11 and 13), at day 1,489 to 1,771 of 1,826 (econ-F at about 1,027) when read.
+They predate the households' fixes, burning, flash and the retirement (R1 to R5). Read with
+=.venv/bin/python -m alberta_buck.sim.runrecord years build/runs/<id> ...=;
+=build/logs/suites.done= marks the end.
+
+- /The same picture on every seed./ K's mean over the last two years 0.47 to 0.54 (life-B lowest,
+  0.47 to 0.48; life-C highest, 0.54); mean abs(BVIB-1) 1.16 to 1.48%, BVIB above 1 on 98 to 100% of
+  days. A seed moves K by about 0.03, never the shape.
+- /The pools hollow steadily/: net/gross 0.982 at one year, 0.968 at two, 0.957 at three, 0.948 at
+  four, 0.940 at about 4.8 years; the spread 1.8%, 3.5%, 4.8%, 6.0%, 7.1% (the dollar pool a little
+  faster). econ-F hollows slower (0.971 and a 3.0% spread at day 1,027): its larger flows turn the
+  pools' BUCK over.
+- /Supply and lien grow together/: 34 to 37M supply with a 15 to 18M basket lien at about 4.7 years
+  in the lifecycle worlds; econ-F 44 to 46M with a 23 to 24M lien at 2.8 years.
+- /Healthy runs/: no errors, no relief shortfalls, memory bounded (our pyrevm: none of the fifteen
+  died, against three of seven before).
+
+*** The owner's word on the near-zero-K exit (2026-11-21)
+
+"This will be resolved through agents that need to recover BUCKs for savings and liability
+retirement": no contract change. Savers recovering their BUCK and debtors retiring liabilities buy
+BUCK back into the economy before K can reach the region where a fully paired basket's exit is short.
+The pinned test (=test_nearZeroKExitOfAFullyPairedBasketIsShortByTheMarkedHeldBuck=) stays as the
+contract's documented behaviour.
+
+*** Recommendations: approaches for what comes next
+
+1. /Burning idle BUCK on by default/ (=deploy.basket_retirement_cap_m = 1.0= in =economy.toml=,
+   =economy-lifecycle.toml= and the JS world's jubilee policy), flash arbitrage off by default but kept
+   (it should earn its place in the stress arms, where a large dislocation would exceed the wallet).
+   Then rerun the five-year suite at the new head (households' fixes, retirement, burning), two seeds.
+2. /The pools' own hollowness needs a mechanism inside the pools/. In order of preference:
+   a. /Position refresh/ (the machine's job): for the pool whose BUCK side is most carried
+      (net/gross under a threshold, 0.995 say), burn a slice of the basket's position, let the
+      retirement job retire the released, aged BUCK against the lien, and re-mint the TOKEN with BUCK
+      issued fresh; bounded per job (like retirement, a million), skipped while a pool is displaced
+      (the venue's TWAP band). The cost is the carry the BUCK already owes and the gas. This is the
+      owner's "burn BUCKs instead of leaving them idle in pools" applied to the positions, not only
+      the wallet. Measure as a comparison (refresh off, 0.995, 0.99; =economy=, two years): the
+      pools' net/gross, the spread, supply and lien, the relief paid.
+   b. /Refresh on the book's sells after withdrawals/ (step 5 of the design): when the book sells to
+      restore a target, take the BUCK side out of the most carried pool first.
+   c. /Outside liquidity/: the BUCK/USDC pool is SimLP's, which no basket job can refresh; a liquidity
+      provider agent that withdraws and re-adds on its own carry (as real LPs would) makes the dollar
+      pool honest. econ-F's slower hollowing says turnover is the lever.
+   Quoting at net (done: the book, K's reading) already keeps the hollowness from misleading prices;
+   these are about the pools' depth and spread.
+3. /K's slide/: with burning on, K holds interior without a demand cast. Recheck the slide on the
+   new suite before casting persistent BUCK demand (balances, payroll), then cast it as planned and
+   measure whether K stays interior with the demand and the burn together.
+4. /The population's response to K/ (fewer investors, more debtors and savers when K is high) is the
+   proportional population working; record the composition beside K in the comparisons so a change in
+   K is read with the change in who arrives.
+5. /R6 before the release/ (doc/review/consolidation-plan.org): the V3 venue's leftover pro-rata
+   accounting, under the layout check, so the published shell's storage is the one we keep.
+6. /The release path/: R6; the defaults (1); the new suite; regenerate the pinned 12 s vectors; the
+   savings sandbox's step 6; then the contracts release and the --no-ff merge to master.
+
+** Resume here (2026-11-21)
+
+- *Branch*: =feature/household-minimal-ecosystem= (worktree =.claude/worktrees/buck-compound=), head
+  3bba6fb4, pushed.
+- *Done since 2026-11-20*: the old baskets' retirement R1 to R5 (doc/review/consolidation-plan.org,
+  "Retiring the old baskets": the earlier upkeep unpublished; deploy, server and savings page on the
+  machine only; every Solidity fixture on the machine; the pro-rata and ops baskets, hooked Buck,
+  earlier upkeep, pairs director and shadow controller deleted; the wheel slimmed, =setArb= four
+  arguments; a storage-layout check with the shells' layouts pinned, and the dead director fields and
+  stabilizer seam pruned behind it). Forge 1,215, Python 1,312, JS 300 pass. The flash comparison read
+  (above): burn on, flash neutral, hollowness untouched.
+- *Running on datasim*: the seeded suite in =~/src/alberta-buck-net= (4d7497aa), the lifecycle worlds
+  near their end and econ-F at about day 1,027 (some 13 hours more); read with =runrecord years=.
+- *Next, in order*: (1) burn on by default, flash off; (2) the owner's word on R6, then R6; (3) the
+  position-refresh design and its comparison (recommendation 2a); (4) a new five-year suite at the new
+  head (two seeds) on datasim; (5) the stress arms' port (task 30, then delete the catalogue);
+  (6) the demand cast; (7) the release path (recommendation 6).
+- *Gotchas*: the JS artifact bundle (=core/js/artifacts/bundle.mjs=, generated) goes stale after a
+  contract change: =node core/js/bin/bundle-artifacts.mjs= before the webevm tests; a change to
+  =foundry.toml='s outputs needs one =forge build --force=; =scripts/storage-layout.py --update= after a
+  deliberate storage change (=make storage-layout-check= fails until then).
+
+** Resume here (superseded: 2026-11-20)
 
 - *Branch*: =feature/household-minimal-ecosystem=; worktree =.claude/worktrees/buck-compound=.
 - *Done today*: the datasim net suite recorded ("The five-year net suite, and why three of its

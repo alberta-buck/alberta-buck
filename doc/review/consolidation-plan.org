@@ -213,8 +213,8 @@ What the move showed, for the owner:
   near-zero K a fully paired machine basket's exit reverts =InsufficientSpendableBalance=. The
   shortfall rule retires the marked share of the held BUCK (502.41 in the test), but the exit
   recovers only the BUCK it actually releases (499.99) after paying the leaver. At K = 0.05 the
-  exit proceeds. The fix is the owner's call: retire at most what the exit released, or mark the
-  held BUCK at what an exit can release.
+  exit proceeds. The owner (2026-11-21): no contract change; agents recovering BUCK for savings and
+  liability retirement resolve it (doc/review/bucknet-economy-implementation.org).
 
 ** R4 as done: the families deleted (2026-11-20)
 
@@ -276,12 +276,54 @@ What the move showed, for the owner:
   which the desk still uses). Pruning them shrinks the venue and the shared storage further, under
   the same check.
 
-* Order of work
-1. Wave 1, and the three test tiers with =help= rewritten around them, once the
-   JS conversion to webevm lands (it edits the Makefile now).
-2. The release fixes above that need no decision.
-3. Wave 3's first moves that need no decision: unpublish the earlier upkeep
-   family; port BuckNetQuote.t.sol to Buck; move BasketWheelArb and the three
-   canonical wheel suites to the machine wheel.
-4. Wave 2 and the rest of wave 3 after the owner's word on the stress arms, the
-   shadow controller and the V2 adapter.
+* Where the consolidation stands (2026-11-21)
+
+- /Wave 1/: done (=RegressVerifier= and the Tevm baselines gone; the three tiers =test-all=,
+  =test-contracts=, =test-worlds= in the Makefile; =test-packaging= now includes
+  =storage-layout-check=).
+- /Wave 3/: the pro-rata family, the pairs director, the earlier upkeep and the shadow controller are
+  deleted (R1 to R5 above); the V2 adapter went on 2026-11-14. Left: the USD controller, the BuckNet
+  facade, signed Buck and the V2 integration (the table above).
+- /Wave 2/: the TUI, =kdesign=, the ops comparisons and the shadow book went with R4. Left: the
+  catalogue (until its stress arms are ported, task 30), about 50 legacy experiments and their
+  vectors and plots, the legacy invariant tests that read them (=test_rebalancing_sim_invariants=,
+  =sim-compare-rebalancing-eq=), the matrix/sweep/star/eqmetrics modules, and the five suites in
+  =alberta_buck/test/legacy/= (not collected by default).
+- /EIP-170 margins now/: the upkeep facet 302 bytes, the basket's shell 392, Buck 646, BuckCredit
+  about 60, =BasketMarketOps= 1,427, the machine wheel about 4,480: any change to the first four
+  needs bytes found first.
+
+* Order of work (from 2026-11-21), with the recommended approach for each
+
+1. /R6: the V3 venue's pro-rata accounting/ (proposed above; the owner's word first). Approach: list
+   the venue's entry points no contract calls (=provideForToken=, =withdrawLiquidity=,
+   =investFromBucks=, =convertIntoBucks=, =setupPool=), confirm with a grep of Python, JS and the
+   sandbox that nothing external calls them either, delete them with their suites' cases, then the
+   fields only they and =creditDepositors= / =creditTreasury= touched (=stressBonusPrincipal=, the
+   stress-fee parameters, =treasuryBuckPending=; =totalOutstandingBuck= only once =poolBuckValues= no
+   longer needs it for the desk). Run =make storage-layout-check= (it must fail, naming exactly those
+   fields), =storage-layout-update=, the full forge suite, and the Python and JS world tests; rebuild
+   the JS bundle first. The shell's bytes freed are the margin the release needs.
+2. /Wave 2, once the stress arms are ported/ (task 30): port the catalogue's excursion and attack
+   arms as =economy= interventions (one comparison spec, like =comparisons/shocks.toml=), then delete
+   the catalogue, the matrix, the sweep, star and =eqmetrics= (after =pusher_agent= and =bookloader=
+   move into the intervention code or go), the legacy experiments other than =economy= and
+   =economy-lifecycle=, their vectors and plots, the legacy invariant tests and
+   =alberta_buck/test/legacy/=. Keep the Python policy models and the paper figures they make.
+3. /Wave 3, the rest/:
+   - /BuckNet facade/: port =BuckNetQuote.t.sol= to Buck (the published =BuckNetQuoter= is its only
+     test), then delete =BuckNet=, =BuckNetMintCompatibility.t.sol=, =BuckNet.t.sol= and
+     =NotesBuckNetAccounting.t.sol= (check the notes papers first).
+   - /Signed Buck (=BuckLinear=)/: 20 suites still use it, among them =BuckBasketEquityFixture= (now on
+     the machine's facets but on =BuckLinear=) and its desk suites. Move that fixture to canonical Buck
+     first (it carries the most coverage), then decide per suite: port or delete. The notes stack
+     (=alberta_buck/sim/notes_stack.py=, the executable papers' world) moves last.
+   - /The USD controller and =Deploy.s.sol=/: write the canonical deploy script (Buck, BuckCredit,
+     BuckKControllerDirect, JubileeFund, the machine and its facets, BasketReference, the desk), a
+     forge test that runs it against a fork-free chain, then delete =BuckKController= and the
+     =deploy-*= targets.
+   - /V2 integration/: rewrite its identity cases on canonical Buck and a V3 pool, then delete it with
+     the V2 staging.
+4. /Before the release/: the published list (=scripts/contracts-dist.py=) checked against what the
+   canonical deploy script deploys; =BuckBasketReceipt= and =UniswapV3BindingAdapter= published; the
+   simulation helpers marked or moved out of the package.
