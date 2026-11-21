@@ -5856,10 +5856,21 @@ idle BUCK is the basket's liquidity target.
   =build/logs/suite-default.log=, =suite-seeds.log=, =build/logs/suites.done= when both end). Its
   lifecycle worlds predate the households' fixes and normal draws (and so are the baseline of
   today's model); read with =python -m alberta_buck.sim.runrecord years build/runs/<id> ...=.
-- *Next, in order*: =Buck.flashIssue= (tests first), flash arbitrage in the machine, burning idle
-  BUCK, deposits into the pools, then their comparison; the keepers' =tickAt= and memo keys; the
-  shadow controller's deletion and the stress arms' port; then the demand cast. Also: regenerate
-  the pinned vectors at 12 s; the savings sandbox's step 6.
+- *Also done (380266d6)*: =Buck.flashIssue= and =flashRoom=, flash arbitrage (=arbFlash=), the
+  retirement job burning a Carrying basket's idle BUCK, the keepers' =tickAt=, the =flash= comparison
+  ("As built: steps 1 and 2"). Step 4 (deposits into the pools) needs no change: a deposit's BUCK
+  waits in the wallet and the next pairing spends wallet cash before it issues.
+- *Running on datasim, second*: =comparisons/flash.toml= (four runs, two years) in a worktree of its
+  own, =~/src/alberta-buck-flash= at 380266d6 (=/tmp/flash-setup.sh=: venv, our pyrevm, sim-build,
+  kernels, then =make venv-compare COMPARE=flash COMPARE_JOBS=4=; =build/logs/setup.log=,
+  =compare-flash.log= and its =.done= / =.failed= marker). Report there with =make nix-venv-compare-report
+  COMPARE=flash=, or copy =build/runs/flash.*= here.
+- *Next, in order*: read the flash comparison (and choose the defaults: =arb_flash=, the retirement
+  cap); the per-kind memo keys and the keepers calling =tickAt= in both worlds; the shadow
+  controller's deletion with the old ops (pro-rata) basket family, where it is entangled (its desk
+  =MonetaryDesk=, the controller choice in =__main__= / =deploy=, =kdesign=, =shadow_book=); the stress
+  arms' port; then the demand cast. Also: regenerate the pinned vectors at 12 s; the savings sandbox's
+  step 6.
 
 ** Resume here (superseded: 2026-11-15, night)
 
