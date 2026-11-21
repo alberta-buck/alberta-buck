@@ -390,13 +390,21 @@ contract Buck is IERC20Metadata, IBuckJubilee {
     function issue(uint256 id, uint256 coverage, uint256 spendable, uint256 maxPremium, address expectedPool)
         external nonReentrant returns (uint256 principal, uint256 premium)
     {
+        return _issue(BuckFacilities.Issue(id, coverage, spendable, maxPremium, expectedPool, address(0)));
+    }
+
+    /// @notice Draw already activated credit directly into a verified Carrying pool.
+    /// The pool receives full-value BUCK and the facility owner retains its aged cash.
+    function issueToPool(uint256 id, address pool, uint256 amount) external nonReentrant {
+        if (pool == address(0) || amount == 0) revert BadAmount();
+        _issue(BuckFacilities.Issue(id, 0, amount, 0, address(0), pool));
+    }
+
+    function _issue(BuckFacilities.Issue memory request)
+        private returns (uint256 principal, uint256 premium)
+    {
         _ready();
-        uint256 k = buckK.compute();
-        uint256 factor = buckK.fundingFactor();
-        (principal, premium) = BuckFacilities.issue(_cash, _facilities, _receiptFragments, _deps(),
-            BuckFacilities.Issue(id, coverage, spendable, maxPremium, expectedPool));
-        IBuckFund(jubilee).checkpointIssuance();
-        if (buckK.currentBuckK() != k || buckK.fundingFactor() != factor) revert CreditExceeded();
+        return BuckFacilities.issue(_cash, _facilities, _receiptFragments, _deps(), request);
     }
     /// @notice Borrow `amount` fresh BUCK for the length of one call (owner, 2026-11-20: very large
     ///         arbitrage without permanently increasing supply). The caller, an approved Carrying

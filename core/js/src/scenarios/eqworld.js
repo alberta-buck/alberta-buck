@@ -358,6 +358,12 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   await session.send(basket, "openCredit", [credit.address, MACHINE.creditFace],
                      { tag: "eq:basket.openCredit" });
   await session.send(basket, "setResponse", [MACHINE.response], { tag: "eq:setResponse" });
+  if (opts.refreshBand) await session.send(basket, "setRefreshBand", opts.refreshBand, { tag: "eq:refreshBand" });
+  if (opts.zeroWalletReserve) {
+    const params = [...await session.call(basket, "eq")];
+    params[0] = params[1] = 0;
+    await session.send(basket, "setEquityParams", [params], { tag: "eq:zeroWalletReserve" });
+  }
   await session.send(basket, "setWheel", [wheel.address], { tag: "eq:setWheel" });
   await session.send(wheel, "setSample", [parity.address], { tag: "eq:wheel.setSample" });
   await session.send(wheel, "setController", [kctrl.address], { tag: "eq:wheel.setController" });
@@ -918,6 +924,7 @@ export class WheelKeeper {
    *  and .settled. */
   constructor({ arb = null, complete = false, maxTicks = SETTLE_TICKS } = {}) {
     Object.assign(this, { arb, complete, maxTicks });
+    this.responseCounters = {};
     this.turns = 0;
     this.work = 0n;
     this.settled = true;
@@ -929,6 +936,17 @@ export class WheelKeeper {
     if (this.complete) ({ settled: this.settled } = await world.settleWheel({ tag, maxTicks: this.maxTicks }));
     else await world.turnWheel({ tag });
     const receipts = world.lastWheelReceipts ?? [];
+    for (const receipt of receipts) {
+      const events = parseEventLogs({ abi: world.net.upkeep.abi, logs: receipt.logs, eventName: "Responded" });
+      for (const { address, args } of events) {
+        if (address.toLowerCase() !== world.basket.address.toLowerCase() || Number(args.action) !== 8) continue;
+        const c = this.responseCounters;
+        c.wh_eq_refresh = (c.wh_eq_refresh ?? 0n) + args.buySpent;
+        c.wh_eq_refresh_n = (c.wh_eq_refresh_n ?? 0) + 1;
+        const key = `wh_eq_refresh_${args.buy}_n`;
+        c[key] = (c[key] ?? 0) + 1;
+      }
+    }
     this.turns = receipts.length;
     this.work = receipts.reduce((sum, r) => sum + parseEventLogs(
       { abi: world.wheel.abi, logs: r.logs, eventName: "Ticked" }).reduce((s, e) => s + e.args.work, 0n), 0n);

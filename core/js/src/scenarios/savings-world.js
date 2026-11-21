@@ -235,6 +235,9 @@ export class SavingsWorld {
       frame.eq_lean = await this.targetsBp();
     } catch { /* the weights read before the first pairing */ }
     frame.sv = await this.savings();
+    for (const [key, value] of Object.entries(this.keeper.responseCounters)) {
+      frame[key] = typeof value === "bigint" ? String(value) : value;
+    }
     Object.assign(frame, this.households());
     return frame;
   }

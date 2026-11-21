@@ -51,7 +51,7 @@ library BuckFacilities {
         JubileeClaimBook claims;
         address jubilee;
     }
-    struct Issue { uint256 tokenId; uint256 coverage; uint256 spendable; uint256 maxPremium; address expectedPool; }
+    struct Issue { uint256 tokenId; uint256 coverage; uint256 spendable; uint256 maxPremium; address expectedPool; address destination; }
     struct MintPlan {
         Issue[] issues;
         uint256 coverage;
@@ -105,6 +105,17 @@ library BuckFacilities {
     event CashRetired(address indexed owner, uint256 principal, uint256 ownerNetScaled,
                       uint256 ownerNominalScaled, uint256 fundNetScaled, uint256 fundNominalScaled);
 
+    function issue(BuckCash.Book storage cash, State storage state,
+                   mapping(address => mapping(address => bytes32)) storage fragments,
+                   Dependencies memory d, Issue memory r) public returns (uint256 principal, uint256 premium)
+    {
+        uint256 k = d.controller.compute();
+        uint256 factor = d.controller.fundingFactor();
+        (principal, premium) = _issue(cash, state, fragments, d, r);
+        IBuckFund(d.jubilee).checkpointIssuance();
+        if (d.controller.currentBuckK() != k || d.controller.fundingFactor() != factor) revert CreditExceeded();
+    }
+
     /// @dev Preconditions: the host holds its guard and all immutable bindings
     ///      are complete. Approved Carrying services can issue; revocation
     ///      prevents new issuance without blocking retirement. The premium is
@@ -115,9 +126,9 @@ library BuckFacilities {
     ///      principal, supply and claim age remain unchanged. Increased free
     ///      backing may improve an over-issued line without minting currency.
     ///      Otherwise supply/NFT gain spendable+premium and ages synchronize.
-    function issue(BuckCash.Book storage cash, State storage state,
+    function _issue(BuckCash.Book storage cash, State storage state,
                    mapping(address => mapping(address => bytes32)) storage fragments,
-                   Dependencies memory d, Issue memory r) public returns (uint256 principal, uint256 premium)
+                   Dependencies memory d, Issue memory r) private returns (uint256 principal, uint256 premium)
     {
         bool carrying = _owner(state, d, msg.sender, true);
         if (d.credit.ownerOf(r.tokenId) != msg.sender) revert NotCreditOwner();
@@ -156,15 +167,13 @@ library BuckFacilities {
             d.claims.sync(r.tokenId);
         }
         if (r.spendable != 0) {
-            cash.issue(msg.sender, r.spendable, carrying);
-            emit Transfer(address(0), msg.sender, r.spendable);
-            emit NetValueTransfer(address(0), msg.sender, r.spendable, r.spendable * Q);
+            BuckTransfer.issueSpendable(cash, fragments, d.identity, r.destination, r.spendable, carrying);
         }
         if (premium != 0) {
             state.premium[r.tokenId] += premium;
-            BuckTransfer.premium(cash, fragments, d.identity, msg.sender, pool, premium);
+            BuckTransfer.issueToPool(cash, fragments, d.identity, msg.sender, pool, premium);
         }
-        if (cash.balanceOf(msg.sender) < beforeBalance + r.spendable) revert BadAmount();
+        if (cash.balanceOf(msg.sender) < beforeBalance + (r.destination == address(0) ? r.spendable : 0)) revert BadAmount();
         emit FacilityIssued(msg.sender, r.tokenId, r.coverage, principal, premium, pool);
     }
 
@@ -186,7 +195,7 @@ library BuckFacilities {
         MintPlan memory p = planMint(cash, state, d, amount, ids, k);
         if (beforeBalance < Math.mulDiv(p.premium, factor, K_SCALE)) revert InsufficientMintFunding();
         for (uint256 i; i < p.used; ++i) {
-            (, uint256 paid) = issue(cash, state, fragments, d, p.issues[i]);
+            (, uint256 paid) = _issue(cash, state, fragments, d, p.issues[i]);
             if (paid != p.issues[i].maxPremium || d.controller.currentBuckK() != k) revert CreditExceeded();
             if (d.controller.fundingFactor() != factor) revert InsufficientMintFunding();
         }
@@ -225,7 +234,7 @@ library BuckFacilities {
             address pool = state.facilityPool[id];
             if (pool == address(0)) pool = state.insurerPool[d.credit.insurerOf(id)];
             if (found.premium != 0) _pool(d, pool);
-            p.issues[p.used++] = Issue(id, found.coverage, delivered, found.premium, pool);
+            p.issues[p.used++] = Issue(id, found.coverage, delivered, found.premium, pool, address(0));
             p.coverage += found.coverage;
             p.premium += found.premium;
             p.spendable += delivered;

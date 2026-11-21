@@ -172,6 +172,9 @@ def frame_record(flat: dict, tokens) -> dict:
                        carried_fee=flat.get("eq_carried_fee"), weights=weights,
                        wheel=dict(buy=flat.get("wh_eq_buy"), sell=flat.get("wh_eq_sell"), respond=flat.get("wh_eq_respond"),
                                   buys=flat.get("wh_eq_buy_n"), sells=flat.get("wh_eq_sell_n"),
+                                  refresh=flat.get("wh_eq_refresh"), refreshes=flat.get("wh_eq_refresh_n"),
+                                  refreshes_by_pool=[flat.get(f"wh_eq_refresh_{i}_n", 0) for i in range(len(tokens))]
+                                  if "wh_eq_refresh_n" in flat else None,
                                   responds=flat.get("wh_eq_respond_n"))),
         "jubilee": dict(nominal=jubilee.get("nominal"), cash=jubilee.get("cash"),
                         position_mark=(jubilee.get("position") or {}).get("mark"),

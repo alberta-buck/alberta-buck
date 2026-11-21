@@ -466,7 +466,8 @@ the next.  The pace does not depend on who calls, or how often.
 
 The wheel turns three kinds of step on the basket (=BasketUpkeepFacet=).
 
-- *Daily.*  Once a day: settle the relief against the lien and mark the credit.
+- *Daily.*  Once a day the canonical basket updates its credit mark and clears its daily flow.
+  The fund pays relief when principal is retired.
 - *Sync(i).*  Once a day for each pool: collect the position's fees and mark.
 - *Respond.*  At most once an interval (30 minutes in the lab): observe, then the three things
   below, in order.
@@ -486,6 +487,19 @@ a swap.  A sale takes wallet TOKEN first, then burns liquidity: a position gives
 in equal value, so twice the remainder is burned and its TOKEN sold.  A purchase buys TOKEN with
 half its budget and pairs it with the other half.  The credit is marked after the sales and after
 each purchase.
+
+*Refresh a carried pool.*  On a turn with no purchase, sale or placement, the basket
+checks its TOKEN/BUCK pools.  Below 0.990 net BUCK per nominal BUCK it chooses the most
+discounted eligible position and replaces enough liquidity to move the pool toward 0.995.
+The slice fits both the basket's position and its executable credit.  A displaced spot
+waits for the venue's TWAP band.  Burning and re-minting LP liquidity leaves spot unchanged.
+
+For purchases, placements and refreshes, the basket issues the BUCK owed directly to the
+pool in its V3 callback.  This preserves the age and net value of cash already in the wallet.
+The carried BUCK withdrawn during refresh waits for redemption or scheduled retirement.
+The retirement job can reduce principal with cash above the wallet reserve.  The amount of
+debt left is an outcome of funding the portfolio, while return on deposited equity is the
+measure of its performance.
 
 Two rules act with no view on prices and ask the policy nothing.
 

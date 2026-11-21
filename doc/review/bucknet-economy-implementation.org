@@ -6307,6 +6307,38 @@ supply and lien, K and BVIB.
   8897); the owner publishes packages (pyrevm build, webevm) and owns Cloudflare/tunnel steps; write
   phase-end observations into the org docs before a phase's commit.
 
+** Fresh pool funding and the wallet reserve experiment (2026-11-21)
+
+The owner judges the basket by return on deposited equity from constituent mean reversion
+and executable arbitrage, after carry and fees. A small operating wallet and a funded LP
+book can coexist. The lien measures financing. Its decline to zero in the earlier burn
+arms was a result of surplus retirement and wallet-first purchases.
+
+The original step 2 would have issued into the basket's Carrying account. An ERC-20
+transfer from that account gives the recipient a proportional share of the old carry.
+The canonical basket instead authorizes its V3 payment callbacks to draw the amount
+actually owed directly into the verified pool via =Buck.issueToPool=. It uses the NFT
+owner's existing activated credit, the identity checks and the issuance checkpoint.
+A real-contract test ages the basket's wallet for 200 days and checks that both of its
+balances stay fixed and the pool receives equal gross and net increments. A second test
+ages the pool, then checks the idle response refreshes without moving spot or materially
+changing the LP position. The response reports action 8 and the constituent index.
+
+=comparisons/refresh.toml= crosses three bands with the flow reserve and a zero target
+(both =floorBp= and =flowZx100= zero). The exit rule is the same in all arms. At seed
+41404, three local days in =build/runs/refined-smoke= ended with the following values
+in BUCK, under the pre-leverage limits:
+
+| Wallet reserve | Wallet (net) | Principal | BUCK in positions (LOW) |
+|----------------+--------------+-----------+-------------------------|
+| Flow           |   125534.126 | 6449865.9 |               6346696.5 |
+| Zero           |        0.002 | 6312998.4 |               6363804.7 |
+
+The three simulated days exercise financing and settlement. Carry reaches the refresh
+floor much later. Compare receipt returns and exit execution over the long runs before
+selecting a reserve. When principal is already zero, a reserve of zero cannot retire
+more cash. The treatment of a positive strategic balance remains a portfolio decision.
+
 ** Resume here (superseded: 2026-11-20)
 
 - *Branch*: =feature/household-minimal-ecosystem=; worktree =.claude/worktrees/buck-compound=.

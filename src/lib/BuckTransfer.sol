@@ -40,13 +40,31 @@ library BuckTransfer {
         emit BuckTransferReceipt(from, to, amount, fromHash, toHash);
     }
 
+    /// @dev A facility owner's ordinary draw, or the authenticated pool payment
+    /// funded by that facility. BuckCash excludes the Jubilee from ordinary issuance.
+    function issueSpendable(BuckCash.Book storage cash,
+                            mapping(address => mapping(address => bytes32)) storage fragments,
+                            IdentityRegistry identity, address destination, uint256 amount, bool carrying) public
+    {
+        if (destination == address(0)) {
+            cash.issue(msg.sender, amount, carrying);
+            emit Transfer(address(0), msg.sender, amount);
+            emit NetValueTransfer(address(0), msg.sender, amount, amount * 1e36);
+        } else {
+            if (!identity.isCarrying(destination)) revert NotCarryingPool();
+            issueToPool(cash, fragments, identity, msg.sender, destination, amount);
+        }
+    }
+
+    error NotCarryingPool();
+
     /// @notice Finance a premium directly into its original pool at full net
     ///         value, before dilution into any old Carrying issuer balance.
     /// @dev This is issuance on the owner's facility, not a nominal debit of
     ///      its old fee-bearing cash. The zero-address mint event records the
     ///      actual recipient; the identity receipt authorizes owner/pool and
     ///      FacilityIssued attributes the premium to the owner's NFT.
-    function premium(BuckCash.Book storage cash,
+    function issueToPool(BuckCash.Book storage cash,
                      mapping(address => mapping(address => bytes32)) storage fragments,
                      IdentityRegistry identity, address owner, address pool, uint256 amount) public
     {

@@ -127,6 +127,9 @@ abstract contract BuckBasketStorage {
         1461446703485210103287273052203988822378723970342;
 
     // --- Callback re-entry guards ----------------------------------------- //
+    // A canonical purchase pays its authenticated V3 callbacks from this facility.
+    // Zero selects ordinary wallet transfers for other venue operations.
+    uint256 internal transient _paymentCredit;
     address internal _callbackPool;
     address internal _swapCallbackPool;
 

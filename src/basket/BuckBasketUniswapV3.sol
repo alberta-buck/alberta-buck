@@ -11,6 +11,10 @@ import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {BuckBasketStorage, IUniswapV3MintCallback,
         IUniswapV3SwapCallback} from "./BuckBasketStorage.sol";
 
+interface IPoolIssuer {
+    function issueToPool(uint256 id, address pool, uint256 amount) external;
+}
+
 /// @title BuckBasketUniswapV3 -- the Uniswap V3 venue facet for a BuckBasket.
 ///
 /// @notice The AMM-specific half of the basket.  Deployed once and reached by
@@ -196,6 +200,33 @@ contract BuckBasketUniswapV3 is
         catch { return spot; }
     }
 
+    function refreshQuote(uint256 floorBp, uint256 topBp, uint256 budget)
+        external view returns (uint256 index, uint128 liquidity, uint256 nominal)
+    {
+        uint256 worst = floorBp * 1e14;
+        for (uint256 i; i < constituents.length; ++i) {
+            Constituent storage c = constituents[i];
+            (uint256 gross, uint256 net) = CarryRatio.read(address(buck), c.pool);
+            if (gross == 0) continue;
+            uint256 ratio = Math.mulDiv(net, 1e18, gross);
+            if (ratio >= worst) continue;
+            uint256 twap = _readPoolPrice(c, twapWindow);
+            uint256 spot = _readPoolPrice(c, 0);
+            uint256 delta = spot > twap ? spot - twap : twap - spot;
+            if (twap == 0 || delta * 10000 > twap * defaultMaxDeviationBp) continue;
+            uint128 own = _positionLiquidity(c);
+            (uint160 sqrtP,,,,,,) = IUniswapV3Pool(c.pool).slot0();
+            uint256 held = _buckSideAt(c, own, sqrtP);
+            if (held == 0) continue;
+            // All pool BUCK (including outside LPs and fees) shares the same age.
+            uint256 wanted = Math.mulDiv(gross / 1e36, topBp * 1e14 - ratio, 1e18 - ratio);
+            uint256 amount = Math.min(held, Math.min(budget, wanted));
+            uint128 slice = uint128(Math.mulDiv(own, amount, held));
+            if (slice == 0 || _buckSideAt(c, slice, sqrtP) == 0) continue;
+            (worst, index, liquidity, nominal) = (ratio, i, slice, amount);
+        }
+    }
+
     function positionMint(uint256 i, uint256 tokenAmount, uint256 buckAmount)
         public virtual override onlySelf
         returns (uint128 liquidity, uint256 tokenUsed, uint256 buckUsed)
@@ -253,6 +284,14 @@ contract BuckBasketUniswapV3 is
 
     // --- V3 callbacks (authenticated by pool, not onlySelf) --------------- //
 
+    function _payPool(address token, uint256 amount) private {
+        if (_paymentCredit != 0 && token == address(buck)) {
+            IPoolIssuer(token).issueToPool(_paymentCredit - 1, msg.sender, amount);
+        } else {
+            IERC20(token).transfer(msg.sender, amount);
+        }
+    }
+
     function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes calldata data)
         external override
     {
@@ -260,11 +299,11 @@ contract BuckBasketUniswapV3 is
         address token = abi.decode(data, (address));
         Constituent storage c = constituents[indexOf[token] - 1];
         if (c.buckIsToken0) {
-            if (amount0Owed > 0) IERC20(address(buck)).transfer(msg.sender, amount0Owed);
+            if (amount0Owed > 0) _payPool(address(buck), amount0Owed);
             if (amount1Owed > 0) IERC20(c.token).transfer(msg.sender, amount1Owed);
         } else {
             if (amount0Owed > 0) IERC20(c.token).transfer(msg.sender, amount0Owed);
-            if (amount1Owed > 0) IERC20(address(buck)).transfer(msg.sender, amount1Owed);
+            if (amount1Owed > 0) _payPool(address(buck), amount1Owed);
         }
     }
 
@@ -275,8 +314,8 @@ contract BuckBasketUniswapV3 is
         // Authority comes from the active authenticated swap, not user data.
         // This also supports TOKEN/USDC and BUCK/USDC route legs.
         IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
-        if (amount0Delta > 0) IERC20(pool.token0()).transfer(msg.sender, uint256(amount0Delta));
-        if (amount1Delta > 0) IERC20(pool.token1()).transfer(msg.sender, uint256(amount1Delta));
+        if (amount0Delta > 0) _payPool(pool.token0(), uint256(amount0Delta));
+        if (amount1Delta > 0) _payPool(pool.token1(), uint256(amount1Delta));
     }
 
     function arbSwap(address pool, address input, address output, uint256 amount)

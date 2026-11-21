@@ -203,9 +203,10 @@ Three good things come of this:
 
 - *Your deposit goes to work at once.*  Whatever you bring is paired with BUCKs the basket issues
   for the purpose.  Nothing is sold to make room for it.
-- *You are paid before anything is sold.*  When you leave, the basket pays you in BUCKs from its
-  credit, and sells a little of what it holds afterwards, in its own time.  It keeps half of its
-  limit free for exactly this.
+- *An exit draws on the assets.*  A redemption can use available wallet BUCK.  Otherwise
+  it withdraws the holder's fraction of the positions and sells TOKEN for BUCK, subject to
+  executable prices, the holder's minimum and the facility shortfall check.  A holder can
+  also request payment in kind.
 - *It never borrows to buy more.*  The most it can come to hold is what its depositors put in,
   plus what =K= lets it issue against that.  It does not pledge the same goods twice.
 

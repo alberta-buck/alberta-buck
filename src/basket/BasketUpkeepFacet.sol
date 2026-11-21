@@ -101,7 +101,30 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         for (uint256 j; j < s.m.length; ++j) if (s.m[j].depth != 0 && _tokenValue(s, j) > grain) return true;
         Plan memory p = _plan(s, _book(s));
         for (uint256 j; j < s.m.length; ++j) if (p.sells[j] > 0 || p.buys[j] > 0) return true;
-        return false;
+        (,, uint256 amount) = _refreshQuote(s);
+        return amount != 0;
+    }
+
+    function _refreshQuote(Snap memory s) private view returns (uint256, uint128, uint256) {
+        if (!netAccounting || refreshFloorBp == 0) return (0, 0, 0);
+        return _v().refreshQuote(refreshFloorBp, refreshTopBp, _issuableS(s));
+    }
+
+    function _refresh(Snap memory s) private returns (uint256 used) {
+        (uint256 i, uint128 slice, uint256 quote) = _refreshQuote(s);
+        if (quote == 0) return 0;
+        (uint256 budget, uint256 gap) = _fundCash(quote, true);
+        if (budget < quote) return 0;
+        (uint256 tokens, uint256 bucks) = _v().positionBurn(i, slice);
+        _paymentCredit = creditId + 1;
+        (uint128 restored, uint256 paired, uint256 issued) = _v().positionMint(i, tokens, PM.min(bucks, budget));
+        _paymentCredit = 0;
+        require(restored != 0, "refresh dust");
+        liquidityOf[i] = liquidityOf[i] - slice + restored;
+        idleToken[i] += tokens - paired;
+        _finishBuy(gap);
+        emit Responded(8, NONE, i, 0, issued);
+        return issued;
     }
 
     function wheelStep(uint8 kind, uint256 i) external returns (uint256) {
@@ -398,8 +421,11 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         uint256 traded = _execute(s, p, b.grain);
         if (traded > 0) _record(beforeTicks);
         if (moved + traded == 0) {
-            if (!stale) return 0;
-            emit Responded(0, NONE, NONE, 0, 0);
+            moved = _refresh(s);
+            if (moved == 0) {
+                if (!stale) return 0;
+                emit Responded(0, NONE, NONE, 0, 0);
+            }
         }
         lastResponseAt = uint64(block.timestamp);
         emit WheelWork(2, 0, moved + traded);
@@ -432,16 +458,18 @@ contract BasketUpkeepFacet is BasketCreditSetup {
 
     function _buy(uint256 i, uint256 budget, bool pairOnly) internal returns (uint256 used) {
         uint256 openingShortfall;
-        (budget, openingShortfall) = _fundCash(budget);
+        (budget, openingShortfall) = _fundCash(budget, true);
         if (budget == 0) return 0;
+        if (netAccounting) _paymentCredit = creditId + 1;
         uint256 half = pairOnly ? 0 : budget / 2;
         uint256 spent;
         if (half > 0) {
             uint256 got;
-            (spent, got) = _marketLeg(i, true, half);
+            (spent, got) = _v().monetaryLeg(i, true, half);
             idleToken[i] += got;
         }
-        (uint128 l, uint256 tokens, uint256 bucks) = _mintPosition(i, idleToken[i], budget - half);
+        (uint128 l, uint256 tokens, uint256 bucks) = _v().positionMint(i, idleToken[i], budget - half);
+        _paymentCredit = 0;
         liquidityOf[i] += l;
         idleToken[i] -= tokens;
         used = spent + bucks;

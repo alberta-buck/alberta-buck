@@ -72,6 +72,10 @@ interface IBuckBasketVenue {
 
     function marks(uint256 i, uint128 liquidity) external view returns (Marks memory);
 
+    /// @notice Most discounted eligible position and the slice replaceable within the issue budget.
+    function refreshQuote(uint256 floorBp, uint256 topBp, uint256 budget)
+        external view returns (uint256 index, uint128 liquidity, uint256 nominal);
+
     /// @notice Add the most full-range liquidity `tokenAmount` and `buckAmount`
     ///         (held by the basket) balance at the spot; report what was used.
     function positionMint(uint256 i, uint256 tokenAmount, uint256 buckAmount)

@@ -38,11 +38,11 @@ contract CompoundBasketHarness is BuckBasketEquity {
     }
 
     function fundForAccounting(uint256 desired) external onlyGov returns (uint256 funded) {
-        (funded,) = _fundCash(desired);
+        (funded,) = _fundCash(desired, false);
     }
 
     function buyFromCashForAccounting(uint256 i, uint256 desired) external onlyGov {
-        (uint256 budget, uint256 gap) = _fundCash(desired);
+        (uint256 budget, uint256 gap) = _fundCash(desired, false);
         (, uint256 tokens) = _venue().monetaryLeg(i, true, budget);
         idleToken[i] += tokens;
         _finishBuy(gap);

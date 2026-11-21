@@ -340,6 +340,54 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         assertEq(basket.lien(), principal); // Marked claims are not automatic paydown.
     }
 
+    function test_poolPaymentsPreserveAgedWalletAndDeliverFullNet() public {
+        _pools();
+        identity.setIsCarrying(address(basket), true);
+        vm.startPrank(GOV);
+        buck.setApprovedCarryingIssuer(address(basket), true);
+        vm.stopPrank();
+        vm.prank(ALICE);
+        buck.transfer(address(basket), 50e6);
+        vm.warp(vm.getBlockTimestamp() + 200 days);
+        _open(1e12);
+        _machine();
+        (uint256 gross, uint256 net) = buck.accountBalancesScaled(address(basket));
+        assertGt(gross, net);
+        (uint256 poolGross, uint256 poolNet) = buck.accountBalancesScaled(pools[0]);
+        IBasketUpkeep(address(basket)).wheelStep(2, 0);
+        (uint256 afterGross, uint256 afterNet) = buck.accountBalancesScaled(pools[0]);
+        assertGt(afterGross, poolGross);
+        assertEq(afterGross - poolGross, afterNet - poolNet);
+        (afterGross, afterNet) = buck.accountBalancesScaled(address(basket));
+        assertEq(afterGross, gross);
+        assertEq(afterNet, net);
+    }
+
+    function test_idleResponseRefreshesPoolWithoutMovingSpot() public {
+        _pools();
+        _open(1e12);
+        _machine();
+        IBasketUpkeep upkeep = IBasketUpkeep(address(basket));
+        upkeep.wheelStep(2, 0);
+        vm.warp(vm.getBlockTimestamp() + 220 days);
+        IBuckBasketVenue venue = IBuckBasketVenue(address(basket));
+        (uint256 index, uint128 slice,) = venue.refreshQuote(9900, 9950, type(uint256).max);
+        assertGt(slice, 0);
+        address pool = pools[index];
+        uint128 liquidity = basket.liquidityOf(index);
+        (uint160 spot,,,,,,) = IV3Init(pool).slot0();
+        (uint256 gross, uint256 net) = buck.accountBalancesScaled(pool);
+        uint256 lien = basket.lien();
+        upkeep.wheelStep(2, 0);
+        (uint160 afterSpot,,,,,,) = IV3Init(pool).slot0();
+        (uint256 afterGross, uint256 afterNet) = buck.accountBalancesScaled(pool);
+        assertEq(afterSpot, spot);
+        assertApproxEqRel(basket.liquidityOf(index), liquidity, 1e12);
+        assertGt(basket.lien(), lien);
+        assertGt(buck.balanceOf(address(basket)), 0);
+        assertGt(Math.mulDiv(afterNet, 1e18, afterGross), Math.mulDiv(net, 1e18, gross));
+    }
+
     function test_faceCapStopsFurtherDrawsWithoutActivatingOrMintingExtraRoom() public {
         _pools();
         _open(600e6);

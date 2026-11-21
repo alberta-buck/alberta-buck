@@ -177,6 +177,8 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///         issuance, repayment and low-K exit solvency remain explicit.
     ///         Legacy fixtures retain the earlier signed-account branch.
     bool public netAccounting;
+    uint16 internal refreshFloorBp;
+    uint16 internal refreshTopBp;
 
     /// @notice The basket's share of a receipt's gain over its cost basis.
     uint256 public constant LAMBDA_BP = 2500;
@@ -372,7 +374,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///      of that draw, including when existing cash funds the purchase.
     ///      The returned actual coverage shortfall is checked after execution.
     ///      Failure of backing/mint/trade/postcheck reverts together.
-    function _fundCash(uint256 desired) internal returns (uint256 funded, uint256 shortfall) {
+    function _fundCash(uint256 desired, bool fresh) internal returns (uint256 funded, uint256 shortfall) {
         if (!netAccounting) return (Math.min(desired, _bk().balanceOf(address(this))), 0);
         controller.compute();
         Snap memory s = _snap();
@@ -380,21 +382,21 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         _markS(s);
         s.spend = spend;
         shortfall = _shortfallS(s);
-        funded = Math.min(desired, _liquidityS(s));
+        funded = Math.min(desired, fresh ? _issuableS(s) : _liquidityS(s));
         if (funded != 0 && address(credit) != address(0)) {
             (uint256 face, uint256 active, uint32 rate) = credit.creditInfo(creditId);
             if (rate != 0) revert NonzeroBasketPremium();
             uint256 coverage = face - active;
-            uint256 draw = funded > s.spend ? funded - s.spend : 0;
+            uint256 draw = !fresh && funded > s.spend ? funded - s.spend : 0;
             (uint256 principal, uint256 age) = credit.issuanceOf(creditId);
             // A matured lien needs release; existing cash does not renew it.
             if (draw == 0 && principal != 0 && age == principal * (50 * (365 days + 6 hours))) coverage = 0;
             if (draw != 0 || coverage != 0) {
                 IBuckNetAccount(address(buck)).issue(creditId, coverage, draw, 0, address(0));
             }
-            if (draw != 0) creditLive = true;
+            if (fresh || draw != 0) creditLive = true;
         }
-        funded = Math.min(funded, _cashAvailable());
+        if (!fresh) funded = Math.min(funded, _cashAvailable());
     }
 
     /// @dev Policy solvency using fresh bare collateral and the independently

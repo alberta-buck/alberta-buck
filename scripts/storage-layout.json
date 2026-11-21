@@ -293,6 +293,20 @@
    "offset": 29,
    "type": "bool",
    "bytes": 1
+  },
+  {
+   "label": "refreshFloorBp",
+   "slot": 32,
+   "offset": 30,
+   "type": "uint16",
+   "bytes": 2
+  },
+  {
+   "label": "refreshTopBp",
+   "slot": 33,
+   "offset": 0,
+   "type": "uint16",
+   "bytes": 2
   }
  ],
  "BasketDesk": [

@@ -1,0 +1,16 @@
+question = "How does pool refresh affect carry, the spread, wallet cash and the basket lien?"
+experiment = "economy"
+days = 730
+
+[[axis]]
+name = "band"
+[axis.values]
+off = { "machine.refresh_floor_bp" = 0, "machine.refresh_top_bp" = 0 }
+base = { "machine.refresh_floor_bp" = 9900, "machine.refresh_top_bp" = 9950 }
+tight = { "machine.refresh_floor_bp" = 9950, "machine.refresh_top_bp" = 9970 }
+
+[[axis]]
+name = "reserve"
+[axis.values]
+flow = { "machine.zero_wallet_reserve" = false }
+zero = { "machine.zero_wallet_reserve" = true }

@@ -56,6 +56,9 @@ DEFAULTS = {
     # line for the cycle's length (Buck.flashIssue; BasketMachineWheel.setArbFlash), not from its wallet.
     # On by default since 2026-11-21 (owner: the basket should not be BUCK-constrained in arbitrage).
     "arb_flash": True,
+    "refresh_floor_bp": 9900,
+    "refresh_top_bp": 9950,
+    "zero_wallet_reserve": False,
 }
 ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_AGE", "dt_max": "SIM_MACHINE_DT_MAX",
                "leash_bp": "SIM_MACHINE_LEASH_BP", "tilt": "SIM_MACHINE_TILT", "lean_cap_bp": "SIM_MACHINE_LEAN_CAP_BP",
@@ -66,7 +69,7 @@ ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_A
                "desk_gain_bp": "SIM_OPS_GAIN_BP", "desk_cap_bp": "SIM_OPS_CAP_BP", "desk_persist_days": "SIM_OPS_PERSIST"}
 # Responded's action: what a response did, and which of its two amounts measures it. A sale's is the
 # TOKEN sold and a purchase's the TOKEN bought, in BUCK; a placement's is the BUCKs paired.
-ACTIONS = {1: ("sell", "proceeds"), 2: ("buy", "buySpent"), 4: ("place", "buySpent")}
+ACTIONS = {1: ("sell", "proceeds"), 2: ("buy", "buySpent"), 4: ("place", "buySpent"), 8: ("refresh", "buySpent")}
 
 
 def settings(given=None) -> dict:
@@ -248,6 +251,10 @@ def book_receipt(d, receipt, ctr) -> None:
         ctr[key] = ctr.get(key, 0) + 1
         if action in ACTIONS:
             name, amount = ACTIONS[action]
+            if action == 8:
+                pool = int(event["args"]["buy"])
+                key = f"wh_eq_refresh_{pool}_n"
+                ctr[key] = ctr.get(key, 0) + 1
             ctr[f"wh_eq_{name}"] = ctr.get(f"wh_eq_{name}", 0) + int(event["args"][amount])
             ctr[f"wh_eq_{name}_n"] = ctr.get(f"wh_eq_{name}_n", 0) + 1
 
@@ -322,6 +329,12 @@ def activate(d, given=None, turn_seconds=0) -> None:
         chain.send(basket.functions.openCredit(d.credit.address, 10**23), sender=gov)
     chain.send(basket.functions.setResponse((int(s["leash_bp"]), interval, round(s["tilt"] * 10000),
                                              int(s["lean_cap_bp"]))), sender=gov)
+    if (s["refresh_floor_bp"], s["refresh_top_bp"]) != (9900, 9950):
+        chain.send(basket.functions.setRefreshBand(s["refresh_floor_bp"], s["refresh_top_bp"]), sender=gov)
+    if s["zero_wallet_reserve"]:
+        params = list(basket.functions.eq().call())
+        params[:2] = [0, 0]  # floorBp and flowZx100 together determine the reserve
+        chain.send(basket.functions.setEquityParams(tuple(params)), sender=gov)
     chain.send(wheel.functions.setController(d.kctrl.address), sender=gov)
     d.venue, d.signals, d.pair_signals, d.pair_policy = venue, signals, observer, policy
     d.equity_upkeep = response

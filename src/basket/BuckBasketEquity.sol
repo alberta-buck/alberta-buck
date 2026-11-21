@@ -139,6 +139,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         eq = EquityParams({floorBp: 100, flowZx100: 200, bandBp: 5000, parkBp: 30000,
                            flowDays: 30, stepBp: 500, weightBandBp: 200, grainPpm: 100,
                            exitFeeBp: 0, swapCapBp: 100, ceilBp: 2000});
+        refreshFloorBp = 9900;
+        refreshTopBp = 9950;
         response = ResponseParams({leashBp: 3000, interval: 1800, tiltBp: 0, leanCapBp: 0});
         receipt = new BuckBasketReceipt(address(this));
     }
@@ -172,6 +174,12 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
 
     /// @dev A target never leans as far as the leash, so the safeguard that
     ///      keeps a constituent inside its leash cannot fight the lean.
+    function setRefreshBand(uint16 floorBp, uint16 topBp) external onlyGov {
+        require(floorBp <= topBp && topBp <= 10000, "refresh band");
+        refreshFloorBp = floorBp;
+        refreshTopBp = topBp;
+    }
+
     function setResponse(ResponseParams calldata p) external onlyGov {
         require(p.leashBp > 0 && p.leashBp <= 10000 && p.interval > 0
                 && p.tiltBp <= 10000 && p.leanCapBp < p.leashBp, "response params");
