@@ -24,7 +24,7 @@ contract BuckCompoundFundedArbTest is BuckCompoundArbFixture {
         // Existing equity, not credit issued for the arb. Every trade leaves
         // the basket's liquidity target untouched and never uses wheel funds.
         vm.prank(ALICE); buck.transfer(address(basket), 100_000e6);
-        vm.prank(GOV); wheel.setArb(ub, address(basket), 0, 100, 0);
+        vm.prank(GOV); wheel.setArb(ub, address(basket), 100, 0);
     }
 
     function _plan() private view returns (IBasketArb.ArbPlan memory) {

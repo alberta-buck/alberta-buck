@@ -88,7 +88,7 @@ def _equity_triangles(d) -> None:
         raise ValueError("funded wheel arb requires the approved Carrying basket")
     # A cycle is at most this share of its first pool's reserve: 5%, the machine wheel's limit (owner,
     # 2026-11-20: very large arbitrage; with arbFlash the credit line's room bounds it too).
-    d.chain.send(d.wheel.functions.setArb(d.pool_ub, d.basket.address, 0,
+    d.chain.send(d.wheel.functions.setArb(d.pool_ub, d.basket.address,
         int(os.environ.get("SIM_WHEEL_ARB_CAP_BP", "500")),
         int(os.environ.get("SIM_WHEEL_ARB_MIN_EDGE_BP", "0"))), sender=d.gov)
     for k, t in enumerate(d.tokens):

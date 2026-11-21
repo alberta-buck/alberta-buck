@@ -36,16 +36,13 @@ wh_* counters (work_wheel.WorkWheel.counters) and the caller's
 wh_call_* (calls, idle, pay, gas_usd, net).
 
 `impl` "solidity" (CONVERGENCE step 3) replaces the Python wheel with the
-contract: the agent deploys src/wheel/BasketWheel.sol beside the basket,
-binds it (public, Carrying -- a contract working for the basket, like the
-pools), lets the basket accept its credits (=setWheel=, on the venue facet
-through the shell's fallback), configures one triangle per constituent,
-and becomes a pure CALLER: its proxy sends =tick(max_work, max_scan)=, and
-the frame books the contract's own events (=Ticked=, =Cycled=) and the
-receipts' real gas.  Knobs: start "token" | "buck" (where the profit lands:
-the depositors, or the reserve then the treasury), share_bp 1000, cap_bp
-200, min_edge_bp 1, kappa_bp 200, reserve_cap_buck 100 (a gas budget), kinds ["arb"]
-(+ "compute", "director", "sweep", "ops").  Its frame fields are wh_sol_*.
+contract: the basket machine's wheel (BasketMachineWheel), deployed with the
+basket.  The agent sets its reserve and arbitrage (cap_bp 200, min_edge_bp 1,
+kappa_bp 200, reserve_cap_buck 100: a gas budget), re-sets one triangle per
+constituent, and becomes a pure CALLER: its proxy turns the wheel to
+completion, and the frame books the wheel's events (=Ticked=) and the
+receipts' real gas.  Its frame fields are wh_sol_*.  (The older wheel this
+agent deployed, its caller share and its start modes are retired, 2026-11-20.)
 """
 from __future__ import annotations
 
@@ -201,10 +198,8 @@ class BasketWheelAgent(_ProxyAgent):
         self.max_ticks = int(sp("max_ticks", SETTLE_TICKS))  # canonical: a settle's cap
         ms = sp("max_scan", None)
         self.max_scan = 0 if ms is None else int(ms)
-        # Historical start/caller-share comparisons belong to the older
-        # flash wheel. The machine's net ROI already belongs to its basket.
-        self.start = "buck" if self.canonical else str(sp("start", "token"))
-        self.share_bp = 0 if self.canonical else int(sp("share_bp", 1000))
+        # The machine's net ROI belongs to its basket: no caller share, no start mode (the older
+        # flash wheel's comparisons went with it).
         gov = d.gov
         # The basket machine's wheel is deployed with the basket (it places the deposits); this
         # agent adds its kinds and calls it. (The older wheel this agent deployed for the
@@ -215,10 +210,8 @@ class BasketWheelAgent(_ProxyAgent):
             int(sp("kappa_bp", 200)), int(float(sp("reserve_cap_buck", 100)) * E6)),
             sender=gov)
         d.chain.send(wheel.functions.setArb(
-            d.pool_ub, d.basket.address, self.share_bp, int(sp("cap_bp", 200)),
+            d.pool_ub, d.basket.address, int(sp("cap_bp", 200)),
             int(sp("min_edge_bp", 1))), sender=gov)
-        if not self.canonical:
-            d.chain.send(wheel.functions.setStartMode(1 if self.start == "buck" else 0), sender=gov)
         k = 0
         for i, tok in enumerate(d.tokens if wheel_arb_enabled(d) else []):
             idx = int(d.basket.functions.indexOf(tok.address).call()) - 1
@@ -260,59 +253,25 @@ class BasketWheelAgent(_ProxyAgent):
             return 0.0
         return (r_usd / E6) / (r_tok / 10 ** d.dec[i])
 
-    def _quote_pay_usd(self, d) -> float:
-        """The caller's simulation: the share of what the due triangles would
-        capture now (the contract's own plan), in USD."""
-        pay = 0.0
-        n = int((self.sol.functions.arbRouteCount() if self.canonical
-                 else self.sol.functions.triangleCount()).call())
-        buck = self.start == "buck"
-        for k in range(n):
-            x, _dir, profit = self.sol.functions.plan(k).call()
-            if x == 0:
-                continue
-            tok = d.buck.address if buck else self.sol.functions.triangles(k).call()[0]
-            dec = 6 if buck else d.dec[self._tok_index[tok]]
-            pay += profit / 10 ** dec * self._usd_per_unit(d, tok) * self.share_bp / 1e4
-        return pay
-
     def _act_solidity(self, d, scenario, day, tick, ctr) -> None:
         c = self.sol_ctr
-        # An equity basket's components must run whatever the arbitrage pays:
-        # they are the basket's placing, and the reserve pays for the upkeep.
-        upkeep = False
-        if self.canonical:
-            upkeep = True  # ROI work is independent of a caller-profit simulation.
-        elif getattr(self, "equity", False):
-            # pending() checks due slots directly; a simulated rearm would
-            # not persist and does not affect this view.
-            upkeep = bool(self.sol.functions.pending().call()[0])
-        if self.call_mode == "profitable" and not upkeep:
-            pay = self._quote_pay_usd(d)
-            if pay < self.profile.usd(self.profile.tx_base + 700_000):
-                c["wh_sol_skipped"] += 1
-                ctr.update({k: (round(v, 2) if isinstance(v, float) else v)
-                            for k, v in c.items()})
-                return
+        # The machine's work runs whatever a caller would earn: the basket's components are its
+        # placing, and its ROI work is the basket's (no caller-profit simulation gates it).
         receipts, publications = [], []
         try:
-            if self.canonical:
-                # To completion: tick while the wheel's pending() view reads work (no gas to ask).
-                from alberta_buck.sim.basket_machine import book_settle, settle_receipts
-                settled = False
-                try:
-                    _, _, settled = settle_receipts(d, max_ticks=self.max_ticks, proxy=self.proxy,
-                        dispatch=lambda name, args: self._proxy_exec(d, self.sol.address, self.sol.encode_abi(name, args=args)),
-                        receipts=receipts, publications=publications)
-                finally:
-                    book_settle(d, receipts, settled, ctr)
-            else:
-                receipts.append(self._proxy_exec(d, self.sol.address, self.sol.encode_abi(
-                    "tick", args=[self.max_work, self.max_scan])))
+            # To completion: tick while the wheel's pending() view reads work (no gas to ask).
+            from alberta_buck.sim.basket_machine import book_settle, settle_receipts
+            settled = False
+            try:
+                _, _, settled = settle_receipts(d, max_ticks=self.max_ticks, proxy=self.proxy,
+                    dispatch=lambda name, args: self._proxy_exec(d, self.sol.address, self.sol.encode_abi(name, args=args)),
+                    receipts=receipts, publications=publications)
+            finally:
+                book_settle(d, receipts, settled, ctr)
         except Exception as e:
             ctr["wh_sol_err"] = repr(e)[:200]
         for rcpt in receipts:
-            self._record_solidity_receipt(d, rcpt, ctr, refresh=not self.canonical)
+            self._record_solidity_receipt(d, rcpt, ctr, refresh=False)
         for publication in publications:
             gas = int(publication.get("gasUsed", 0) or 0)
             c["wh_sol_gas"] += gas
@@ -335,19 +294,8 @@ class BasketWheelAgent(_ProxyAgent):
         for ev in self.sol.events.Ticked().process_receipt(rcpt, errors=DISCARD):
             c["wh_sol_work"] += int(ev["args"]["work"])
             c["wh_sol_reserve_pay_usd"] += int(ev["args"]["reservePay"]) / E6 * buck_usd
-        buck = self.start == "buck"
-        for ev in self.sol.events.Cycled().process_receipt(rcpt, errors=DISCARD):
-            a = ev["args"]
-            tok = d.buck.address if buck else self.sol.functions.triangles(int(a["k"])).call()[0]
-            dec = 6 if buck else d.dec[self._tok_index[tok]]
-            px = self._usd_per_unit(d, tok) / 10 ** dec
-            c["wh_sol_cycles"] += 1
-            c["wh_sol_profit_usd"] += int(a["profit"]) * px
-            c["wh_sol_share_usd"] += int(a["callerShare"]) * px
-            c["wh_sol_credited_usd"] += int(a["credited"]) * px
-            self.note(d, "cycle", k=int(a["k"]), dir=int(a["dir"]),
-                      x=int(a["amountIn"]), profit_usd=round(int(a["profit"]) * px, 2),
-                      credited_usd=round(int(a["credited"]) * px, 2), gas=gas)
+        # (The machine's cycles are its basket's, booked from the basket's own events by
+        # book_receipt; wh_sol_cycles and the share counters stay 0.)
         if self.equity:
             for ev in d.basket.events.WheelWork().process_receipt(rcpt, errors=DISCARD):
                 key = self.EQ_KINDS.get(int(ev["args"]["kind"]))

@@ -22,7 +22,7 @@ contract BuckCompoundFlashArbTest is BuckCompoundArbFixture {
         super.setUp();
         machine = new BasketMachineWheel(address(buck), address(usdc), GOV, 0, 0);
         _configureArb(machine);
-        vm.prank(GOV); wheel.setArb(ub, address(basket), 0, 100, 0);
+        vm.prank(GOV); wheel.setArb(ub, address(basket), 100, 0);
         // An empty wallet: today's wallet-funded cycle has nothing to spend.
         uint256 cash = buck.balanceOf(address(basket));
         if (cash != 0) { vm.prank(address(basket)); buck.transfer(ALICE, cash); }

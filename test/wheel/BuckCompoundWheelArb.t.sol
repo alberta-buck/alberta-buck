@@ -66,7 +66,7 @@ abstract contract BuckCompoundArbFixture is JubileeEquityFixture {
         vm.startPrank(GOV);
         (bool ok,) = address(basket).call(abi.encodeWithSignature("setWheel(address)", address(wheel)));
         require(ok);
-        wheel.setArb(ub, address(basket), 0, 100, 1);
+        wheel.setArb(ub, address(basket), 100, 1);
         wheel.setTriangle(0, ArbKind.Triangle(address(asset), own, market, 0));
         vm.stopPrank();
     }

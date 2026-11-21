@@ -321,13 +321,7 @@ def activate(d, given=None, turn_seconds=0) -> None:
         chain.send(basket.functions.openCredit(d.credit.address, 10**23), sender=gov)
     chain.send(basket.functions.setResponse((int(s["leash_bp"]), interval, round(s["tilt"] * 10000),
                                              int(s["lean_cap_bp"]))), sender=gov)
-    if getattr(d, "net_stack", None) is None:
-        chain.send(wheel.functions.setResponseMode(True), sender=gov)
     chain.send(wheel.functions.setController(d.kctrl.address), sender=gov)
-    # These were comparison advisors; the replacement has one price service.
-    zero = "0x" + "0" * 40
-    if getattr(d, "net_stack", None) is None:
-        chain.send(wheel.functions.setDirector(zero), sender=gov)
     d.venue, d.signals, d.pair_signals, d.pair_policy = venue, signals, observer, policy
     d.equity_upkeep = response
     source = signals

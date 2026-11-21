@@ -457,7 +457,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   }
   if (opts.wheelArb !== false) {
     // A cycle is at most 5% of its first pool's reserve, the machine wheel's limit (owner, 2026-11-20).
-    await session.send(wheel, "setArb", [poolUB.address, basket.address, 0,
+    await session.send(wheel, "setArb", [poolUB.address, basket.address,
       opts.arbCapBp ?? 500, opts.arbMinEdgeBp ?? 0], { tag: "eq:arb.configure" });
     // Flash arbitrage (owner, 2026-11-20): each cycle's BUCK leg borrowed fresh from the basket's line.
     if (opts.arbFlash) await session.send(wheel, "setArbFlash", [true], { tag: "eq:arb.flash" });

@@ -103,16 +103,12 @@ contract BasketMachineWheel is WorkWheel, CompletionMemo, SampleKind, JubileeKin
 
     error InvalidArbConfiguration();
 
-    /// @notice The canonical wheel delegates ROI work to its Carrying basket.
-    /// The older wheel retains the isolated flash comparison implementation.
-    function setArb(address pool, address basket, uint16 share, uint16 cap, uint16 edge)
-        public override onlyGov
-    {
-        if (share != 0 || cap > 500 || edge > 10000) revert InvalidArbConfiguration();
-        super.setArb(pool, basket, share, cap, edge);
+    /// @notice The canonical wheel delegates ROI work to its Carrying basket: a cycle is at most
+    ///         5% of its first pool's reserve.
+    function setArb(address pool, address basket, uint16 cap, uint16 edge) public override onlyGov {
+        if (cap > 500 || edge > 10000) revert InvalidArbConfiguration();
+        super.setArb(pool, basket, cap, edge);
     }
-
-    function setStartMode(uint8) public override onlyGov { revert InvalidArbConfiguration(); }
 
     /// @notice The basket borrows each cycle's BUCK fresh from its credit line for the cycle's length
     ///         (Buck.flashIssue; owner, 2026-11-20) instead of spending its wallet: cycles as large as
@@ -159,11 +155,8 @@ contract BasketMachineWheel is WorkWheel, CompletionMemo, SampleKind, JubileeKin
         return uint256(result.totalReturn);
     }
 
-    // Proceeds and LP fees already belong to the basket. No caller bounty
-    // is required and the reward reserve never supplies arb inventory.
-    function _distribute(uint256, uint8, uint256, uint256) internal pure override {}
-
-    function uniswapV3SwapCallback(int256, int256, bytes calldata) external pure override { revert BadCallback(); }
+    // Proceeds and LP fees already belong to the basket: no caller bounty, and the reward reserve
+    // never supplies arb inventory.
 
     /// @notice N triangles plus each unordered cross-TOKEN four-pool cycle.
     function arbRouteCount() external view returns (uint256) {
