@@ -8,12 +8,11 @@ adapters and Groth16 verifiers, the equity basket (`BuckBasketEquity` and its
 venue facets), the monetary desk beside it (`BasketDesk`), and the simulation
 helpers.
 
-The basket's upkeep ships twice. The basket machine is the one to build on:
-`BasketUpkeepFacet`, the policy it asks (`PairRebalancePolicy` over
-`PairSignals`), the parity reference (`BasketReference`), the desk's policy
-(`OuterBandDeskPolicy`) and their wheel (`BasketMachineWheel`). The earlier
-upkeep (`BuckBasketEquityWheel`, `EquityTurnDirector`, `BasketWheel`) is kept
-beside it so the two can be compared, and will be removed.
+The basket's upkeep is the basket machine: `BasketUpkeepFacet`, the policy it
+asks (`PairRebalancePolicy` over `PairSignals`), the parity reference
+(`BasketReference`), the desk's policy (`OuterBandDeskPolicy`) and their wheel
+(`BasketMachineWheel`). The earlier upkeep (`BuckBasketEquityWheel`,
+`EquityTurnDirector`, `BasketWheel`) is no longer shipped.
 
 **Unaudited prototype software for a monetary system.** These contracts have
 never been audited. They are published so the research and simulations can be

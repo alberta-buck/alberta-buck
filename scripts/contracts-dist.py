@@ -94,11 +94,8 @@ CONTRACTS = [
     "BasketReference",         # the parity reference: the basket's cost in BUCK
     "OuterBandDeskPolicy",     # the desk's policy, beyond the band
     "BasketMachineWheel",      # the work wheel a keeper turns
-    # The earlier upkeep of the same basket, kept beside the machine so the two
-    # can be compared: Deploy, Fund and Trim components, a turn director, its wheel.
-    "BuckBasketEquityWheel",   # the components facet
-    "EquityTurnDirector",      # the turn director
-    "BasketWheel",             # its work wheel
+    # (The earlier upkeep -- BuckBasketEquityWheel, EquityTurnDirector, BasketWheel -- is
+    # retired, the owner's word of 2026-11-20: doc/review/consolidation-plan.org.)
     "SimLP",                   # simulation liquidity helper
     "MockERC20",               # test/sim token
     # The Notes pool and the adapters that give it its verifiers.
