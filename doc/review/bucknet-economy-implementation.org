@@ -5966,7 +5966,7 @@ contract's documented behaviour.
 6. /The release path/: R6; the defaults (1); the new suite; regenerate the pinned 12 s vectors; the
    savings sandbox's step 6; then the contracts release and the --no-ff merge to master.
 
-** Keeping the pools at a target discount: refresh (DRAFT, under discussion, 2026-11-21)
+** Keeping the pools at a target discount: refresh (decided 2026-11-21)
 
 The owner's framing (2026-11-21): the basket nets to about zero (its pools' BUCK carries its fee
 while the lien that issued it accrues relief), but the TOKEN/BUCK pools grow hollow, so the market
@@ -6002,12 +6002,10 @@ putting it back with fresh BUCK, ideally as part of rebalancing.
 *** The refresh, refined
 
 - /An LP change, not a trade/: decrease the basket's liquidity in pool i by a slice (=positionBurn=,
-  TOKEN t and hollow BUCK b out, no price moved, no swap fee), retire b against the lien
-  (=retireCredit=, self-callable: relief paid, the slice's claim-seconds removed), issue fresh BUCK
-  and mint the slice back (=_fundCash= then =positionMint=). One transaction, in that order: the
-  wallet's hollow BUCK must be retired before the re-mint, or =_fundCash= spends it straight back
-  into the pool (it spends wallet cash before issuing). No flash is needed: retiring frees the room
-  the re-issue uses, and the position's size and price are unchanged.
+  TOKEN t and carried BUCK b out, no price moved, no swap fee), issue fresh BUCK and mint the slice
+  back (=positionMint=); b waits in the wallet for the burn job (decision 2), which retires it
+  against the lien with its relief. No flash is needed: the position's size and price are unchanged
+  and the re-issue fits the room the position's BUCK half already counts.
 - /The arithmetic/: cycling a fraction f of a pool's BUCK raises its net/gross r by f x (1 - r):
   from 0.989 to 0.990 is about 9% of the pool's BUCK. Holding a target r* against the 2% decay, with
   the market's own turnover (about 0.58 of the pools' BUCK a year in the flash runs, inferred from
@@ -6016,9 +6014,9 @@ putting it back with fresh BUCK, ideally as part of rebalancing.
   about the carry neutralized, 2% of the pool BUCK a year (0.3 to 0.5M in these worlds) whatever the
   target; the target only sets how often.
 - /Folded into rebalancing/: the response already burns a position when it sells a constituent and
-  mints when it buys or pairs. It should (a) take a sale's BUCK side from the most-carried pool's
-  slice and retire it before buying, and (b) when a pool is under its band with no trade due,
-  refresh it alone. Both under the same response pacing and venue band.
+  mints when it buys or pairs; with the fresh-issue rule its buys and pairings already put fresh
+  BUCK in. When a pool is under its band with no trade due, the response refreshes it alone, under
+  the same pacing and venue band.
 - /Hysteresis/: refresh a pool when it falls under the band's floor, back to its top (say 0.990 to
   0.995), so a refresh is a few large slices, not a trickle.
 
@@ -6035,9 +6033,8 @@ putting it back with fresh BUCK, ideally as part of rebalancing.
 3. /Relief equals carry only on average/: relief is the basket's pro-rata share of the fund, by
    claim-seconds, against everyone's claims; if the lien is younger than the pool BUCK (retirement
    and re-issue reset ages at different rates), a refresh can cost the basket a little.
-4. /Bytes/: the upkeep facet has 302 bytes, the shell 392. The refresh belongs in =BasketMarketOps=
-   (1,427 bytes) or the venue facet once R6 frees it; a wheel slot of its own if it cannot ride in
-   the response.
+4. /Bytes/: after R6 the upkeep facet has 737 bytes, the shell 963 and the machine's venue 7,865:
+   the refresh's slice logic belongs in the venue facet, the response only deciding when.
 5. /The dollar pool is not the basket's/: BUCK/USDC is SimLP's and hollows as fast; no basket job
    reaches it. An outside-LP agent that refreshes on its own carry (as real LPs would) is the
    honest model.
@@ -6046,22 +6043,72 @@ putting it back with fresh BUCK, ideally as part of rebalancing.
    kept). Before leaning on the credit line for arbitrage, audit the cycles' realized against
    planned net return (=minEdgeBp= is 0, and the other two legs pay SimLP's pool fees).
 
-*** Open questions for the owner
+*** The owner's decisions (2026-11-21)
 
-1. The target: an absolute band (0.990 to 0.995), or tied to each pool's fee (the discount kept under
-   the 0.30% tier: 0.997), at about three times the refresh volume?
-2. When the fund cannot pay the relief (cash low, =ReliefLiquidityLimit=, or a pool off its TWAP):
-   skip the refresh and retry (recommended), or re-mint with fresh BUCK anyway and leave the hollow
-   BUCK for the burn job?
-3. Inside the response (no new slot; needs bytes) or a refresh slot of its own after it?
-4. The dollar pool: an outside-LP refresh agent, or should the basket supply part of the BUCK/USDC
-   liquidity too?
-5. Flash arbitrage: off until the cycle audit (recommended), or on?
+1. /A band/: refresh a pool when its net/gross falls under 0.990, back to 0.995.
+2. /The simplest step/: a refresh drops the withdrawn, fee-carrying BUCK into the basket's wallet for
+   the burn job (the Jubilee wheel's retirement, on by default) and re-mints with BUCK issued fresh;
+   each wheel tick does its one job minimally. No retirement inside the refresh, and so no relief
+   budget or price band on its path.
+3. /R6 first/: clean up the V3 venue's pro-rata accounting, which also frees the bytes.
+4. /The BUCK/USDC pool/: uncontrolled for now. Later a desk per set of FIAT/BUCK pools (USDC/BUCK,
+   USDT/BUCK, ...) does their arbitrage and freshening, detaches them on disruption and runs the
+   multi-quadrant monetary operations (to be designed).
+5. /Flash arbitrage on/: the basket should not be BUCK-constrained when it sees an opportunity. And
+   later, an optimization: the basket's credit limit should reflect its leveraged portfolio's whole
+   value, not only K x its deposited equity.
+
+*** The rule the decisions need: BUCK into a pool is issued fresh
+
+Today =_fundCash= spends the wallet's BUCK before it issues any. With decision 2 the wallet holds the
+refresh's carried BUCK until the burn job retires it, so the next pairing, buy or refresh re-mint
+would put that carried BUCK straight back into a pool. So: every BUCK the basket puts into a pool
+(pairing a deposit, buying a constituent, re-minting a refresh, an arbitrage leg, which flash
+already makes fresh) is issued fresh; the wallet's BUCK goes only to exits and to the burn job.
+Consequences, accepted: the lien and supply carry the wallet's BUCK until the burn job retires it
+(at the band, about 77k BUCK a day in the economy world; the burn job retires up to a million a
+job); a BUCK deposit's BUCK waits in the wallet and is retired, the pairing issued fresh (supply as
+before, the order reversed); the burn job's throughput and the fund's relief budget bound how much
+carried BUCK can wait (measured).
+
+*** The build, in order
+
+1. /Defaults/: burning on (=deploy.basket_retirement_cap_m = 1.0=) and flash arbitrage on
+   (=machine.arb_flash=, =arbFlash=) in the deploy defaults, =economy.toml=, =economy-lifecycle.toml=
+   and the JS world; the =flash= comparison kept for the record.
+2. /The fresh-issue rule/: =_fundCash(desired, fresh)=; with =fresh= the whole amount is drawn on
+   the line whatever the wallet holds. Pairing, buying and the refresh's re-mint pass it; exits do
+   not (they pay from the wallet). Tests: a pairing with carried BUCK in the wallet issues fresh and
+   leaves the wallet as it was; the solvency postcondition (=_finishBuy=) still holds.
+3. /The refresh primitive/ (the machine's venue, =onlySelf=): =refresh(i, liquidity)= burns that
+   much of the basket's position in pool i (=positionBurn=; TOKEN and carried BUCK to the wallet),
+   draws fresh BUCK for the BUCK side and mints the same liquidity back (=positionMint=); no price
+   moved. Tests: the pool's net/gross rises by f x (1 - r) for the fraction f of the pool's BUCK
+   replaced; the position's liquidity and the price are unchanged; the carried BUCK waits in the
+   wallet; the burn job then retires it with its relief.
+4. /The response decides when/ (the upkeep facet): when no sale or buy is due and some pool's
+   net/gross is under the band's floor, refresh the most carried one back to the band's top: replace
+   f = (top - r) / ((1 - r) x s) of the basket's position, s the basket's share of the pool's
+   liquidity, at most the whole position; one pool a response; the band in =ResponseParams= or a
+   setter of its own (governance). Tests: under the floor it refreshes, inside the band it does not,
+   a displaced pool (venue band) waits.
+5. /The worlds/: Python and JS read the refreshes (an event, counted per pool) beside each pool's
+   net/gross in the frames.
+6. /The comparison/ (above): refresh off, 0.990-0.995, 0.995-0.997; two years, burn and flash on.
+
+*** Notes on decision 5 (for later)
+
+- Credit is not what bounds a cycle today: =capBp= (5% of the first pool's reserve) is. Flash makes
+  the wallet irrelevant; the cycle audit (realized against planned net return, risk 6) still stands.
+- The limit is =K x (equity - relief) + heldBUCK= now, so the lien net of the positions' BUCK is
+  bounded by K x equity. Counting the whole leveraged portfolio at K (=K x (equity + lien)=) would let
+  leverage compound to =lien <= K x equity / (1 - K)= (3x equity at K = 0.75): the spiral the KMAX
+  cap exists for. Any such optimization needs that bound stated first.
 
 *** Measuring it
 
-A comparison like =comparisons/flash.toml= (=economy=, two years, burn on): refresh off, band
-0.990-0.995, band 0.995-0.997. Read the pools' net/gross and the book's spread, the arbitrageurs'
+A comparison like =comparisons/flash.toml= (=economy=, two years, burn and flash on): refresh off,
+band 0.990-0.995, band 0.995-0.997. Read the pools' net/gross and the book's spread, the arbitrageurs'
 share of the volume, the basket's share price, the fund's cash and receipt sales, relief paid,
 supply and lien, K and BVIB.
 
@@ -6078,8 +6125,8 @@ supply and lien, K and BVIB.
   (above): burn on, flash neutral, hollowness untouched.
 - *Running on datasim*: the seeded suite in =~/src/alberta-buck-net= (4d7497aa), the lifecycle worlds
   near their end and econ-F at about day 1,027 (some 13 hours more); read with =runrecord years=.
-- *Next, in order*: (1) burn on by default, flash off; (2) the owner's word on R6, then R6; (3) the
-  pool refresh ("Keeping the pools at a target discount", a draft with open questions) and its
+- *Next, in order*: (1) burn and flash on by default (owner); (2) R6, done (the venue's pro-rata accounting gone; the venue has 7.9 KB, the shell 963 bytes); (3) the
+  pool refresh ("Keeping the pools at a target discount", decided) with the fresh-issue rule, and its
   comparison; (4) a new five-year suite at the new
   head (two seeds) on datasim; (5) the stress arms' port (task 30, then delete the catalogue);
   (6) the demand cast; (7) the release path (recommendation 6).

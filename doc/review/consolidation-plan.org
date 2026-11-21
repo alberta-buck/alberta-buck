@@ -276,6 +276,27 @@ What the move showed, for the owner:
   which the desk still uses). Pruning them shrinks the venue and the shared storage further, under
   the same check.
 
+** R6 as done: the V3 venue's pro-rata accounting (owner: "clean up R6", 2026-11-21)
+
+- /The venue/ (=BuckBasketUniswapV3=, and =IBuckBasketVenue=): =poolBuckValues=, its own
+  =creditDepositors= and =creditTreasury= (the equity shell has its own), =provideForToken= (the
+  hooked Buck's =mintFromBasket=), =withdrawLiquidity=, =investFromBucks=, =convertIntoBucks= and
+  =poolLive= went, with the helpers only they used (the spot/TWAP guard and =peekTwap=, the
+  underweight pick, the first-position seed check, the exact-out TOKEN quote). =setupPool= is internal
+  (=registerToken= its only caller). No contract, Python, JS or sandbox code called any of them.
+- /The shared storage/: =totalOutstandingBuck=, =treasuryBuckPending=, the stress fee's three
+  parameters and =stressBonusPrincipal=, their events (treasury accrued, withdrawn, reinvested;
+  stress fee; wheel credit) and three unused constants. The layout check named exactly those six
+  fields; re-pinned (the shell 42 variables, the desk 32).
+- /Bytes freed/: the shell 392 to 963 left, the upkeep facet 302 to 737, the desk 3,025 to 3,545,
+  the V3 venue 9,235, the machine's venue 7,865: room for the pool refresh.
+- /Python/: the work wheel's director and treasury-sweep tasks (the pro-rata basket's) went.
+- /Left, noted/: =minSeedLiquidity= is now read by nothing but still set by the constructor (its
+  argument is in every deployment and test); =MonetaryDesk='s non-net branches still call the hooked
+  Buck's =mintFromBasket= / =burnFromBasket= (dead on canonical Buck); the =Constituent= struct keeps
+  =treasuryLiquidity= (the Jubilee fund's view and the suites destructure all eleven fields). Each is
+  a later, separate cleanup.
+
 * Where the consolidation stands (2026-11-21)
 
 - /Wave 1/: done (=RegressVerifier= and the Tevm baselines gone; the three tiers =test-all=,
@@ -289,21 +310,13 @@ What the move showed, for the owner:
   vectors and plots, the legacy invariant tests that read them (=test_rebalancing_sim_invariants=,
   =sim-compare-rebalancing-eq=), the matrix/sweep/star/eqmetrics modules, and the five suites in
   =alberta_buck/test/legacy/= (not collected by default).
-- /EIP-170 margins now/: the upkeep facet 302 bytes, the basket's shell 392, Buck 646, BuckCredit
-  about 60, =BasketMarketOps= 1,427, the machine wheel about 4,480: any change to the first four
-  needs bytes found first.
+- /EIP-170 margins now/ (after R6): the upkeep facet 737 bytes, the basket's shell 963, Buck 646,
+  BuckCredit about 60, =BasketMarketOps= 1,427, the machine wheel about 4,480, the machine's venue
+  7,865: Buck and BuckCredit still need bytes found before any change.
 
 * Order of work (from 2026-11-21), with the recommended approach for each
 
-1. /R6: the V3 venue's pro-rata accounting/ (proposed above; the owner's word first). Approach: list
-   the venue's entry points no contract calls (=provideForToken=, =withdrawLiquidity=,
-   =investFromBucks=, =convertIntoBucks=, =setupPool=), confirm with a grep of Python, JS and the
-   sandbox that nothing external calls them either, delete them with their suites' cases, then the
-   fields only they and =creditDepositors= / =creditTreasury= touched (=stressBonusPrincipal=, the
-   stress-fee parameters, =treasuryBuckPending=; =totalOutstandingBuck= only once =poolBuckValues= no
-   longer needs it for the desk). Run =make storage-layout-check= (it must fail, naming exactly those
-   fields), =storage-layout-update=, the full forge suite, and the Python and JS world tests; rebuild
-   the JS bundle first. The shell's bytes freed are the margin the release needs.
+1. /R6/: done (above).
 2. /Wave 2, once the stress arms are ported/ (task 30): port the catalogue's excursion and attack
    arms as =economy= interventions (one comparison spec, like =comparisons/shocks.toml=), then delete
    the catalogue, the matrix, the sweep, star and =eqmetrics= (after =pusher_agent= and =bookloader=

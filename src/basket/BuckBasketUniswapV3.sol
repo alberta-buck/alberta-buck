@@ -14,7 +14,7 @@ import {BuckBasketStorage, IUniswapV3MintCallback,
 /// @title BuckBasketUniswapV3 -- the Uniswap V3 venue facet for a BuckBasket.
 ///
 /// @notice The AMM-specific half of the basket.  Deployed once and reached by
-///         the shell (`BuckBasketProRata`) via `delegatecall`, so every method
+///         the shell (`BuckBasketEquity`, and the desk) via `delegatecall`, so every method
 ///         runs in the shell's storage context (`address(this)` is the basket,
 ///         all custody stays at the shell).  Implements the venue seam
 ///         (`IBuckBasketVenue`) plus the V3 mint/swap callbacks; the heavy V3
@@ -84,7 +84,7 @@ contract BuckBasketUniswapV3 is
         uint256 basketAmount = UniswapV3OracleLib.mulDiv(
             UniswapV3OracleLib.mulDiv(newW, 1e18, 10000), 1e18, initialPriceInBuck);
         (address p, int24 lo, int24 hi, bool b0) =
-            setupPool(token, decimals, initialPriceInBuck, feeTier);
+            _setupPool(token, decimals, initialPriceInBuck, feeTier);
         pool = p;
         constituents.push(Constituent({
             token: token, decimals: decimals, basketAmount: basketAmount,
@@ -97,8 +97,8 @@ contract BuckBasketUniswapV3 is
         emit BasketTokenAdded(token, newW, initialPriceInBuck, p);
     }
 
-    function setupPool(address token, uint8 decimals, uint256 initialPriceInBuck, uint24 feeTier)
-        public override onlySelf
+    function _setupPool(address token, uint8 decimals, uint256 initialPriceInBuck, uint24 feeTier)
+        internal
         returns (address pool, int24 tickLower, int24 tickUpper, bool buckIsToken0)
     {
         pool = _findOrCreatePool(token, feeTier);
@@ -124,190 +124,15 @@ contract BuckBasketUniswapV3 is
         return total;
     }
 
-    function poolBuckValues()
-        external view override
-        returns (uint256[] memory bv, uint128[] memory depL, uint256 B, uint256[] memory prices)
-    {
-        uint256 N = constituents.length;
-        bv     = new uint256[](N);
-        depL   = new uint128[](N);
-        prices = new uint256[](N);
-        for (uint256 i = 0; i < N; i++) {
-            Constituent storage c = constituents[i];
-            uint128 totalL = _positionLiquidity(c);
-            if (totalL <= c.treasuryLiquidity) continue;
-            uint256 spot = _readPoolPrice(c, 0);
-            _enforceSlippageGuard(c, spot, defaultMaxDeviationBp);
-            prices[i] = spot;
-            depL[i] = totalL - c.treasuryLiquidity;
-            uint256 poolBuck = IERC20(address(buck)).balanceOf(c.pool);
-            bv[i] = uint256(depL[i]) * poolBuck / totalL;
-            B += bv[i];
-        }
-        if (!(B > 0)) revert NoValue();
-    }
-
-    // --- Liquidity in/out ------------------------------------------------- //
-
-    // --- The work wheel's credits -------------------------------------------- //
+    // --- The work wheel ------------------------------------------------------ //
     //
-    // Policy, hosted here rather than in the shell for the shells' size
-    // budget: reached through the
-    // shell's fallback like every venue entry point, msg.sender preserved by
-    // the delegatecall.  A Diamond would give them a facet of their own.
+    // Hosted here rather than in the shell for the shell's size budget: reached through the shell's
+    // fallback like every venue entry point, msg.sender preserved by the delegatecall.
 
     function setWheel(address w) external {
         if (!(msg.sender == governance)) revert NotGovernance();
         wheel = w;
         emit WheelSet(w);
-    }
-
-    /// @notice The wheel credits TOKEN it captured to the DEPOSITORS: re-LP'd
-    ///         into pool `i` as depositor liquidity with minted partner BUCK --
-    ///         the stress fee's mechanics, booked in `stressBonusPrincipal` --
-    ///         so every outstanding receipt's claim grows pro rata and the
-    ///         basket still burns exactly what it minted.
-    function creditDepositors(uint256 i, uint256 tokenAmount)
-        external returns (uint128 liquidity, uint256 partnerBuck)
-    {
-        if (!(msg.sender == wheel && msg.sender != address(0))) revert NotWheel();
-        if (!(totalOutstandingBuck > stressBonusPrincipal)) revert NoDepositors();
-        IERC20(constituents[i].token).transferFrom(msg.sender, address(this), tokenAmount);
-        (liquidity, partnerBuck) =
-            IBuckBasketVenue(address(this)).provideForToken(i, tokenAmount, 0);
-        stressBonusPrincipal += partnerBuck;
-        totalOutstandingBuck += partnerBuck;
-        emit WheelCredit(i, tokenAmount, partnerBuck);
-    }
-
-    /// @notice The wheel credits BUCK it captured to the treasury (re-LP'd by
-    ///         sweepTreasury, like every other treasury accrual).
-    function creditTreasury(uint256 buckAmount) external {
-        if (!(msg.sender == wheel && msg.sender != address(0))) revert NotWheel();
-        IERC20(address(buck)).transferFrom(msg.sender, address(this), buckAmount);
-        treasuryBuckPending += buckAmount;
-        emit TreasuryAccrued(buckAmount, treasuryBuckPending);
-    }
-
-    function provideForToken(uint256 i, uint256 tokenAmount, uint256 maxDeviationBp)
-        external override onlySelf returns (uint128 liquidity, uint256 buckMinted)
-    {
-        Constituent storage c = constituents[i];
-        _enforceSlippageGuard(c, _readPoolPrice(c, 0), maxDeviationBp);
-
-        // Bind liquidity to the exact TOKEN held and compute the floor partner
-        // BUCK for that L at the current sqrtP.  This is the receipt's principal;
-        // a full redemption recovers it modulo a couple wei of V3 burn rounding.
-        (uint160 sqrtP,,,,,,) = IUniswapV3Pool(c.pool).slot0();
-        uint160 sqrtLow  = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickLower);
-        uint160 sqrtHigh = UniswapV3OracleLib.getSqrtRatioAtTick(c.tickUpper);
-        if (c.buckIsToken0) {
-            liquidity  = UniswapV3OracleLib.getLiquidityForAmount1(sqrtLow, sqrtP, tokenAmount);
-            buckMinted = UniswapV3OracleLib.getAmount0ForLiquidity(sqrtP, sqrtHigh, liquidity);
-        } else {
-            liquidity  = UniswapV3OracleLib.getLiquidityForAmount0(sqrtP, sqrtHigh, tokenAmount);
-            buckMinted = UniswapV3OracleLib.getAmount1ForLiquidity(sqrtLow, sqrtP, liquidity);
-        }
-        if (!(liquidity > 0)) revert L0();
-        if (!(buckMinted > 0)) revert Buck0();
-        if (_isFirstPositionInPool(c)) {
-            if (!(liquidity >= minSeedLiquidity)) revert SeedTooSmall();
-        }
-
-        // Mint principal + 1 wei: V3 mint rounds owed BUCK up past the floor
-        // estimate by at most 1 wei, so this guarantees the callback is covered.
-        // Any unconsumed wei stays idle in the basket (bounded buffer).
-        buck.mintFromBasket(address(this), buckMinted + 1);
-        _callbackPool = c.pool;
-        IUniswapV3Pool(c.pool).mint(
-            address(this), c.tickLower, c.tickUpper, liquidity, abi.encode(c.token));
-        _callbackPool = address(0);
-    }
-
-    function withdrawLiquidity(uint256 i, uint128 liquidity)
-        external override onlySelf returns (uint256 tokenOut, uint256 buckOut)
-    {
-        Constituent storage c = constituents[i];
-        IUniswapV3Pool(c.pool).burn(c.tickLower, c.tickUpper, liquidity);
-        (uint128 a0, uint128 a1) = IUniswapV3Pool(c.pool).collect(
-            address(this), c.tickLower, c.tickUpper, type(uint128).max, type(uint128).max);
-        if (c.buckIsToken0) { buckOut = a0; tokenOut = a1; }
-        else                { tokenOut = a0; buckOut = a1; }
-    }
-
-    // --- Conversion verbs ------------------------------------------------- //
-
-    /// @notice Deploy BUCK into the most-underweight (or hinted) pool: swap ~half
-    ///         for the pool's TOKEN, LP both sides, return what was done.  The
-    ///         shell tags ownership (treasury slice / receipt) and adjusts the
-    ///         BUCK ledger; only the BUCK actually consumed is reported.
-    function investFromBucks(uint256 buckAmount, uint256 poolHint)
-        external override onlySelf
-        returns (uint256 poolIdx, uint128 liquidity, uint256 buckConsumed)
-    {
-        poolIdx = poolHint == type(uint256).max ? _mostUnderweightPool() : poolHint;
-        Constituent storage c = constituents[poolIdx];
-
-        (uint256 buckSpent, uint256 tok) = _swapBuckForTokenExactIn(c, buckAmount / 2);
-        uint256 buckForLp = buckAmount - buckSpent;            // remainder pairs with TOKEN
-
-        liquidity = _liquidityForAmounts(c, tok, buckForLp);
-        if (!(liquidity > 0)) revert ReinvestL0();
-
-        _callbackPool = c.pool;
-        (uint256 a0, uint256 a1) = IUniswapV3Pool(c.pool).mint(
-            address(this), c.tickLower, c.tickUpper, liquidity, abi.encode(c.token));
-        _callbackPool = address(0);
-
-        buckConsumed = buckSpent + (c.buckIsToken0 ? a0 : a1);   // swap + LP BUCK side
-    }
-
-    /// @notice Raise `targetBuck` BUCK by greedily swapping the held TOKEN
-    ///         (most-TOKEN pool first) into BUCK on the internal pools.  Returns
-    ///         the gained BUCK, the value lost to slippage+fee, and the remaining
-    ///         inventory (the depositor's reduced TOKEN payout).
-    /// @dev    FX multi-hop routing via the registry is a follow-up; internal
-    ///         TOKEN/BUCK pools only for now.
-    function convertIntoBucks(uint256[] calldata tokenInventory, uint256 targetBuck)
-        external override onlySelf
-        returns (uint256 gained, uint256 lossValue, uint256[] memory inv)
-    {
-        inv = tokenInventory;                  // calldata -> memory copy (mutated below)
-        uint256 N = constituents.length;
-        uint256 remaining = targetBuck;
-        // A near-exact per-pool estimate clears a pool in one pass; the cap allows
-        // a couple of correction passes and multi-pool spread.
-        uint256 maxPasses = N * 2 + 4;
-        for (uint256 pass = 0; pass < maxPasses && remaining > 0; pass++) {
-            // Pool with the most held TOKEN that still has in-range liquidity to
-            // swap against.  A pool just fully drained (single-depositor full
-            // redeem) has liquidity()==0 and is skipped; its TOKEN flows to the
-            // depositor unconverted.
-            uint256 bestIdx = type(uint256).max;
-            uint256 bestTok = 0;
-            for (uint256 i = 0; i < N; i++) {
-                if (inv[i] > bestTok
-                    && IUniswapV3Pool(constituents[i].pool).liquidity() > 0) {
-                    bestIdx = i; bestTok = inv[i];
-                }
-            }
-            if (bestIdx == type(uint256).max) break;
-
-            Constituent storage c = constituents[bestIdx];
-            uint256 priceBefore = _readPoolPrice(c, 0);   // spot, for loss accounting
-            uint256 tokenIn = _tokenInForBuckOut(c, remaining);
-            if (tokenIn == 0 || tokenIn > inv[bestIdx]) {
-                tokenIn = inv[bestIdx];   // sell all available here
-            }
-            (uint256 spent, uint256 received) = _swapTokenForBuckExactIn(c, tokenIn);
-            inv[bestIdx] -= spent;
-            gained += received;
-            uint256 spentValue = UniswapV3OracleLib.mulDiv(
-                spent, priceBefore, 10 ** c.decimals);
-            if (spentValue > received) lossValue += spentValue - received;
-            remaining = received >= remaining ? 0 : remaining - received;
-            if (received == 0) break;   // no progress; avoid spinning
-        }
     }
 
     // --- Equity primitives (BuckBasketEquity) ------------------------------ //
@@ -362,10 +187,6 @@ contract BuckBasketUniswapV3 is
         uint256 vSpot = 2 * _buckSideAt(c, liquidity, sSpot);
         m.posTwap = 2 * _buckSideAt(c, liquidity, sTwap);
         (m.posHigh, m.posLow) = vSpot > m.posTwap ? (vSpot, m.posTwap) : (m.posTwap, vSpot);
-    }
-
-    function poolLive(uint256 i) external view override returns (bool) {
-        return IUniswapV3Pool(constituents[i].pool).liquidity() > 0;
     }
 
     /// @dev Legacy deployments permit cold-pool marks. The validated venue
@@ -479,20 +300,6 @@ contract BuckBasketUniswapV3 is
 
     // --- Swap helpers ----------------------------------------------------- //
 
-    /// @notice TOKEN-in to extract `buckOut` BUCK from `c.pool`, via the CPMM
-    ///         exact-output formula on the pool's actual reserves (full-range V3
-    ///         ⇒ pool balances are the virtual reserves), inflated by the fee.
-    ///         Returns `type(uint256).max` when the pool can't cover `buckOut`.
-    function _tokenInForBuckOut(Constituent storage c, uint256 buckOut)
-        internal view returns (uint256 tokenIn)
-    {
-        uint256 tokRes  = IERC20(c.token).balanceOf(c.pool);
-        uint256 buckRes = IERC20(address(buck)).balanceOf(c.pool);
-        if (buckRes <= buckOut || tokRes == 0) return type(uint256).max;
-        uint256 ideal = UniswapV3OracleLib.mulDiv(tokRes, buckOut, buckRes - buckOut);
-        tokenIn = UniswapV3OracleLib.mulDiv(ideal, 1e6, 1e6 - c.feeTier) + 1;
-    }
-
     /// @inheritdoc IBuckBasketVenue
     ///
     /// @dev The per-leg size bound lives in the shell, but note WHY one is
@@ -552,35 +359,6 @@ contract BuckBasketUniswapV3 is
 
     // --- Pool math / reads ------------------------------------------------ //
 
-    /// @notice Index of the pool most underweight against the basket's
-    ///         *fixed-quantity* target, whose value share scales by
-    ///         initialPrice/spot (hold less BUCK value of a token as it
-    ///         appreciates).  Relative target share s = basketAmount *
-    ///         initialPrice² / spot; rank pools by actual-value / s (lowest =
-    ///         most underweight; empty pools, ratio 0, sort first).
-    function _mostUnderweightPool() internal view returns (uint256 idx) {
-        int256 best = type(int256).max;
-        for (uint256 i = 0; i < constituents.length; i++) {
-            Constituent storage c = constituents[i];
-            uint256 v = _poolLpValue(c);
-            uint256 p = _readPoolPrice(c, 0);
-            uint256 base = UniswapV3OracleLib.mulDiv(c.basketAmount, c.initialPriceInBuck, 1e18);
-            uint256 s = p > 0 ? UniswapV3OracleLib.mulDiv(base, c.initialPriceInBuck, p) : 0;
-            int256 ratio = s > 0 ? int256(UniswapV3OracleLib.mulDiv(v, 1e18, s)) : type(int256).max;
-            if (ratio < best) { best = ratio; idx = i; }
-        }
-    }
-
-    /// @notice BUCK value of a pool's reserves (full-range ⇒ balances are the
-    ///         virtual reserves).  0 if unseeded.
-    function _poolLpValue(Constituent storage c) internal view returns (uint256 valueBuck) {
-        uint256 tokBal = IERC20(c.token).balanceOf(c.pool);
-        if (tokBal == 0) return 0;
-        uint256 spotPrice = _readPoolPrice(c, 0);
-        uint256 buckBal = IERC20(address(buck)).balanceOf(c.pool);
-        valueBuck = UniswapV3OracleLib.mulDiv(tokBal, spotPrice, 10 ** c.decimals) + buckBal;
-    }
-
     /// @notice V3 liquidity for (tokenAmount, buckAmount) at the current price --
     ///         min of the two sides (leftover stays in the basket).
     function _liquidityForAmounts(Constituent storage c, uint256 tokenAmount, uint256 buckAmount)
@@ -608,10 +386,6 @@ contract BuckBasketUniswapV3 is
         );
     }
 
-    function _isFirstPositionInPool(Constituent storage c) internal view returns (bool) {
-        return _positionLiquidity(c) == 0;
-    }
-
     function _readPoolPrice(Constituent storage c, uint32 secondsAgo)
         internal view virtual returns (uint256 priceInBuck)
     {
@@ -634,33 +408,6 @@ contract BuckBasketUniswapV3 is
     ///      shell fallback when `this` resolves to the basket under delegatecall.
     function consultTickExternal(address pool, uint32 secondsAgo) external view returns (int24) {
         return UniswapV3OracleLib.consult(pool, secondsAgo);
-    }
-
-    function _enforceSlippageGuard(Constituent storage c, uint256 spotPrice, uint256 maxDeviationBp)
-        internal view
-    {
-        if (maxDeviationBp == 0) return;
-        try this.peekTwap(c.pool, twapWindow) returns (uint256 twapPrice) {
-            if (twapPrice == 0) return;
-            uint256 dev = spotPrice > twapPrice ? spotPrice - twapPrice : twapPrice - spotPrice;
-            if (!(dev * 10000 <= twapPrice * maxDeviationBp)) revert Slippage();
-        } catch {
-            return;
-        }
-    }
-
-    function peekTwap(address pool, uint32 secondsAgo) external view returns (uint256) {
-        int24 tick = UniswapV3OracleLib.consult(pool, secondsAgo);
-        Constituent storage c = constituents[indexOf[_poolToToken(pool)] - 1];
-        return UniswapV3OracleLib.getQuoteAtTick(
-            tick, uint128(10 ** c.decimals), c.token, address(buck));
-    }
-
-    function _poolToToken(address pool) internal view returns (address) {
-        for (uint256 i = 0; i < constituents.length; i++) {
-            if (constituents[i].pool == pool) return constituents[i].token;
-        }
-        revert NotInBasket();
     }
 
     // --- Snapped full-range bounds + initial price (moved from BasketMath) - //

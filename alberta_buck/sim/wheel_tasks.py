@@ -4,10 +4,8 @@ alberta_buck/sim/work_wheel.py).
 ConsistencyArbTask   one slot per constituent: the triangle TOKEN/BUCK (the
                      basket's own pool), TOKEN/USDC and BUCK/USDC, gone round
                      from BUCK to BUCK when it pays.  Captures value.
-DirectorPokeTask     the director's epoch signal refresh (poke(1)), today
-                     done by the shell and DirectorKeeperAgent.  Upkeep.
-TreasurySweepTask    re-LP the treasury's pending BUCK (sweepTreasury), which
-                     no sim agent calls today.  Upkeep.
+(The director's poke and the treasury sweep went with the pro-rata basket,
+2026-11-20.)
 
 THE CYCLE, and why it can be sized in closed form.  A constant-product
 swap of x is out(x) = g R_out x / (R_in + g x), a Mobius map with
@@ -203,54 +201,4 @@ class ConsistencyArbTask(WheelTask):
                                "recycled": round(recycled, 2)})
 
 
-# -- upkeep the wheel subsumes ---------------------------------------------------------- #
-
-class DirectorPokeTask(WheelTask):
-    """The director's per-constituent signal refresh, one poke per slot run.
-    Permissionless; the shell already pokes it with a budget of 1 on every
-    activation.  Captures nothing: paid from the reserve."""
-    kind = "director"
-    gas = 60_000
-
-    def slots(self, d) -> int:
-        return 1 if getattr(d, "director", None) is not None else 0
-
-    def due(self, d, i: int, clk) -> bool:
-        try:
-            return int(d.director.functions.pending().call()) > 0
-        except Exception:
-            return False
-
-    def run(self, d, i: int, clk) -> TaskResult | None:
-        d.chain.send(d.director.functions.poke(1))
-        return TaskResult(work=1, gas=self.gas)
-
-
-class TreasurySweepTask(WheelTask):
-    """Re-LP the treasury's pending BUCK once it passes the shell's minimum
-    (BuckBasketProRata.sweepTreasury).  Permissionless; captures nothing."""
-    kind = "sweep"
-    gas = 250_000
-
-    def slots(self, d) -> int:
-        try:
-            d.basket.functions.treasuryBuckPending().call()
-            return 1
-        except Exception:
-            return 0
-
-    def due(self, d, i: int, clk) -> bool:
-        try:
-            pend = int(d.basket.functions.treasuryBuckPending().call())
-            floor = int(d.basket.functions.MIN_REINVEST_BUCK().call())
-        except Exception:
-            return False
-        return pend >= floor
-
-    def run(self, d, i: int, clk) -> TaskResult | None:
-        d.chain.send(d.basket.functions.sweepTreasury())
-        return TaskResult(work=1, gas=self.gas)
-
-
-TASKS = {"arb": ConsistencyArbTask, "director": DirectorPokeTask,
-         "sweep": TreasurySweepTask}
+TASKS = {"arb": ConsistencyArbTask}

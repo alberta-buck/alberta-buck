@@ -35,53 +35,13 @@ interface IBuckBasketVenue {
     function registerToken(address token, uint8 decimals, uint256 initialPriceInBuck,
                            uint256 weightBp, uint24 feeTier) external returns (address pool);
 
-    // --- Pool setup ------------------------------------------------------- //
-
-    /// @notice Create/init the (BUCK, token) pool and return the venue-specific
-    ///         constituent fields the shell records.
-    function setupPool(address token, uint8 decimals, uint256 initialPriceInBuck, uint24 feeTier)
-        external returns (address pool, int24 tickLower, int24 tickUpper, bool buckIsToken0);
-
     // --- Value reads (loops live in the facet, not the shell) ------------- //
 
     /// @notice Controller process variable: Σ basketAmount·price (BUCK, 18-dec).
     function basketValueInBuck() external view returns (int256);
 
-    /// @notice Per-pool *depositor* BUCK reserve (full-range ⇒ pool value =
-    ///         2·buckReserve, the value sufficient statistic), the depositor
-    ///         liquidity slice, their total `B`, and each pool's spot price (BUCK
-    ///         per whole TOKEN) -- the shell needs spot to scale the basket's
-    ///         fixed-quantity target weights by initialPrice/spot.  Carries the
-    ///         spot/TWAP manipulation guard on every touched pool.
-    function poolBuckValues()
-        external view
-        returns (uint256[] memory bv, uint128[] memory depL, uint256 B, uint256[] memory prices);
+    // --- Market legs -------------------------------------------------------- //
 
-    // --- Liquidity in/out ------------------------------------------------- //
-
-    /// @notice LP an exact TOKEN amount (already held by the basket) full-range,
-    ///         minting the partner BUCK.  Returns the minted liquidity and the
-    ///         BUCK principal (the receipt's share unit).
-    function provideForToken(uint256 i, uint256 tokenAmount, uint256 maxDeviationBp)
-        external returns (uint128 liquidity, uint256 buckMinted);
-
-    /// @notice Burn `liquidity` from pool `i` and collect both sides to the basket.
-    function withdrawLiquidity(uint256 i, uint128 liquidity)
-        external returns (uint256 tokenOut, uint256 buckOut);
-
-    // --- The two generic conversion verbs --------------------------------- //
-
-    /// @notice Deploy `buckAmount` BUCK into a basket position: swap to balance
-    ///         and LP into pool `poolHint` (`type(uint256).max` ⇒ most
-    ///         underweight).  Returns the pool used, liquidity minted, and BUCK
-    ///         consumed; the shell tags ownership (treasury slice or receipt).
-    function investFromBucks(uint256 buckAmount, uint256 poolHint)
-        external returns (uint256 poolIdx, uint128 liquidity, uint256 buckConsumed);
-
-    /// @notice Raise ~`targetBuck` BUCK by converting from `tokenInventory`
-    ///         (per-constituent TOKEN the basket holds), best route first.
-    ///         Returns the BUCK gained, the value lost to slippage+fee (for the
-    ///         caller's loss-budget check), and the remaining inventory.
     /// @notice One leg of a monetary operation in constituent `i`.
     ///         `sellBuck` swaps BUCK -> TOKEN (the issue side); otherwise
     ///         TOKEN -> BUCK (the absorb side).  Pure AMM mechanics: all
@@ -89,9 +49,6 @@ interface IBuckBasketVenue {
     ///         the shell.  Returns what was actually spent and received.
     function monetaryLeg(uint256 i, bool sellBuck, uint256 amountIn)
         external returns (uint256 spent, uint256 received);
-
-    function convertIntoBucks(uint256[] calldata tokenInventory, uint256 targetBuck)
-        external returns (uint256 gained, uint256 lossValue, uint256[] memory inventoryAfter);
 
     // --- Equity primitives (BuckBasketEquity) -------------------------------- //
     //
@@ -114,9 +71,6 @@ interface IBuckBasketVenue {
     }
 
     function marks(uint256 i, uint128 liquidity) external view returns (Marks memory);
-
-    /// @notice Whether pool `i` has active liquidity to trade against.
-    function poolLive(uint256 i) external view returns (bool);
 
     /// @notice Add the most full-range liquidity `tokenAmount` and `buckAmount`
     ///         (held by the basket) balance at the spot; report what was used.
