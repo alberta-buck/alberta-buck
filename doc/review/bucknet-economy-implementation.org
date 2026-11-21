@@ -5,7 +5,8 @@
 * Current restart point — refined basket, 2026-11-21
 
 Work in =.claude/worktrees/buck-compound= on =feature/household-minimal-ecosystem=.
-The historical checkpoints below are dated. The refresh baseline commit is =61aa2cf4=.
+The refresh baseline is =61aa2cf4=. The revised portfolio and credit-first exit runs use
+=a1d4deb1=. The later benchmark and test changes are independent of both frozen runs.
 Claude Code's project memory index is =~/.claude/projects/-Users-perry-src-alberta-buck/memory/MEMORY.md=.
 
 ** Owner decisions and discriminating evidence
@@ -13,6 +14,8 @@ Claude Code's project memory index is =~/.claude/projects/-Users-perry-src-alber
 - Maximize depositor return from mean reversion and arbitrage after costs. A settled wallet
   near zero is the operating target. Outstanding principal funds positions and has no zero target.
   Use mint on demand. Evaluate a small wallet buffer only if measured gas savings justify carry.
+  The older wheel spent the wallet first and used surplus cash above its reserve to retire
+  principal. That combination drove the lien close to zero in some runs.
 - For ordinary BUCK redemptions use available credit, then sell holdings when it is insufficient.
   Explicit in-kind exits still take assets. Check the post-sale collateral of the remaining shares.
 - Ten local economy days at the refresh baseline, seed 41404, zero reserve: 86 positive basket
@@ -45,11 +48,16 @@ Claude Code's project memory index is =~/.claude/projects/-Users-perry-src-alber
 - The local zero-reserve arm at =61aa2cf4= completed 730 frames. First/last marked BUCK per
   share 0.992523 / 1.006348, +1.393% over the recorded interval. End wallet 0.013405 BUCK,
   end principal 15,932,160 BUCK, K 0.48758, BVIB 1.00864, TOKEN pool net/gross 0.9948–0.9956.
+  The wallet held under 1 BUCK at 729 of 730 daily closes (median 0.0601, maximum 76.36).
+  Peak-to-trough marked share drawdown was 4.439%. Holding the initial declared TOKEN weights
+  at the same LOW marks gained 3.113%, leaving the share 1.720 percentage points behind.
+  This benchmark holds TOKENs throughout and incurs no entry or exit costs.
   One explicit refresh (1.618M BUCK) occurred; ordinary fresh purchases also freshen the pools.
   All 40 household error rows were debtors: 19 refinance-terms reassessments, 17 issuance
   reconciliations, 4 repayment owner-funds refusals. No dispatcher faults. These are reported
   household errors; their incidence should be compared across arms.
-- The four datasim baseline stress arms passed day 610. The day-7 LABR reference fell from
+- At 20:42 UTC the four datasim baseline stress arms had 640–642 frames. The four
+  active refresh arms had 628–654, and both tight-band arms were queued. The day-7 LABR reference fell from
   0.244467 to 0.195573 in its arm. The clamp arm recorded K=0.5 against control 0.750729.
   Withdrawal schedules 50% of current investors, whose subsequent execution must be read
   from their receipts and ledger. The earlier five-year suite still lacks =suites.done=.
@@ -57,7 +65,8 @@ Claude Code's project memory index is =~/.claude/projects/-Users-perry-src-alber
 ** New portfolio policy and qualification
 
 - The Python and JS worlds enable =portfolioLimits= and a zero flow/percentage reserve.
-  The matched control can set =machine.portfolio_limits=false= or JS =portfolioLimits:false=.
+  For a legacy control use TOML ~portfolio_limits = false~ in =[machine]=, Python CLI
+  ~--set machine.portfolio_limits=False~, or JS ~portfolioLimits: false~.
   The hard facility mark is X+(H+C)/K, with X at LOW; the soft limit is 0.9K times book
   equity divided by (1-0.9K). The parity lean still chooses exposure inside the limit.
   Whether neutral parity should aim at the ceiling itself remains a separate experiment.
@@ -77,14 +86,86 @@ Claude Code's project memory index is =~/.claude/projects/-Users-perry-src-alber
   The storage pin includes the facet. Frames expose LOW TOKEN exposure, net issuance,
   K times exposure and the TWAP-based response ceiling. Reports include first-to-last
   marked share return before personal exit fees.
-- The local 10-day Python confirmation at =build/runs/portfolio-smoke= scheduled 15 of 30
-  investors to withdraw on day 7. Four exits had completed by day 8. One debtor refinance
-  reassessment and zero dispatcher faults across the ten days. The webevm savings and
-  equilibrium-bootstrap suites passed all 42 tests.
-- Compare the new run in its own checkout against the baseline. Review actual exits,
-  receipt returns versus holding, headroom, pool carry and realized arbitrage. Five-year
-  qualification, browser-only release work, parity vectors, the remaining release papers
-  and the master merge remain ahead.
+- The rebuilt static sandbox passed both headless Chromium acceptance tests. The wallet page
+  certified users, traded, paid and reloaded. With the sim server set to null the Savings tab
+  created its webevm worker, deposited, advanced the world, applied a shock and redeemed.
+  The Node webevm bootstrap and savings suites passed 42/42. The full Foundry suite passed
+  1220 tests across 111 suites, with one fork skip. The independent Linux build passed the storage pin.
+  The combined Python economy and core suites passed 1392 tests, four skipped. All 15 report and
+  recorder tests passed after adding the passive index to the shared fixture. The final JS suite
+  on the rebuilt page passed 334 of 335 tests. The server-backed Savings test skipped because
+  =SAVINGS_PAGE= was unset. Both static in-browser acceptance tests ran and passed.
+- The Linux smoke and the first ten withdrawal frames in both independent 730-day runs
+  have identical bytes (SHA-256 =605c9c64c394deb41dd216fddce2a3c025a28120d6e8397356651a51c157a038=).
+  The earlier Mac smoke used the pre-commit worktree and produced the same frames. There was
+  one debtor refinance reassessment and zero dispatcher faults in the ten frames.
+- The withdrawal intervention selected the first 15 of the original 30 investors. On the
+  revised Mac ledger, four had completed exit on day 7, nine by day 8, and all 15 by day 11.
+  Nine held funded receipts. Their 267152.133048 BUCK deposited returned 265867.998413 BUCK
+  (-0.481%) in confirmed redemptions across days 7–10. The same nine funded receipts in the baseline
+  returned 261586.255586 BUCK on 267152.135029 deposited (-2.083%), all redeemed on day 7.
+  The gap is 1.603 percentage points on this one shock. Settlement timing and price changes
+  contribute alongside the policy change. This measures the basket leg before conversion to USDC.
+- The reporting and test revision =7c888a9d= publishes the same passive TOKEN index in the
+  in-browser savings world and the Python run record. The comparison report shows marked
+  share and hold returns relative to their first recorded observations. The savings page
+  annualizes from its first valid share mark. The funded and flash arb regressions in
+  Python and JS now reconcile total issued before/after wheel rotations against confirmed
+  permanent issues less retirements. Under zero wallet reserve net retirement can exceed
+  issuance during a profitable flash rotation.
+
+** Resume the two-year experiments
+
+At 20:42 UTC on 2026-11-21 the revised Linux runs had recorded 15 frames for control,
+credit and markdown and 16 for withdrawals, with zero dispatcher faults. The Mac withdrawal
+run had recorded 142 frames. All four revised Linux arms produced identical daily frames
+through day 6 (SHA-256
+=c8d58e4eda9dec5742f05c4acd85e5c5bce4d3f9c8e2e9ff1b24821641c2e707=).
+On day 7 the LABR arm printed 0.195573 USD versus 0.244467 control, the credit arm K=0.5
+versus 0.750729 control, and the withdrawal intervention recorded 15 of 30 investors selected.
+
+The new Linux worktree is =~/src/alberta-buck-portfolio-a1d4deb1= on =datasim.local=.
+=build/logs/build.done= and =smoke.done= record the successful build and ten-day preflight.
+=build/logs/basket-stress.log= names the four 730-day workers. Each arm has a manifest and
+daily records under =build/runs/basket-stress.stress-{control,markdown,credit,withdrawals}/=.
+At completion look for =build/logs/basket-stress.done=, or =build/logs/portfolio.failed=
+and the individual logs in =build/sim/compare/basket-stress/runs/= if the comparison fails.
+The new checkout uses the patched Linux Python environment from the refresh checkout. These
+commands read progress and, after completion, regenerate the comparison report in this checkout:
+
+#+begin_src sh
+cd ~/src/alberta-buck-portfolio-a1d4deb1
+wc -l build/runs/basket-stress.stress-*/frames.jsonl
+export ALBERTA_BUCK_REPO="$PWD"
+export PYTHONPATH="$PWD:$PWD/core/python:$PWD/core/contracts/python"
+../alberta-buck-refresh-61aa2cf4/.venv/bin/python -m alberta_buck.sim.compare report basket-stress
+#+end_src
+
+The Mac's independent 730-day withdrawal arm is in
+=build/runs/portfolio-730d/basket-stress.stress-withdrawals/=, with its driver log
+at =/tmp/buck-portfolio-mac-730.log=. Check the manifest for =a1d4deb1af15= and
+~"status": "complete"~. The Mac used a frozen checkout while the release worktree remained editable.
+At day 90 it held 0.006884 BUCK in the wallet and had 6.038M BUCK of gross principal.
+Net issuance after LP BUCK and cash was -0.606M, while the marked TOKEN exposure was 6.644M.
+These three balances describe different parts of the same book.
+
+For each revision compare the three disturbed arms to that revision's control first, then
+compare like arms across revisions. Use equal frame counts for an interim comparison. For the
+passive benchmark open that checkout's =build/sim/compare/basket-stress/runs/<arm>.json=,
+take the first and last flat =frames= entries, and compute final/initial minus one for both
+=eq_share_price= and =eq_hold=. =eq_hold= prices the initial declared weights at LOW.
+In =events.jsonl= group each investor's confirmed =deposit= and =redeem= operations by
+member and token ID, count a transaction hash once, and match shares added against shares
+retired. For fully closed BUCK receipts divide net BUCK returned by BUCK deposited and
+subtract one. Price in-kind proceeds separately. Use the subsequent confirmed sale receipts
+for USD proceeds and account separately for any other cash the investor sold. For records
+written since =7c888a9d= the report also reads =basket.hold_index= from the daily JSONL.
+
+Review the return and drawdown alongside the wallet distribution, net issuance, asset
+exposure, credit headroom, pool net/gross, carried fees and the wheel's actual trades.
+The control and three shocks test sensitivity at one seed. Still open are realized arb
+attribution, the economically justified mint buffer, exposure at neutral parity, five-year
+qualification, complete agent parity, the remaining release papers and the master merge.
 
 * Start here: what remains before the sandboxes and the five-year runs
 
@@ -6398,8 +6479,8 @@ supply and lien, K and BVIB.
 
 The owner judges the basket by return on deposited equity from constituent mean reversion
 and executable arbitrage, after carry and fees. A small operating wallet and a funded LP
-book can coexist. The lien measures financing. Its decline to zero in the earlier burn
-arms was a result of surplus retirement and wallet-first purchases.
+book can coexist. The lien measures financing. Surplus retirement and wallet-first purchases
+reduced the earlier burn arms to zero principal with wallet arbitrage and 35256 BUCK with flash arbitrage.
 
 The original step 2 would have issued into the basket's Carrying account. An ERC-20
 transfer from that account gives the recipient a proportional share of the old carry.

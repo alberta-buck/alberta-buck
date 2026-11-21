@@ -273,11 +273,17 @@ good for the economy and mildly annoying for a saver, who would like a rainy-day
 hold its ground.
 
 The BuckBasket is the saver's answer.  Savings parked in it earn the tolls and the harvest instead
-of paying demurrage, and remain available on demand.  In a simulated economy that ran for five
+of paying demurrage, and remain available on demand.  In an earlier simulated economy that ran for five
 years on the real price histories of five commodities, a share of the basket ended 18% to 28%
 ahead of simply holding the same commodities: three to five percent a year.  Where prices came
 home more faithfully it was five to seven.  Where a price wanders off and does not come back, the
 basket loses a little instead.  Treat those as a simulation's numbers, not a promise.
+
+In a two-year test of the basket issuing fresh BUCK directly into its pools, the wallet closed
+below one BUCK on 729 of 730 days. A share gained 1.39% in BUCK value over that period. A saver
+holding the opening mix of commodities would have gained 3.11% at the same valuation prices.
+Both figures measure holdings before the cost of selling them. The companion paper gives the
+run settings and explains how the basket pays a saver who leaves.
 
 It is a medium-to-long-term proposition.  On the day you leave, a commodity may be below its
 average, and you get what the basket is worth that day.  Two things shrink that risk: *time*,

@@ -783,6 +783,14 @@ The net mark is most of it.  The machine ends 4.5% to 7.9% ahead of the same she
 plainly, with the upkeep that mark needs.  On three days in four that older upkeep had under
 5% of its equity to spend on an exit, because pairing used its whole limit.
 
+*Fresh pool issuance.* The 730-day comparison at =61aa2cf4= uses seed 41404, a zero wallet
+target and a pool refresh band of 9900–9950 basis points. From day 0 to day 729, the BUCK
+value per share rose from 0.992523 to 1.006348 (+1.393%). Buying the opening declared TOKEN
+weights at the basket's LOW marks and holding them gained 3.113%, a lead of 1.720 percentage
+points before personal trading costs. The basket's end-of-day wallet held a median 0.0601
+BUCK. Its outstanding principal ended at 15.93 million BUCK. This experiment used the
+earlier redemption rule. The portfolio credit rule at =a1d4deb1= has its own matched runs.
+
 *Harder casts.*  Fourteen worlds ran five years on each of three baskets: waves of households
 arriving to refinance, debtors saving into the basket, forced excursions and an arbitrage raid.
 All 42 runs finish, including one that previously stopped on its first day.  On the machine,
