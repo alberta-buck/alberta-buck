@@ -1,10 +1,10 @@
 // The Savings tab's contract surface: only what a saver calls or reads, in
 // viem's human-readable form -- no artifact bundle, since the world's
-// contracts live on the server.  The basket is a pro-rata shell (ops) or an
-// equity shell (equity-ops or equity-machine, sim_info's basket_kind
-// "equity"): both take depositToken / redeem(id, bp) and emit Deposited /
-// Redeemed; the venue facet's views are reached through the shell's fallback
-// at the same address.  An equity basket also answers holdings / valueOf, and
+// contracts live on the server.  The basket is the equity shell (sim_info's
+// basket_kind "equity"; the pro-rata shell is retired): it takes
+// depositToken / redeem(id, bp) and emits Deposited / Redeemed; the venue
+// facet's views are reached through the shell's fallback at the same
+// address.  It also answers holdings / valueOf, and
 // pays its exits in BUCK (in kind, TOKEN, when its account cannot spend
 // them); on the basket machine (sim_info's machine) its venue is the strict
 // one, which refuses a pool it cannot price.
@@ -22,7 +22,7 @@ export const ERC20 = parseAbi([
 
 export const BASKET = parseAbi([
   "function depositToken(address token, uint256 tokenAmount, uint256 maxDeviationBp) returns (uint256 receiptId)",
-  "function redeem(uint256 receiptId, uint256 redeemBp)",
+  "function redeem(uint256 receiptId, uint256 redeemBp) returns (uint256 paid)",
   "function deposits(uint256 id) view returns (uint256 buckPrincipal, uint256 tokenPrincipal, address token, uint64 depositTime)",
   "function twapWindow() view returns (uint32)",
   "function consultTickExternal(address pool, uint32 secondsAgo) view returns (int24)",
@@ -52,10 +52,6 @@ export const POOL = parseAbi([
 
 export const RECEIPT = parseAbi([
   "function ownerOf(uint256 id) view returns (address)",
-]);
-
-export const DIRECTOR = parseAbi([
-  "function depositHint() view returns (uint256)",
 ]);
 
 // What a refusal means to a saver, by the basket's error name.

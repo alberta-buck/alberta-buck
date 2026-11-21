@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { BASKET, DIRECTOR, ERC20, POOL, RECEIPT } from "../sandbox/src/savings/abi.js";
-import { annualized, channels, chooseIndex, dateOf, deviationBp, equityWorth, hintIndex, newSid, prices, receiptWorth,
+import { BASKET, ERC20, POOL, RECEIPT } from "../sandbox/src/savings/abi.js";
+import { annualized, channels, chooseIndex, dateOf, deviationBp, equityWorth, hintIndex, newSid, prices,
          row, serverBase, tokenFor } from "../sandbox/src/savings/model.js";
 
 const loc = (href) => new URL(href);
@@ -82,20 +82,20 @@ test("a frame cut down to what the tab draws", () => {
 test("a frame's basket and desks: decisions in BUCK, books against holding, the desk's signal", () => {
   const r = row({ day: 40, sv: { E: "5000000000000", L: "3000000000000", Q: "100000000000", D: 1.01 },
                   eq_hold: 1.004, eq_lean: [3400, 3300, 3300], eq_w: [3333, 3333, 3334], eq_decl: [3333, 3333, 3334],
-                  wh_eq_deploy: "2500000000", wh_eq_trim: 750_000_000, dk_q1: "1000000", dk_q4: 4_000_000,
+                  dk_q1: "1000000", dk_q4: 4_000_000,
                   desk_nav: "2000000000000", desk_hold: "1990000000000", sh_held: 1_000_000, sh_outstanding: 4_000_000,
                   mk_cm: -191_837_923_414, ut_nw: 7_000_000, ut_hold: 6_500_000 });
   assert.deepEqual([r.E, r.L, r.Q], [5_000_000, 3_000_000, 100_000]);
   assert.equal(r.hold, 1.004);
   assert.deepEqual(r.lean, [3400, 3300, 3300]);
-  assert.deepEqual([r.eqDeploy, r.eqFund, r.eqTrim, r.eqSync], [2500, null, 750, null]);
+  assert.equal(r.eqSync, null);
   assert.deepEqual(r.dkQ, [1, 0, 0, 4]);
   assert.deepEqual([r.deskNav, r.deskHold, r.deskHeld, r.deskOut], [2_000_000, 1_990_000, 1, 4]);
   assert.ok(Math.abs(r.premium - 1.918) < 1e-3, "the common mode below par: BUCK at a premium");
   assert.deepEqual([r.utNw, r.utHold], [7, 6.5]);
   const bare = row({ day: 1 });
   assert.deepEqual([bare.hold, bare.deskNav, bare.premium, bare.utNw], [null, null, null, null],
-    "no source, no number (a pro-rata world draws nothing)");
+    "no source, no number");
 });
 
 test("a frame from the basket machine: its responses by what they did, its parity reference as the signal", () => {
@@ -103,7 +103,6 @@ test("a frame from the basket machine: its responses by what they did, its parit
                   wh_eq_sync: 12_000_000, wh_eq_place: "2500000000", wh_eq_sell: 750_000_000,
                   eq_signal_raw: "980392156862745098", desk_side: -1, desk_over_days: 12 });
   assert.deepEqual([r.eqPlace, r.eqSell, r.eqBuy, r.eqSync], [2500, 750, null, 12]);
-  assert.deepEqual([r.eqDeploy, r.eqFund, r.eqTrim], [null, null, null], "the older steps have no source");
   assert.ok(Math.abs(r.premium - 2) < 1e-9, "a basket costing 0.98 BUCK: BUCK 2% dear");
   assert.deepEqual([r.deskSide, r.deskDays], [-1, 12]);
   assert.deepEqual(r.lean, [3500, 3200, 3300]);
@@ -113,20 +112,6 @@ test("a growth compounded to a year", () => {
   assert.ok(Math.abs(annualized(1, 1.01, 90) - (1.01 ** (365 / 90) - 1)) < 1e-12);
   assert.equal(annualized(1, 1.01, 0), null);
   assert.equal(annualized(0, 1, 30), null);
-});
-
-test("a receipt pays the TOKEN side of its claim (BuckBasketProRata._redeem)", () => {
-  // At the start (B = O, no bonus) a receipt is paid what it put in.
-  assert.deepEqual(receiptWorth(100n, { O: 1000, S: 0, B: 1000 }), { burn: 100n, claim: 200n, paid: 100n });
-  // TOKENs up against BUCK (B > O): the half of the claim; the BUCK surplus is the treasury's.
-  assert.equal(receiptWorth(100n, { O: 1000, S: 0, B: 1200 }).paid, 120n);
-  // TOKENs down (B < O): the claim less the burn (TOKEN converted to cover it).
-  assert.equal(receiptWorth(100n, { O: 1000, S: 0, B: 900 }).paid, 80n);
-  // The wheel's credits (the bonus S, with its partner BUCK in B): a larger burn, a larger claim.
-  const w = receiptWorth(100n, { O: 1100, S: 100, B: 1100 });
-  assert.equal(w.burn, 110n);
-  assert.equal(w.paid, 110n);
-  assert.equal(receiptWorth(100n, { O: 1000, S: 0, B: null }), null);
 });
 
 test("an equity receipt pays its shares' value, less the treasury's cut and the exit charge", () => {
@@ -169,12 +154,10 @@ test("dollars into TOKEN units at the pool's price; where a deposit helps most",
 const OUT = fileURLToPath(new URL("../../../out/", import.meta.url));
 const ARTIFACTS = {
   ERC20: ["MockERC20.sol/MockERC20.json"],
-  BASKET: ["BuckBasketOps.sol/BuckBasketOps.json", "BuckBasketProRata.sol/BuckBasketProRata.json",
-           "BuckBasketUniswapV3.sol/BuckBasketUniswapV3.json",
+  BASKET: ["BuckBasketUniswapV3.sol/BuckBasketUniswapV3.json",
            "BuckBasketEquity.sol/BuckBasketEquity.json", "BasketVenueFacet.sol/BasketVenueFacet.json"],
   POOL: ["UniswapV3Pool.sol/UniswapV3Pool.json"],
   RECEIPT: ["BuckBasketReceipt.sol/BuckBasketReceipt.json"],
-  DIRECTOR: ["PairsRebalanceDirector.sol/PairsRebalanceDirector.json"],
 };
 const have = Object.values(ARTIFACTS).flat().every((f) => existsSync(OUT + f));
 const canon = (p) => (p.type.startsWith("tuple")
@@ -184,7 +167,7 @@ const sig = (it) => `${it.type} ${it.name}(${(it.inputs ?? []).map(canon).join("
   + (it.type === "event" ? ` [${it.inputs.map((p) => (p.indexed ? 1 : 0)).join("")}]` : "");
 
 test("the tab's contract surface matches the compiled contracts", { skip: !have && "out/ not built" }, () => {
-  for (const [name, abi] of Object.entries({ ERC20, BASKET, POOL, RECEIPT, DIRECTOR })) {
+  for (const [name, abi] of Object.entries({ ERC20, BASKET, POOL, RECEIPT })) {
     const known = new Set(ARTIFACTS[name].flatMap((f) => JSON.parse(readFileSync(OUT + f, "utf8")).abi.map(sig)));
     for (const it of abi) assert.ok(known.has(sig(it)), `${name}: ${sig(it)} is not in the compiled contracts`);
   }

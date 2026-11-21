@@ -25,23 +25,14 @@ def main(argv=None) -> int:
     ap.add_argument("--director", default="pairs", choices=["pairs"],
                     help="rebalance-director signal engine: the pairs director is the one left")
     ap.add_argument("--controller", default=os.environ.get("SIM_CONTROLLER", "direct"),
-                    choices=["direct", "shadow"],
-                    help="BUCK_K controller: BuckKControllerDirect (direct, "
-                         "default) or BuckKControllerShadow (shadow -- WP-3a: "
-                         "reads the ops shell's observer, bvib + lambda * "
-                         "netInventory / D, with Ki scheduled by the desk's "
-                         "saturation; SIM_SHADOW_LAMBDA / SIM_SHADOW_GAMMA, "
-                         "default 0, make it Direct's twin).  Env SIM_CONTROLLER "
-                         "sets the default so catalogue/star cells can select it")
+                    choices=["direct"],
+                    help="BUCK_K controller: BuckKControllerDirect, the one left (the shadow "
+                         "controller is retired, 2026-11-20)")
     ap.add_argument("--basket", default=None,
-                    choices=["prorata", "ops", "equity", "equity-ops", "equity-machine"],
-                    help="basket implementation: the equity basket on the "
-                         "basket machine (equity-machine, default; equity and "
-                         "equity-ops are the same machine since 2026-11-20 "
-                         "unless SIM_EQUITY_MACHINE=0), "
-                         "BuckBasketProRata (prorata), or BuckBasketOps "
-                         "(ops -- prorata plus the monetary-operations desk "
-                         "on the director's common mode)")
+                    choices=["equity-machine", "equity-ops", "equity"],
+                    help="the equity basket on the basket machine, with its desk (equity-machine, "
+                         "the default, or equity-ops) or alone (equity); the pro-rata and ops "
+                         "baskets and the earlier upkeep are retired (2026-11-20)")
     ap.add_argument("--days", type=int, default=None)
     ap.add_argument("--ticks-per-day", type=int, default=None)
     ap.add_argument("--seed", type=int, default=None)

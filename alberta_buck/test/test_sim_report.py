@@ -102,45 +102,6 @@ def test_concurrent_completed_worlds_render_separate_valid_pdfs(snapshot, tmp_pa
         assert artifact.encode() in raw
 
 
-def test_interactive_completion_preserves_json_and_retries_a_failed_pdf(snapshot, tmp_path, monkeypatch):
-    import random
-    from alberta_buck.sim.driver import SimDriver
-
-    snapshot.meta["run"]["mode"] = "interactive"
-    snapshot.s.days             = report.FIVE_YEARS
-    snapshot.capture            = lambda *args: None
-    driver                      = SimDriver.__new__(SimDriver)
-    driver.snap                 = snapshot
-    driver.scenario             = SimpleNamespace(days=report.FIVE_YEARS, ticks_per_day=1)
-    driver.day, driver.tick     = report.FIVE_YEARS - 1, 0
-    driver.done                 = False
-    driver.ts, driver.tick_secs = 0, 1
-    driver.timeline_epoch = driver.ts + driver.tick_secs
-    driver.anvil                = SimpleNamespace(warp_to=lambda ts: None)
-    chain                       = SimpleNamespace(clear_balance_cache=lambda: None, send=lambda operation: None)
-    kctrl                       = SimpleNamespace(functions=SimpleNamespace(compute=lambda: None))
-    driver.d                    = SimpleNamespace(chain=chain, kctrl=kctrl)
-    driver._begin_day           = lambda: None
-    driver._whale_tick          = -1
-    driver.whales, driver.arbs, driver.agents = [], [], []
-    driver._prng                = random.Random(1)
-    driver.ctr                  = {}
-    driver.init_val = driver.reb_init = driver.dm_init = 0
-    driver.proxy                = SimpleNamespace(bump=lambda: None)
-    driver.report_path          = tmp_path / "interactive.json"
-    driver.report_json = driver.report_pdf = driver.report_error = None
-    render                      = report.render
-    def broken(path):
-        raise RuntimeError("test renderer failure")
-    monkeypatch.setattr(report, "render", broken)
-    assert driver.step_tick() is False and driver.done
-    assert "test renderer failure" in driver.report_error
-    assert json.loads(driver.report_path.read_text())["meta"]["run"]["completed"] is True
-    monkeypatch.setattr(report, "render", render)
-    assert driver.write() == driver.report_path
-    assert driver.report_error is None and driver.report_pdf.exists()
-
-
 def test_checkpoint_is_not_a_completed_report(snapshot, tmp_path):
     path                        = snapshot.write(tmp_path / "checkpoint.json")
     with pytest.raises(ValueError, match="no completed run"):

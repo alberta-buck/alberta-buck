@@ -147,13 +147,12 @@ help-runs:
 #      make nix-sandbox-local [SANDBOX_LOCAL_PORT=8988]   the sandbox, its Savings world running in the tab
 #      make nix-venv-sim-savings SIM_SAVINGS_PORT=8981    the Savings world on a Python server (on this
 #                                                         machine never 8000, 8797 or 8798: tunnel origins)
-#      make nix-venv-sim-tui                              a curses inspector over a live world
 #      The dashboard (5) starts live sessions too: New live session, on its page.
 #   g  Historical studies, kept for reference and not acceptance (each is documented where it is
 #      defined below; README-simulations.org says which still matter): sim-run (routing),
 #      sim-equilibrium, sim-rebalancing-eq[-<name>], sim-rebalancing-eq-matrix, sim-catalogue[-<name>],
-#      sim-sweep[-<name>], sim-metrics, sim-debtors, sim-isolation, sim-policy, sim-director, sim-flow,
-#      sim-monetary-ops, sim-basket-ops, sim-historical and the other sim-* targets.
+#      sim-sweep[-<name>], sim-metrics, sim-debtors, sim-isolation, sim-policy, sim-flow,
+#      sim-historical and the other sim-* targets.
 #
 # 4  Re-running
 #    - Working-tree runs (3a, 3c, 3e, economy-smoke, COMPARE_ARGS=--here) run whatever is checked out,
@@ -319,8 +318,7 @@ VENV			?= $(BUCK_PYTHON)/.venv
 .PHONY: test-python venv-activate
 .PHONY: golden-receipts
 .PHONY: snark snark-setup snark-fixtures snark-ptau snark-clean snark-a2 snark-a2-setup snark-a2-fixtures
-.PHONY: sim sim-build sim-run sim-test sim-plot sim-tui
-.PHONY: test-director sim-run-director sim-director
+.PHONY: sim sim-build sim-run sim-test sim-plot
 .PHONY: sim-run-policy sim-run-policy-sweep sim-plot-policy sim-policy sim-policy-sweep
 .PHONY: sim-rebalancing sim-run-rebalancing sim-plot-rebalancing
 .PHONY: sim-run-flow sim-plot-flow sim-flow
@@ -398,7 +396,7 @@ buck-accounting-test: build-uniswap-artifacts
 #   make nix-basket-arb-test
 .PHONY: basket-arb-test
 basket-arb-test: build-uniswap-artifacts
-	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*ArbTest|BuckCompoundCarryingBasketTest|BasketCreditSetupTest|BasketPublicLifecycleTest|BasketMachineIdentityTest|BasketWheelArbTest)$$' -vvv
+	forge test $(FORGE_OPTS) --match-contract '^(BuckCompound.*ArbTest|BuckCompoundCarryingBasketTest|BasketCreditSetupTest|BasketPublicLifecycleTest|BasketMachineIdentityTest)$$' -vvv
 
 # Run tests against a forked network (slow first run, cached after)
 test-fork-sepolia:
@@ -410,14 +408,6 @@ test-fork-mainnet:
 # Gas snapshots
 snapshot:
 	forge snapshot $(FORGE_OPTS)
-
-# ── Rebalance director tests ─────────────────────────────────────────
-#
-#   make nix-test-director           # unit + fuzz suite
-#   make nix-sim-director            # 30-day Anvil smoke sim (keeper agent)
-
-test-director:	build
-	forge test $(FORGE_OPTS) --match-contract 'RebalanceDirector' -vv
 
 # Formatting and linting
 fmt:
@@ -927,7 +917,7 @@ $(ROUTING_IMAGE): $(ROUTING_VECTOR)
 
 SIM_DAYS	?= 365
 SIM_TICKS	?= 4
-SIM_BASKET	?= equity-machine  # equity-machine (default) | equity-ops | equity | prorata | ops
+SIM_BASKET	?= equity-machine  # equity-machine (default) | equity-ops | equity
 #
 # Every Anvil-style sim below composes from a common matrix:
 #
@@ -936,15 +926,11 @@ SIM_BASKET	?= equity-machine  # equity-machine (default) | equity-ops | equity |
 #                  on short runs, far more on long ones -- see
 #                  alberta_buck/sim/pyrevm_backend.py)
 #   SIM_BASKET   = equity-machine (the equity basket on the basket machine,
-#                  with the desk beside it; default)
-#                | equity-ops, equity (the same basket on its earlier upkeep,
-#                  with the desk and without)
-#                | prorata (BuckBasketProRata + UniswapV3 venue facet)
-#                | ops (the pro-rata basket with the desk inside it)
-#   SIM_DIRECTOR = pairs (PairsRebalanceDirector: differential-mode
-#                  tick-EMA ladders, quorum turn votes; the one left)
-#   Env knobs (deploy-time director params, for short smoke runs):
-#     DIRECTOR_DEADBAND_BP=10  DIRECTOR_QUORUM=2|3
+#                  with the desk beside it; default) | equity-ops (the same)
+#                | equity (the basket without the desk).  The pro-rata and
+#                  ops baskets, the earlier upkeep, the pairs director and
+#                  the shadow controller are retired (2026-11-20).
+#   SIM_DIRECTOR = pairs (a no-op flag until the catalogue's arms are ported)
 #
 #   e.g.  make nix-sim-rebalancing SIM_BACKEND=pyrevm
 #         SIM_BACKEND=pyrevm make nix-sim-historical SIM_YEARS=5
@@ -1083,26 +1069,6 @@ sim-plot:	$(ROUTING_VECTOR)
 
 sim:		sim-run sim-plot
 
-# ── Interactive curses inspector (live component / agent viewer) ────────
-#
-# A navigable TUI over a live sim: deploy + step the timeline yourself and
-# inspect every on-chain component and agent (summary -> detail).  This is
-# the display-only first layer; parameter adjustment comes later.
-#
-#   make nix-sim-tui                                       # rebalancing/prorata
-#   make nix-sim-tui SIM_SCENARIO=routing                     # lighter, fast deploy
-#
-# In the UI:  arrows/PgUp/PgDn move; Right/Left expand/collapse; [space] step
-# a tick, [d] step a day, [r] run/pause, [w]rite a snapshot vector, [q]uit.
-sim-tui:	sim-build
-	@echo "sim-tui: scenario: $(SIM_SCENARIO)"
-	@echo "sim-tui: basket:   prorata (the inspector reads the pro-rata basket's books)"
-	python -m $(SIM_PKG).tui --scenario $(SIM_SCENARIO) --basket prorata \
-		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS)
-
-sim-tui-prorata: sim-tui
-
-
 # ── Rebalancing simulation (Phase 1: staggered direct-mint agents) ──────
 #
 # DirectMintAgents enter/exit stochastically.  Current TOKEN deposits LP into
@@ -1127,34 +1093,6 @@ sim-plot-rebalancing:	$(REBALANCING_VECTOR)
 	python -m pytest $(SIM_REB_PLOT) -v -s
 
 sim-rebalancing:	sim-run-rebalancing sim-plot-rebalancing
-
-
-# ── Rebalancing on the pro-rata basket ──────────────────────────────────
-#
-# BUCK direct-mint agents and the rebalancing effect of BuckBasketProRata
-# redemptions.  (The run against the original basket went with that basket.)
-#
-#   make nix-sim-rebalancing-prorata        # build -> run (prorata) -> plot
-#   make nix-sim-run-rebalancing-prorata    # just the run
-#
-# Horizon override applies as usual:  ... SIM_DAYS=365 SIM_TICKS=4
-
-REBALANCING_VECTOR_PRORATA      = test/vectors/rebalancing-sim-prorata.json
-
-.PHONY: sim-run-rebalancing-prorata sim-plot-rebalancing-prorata sim-rebalancing-prorata
-
-sim-run-rebalancing-prorata:	sim-build
-	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) \
-		--ticks-per-day $(SIM_TICKS) --basket prorata \
-		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
-		--out $(REBALANCING_VECTOR_PRORATA)
-
-sim-plot-rebalancing-prorata:	$(REBALANCING_VECTOR_PRORATA)
-	REB_VECTOR=$(REBALANCING_VECTOR_PRORATA) \
-		REB_OUT=images/rebalancing-sim-prorata.png \
-		python -m pytest $(SIM_REB_PLOT) -v -s
-
-sim-rebalancing-prorata:	sim-run-rebalancing-prorata sim-plot-rebalancing-prorata
 
 
 # -- The reverting regime: oscillation without drift -------------------
@@ -1193,90 +1131,6 @@ sim-plot-rebalancing-revert:	$(REBALANCING_VECTOR_REVERT)
 		python -m pytest $(SIM_REB_PLOT) -v -s
 
 sim-rebalancing-revert:	sim-run-rebalancing-revert sim-plot-rebalancing-revert
-
-# Who collects the rebalancing premium: per-commodity excursions, the
-# basketValueInBuck break, and the depositor/treasury split.  The chain-sim
-# answer to the article's Figure 1.
-#   make nix-sim-plot-basket-split
-.PHONY: sim-plot-basket-split
-sim-plot-basket-split:	$(REBALANCING_VECTOR_REVERT)
-	python -m pytest alberta_buck/sim/plot_basket_split.py -v -s
-
-
-# ── Monetary operations A/B ───────────────────────────────────────────
-#
-# The BuckBasket's operations desk (alberta-buck-ethereum-wheel.org, "The desk")
-# run as an agent against the live chain sim, compared against the same
-# scenario and seed without it.  Two runs, then the comparison:
-#
-#   make nix-venv-sim-monetary-ops        # both runs + the table
-#   make nix-venv-sim-compare-ops         # just the table, from existing runs
-#
-# Written to their own vectors so neither clobbers the committed baseline.
-
-OPS_VECTOR_OFF	= test/vectors/monetary-ops-off.json
-OPS_VECTOR_ON	= test/vectors/monetary-ops-on.json
-
-.PHONY: sim-monetary-ops sim-run-ops-off sim-run-ops-on sim-compare-ops
-
-# SIM_SEED selects the draw.  Both arms MUST use the same one -- the whole
-# comparison is that they differ only in the roster.  Sweep several: the
-# model's failure case reversed sign between one seed and nine.
-SIM_SEED	?=
-OPS_SEED	= $(if $(SIM_SEED),--seed $(SIM_SEED),)
-
-sim-run-ops-off:	sim-build
-	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
-		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
-		--basket prorata --backend $(SIM_BACKEND) \
-		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(OPS_VECTOR_OFF)
-
-sim-run-ops-on:	sim-build
-	SIM_MONETARY_OPS=1 python -m $(SIM_PKG) --scenario rebalancing-revert \
-		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
-		--basket prorata --backend $(SIM_BACKEND) \
-		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(OPS_VECTOR_ON)
-
-sim-compare-ops:
-	python -m $(SIM_PKG).compare_ops $(OPS_VECTOR_OFF) $(OPS_VECTOR_ON)
-
-sim-monetary-ops:	sim-run-ops-off sim-run-ops-on sim-compare-ops
-
-
-# ── The ops BASKET A/B (contract, not agent) ──────────────────────────
-#
-# Same scenario and seed; the ONLY difference is which shell is deployed.
-# The monetary-ops AGENT is off in both arms, so what is measured is the
-# contract-side desk -- full-strength Q2/Q4 via burnFromBasket/mintFromBasket,
-# which no agent can reach.
-#
-#   make nix-venv-sim-basket-ops        # both arms + the table
-#
-# Sweep the overlap between the fast desk and K's slow forcing with
-# SIM_OPS_POSITION_BP / SIM_OPS_OUTRIGHT_BP / SIM_OPS_CAPITAL_USD.
-
-BASKET_VECTOR_OFF	= test/vectors/basket-ops-off.json
-BASKET_VECTOR_ON	= test/vectors/basket-ops-on.json
-
-.PHONY: sim-basket-ops sim-run-basket-off sim-run-basket-on sim-compare-basket
-
-sim-run-basket-off:	sim-build
-	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
-		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
-		--basket prorata --backend $(SIM_BACKEND) \
-		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(BASKET_VECTOR_OFF)
-
-sim-run-basket-on:	sim-build
-	SIM_MONETARY_OPS=0 python -m $(SIM_PKG) --scenario rebalancing-revert \
-		--days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
-		--basket ops --backend $(SIM_BACKEND) \
-		--director $(SIM_DIRECTOR) $(OPS_SEED) --out $(BASKET_VECTOR_ON)
-
-sim-compare-basket:
-	python -m $(SIM_PKG).compare_ops $(BASKET_VECTOR_OFF) $(BASKET_VECTOR_ON)
-
-sim-basket-ops:	sim-run-basket-off sim-run-basket-on sim-compare-basket
-
 
 # ── Pure price-flow basket simulator (no Anvil) ───────────────────────
 #
@@ -1341,18 +1195,6 @@ sim-policy-sweep:	sim-run-policy-sweep
 # frontier; alberta-buck-ethereum-wheel.org shows the mechanism) from the same rebalance-policy vector.
 sim-plot-article:	$(POLICY_VECTOR)
 	python -m alberta_buck.sim.plot_rebalance_article
-
-# 30-day Anvil smoke sim exercising the rebalance director end to end:
-# the rebalancing scenario's DirectorKeeperAgent pokes the director's work
-# wheel each tick and executes its advisory efforts through the router.
-sim-run-director:
-	python -m $(SIM_PKG) --scenario rebalancing --days 30 \
-		--ticks-per-day $(SIM_TICKS) --basket prorata \
-		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
-		--out test/vectors/director-smoke.json
-
-sim-director:	sim-build sim-run-director
-
 
 # ── Historical commodity & labour quote source ───────────────────────
 #

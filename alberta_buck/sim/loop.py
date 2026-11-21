@@ -26,7 +26,6 @@ from alberta_buck.sim.markout import MarkoutLedger, PoolProbe, actor_tag  # WP-1
 import alberta_buck.sim.undertaking_agents  # noqa: F401  WP-2
 import alberta_buck.sim.facility_agent  # noqa: F401  triggers @_register  WP-6
 import alberta_buck.sim.seeder_agent  # noqa: F401  WP-8  triggers @_register
-from alberta_buck.sim import shadow_book  # WP-13: the stand-ins' book -> observer
 import alberta_buck.sim.pusher_agent  # noqa: F401  WP-15  @_register PusherAgent, LpExitAgent
 import alberta_buck.sim.bookloader  # noqa: F401  WP-15  @_register BookLoaderAgent
 import alberta_buck.sim.household_agents as households  # T15  @_register ExternalDebtRetireeAgent
@@ -95,14 +94,11 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
         print(f"[sim] deploying '{scenario.name}' with {basket_impl} basket "
               f"({scenario.days}d x {scenario.ticks_per_day} ticks)...",
               flush=True)
-    # "equity-machine": the equity basket and its desk, with the basket machine put in place of the
-    # older upkeep once the pools are seeded (basket_machine.activate, below).
+    # "equity-machine" (the default) is the equity basket and its desk ("equity-ops"); every equity
+    # basket runs on the basket machine (deploy activates it once the pools are seeded).
     machine = basket_impl == "equity-machine"
-    if machine and controller_impl != "direct":
-        raise ValueError("the basket machine requires the direct K controller")
     d = deploy(chain, anvil, scenario, rng, basket_impl="equity-ops" if machine else basket_impl,
-               director_impl=director_impl, controller_impl=controller_impl,
-               equity_machine=True if machine else None)
+               director_impl=director_impl, controller_impl=controller_impl)
 
     # --- build + register the agent population ----------------------- #
     # Reset per-class counters defensively so back-to-back sim runs in
@@ -304,11 +300,6 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
             else:
                 order = arbs[:]
                 prng.shuffle(order)
-            # WP-13: the stand-ins' books as of the previous tick reach the
-            # observer before any agent runs K's cycle this tick (an
-            # agent's compute() inside the last tick makes the end-of-day
-            # call below a cached read); a no-op unless the sum changed.
-            shadow_book.book(d, ctr)
             reserves = probe.read()
             for a in order:
                 s0 = sent[0]
@@ -329,10 +320,6 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
                     reserves = after
             if builtin_wheel:
                 settle_wheel(d, ctr=ctr)
-        # WP-13: book the agent stand-ins' net inventory (the undertakings'
-        # open books, the facility's drawn lines) into the observer's
-        # pseudo-stabilizer before K's cycle; a no-op without an observer.
-        shadow_book.book(d, ctr)
         try:
             chain.send(d.kctrl.functions.compute())
         except Exception:

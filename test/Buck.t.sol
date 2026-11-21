@@ -10,7 +10,6 @@ import {BN254} from "../src/BN254.sol";
 import {IdentityRegistry} from "../src/IdentityRegistry.sol";
 import {IdentityRegistryHarness} from "./harness/IdentityRegistryHarness.sol";
 import {BuckLinear as Buck} from "../src/legacy/BuckLinear.sol";
-import {BuckWithBasketHooks} from "../src/legacy/BuckWithBasketHooks.sol";
 import {BuckCredit} from "../src/BuckCredit.sol";
 import {BuckCreditHarness} from "./harness/BuckCreditHarness.sol";
 import {BuckKControllerDirect} from "../src/BuckKControllerDirect.sol";
@@ -643,31 +642,6 @@ contract BuckTest is Test {
         assertFalse(ok, "no burnFromBasket");
         (ok,) = address(buck).call(abi.encodeWithSignature("setBasket(address)", alice));
         assertFalse(ok, "no setBasket");
-    }
-
-    function test_setBasket_onlyInsurancePool() public {
-        BuckWithBasketHooks fresh =
-            new BuckWithBasketHooks(address(credit), address(kCtrl), address(reg), POOL);
-        vm.expectRevert("BUCK: not insurancePool");
-        fresh.setBasket(address(0xDECAF));
-    }
-
-    function test_setBasket_oneShot() public {
-        BuckWithBasketHooks fresh =
-            new BuckWithBasketHooks(address(credit), address(kCtrl), address(reg), POOL);
-        vm.prank(POOL);
-        fresh.setBasket(address(0xB0CC));
-        vm.prank(POOL);
-        vm.expectRevert("BUCK: basket already set");
-        fresh.setBasket(address(0xB0DD));
-    }
-
-    function test_setBasket_rejectsZero() public {
-        BuckWithBasketHooks fresh =
-            new BuckWithBasketHooks(address(credit), address(kCtrl), address(reg), POOL);
-        vm.prank(POOL);
-        vm.expectRevert("BUCK: basket=0");
-        fresh.setBasket(address(0));
     }
 
     // ---- burn: all NFTs over-rate -------------------------------------------

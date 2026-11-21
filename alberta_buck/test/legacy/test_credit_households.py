@@ -39,7 +39,7 @@ def test_open_position_returns_use_remaining_basis_and_live_share_price():
     assert a.basket_position(10**18)["basket_roi"] is None
 
 
-@pytest.fixture(params=["prorata", "equity-ops"])
+@pytest.fixture(params=["equity-ops"])     # the pro-rata basket is retired (2026-11-20)
 def household_world(request):
     scenario                    = replace(ROUTING, days=90, agents={})
     scenario.experiment         = expmod.load(None)

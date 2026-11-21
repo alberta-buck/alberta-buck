@@ -1,11 +1,10 @@
 """Configure the existing basket machine after its pools have TWAP history.
 
 An experiment selects it with `[scenario] basket = "equity-machine"` (loop.run), and sizes it in its
-`[machine]` table; deploy() installs it on every equity basket (SIM_EQUITY_MACHINE=0 keeps the earlier
-upkeep reachable until its sources go, retirement step R4). Canonical deployment installs one machine wheel directly and
+`[machine]` table; deploy() installs it on every equity basket (the earlier upkeep is retired,
+2026-11-20). Canonical deployment installs one machine wheel directly and
 seeds independent liquidity before this setup, then agents deposit into it.
-The old comparison path can still replace earlier upkeep. No deployed chain
-is migrated by this simulation helper.
+No deployed chain is migrated by this simulation helper.
 """
 from __future__ import annotations
 
@@ -329,7 +328,6 @@ def activate(d, given=None, turn_seconds=0) -> None:
     zero = "0x" + "0" * 40
     if getattr(d, "net_stack", None) is None:
         chain.send(wheel.functions.setDirector(zero), sender=gov)
-    d.equity_director = None
     d.venue, d.signals, d.pair_signals, d.pair_policy = venue, signals, observer, policy
     d.equity_upkeep = response
     source = signals

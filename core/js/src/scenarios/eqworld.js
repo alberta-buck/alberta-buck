@@ -4,12 +4,11 @@
 //
 //   * the proven identity + Direct stack (buildBuckWorld),
 //   * the basket and its Uniswap venue facet (union ABI: facet views like
-//     basketValueInBuck serve via the shell's fallback).  By default the
+//     basketValueInBuck serve via the shell's fallback): the
 //     equity basket on the basket machine (doc/BASKET-MACHINE.org): a
 //     credit holder that pairs every deposit with BUCKs it issues itself,
 //     its upkeep facet, the pair observer and policy the facet asks, the
 //     parity reference, and the work wheel that turns them (WheelKeeper).
-//     opts.basket = "prorata" builds the pro-rata basket instead,
 //   * per token: a TOKEN/USDC reference pool (SimLP-seeded, whale
 //     territory) and the TOKEN/BUCK basket pool (addBasketToken),
 //   * the floating BUCK/USDC pool, LP'd by SimLP as the public
@@ -39,7 +38,7 @@
 import { encodeFunctionData, keccak256, toBytes, parseEventLogs } from "viem";
 import { installHouseholdOps } from "../agents/household-ops.js";
 import { linkArtifact } from "../artifacts.js";
-import { netCreditOps, OBSERVATIONS } from "../net-world.js";
+import { netCreditOps } from "../net-world.js";
 import { settlementOps } from "../settlement.js";
 
 import { advanceTime, buildBuckWorld, DAY, identityApprove, identityOf, onboard }
@@ -55,7 +54,6 @@ const E18 = 10n ** 18n;
 // runs at, and reverts past what the credits can give; mint(MINT_MAX)
 // delivers all they can give, activating their whole faces.
 const MINT_MAX = (1n << 256n) - 1n;
-const POOL_ROI_INV = 10n;                 // Buck.sol: deposit = e x coverage
 const DEPOSITED_TOPIC = keccak256(toBytes(
   "Deposited(address,uint256,address,uint256,uint256,uint128)"));
 
@@ -122,8 +120,8 @@ function isqrt(n) {
  * @param artifacts  (name) => {abi, bytecode}
  * @param opts.identity   the buck-identity kernel API (REQUIRED)
  * @param opts.urArtifact the parsed UniversalRouter.json (REQUIRED)
- * @param opts.basket     "machine" (default: the equity basket on the basket
- *                        machine) or "prorata" (the pro-rata basket)
+ * @param opts.basket     "machine" (the default and the only basket left: the equity basket on the
+ *                        basket machine; the pro-rata basket is retired, 2026-11-20)
  * @param opts.tokens     [{sym, name, dec, p0, weightBp?}] basket constituents (the
  *                        machine needs two or more; weights must be supplied for all or none)
  * @param opts.targetBuck common pool depth, 6-dec (default $10M)
@@ -139,12 +137,11 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   }
   const gas = 15_000_000n;
   const kind = opts.basket ?? "machine";
-  if (kind !== "machine" && kind !== "prorata") {
-    throw new Error(`buildEquilibriumWorld: opts.basket is "machine" or "prorata", not ${kind}`);
+  if (kind !== "machine") {
+    throw new Error(`buildEquilibriumWorld: opts.basket is "machine" (the pro-rata basket is retired), not ${kind}`);
   }
-  const machine = kind === "machine";
-  const toks = opts.tokens ?? (machine ? MACHINE_TOKENS : DEFAULT_TOKENS);
-  if (machine && toks.length < 2) {
+  const toks = opts.tokens ?? MACHINE_TOKENS;
+  if (toks.length < 2) {
     throw new Error("the basket machine needs two constituents or more: " +
                     "its policy compares them in pairs (opts.tokens)");
   }
@@ -161,7 +158,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       // and router binds. Basket/wheel use their governed authorizers.
       registryArtifact: "IdentityRegistryHarness",
       // Every proxy opts into its actual insurer; the NFT is production BuckCredit.
-      ...(machine ? { accounting: "net" } : { buckArtifact: "BuckWithBasketHooks" }) });
+      accounting: "net" });
   const { reg, credit, kctrl, buck } = world;
   const me = session.account.address;
   // The deployer registers a real identity, then binds contracts as the
@@ -173,39 +170,24 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       [addr, g(operator.kp.pk), ct(operator.E), true, carrying], { tag });
 
   // --- factory, basket + venue, wiring (deploy.py order) --------------
-  const v3f = machine ? world.net.factory : await session.deploy(artifacts("UniswapV3Factory"), [],
-    { name: "UniswapV3Factory", gas });
+  const v3f = world.net.factory;
   // The machine's venue (BasketVenueFacet) refuses a price from a pool that
   // is empty or has no history, so the shell starts on the plain venue,
   // registers its constituents, and takes the machine's venue once the
   // pools are seeded and aged (below).
-  const shellName = machine ? "BuckBasketEquity" : "BuckBasketProRata";
+  const shellName = "BuckBasketEquity";
   const venueName = "BuckBasketUniswapV3";
   const basketArt = artifacts(shellName);
   // Reuse the canonical stack's one linked basket and fund graph. Do not
   // deploy a second basket beside the one already configured in Jubilee.
-  const basketShell = machine ? world.net.basket : await session.deploy(basketArt,
-    [buck.address, kctrl.address, v3f.address, me, FEES.buck, 600, OBSERVATIONS, 500, 1000],
-    { name: shellName, gas });
+  const basketShell = world.net.basket;
   const venue = await session.deploy(artifacts(venueName), [], { name: venueName, gas });
   await session.send(basketShell, "setVenue", [venue.address], { tag: "eq:setVenue" });
   await session.send(kctrl, "setBasket", [basketShell.address], { tag: "eq:kctrl.setBasket" });
-  if (!machine) {
-    // The basket is wired by the insurance pool: the world's own pool contract
-    // acts through its exec(); a caller-supplied pool must be the deployer.
-    if (world.pool) {
-      await session.send(world.pool, "exec", [buck.address, encodeFunctionData({
-        abi: buck.abi, functionName: "setBasket", args: [basketShell.address] })],
-        { tag: "eq:buck.setBasket" });
-    } else {
-      await session.send(buck, "setBasket", [basketShell.address], { tag: "eq:buck.setBasket" });
-    }
-    await bind(basketShell.address, true, "eq:bind:basket");
-  }
   // The shell's entry wins a shared name; the facets add their own.
   const union = [...basketArt.abi];
   const seen = new Set(union.map((e) => `${e.type}:${e.name}`));
-  for (const name of machine ? [venueName, "BasketVenueFacet", "BasketUpkeepFacet"] : [venueName]) {
+  for (const name of [venueName, "BasketVenueFacet", "BasketUpkeepFacet"]) {
     for (const e of artifacts(name).abi) {
       if (!seen.has(`${e.type}:${e.name}`)) { seen.add(`${e.type}:${e.name}`); union.push(e); }
     }
@@ -269,10 +251,6 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
                        { tag: `eq:bootstrap-stock:${t.sym}` });
     await session.send(erc20, "approve", [basket.address, seedTok],
                        { tag: `eq:bootstrap-approve:${t.sym}` });
-    if (!machine) {
-      await session.send(basket, "depositToken", [erc20.address, seedTok, 0n],
-                         { tag: `eq:bootstrap-deposit:${t.sym}`, gas: 3_000_000n });
-    }
     tokens.push({ ...t, erc20, poolUsdc, seedTok,
                   poolBuck: session.contractAt(poolAbi, pb) });
   }
@@ -282,13 +260,13 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   // resting K with a further 20%.
   const k0 = await session.call(kctrl, "buckK");
   // On the machine SimLP also seeds each TOKEN/BUCK pool, a tenth as deep.
-  const seedBuck = machine ? targetBuck / 10n : 0n;
+  const seedBuck = targetBuck / 10n;
   const mintAmt = ((targetBuck + seedBuck * BigInt(tokens.length)) * 12n) / 10n;
   const face2 = (((mintAmt * E18) / k0) * 12n) / 10n;
   const depth = targetBuck + seedBuck * BigInt(tokens.length);
   const FACE = 2n * depth > face2 ? 2n * depth : face2;
   const now = (await session.client.getBlock()).timestamp;
-  const insurer = machine ? world.operator.account : session.account;
+  const insurer = world.operator.account;
   const acceptInsurer = (proxy, tag) => session.send(proxy, "exec", [credit.address, encodeFunctionData({
     abi: credit.abi, functionName: "setCreditIssuer", args: [insurer.address, true] })], { tag });
   await acceptInsurer(simlp, "eq:simlp.acceptInsurer");
@@ -316,193 +294,190 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   // --- the basket machine: observer, policy, reference, upkeep, wheel ---
   // (BasketMachineIntegration.t.sol's wiring, at the control lab's settings.)
   let parts = null;
-  if (machine) {
-    // Seed and age the basket's pools: an independent LP's full-range
-    // position in each, a tenth of the common depth, then the TWAP window.
-    for (const t of tokens) {
-      const unit = 10n ** BigInt(t.dec);
-      const sp = sqrtPriceX96(t.erc20.address, unit, buck.address, t.p0);
-      const t0 = await session.call(t.poolBuck, "token0");
-      const t1 = await session.call(t.poolBuck, "token1");
-      const L = buck.address.toLowerCase() === t0.toLowerCase()
-        ? (seedBuck * sp) / Q96 : (seedBuck * Q96) / sp;
-      const [lo, hi] = fullRangeTicks(SPACING[FEES.buck]);
-      await session.send(simlp, "mint", [t.poolBuck.address, lo, hi, L, t0, t1],
-                         { tag: `eq:seed:${t.sym}-buck` });
-    }
-    await advanceTime(world, MACHINE.settle);
-    // The price book first: the venue hands K its sample while it is fresh.
-    const parity = await session.deploy(artifacts("BasketReference"),
-      [basket.address, MACHINE.interval, MACHINE.maxAge, MACHINE.deviationBp],
-      { name: "BasketReference", gas });
-    const machineVenue = await session.deploy(artifacts("BasketVenueFacet"), [parity.address],
-      { name: "BasketVenueFacet", gas });
-    await session.send(basket, "setVenue", [machineVenue.address],
-                       { tag: "eq:setVenue:machine" });
-
-    const observer = await session.deploy(artifacts("PairSignals"),
-      [tokens.map((t) => t.erc20.address), [buck.address, usdc.address],
-       [...tokens.map((t) => t.poolBuck.address), ...tokens.map((t) => t.poolUsdc.address)],
-       ...MACHINE.observer],
-      { name: "PairSignals", gas });
-    // Each constituent's reference is the price it joined at, never a live one.
-    const reference = tokens.map((t) =>
-      BigInt(Math.round(Math.log(Number(t.p0) / 1e6) / LOG_TICK * 1e18)));
-    const policy = await session.deploy(artifacts("PairRebalancePolicy"),
-      [observer.address, basket.address, reference, MACHINE.sizing],
-      { name: "PairRebalancePolicy", gas });
-    const upkeep = await session.deploy(linkArtifact(artifacts("BasketUpkeepFacet"), {
-      "src/basket/BasketJubileeMath.sol:BasketJubileeMath": world.net.basketValuationLibrary.address,
-      "src/basket/BasketMarketOps.sol:BasketMarketOps": world.net.basketMarketLibrary.address }),
-      [policy.address, parity.address, MACHINE.parityGain, MACHINE.parityGainDear],
-      { name: "BasketUpkeepFacet", gas });
-    const wheel = await session.deploy(artifacts("BasketMachineWheel"),
-      [buck.address, usdc.address, me, 0, 0n], { name: "BasketMachineWheel", gas });
-    // The book prices the routes through USDC from the wheel's arbitrage triangles.
-    await session.send(parity, "setMarkets", [wheel.address], { tag: "eq:book.setMarkets" });
-    await session.send(basket, "setEquityWheel", [upkeep.address], { tag: "eq:setEquityWheel" });
-    // These two service bindings use their actual governed authorization
-    // APIs, even though the registry harness is still needed for synthetic
-    // SimLP/Universal Router infrastructure. Production registry acceptance
-    // of the same APIs is separately covered by the contract suites.
-    await session.send(basket, "authorizeIdentityBinding",
-      [reg.address, me, g(operator.kp.pk), ct(operator.E)], { tag: "eq:basket.authorizeIdentity" });
-    await bind(basket.address, true, "eq:bind:basket");
-    await session.send(buck, "setApprovedCarryingIssuer", [basket.address, true],
-      { tag: "eq:basket.approveCarryingIssuer" });
-    await session.send(wheel, "authorizeIdentityBinding",
-      [me, g(operator.kp.pk), ct(operator.E)], { tag: "eq:wheel.authorizeIdentity" });
-    await bind(wheel.address, true, "eq:bind:wheel");
-    await identityApprove(world, operator, { account: { address: wheel.address }, kp: operator.kp,
-      fields: { given_name: "WorkWheel" } }, { allowance: 0n, rng: opts.rng });
-    // The upkeep facet is written for a credit marked net: K bounds the
-    // BUCKs the basket has let out, not those it holds beside its TOKEN.
-    await session.send(basket, "setNetMark", [true], { tag: "eq:setNetMark" });
-    await session.send(basket, "openCredit", [credit.address, MACHINE.creditFace],
-                       { tag: "eq:basket.openCredit" });
-    await session.send(basket, "setResponse", [MACHINE.response], { tag: "eq:setResponse" });
-    await session.send(basket, "setWheel", [wheel.address], { tag: "eq:setWheel" });
-    await session.send(wheel, "setSample", [parity.address], { tag: "eq:wheel.setSample" });
-    await session.send(wheel, "setController", [kctrl.address], { tag: "eq:wheel.setController" });
-    await session.send(wheel, "setEquity", [basket.address], { tag: "eq:wheel.setEquity" });
-    const fund = world.net.fund;
-    await session.send(wheel, "setValuationSource", [fund.address], { tag: "eq:wheel.setValuationSource" });
-    await session.send(fund, "setValuationWheel", [wheel.address], { tag: "eq:fund.setValuationWheel" });
-    await session.send(fund, "setInvestmentKeeper", [wheel.address], { tag: "eq:fund.setInvestmentKeeper" });
-    // Use the existing bounded jobs; portfolio trades remain outside Buck's
-    // lock. Optional basket-principal scheduling remains a policy parameter.
-    const jubileePolicy = opts.jubileePolicy ?? { maturitySteps: 8, saleCapBp: 1000, slippageBp: 100,
-      deferredBurnCap: targetBuck / 100n, retirementMinimum: 1_000_000n, retirementCap: 0n };
-    await session.send(wheel, "setJubilee", [fund.address, jubileePolicy], { tag: "eq:wheel.setJubilee" });
-    world.net.wheel = wheel;
-    world.net.upkeep = upkeep;
-    world.net.venue = machineVenue;
-    parts = { observer, policy, parity, upkeep, wheel };
-    // A keeper pays up to the block for a tick (recommendation 77): a tick near K = 0 needs 13.9M gas,
-    // and a 12M limit stopped five-year worlds in that regime instead of recording it.
-    const TICK_GAS = 25_000_000n;
-    world.turnWheel = async ({ tag } = {}) => {
-      const base = tag ?? "eq:wheel";
-      const receipts = [];
-      world.lastWheelReceipts = receipts; // Keep confirmed prefixes on a later refusal.
-      await session.send(wheel, "rearm", [], { tag: `${base}:rearm` });
-      const bounded = await session.call(wheel, "arbRouteCount") > 0n;
-      const slots = await session.call(wheel, "slotCount");
-      let remaining = slots, budget = 12n, cursor = await session.call(wheel, "cursor");
-      do {
-        const scan = bounded ? (remaining < 4n ? remaining : 4n) : 0n;
-        const receipt = await session.send(wheel, "tick", [bounded ? 1n : budget, scan],
-          { tag: `${base}:tick:${receipts.length}`, gas: world.tickGas ?? TICK_GAS });
-        receipts.push(receipt);
-        const work = parseEventLogs({ abi: wheel.abi, logs: receipt.logs, eventName: "Ticked" })
-          .reduce((sum, e) => sum + e.args.work, 0n);
-        budget = work < budget ? budget - work : 0n;
-        // Publish between batches: later jobs must see the current single
-        // receipt key. This source remains read-only inside Buck operations.
-        await session.send(wheel, "refreshValuation", [],
-          { tag: `${base}:valuation:${receipts.length}`, expect: "either" });
-        if (!bounded) break;
-        const next = await session.call(wheel, "cursor");
-        const delta = (next + slots - cursor) % slots;
-        const examined = delta || (scan >= slots ? slots : 0n);
-        if (!examined) break;
-        remaining = examined < remaining ? remaining - examined : 0n;
-        cursor = next;
-      } while (remaining > 0n && budget > 0n);
-      return receipts.at(-1);
-    };
-    /** Turns the wheel to completion: while its pending() view reads work, a tick toward the slot it
-     *  names (tick(1, steps + 1), at most SETTLE_SCAN slots a transaction), the valuation published
-     *  after each. pending() is an eth_call --
-     *  no gas -- and exact on the machine's wheel (CompletionMemo): it reads false exactly when a
-     *  tick would find nothing. Returns { receipts, settled }; settled is false only when maxTicks
-     *  ran out first (Python: basket_machine.settle_receipts). */
-    // The machine's tickAt (owner, 2026-11-20) runs the slot pending() names and passes nothing.
-    const direct = wheel.abi.some((f) => f.type === "function" && f.name === "tickAt");
-    world.settleWheel = async ({ tag, maxTicks = SETTLE_TICKS } = {}) => {
-      const base = tag ?? "eq:wheel";
-      const receipts = [];
-      world.lastWheelReceipts = receipts;
-      const count = direct ? await session.call(wheel, "slotCount", []) : 0n;
-      for (let i = 0; i < maxTicks; i++) {
-        const [due, steps] = await session.call(wheel, "pending", [], { gas: VIEW_GAS });
-        if (!due) return { receipts, settled: true };
-        if (direct) {
-          const slot = ((await session.call(wheel, "cursor", [])) + steps) % count;
-          receipts.push(await session.send(wheel, "tickAt", [slot],
-            { tag: `${base}:tick:${i}`, gas: world.tickGas ?? TICK_GAS }));
-        } else {
-          // Toward the slot it names, at most SETTLE_SCAN slots a transaction (each slot passed
-          // evaluates its view on-chain; an arbitrage plan is costly): the bounded rotation's rule.
-          receipts.push(await session.send(wheel, "tick", [1n, steps + 1n < SETTLE_SCAN ? steps + 1n : SETTLE_SCAN],
-            { tag: `${base}:tick:${i}`, gas: world.tickGas ?? TICK_GAS }));
-        }
-        await session.send(wheel, "refreshValuation", [], { tag: `${base}:valuation:${i}`, expect: "either" });
-      }
-      const [due] = await session.call(wheel, "pending", [], { gas: VIEW_GAS });
-      return { receipts, settled: !due };
-    };
-
-    // Bootstrap the basket's pools to real depth: a targetBuck-sized
-    // deposit of each TOKEN from the deployer, which the wheel pairs with
-    // BUCKs the basket issues.
-    for (const t of tokens) {
-      await session.send(basket, "depositToken", [t.erc20.address, t.seedTok, 0n],
-                         { tag: `eq:bootstrap-deposit:${t.sym}`, gas: 3_000_000n });
-    }
-    for (let turn = 0; turn < 8; turn++) {
-      await advanceTime(world, MACHINE.interval + 1);
-      await world.turnWheel({ tag: `eq:bootstrap-wheel:${turn}` });
-      const placed = await Promise.all(tokens.map((_, i) =>
-        session.call(basket, "liquidityOf", [BigInt(i)])));
-      if (placed.every((l) => l > 0n)) break;
-      if (turn === 7) throw new Error("the wheel did not pair the bootstrap deposits");
-    }
-    if (opts.wheelArb !== false) {
-      // A cycle is at most 5% of its first pool's reserve, the machine wheel's limit (owner, 2026-11-20).
-      await session.send(wheel, "setArb", [poolUB.address, basket.address, 0,
-        opts.arbCapBp ?? 500, opts.arbMinEdgeBp ?? 0], { tag: "eq:arb.configure" });
-      // Flash arbitrage (owner, 2026-11-20): each cycle's BUCK leg borrowed fresh from the basket's line.
-      if (opts.arbFlash) await session.send(wheel, "setArbFlash", [true], { tag: "eq:arb.flash" });
-      for (const [i, t] of tokens.entries()) await session.send(wheel, "setTriangle",
-        [BigInt(i), [t.erc20.address, t.poolBuck.address, t.poolUsdc.address, BigInt(i)]],
-        { tag: `eq:arb.register:${t.sym}` });
-      // The book reads these routes' TWAPs: their pools keep the basket's observations.
-      await session.send(parity, "widen", [], { tag: "eq:book.widen", gas: 30_000_000n });
-    }
+  // Seed and age the basket's pools: an independent LP's full-range
+  // position in each, a tenth of the common depth, then the TWAP window.
+  for (const t of tokens) {
+    const unit = 10n ** BigInt(t.dec);
+    const sp = sqrtPriceX96(t.erc20.address, unit, buck.address, t.p0);
+    const t0 = await session.call(t.poolBuck, "token0");
+    const t1 = await session.call(t.poolBuck, "token1");
+    const L = buck.address.toLowerCase() === t0.toLowerCase()
+      ? (seedBuck * sp) / Q96 : (seedBuck * Q96) / sp;
+    const [lo, hi] = fullRangeTicks(SPACING[FEES.buck]);
+    await session.send(simlp, "mint", [t.poolBuck.address, lo, hi, L, t0, t1],
+                       { tag: `eq:seed:${t.sym}-buck` });
   }
+  await advanceTime(world, MACHINE.settle);
+  // The price book first: the venue hands K its sample while it is fresh.
+  const parity = await session.deploy(artifacts("BasketReference"),
+    [basket.address, MACHINE.interval, MACHINE.maxAge, MACHINE.deviationBp],
+    { name: "BasketReference", gas });
+  const machineVenue = await session.deploy(artifacts("BasketVenueFacet"), [parity.address],
+    { name: "BasketVenueFacet", gas });
+  await session.send(basket, "setVenue", [machineVenue.address],
+                     { tag: "eq:setVenue:machine" });
 
+  const observer = await session.deploy(artifacts("PairSignals"),
+    [tokens.map((t) => t.erc20.address), [buck.address, usdc.address],
+     [...tokens.map((t) => t.poolBuck.address), ...tokens.map((t) => t.poolUsdc.address)],
+     ...MACHINE.observer],
+    { name: "PairSignals", gas });
+  // Each constituent's reference is the price it joined at, never a live one.
+  const reference = tokens.map((t) =>
+    BigInt(Math.round(Math.log(Number(t.p0) / 1e6) / LOG_TICK * 1e18)));
+  const policy = await session.deploy(artifacts("PairRebalancePolicy"),
+    [observer.address, basket.address, reference, MACHINE.sizing],
+    { name: "PairRebalancePolicy", gas });
+  const upkeep = await session.deploy(linkArtifact(artifacts("BasketUpkeepFacet"), {
+    "src/basket/BasketJubileeMath.sol:BasketJubileeMath": world.net.basketValuationLibrary.address,
+    "src/basket/BasketMarketOps.sol:BasketMarketOps": world.net.basketMarketLibrary.address }),
+    [policy.address, parity.address, MACHINE.parityGain, MACHINE.parityGainDear],
+    { name: "BasketUpkeepFacet", gas });
+  const wheel = await session.deploy(artifacts("BasketMachineWheel"),
+    [buck.address, usdc.address, me, 0, 0n], { name: "BasketMachineWheel", gas });
+  // The book prices the routes through USDC from the wheel's arbitrage triangles.
+  await session.send(parity, "setMarkets", [wheel.address], { tag: "eq:book.setMarkets" });
+  await session.send(basket, "setEquityWheel", [upkeep.address], { tag: "eq:setEquityWheel" });
+  // These two service bindings use their actual governed authorization
+  // APIs, even though the registry harness is still needed for synthetic
+  // SimLP/Universal Router infrastructure. Production registry acceptance
+  // of the same APIs is separately covered by the contract suites.
+  await session.send(basket, "authorizeIdentityBinding",
+    [reg.address, me, g(operator.kp.pk), ct(operator.E)], { tag: "eq:basket.authorizeIdentity" });
+  await bind(basket.address, true, "eq:bind:basket");
+  await session.send(buck, "setApprovedCarryingIssuer", [basket.address, true],
+    { tag: "eq:basket.approveCarryingIssuer" });
+  await session.send(wheel, "authorizeIdentityBinding",
+    [me, g(operator.kp.pk), ct(operator.E)], { tag: "eq:wheel.authorizeIdentity" });
+  await bind(wheel.address, true, "eq:bind:wheel");
+  await identityApprove(world, operator, { account: { address: wheel.address }, kp: operator.kp,
+    fields: { given_name: "WorkWheel" } }, { allowance: 0n, rng: opts.rng });
+  // The upkeep facet is written for a credit marked net: K bounds the
+  // BUCKs the basket has let out, not those it holds beside its TOKEN.
+  await session.send(basket, "setNetMark", [true], { tag: "eq:setNetMark" });
+  await session.send(basket, "openCredit", [credit.address, MACHINE.creditFace],
+                     { tag: "eq:basket.openCredit" });
+  await session.send(basket, "setResponse", [MACHINE.response], { tag: "eq:setResponse" });
+  await session.send(basket, "setWheel", [wheel.address], { tag: "eq:setWheel" });
+  await session.send(wheel, "setSample", [parity.address], { tag: "eq:wheel.setSample" });
+  await session.send(wheel, "setController", [kctrl.address], { tag: "eq:wheel.setController" });
+  await session.send(wheel, "setEquity", [basket.address], { tag: "eq:wheel.setEquity" });
+  const fund = world.net.fund;
+  await session.send(wheel, "setValuationSource", [fund.address], { tag: "eq:wheel.setValuationSource" });
+  await session.send(fund, "setValuationWheel", [wheel.address], { tag: "eq:fund.setValuationWheel" });
+  await session.send(fund, "setInvestmentKeeper", [wheel.address], { tag: "eq:fund.setInvestmentKeeper" });
+  // Use the existing bounded jobs; portfolio trades remain outside Buck's
+  // lock. Optional basket-principal scheduling remains a policy parameter.
+  const jubileePolicy = opts.jubileePolicy ?? { maturitySteps: 8, saleCapBp: 1000, slippageBp: 100,
+    deferredBurnCap: targetBuck / 100n, retirementMinimum: 1_000_000n, retirementCap: 0n };
+  await session.send(wheel, "setJubilee", [fund.address, jubileePolicy], { tag: "eq:wheel.setJubilee" });
+  world.net.wheel = wheel;
+  world.net.upkeep = upkeep;
+  world.net.venue = machineVenue;
+  parts = { observer, policy, parity, upkeep, wheel };
+  // A keeper pays up to the block for a tick (recommendation 77): a tick near K = 0 needs 13.9M gas,
+  // and a 12M limit stopped five-year worlds in that regime instead of recording it.
+  const TICK_GAS = 25_000_000n;
+  world.turnWheel = async ({ tag } = {}) => {
+    const base = tag ?? "eq:wheel";
+    const receipts = [];
+    world.lastWheelReceipts = receipts; // Keep confirmed prefixes on a later refusal.
+    await session.send(wheel, "rearm", [], { tag: `${base}:rearm` });
+    const bounded = await session.call(wheel, "arbRouteCount") > 0n;
+    const slots = await session.call(wheel, "slotCount");
+    let remaining = slots, budget = 12n, cursor = await session.call(wheel, "cursor");
+    do {
+      const scan = bounded ? (remaining < 4n ? remaining : 4n) : 0n;
+      const receipt = await session.send(wheel, "tick", [bounded ? 1n : budget, scan],
+        { tag: `${base}:tick:${receipts.length}`, gas: world.tickGas ?? TICK_GAS });
+      receipts.push(receipt);
+      const work = parseEventLogs({ abi: wheel.abi, logs: receipt.logs, eventName: "Ticked" })
+        .reduce((sum, e) => sum + e.args.work, 0n);
+      budget = work < budget ? budget - work : 0n;
+      // Publish between batches: later jobs must see the current single
+      // receipt key. This source remains read-only inside Buck operations.
+      await session.send(wheel, "refreshValuation", [],
+        { tag: `${base}:valuation:${receipts.length}`, expect: "either" });
+      if (!bounded) break;
+      const next = await session.call(wheel, "cursor");
+      const delta = (next + slots - cursor) % slots;
+      const examined = delta || (scan >= slots ? slots : 0n);
+      if (!examined) break;
+      remaining = examined < remaining ? remaining - examined : 0n;
+      cursor = next;
+    } while (remaining > 0n && budget > 0n);
+    return receipts.at(-1);
+  };
+  /** Turns the wheel to completion: while its pending() view reads work, a tick toward the slot it
+   *  names (tick(1, steps + 1), at most SETTLE_SCAN slots a transaction), the valuation published
+   *  after each. pending() is an eth_call --
+   *  no gas -- and exact on the machine's wheel (CompletionMemo): it reads false exactly when a
+   *  tick would find nothing. Returns { receipts, settled }; settled is false only when maxTicks
+   *  ran out first (Python: basket_machine.settle_receipts). */
+  // The machine's tickAt (owner, 2026-11-20) runs the slot pending() names and passes nothing.
+  const direct = wheel.abi.some((f) => f.type === "function" && f.name === "tickAt");
+  world.settleWheel = async ({ tag, maxTicks = SETTLE_TICKS } = {}) => {
+    const base = tag ?? "eq:wheel";
+    const receipts = [];
+    world.lastWheelReceipts = receipts;
+    const count = direct ? await session.call(wheel, "slotCount", []) : 0n;
+    for (let i = 0; i < maxTicks; i++) {
+      const [due, steps] = await session.call(wheel, "pending", [], { gas: VIEW_GAS });
+      if (!due) return { receipts, settled: true };
+      if (direct) {
+        const slot = ((await session.call(wheel, "cursor", [])) + steps) % count;
+        receipts.push(await session.send(wheel, "tickAt", [slot],
+          { tag: `${base}:tick:${i}`, gas: world.tickGas ?? TICK_GAS }));
+      } else {
+        // Toward the slot it names, at most SETTLE_SCAN slots a transaction (each slot passed
+        // evaluates its view on-chain; an arbitrage plan is costly): the bounded rotation's rule.
+        receipts.push(await session.send(wheel, "tick", [1n, steps + 1n < SETTLE_SCAN ? steps + 1n : SETTLE_SCAN],
+          { tag: `${base}:tick:${i}`, gas: world.tickGas ?? TICK_GAS }));
+      }
+      await session.send(wheel, "refreshValuation", [], { tag: `${base}:valuation:${i}`, expect: "either" });
+    }
+    const [due] = await session.call(wheel, "pending", [], { gas: VIEW_GAS });
+    return { receipts, settled: !due };
+  };
+
+  // Bootstrap the basket's pools to real depth: a targetBuck-sized
+  // deposit of each TOKEN from the deployer, which the wheel pairs with
+  // BUCKs the basket issues.
+  for (const t of tokens) {
+    await session.send(basket, "depositToken", [t.erc20.address, t.seedTok, 0n],
+                       { tag: `eq:bootstrap-deposit:${t.sym}`, gas: 3_000_000n });
+  }
+  for (let turn = 0; turn < 8; turn++) {
+    await advanceTime(world, MACHINE.interval + 1);
+    await world.turnWheel({ tag: `eq:bootstrap-wheel:${turn}` });
+    const placed = await Promise.all(tokens.map((_, i) =>
+      session.call(basket, "liquidityOf", [BigInt(i)])));
+    if (placed.every((l) => l > 0n)) break;
+    if (turn === 7) throw new Error("the wheel did not pair the bootstrap deposits");
+  }
+  if (opts.wheelArb !== false) {
+    // A cycle is at most 5% of its first pool's reserve, the machine wheel's limit (owner, 2026-11-20).
+    await session.send(wheel, "setArb", [poolUB.address, basket.address, 0,
+      opts.arbCapBp ?? 500, opts.arbMinEdgeBp ?? 0], { tag: "eq:arb.configure" });
+    // Flash arbitrage (owner, 2026-11-20): each cycle's BUCK leg borrowed fresh from the basket's line.
+    if (opts.arbFlash) await session.send(wheel, "setArbFlash", [true], { tag: "eq:arb.flash" });
+    for (const [i, t] of tokens.entries()) await session.send(wheel, "setTriangle",
+      [BigInt(i), [t.erc20.address, t.poolBuck.address, t.poolUsdc.address, BigInt(i)]],
+      { tag: `eq:arb.register:${t.sym}` });
+    // The book reads these routes' TWAPs: their pools keep the basket's observations.
+    await session.send(parity, "widen", [], { tag: "eq:book.widen", gas: 30_000_000n });
+  }
 
   // --- the real router, identity-bound ---------------------------------
   const weth = await session.deploy(artifacts("WETH9"), [], { name: "WETH9", gas });
-  const permit2 = machine ? await session.deploy(artifacts("Permit2"), [], { name: "Permit2", gas }) : null;
+  const permit2 = await session.deploy(artifacts("Permit2"), [], { name: "Permit2", gas });
   const router = await deployUniversalRouter(session, opts.urArtifact,
     { weth: weth.address, v3Factory: v3f.address,
       ...(permit2 ? { permit2: permit2.address } : {}),
       poolInitCode: artifacts("UniswapV3Pool").bytecode });
   await bind(router.address, true, "eq:bind:router");
-  const swapGuard = machine ? await session.deploy(artifacts("BuckNetSwapGuard"),
-    [buck.address, usdc.address, v3f.address], { name: "BuckNetSwapGuard", gas }) : null;
+  const swapGuard = await session.deploy(artifacts("BuckNetSwapGuard"),
+    [buck.address, usdc.address, v3f.address], { name: "BuckNetSwapGuard", gas });
 
   // --- reference feeds (the whales' walks; refUsd's ground truth) ------
   // The reference prices: given paths (opts.feeds, one array of quote base units per whole TOKEN a
@@ -517,23 +492,21 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     fees: FEES, series: [], _proxies: new Map(),
     receipts: tokens.length,        // the bootstrap deposits' receipts
     basketKind: kind,
-    machine: parts,                 // null on the pro-rata basket
+    machine: parts,
     wheel: parts?.wheel ?? null,
   });
-  if (machine) {
-    const execute = (owner, contract, name, args, opts = {}) =>
-      session.send(session.contractAt(artifacts("SimLP").abi, owner.address ?? owner), "exec",
-        [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })],
-        { gas: 5_000_000n, ...opts });
-    // Read-only twin of execute: eth_call the same holder proxy and discard
-    // its writes. Backends differ on a direct call whose sender has code.
-    const simulate = (owner, contract, name, args, { blockNumber } = {}) => session.client.readContract({
-      address: owner.address ?? owner, abi: artifacts("SimLP").abi, functionName: "exec",
-      args: [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })], blockNumber });
-    world.netCreditOps = netCreditOps(session, world.net, execute, { simulate });
-    world.netMarket = { usdc, v3f, pool: poolUB, router, permit2, guard: swapGuard, fee: FEES.ub, execute, simulate };
-    world.netSettlementOps = settlementOps(session, usdc, { execute });
-  }
+  const execute = (owner, contract, name, args, opts = {}) =>
+    session.send(session.contractAt(artifacts("SimLP").abi, owner.address ?? owner), "exec",
+      [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })],
+      { gas: 5_000_000n, ...opts });
+  // Read-only twin of execute: eth_call the same holder proxy and discard
+  // its writes. Backends differ on a direct call whose sender has code.
+  const simulate = (owner, contract, name, args, { blockNumber } = {}) => session.client.readContract({
+    address: owner.address ?? owner, abi: artifacts("SimLP").abi, functionName: "exec",
+    args: [contract.address, encodeFunctionData({ abi: contract.abi, functionName: name, args })], blockNumber });
+  world.netCreditOps = netCreditOps(session, world.net, execute, { simulate });
+  world.netMarket = { usdc, v3f, pool: poolUB, router, permit2, guard: swapGuard, fee: FEES.ub, execute, simulate };
+  world.netSettlementOps = settlementOps(session, usdc, { execute });
 
   // ==== agent-facing op helpers (the doctrine's plumbing layer) ========
 
@@ -628,33 +601,13 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   world.creditState = async (account) => {
     const me = world.holderAddress(account);
     const ids = world._credits.get(account.address) ?? [];
-    if (machine) {
-      const book = await world.netCreditOps.markHousehold(me, ids);
-      const available = await world.netCreditOps.quoteHouseholdActivatedCapacity(me, ids);
-      return { drawn: book.state.issued, limit: book.creditLimit, held: book.state.spendable,
-        spendable: book.state.spendable, unactivated: available.unactivatedPresent,
-        capacity: available.capacity, headroom: book.state.spendable + available.capacity,
-        jub: book.reliefScaled / (10n ** 36n), deposit: book.state.premiumNominal,
-        insuranceAge: book.state.premiumNominal - book.premiumNetScaled / (10n ** 36n) };
-    }
-    const [signed, limit, jub, k] = await Promise.all([
-      session.call(buck, "signedBalanceOf", [me]),
-      session.call(buck, "creditLimit", [me]),
-      session.call(buck, "reliefOf", [me]),
-      session.call(kctrl, "buckK")]);
-    let unactivated = 0n, capacity = 0n;
-    for (const tid of ids) {
-      const info = await session.call(credit, "creditInfo", [tid]);
-      const [face, act, rate] = [info[0], info[1], BigInt(info[2])];
-      const room = face > act ? face - act : 0n;
-      const per = k - rate * POOL_ROI_INV * 10n ** 14n;     // K - e, 1e18
-      unactivated += room;
-      capacity += per > 0n ? (room * per) / E18 : 0n;
-    }
-    const drawn = signed < 0n ? -signed : 0n;
-    const spendable = await session.call(buck, "balanceOf", [me]);
-    return { drawn, limit, held: signed > 0n ? signed : 0n, unactivated, jub,
-             spendable, capacity, headroom: spendable + capacity };
+    const book = await world.netCreditOps.markHousehold(me, ids);
+    const available = await world.netCreditOps.quoteHouseholdActivatedCapacity(me, ids);
+    return { drawn: book.state.issued, limit: book.creditLimit, held: book.state.spendable,
+      spendable: book.state.spendable, unactivated: available.unactivatedPresent,
+      capacity: available.capacity, headroom: book.state.spendable + available.capacity,
+      jub: book.reliefScaled / (10n ** 36n), deposit: book.state.premiumNominal,
+      insuranceAge: book.state.premiumNominal - book.premiumNetScaled / (10n ** 36n) };
   };
 
   /** The Buck.mint argument that makes `tranche` spendable: what it
@@ -829,7 +782,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
                         fields: { given_name: "BuckBasket" } };
   world.approveBasket = async (account) => {
     const key = account.address.toLowerCase();
-    if (!machine || approved.has(key) || world._proxies.has(account.address)) return;
+    if (approved.has(key) || world._proxies.has(account.address)) return;
     const holder = identityOf(world, account.address);
     if (!holder) throw new Error(`${account.address} is not registered: it cannot be paid BUCK`);
     await identityApprove(world, holder, basketParty);
@@ -896,23 +849,9 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     return usd;
   };
 
-  /** Mark a receipt to market.  On the equity basket: its shares at the
-   *  share price, in BUCK, at the floating spot.  On the pro-rata basket:
-   *  principals valued at today's references (v1: LP-fee drift inside the
-   *  position is not counted). */
-  world.receiptValueUsd = async (receiptId, day) => {
-    if (machine) {
-      return (await session.call(basket, "valueOf", [receiptId]))
-             * (await world.spotUB()) / 1_000_000n;
-    }
-    const dep = await session.call(basket, "deposits", [receiptId]);
-    const [principalBuck, principalTok, tokenAddr] = [dep[0], dep[1], dep[2]];
-    const i = tokens.findIndex((t) =>
-      t.erc20.address.toLowerCase() === String(tokenAddr).toLowerCase());
-    let usd = principalBuck * (await world.spotUB()) / 1_000_000n;
-    if (i >= 0) usd += world.refUsd(i, day, principalTok);
-    return usd;
-  };
+  /** Mark a receipt to market: its shares at the share price, in BUCK, at the floating spot. */
+  world.receiptValueUsd = async (receiptId, day) =>
+    (await session.call(basket, "valueOf", [receiptId])) * (await world.spotUB()) / 1_000_000n;
 
   /** Sample the loop's observables into world.series (chart food):
    *  the controller pair (K, fundingFactor), the peg observable, and

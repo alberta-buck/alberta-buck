@@ -52,9 +52,6 @@ export const NEEDED = [
   "PairRebalancePolicy",
   "BasketReference",
   "BasketMachineWheel",
-  // eq world, opts.basket = "prorata": the pro-rata basket and its hooks
-  "BuckBasketProRata",
-  "BuckWithBasketHooks",
 ];
 
 // The sandbox: no test harnesses. The corrected Buck stack is under migration; including

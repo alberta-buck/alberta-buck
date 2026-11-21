@@ -5902,12 +5902,26 @@ idle BUCK is the basket's liquidity target.
 - *Also done*: the desk's slot due only when its policy advises, memory per kind (the Jubilee jobs and
   a refused desk wait for the hour, not for other work), and the keepers calling =tickAt= in both
   worlds: half the keeper transactions, 59% less wheel gas.
+- *Also done*: the arb cycle cap at 5% (owner), and the old baskets' retirement R1 to R4
+  (doc/review/consolidation-plan.org, "Retiring the old baskets"): the earlier upkeep unpublished;
+  =deploy()=, the server and the savings page on the machine only; every shared Solidity fixture on
+  the machine's facets; the pro-rata and ops baskets, the hooked Buck, the earlier upkeep, the pairs
+  director and the shadow controller deleted with their suites, simulation paths, Make targets and
+  JS options. Found on the way, for the owner: a near-zero-K exit of a fully paired basket reverts
+  (the shortfall rule retires the marked held BUCK, more than the exit releases; pinned as a known
+  issue), and the machine's venue refuses the Jubilee fund's scheduled sale while a pool's spot is
+  off its TWAP (it sells once the average catches up).
+- *Observations for the five-year runs, the sandbox and the savings sandbox*: the five-year suite
+  already ran on the machine, so R2 to R4 change none of its numbers (the machine path's
+  transactions keep their order); the savings server and page now offer only the machine, and a
+  page's =scenario.basket= set is refused; the sandbox bundle no longer carries the pro-rata
+  artifacts. Recommendation: R5 next (the shared storage's dead fields need a layout check first),
+  before the release, so the published shell's storage is the one we keep.
 - *Next, in order*: read the flash comparison (and choose the defaults: =arb_flash=, the retirement
-  cap); the shadow
-  controller's deletion with the old ops (pro-rata) basket family, where it is entangled (its desk
-  =MonetaryDesk=, the controller choice in =__main__= / =deploy=, =kdesign=, =shadow_book=); the stress
-  arms' port; then the demand cast. Also: regenerate the pinned vectors at 12 s; the savings sandbox's
-  step 6.
+  cap); R5 (the shared code: =ArbKind='s flash-swap path, =DirectorKind=, =SweepKind=, =EquityKind=,
+  the =IStabilizer= seam, the dead storage behind a layout check); the stress arms' port; then the
+  demand cast. Also: the owner's call on the near-zero-K exit; regenerate the pinned vectors at 12 s;
+  the savings sandbox's step 6.
 
 ** Resume here (superseded: 2026-11-15, night)
 

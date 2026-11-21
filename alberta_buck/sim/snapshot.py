@@ -106,11 +106,9 @@ def _implied(d, pool, token_c, dec, quote_c):
 
 
 def _wp13_frame(d) -> dict:
-    """WP-13: the desk's book, the observer's aggregate position and flags,
-    and the two loops' per-term attribution, read once per frame like
-    buckK / pid_* (one terms() call for the six terms).  Every field is
-    None when its source is absent: the desk's book needs an ops basket,
-    the observer / position fields the shadow controller."""
+    """WP-13: the desk's book, read once per frame like buckK. The observer and position fields
+    stay in the frame as None: their sources went with the shadow controller (2026-11-20), and a
+    saved record's frames keep the same keys."""
     f = {"sh_held": None, "sh_outstanding": None, "sh_net": None, "sh_cap": None,
          "sh_mode": None, "sh_s": None, "sh_sat": None, "sh_value": None,
          "sh_offset": None, "sh_offset_cap": None, "sh_stale": None,
@@ -119,9 +117,9 @@ def _wp13_frame(d) -> dict:
          "pid_s": None, "pid_is": None, "pid_ds": None,
          "pid_up": None, "pid_ui": None, "pid_ud": None,
          "pid_q": None, "pid_qi": None, "pid_qd": None}
-    if getattr(d, "basket_impl", "") in ("ops", "equity-ops"):
-        # The desk: the ops shell, or the BasketDesk beside an equity basket.
-        dk = d.desk if getattr(d, "desk", None) is not None else d.basket
+    if getattr(d, "desk", None) is not None:
+        # The desk: the BasketDesk beside the equity basket.
+        dk = d.desk
         try:
             f["sh_held"] = int(dk.functions.monetaryBuckHeld().call())
             f["sh_outstanding"] = int(dk.functions.monetaryOutstanding().call())
@@ -132,33 +130,6 @@ def _wp13_frame(d) -> dict:
             f["sh_cap"] = int(dk.functions.positionCap().call())
         except Exception:
             f["sh_cap"] = None
-    obs = getattr(d, "observer", None)
-    if obs is not None:
-        try:
-            f["sh_mode"] = int(obs.functions.mode().call())
-            f["sh_s"] = int(obs.functions.aggregatePosition().call())
-            f["sh_sat"] = int(obs.functions.shadowSaturation().call())
-            f["sh_value"] = int(obs.functions.shadowValueInBuck().call())
-            f["sh_offset"] = int(obs.functions.shadowOffset().call())
-            f["sh_offset_cap"] = int(obs.functions.shadowCap().call())
-            st, ex = obs.functions.flags().call()
-            f["sh_stale"], f["sh_excluded"] = int(st), int(ex)
-            f["sh_desk_cap"] = int(obs.functions.heldCap(d.basket.address).call())
-            f["sh_desk_stale"] = bool(obs.functions.stale(d.basket.address).call())
-            f["sh_desk_excluded"] = bool(obs.functions.excluded(d.basket.address).call())
-        except Exception:
-            pass
-    if getattr(d, "controller_impl", "direct") == "shadow":
-        try:
-            f["sh_boost"] = int(d.kctrl.functions.integralBoost().call())
-            f["pid_s"] = int(d.kctrl.functions.S().call())
-            f["pid_is"] = int(d.kctrl.functions.IS().call())
-            f["pid_ds"] = int(d.kctrl.functions.DS().call())
-            t = d.kctrl.functions.terms().call()
-            (f["pid_up"], f["pid_ui"], f["pid_ud"],
-             f["pid_q"], f["pid_qi"], f["pid_qd"]) = (int(x) for x in t[:6])
-        except Exception:
-            pass
     return f
 
 
@@ -223,13 +194,7 @@ def _eqsave_frame(d, ctr) -> dict:
         if canonical:
             raise
         pass
-    eqd = getattr(d, "equity_director", None)
-    if eqd is not None:
-        try:
-            f["eq_lean"] = [int(x) for x in eqd.functions.targetsBp().call()]
-        except Exception:
-            pass
-    elif getattr(d, "equity_machine", False):
+    if getattr(d, "equity_machine", False):
         from alberta_buck.sim.basket_machine import targets_bp
         try:
             f["eq_lean"] = targets_bp(d)
@@ -361,34 +326,8 @@ def _t15_frame(ctr) -> dict:
 
 
 def _wp14_frame(d, ctr) -> dict:
-    f = {k: ctr[k] for k in WP14_SK_KEYS if k in ctr}
-    stabs = getattr(d, "sim_stabs", None)
-    obs = getattr(d, "observer", None)
-    if not stabs or obs is None:
-        return f
-    f["sh_perclass"] = 1
-    f["sh_class_txs"] = ctr.get("sh_class_txs", 0)
-    f["sh_class_err"] = ctr.get("sh_class_err", "")
-    gains = getattr(d, "sim_stab_gains", {}) or {}
-    # Deploy order (sim_stabs is a dict), not the registry set's: a set of
-    # strings iterates in a per-process hash order, which reordered these
-    # keys between runs and broke cmp as the L3 gauge on the V designs.
-    reg = getattr(d, "sim_stab_reg", ())
-    for cls in [c for c in stabs if c in reg]:
-        st = stabs.get(cls)
-        if st is None:
-            continue
-        try:
-            f[f"sh_{cls}_q"] = int(st.functions.netInventory().call())
-            f[f"sh_{cls}_cap"] = int(obs.functions.heldCap(st.address).call())
-            f[f"sh_{cls}_stale"] = int(bool(obs.functions.stale(st.address).call()))
-            f[f"sh_{cls}_excluded"] = int(bool(obs.functions.excluded(st.address).call()))
-            lam, w = gains.get(cls, (None, None))
-            f[f"sh_{cls}_lambda"] = lam
-            f[f"sh_{cls}_w"] = w
-        except Exception:
-            pass
-    return f
+    # The local skews' counters; the per-class stabilizers went with the shadow controller.
+    return {k: ctr[k] for k in WP14_SK_KEYS if k in ctr}
 
 
 def _pool_value_weights(d) -> list[list[float]]:

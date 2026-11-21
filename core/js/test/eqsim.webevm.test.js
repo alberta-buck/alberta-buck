@@ -11,13 +11,9 @@
 //   * the saver completes a full deposit -> term -> redeem cycle,
 //   * the debtor books daily ledger rows (both chart columns).
 //
-// Twice.  On the equity basket with the basket machine, the world's
-// default, for 14 days: the wheel pairs the saver's deposit and the exit is
-// paid in BUCK.  A wheel turn is over a million gas, about four seconds on
-// Tevm, where a day cost some twenty seconds, so the run was kept short.
-// And on the pro-rata basket for 35 days, as before (~2 min on Tevm, some
-// six seconds on webevm + revm), which also takes the debtor through its
-// first month.
+// On the equity basket with the basket machine for 14 days: the wheel pairs
+// the saver's deposit and the exit is paid in BUCK.  (The pro-rata run that
+// took the debtor through its first month went with that basket, 2026-11-20.)
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -143,11 +139,4 @@ test("eqsim: the two-agent equilibrium loop runs on webevm, on the basket machin
   assert.ok(await session.call(world.buck, "balanceOf", [saver.account.address]) > 0n,
     "in BUCK");
   assert.equal(debtor.ledger.length, 14, "debtor booked each day");
-});
-
-test("eqsim: the same loop on the pro-rata basket, through the debtor's first month", { skip }, async () => {
-  const { world, debtor } = await loop({ basket: "prorata", days: 35, holdDays: 20 });
-  assert.equal(world.wheel, null, "the pro-rata basket has no wheel");
-  assert.equal(debtor.ledger.length, 35, "debtor booked each day");
-  assert.ok(debtor.hypoPaid > 0n && debtor.hypoMortgage < 200_000n * 10n ** 6n, "monthly amortization ran");
 });

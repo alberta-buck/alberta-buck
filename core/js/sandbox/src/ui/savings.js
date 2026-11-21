@@ -14,7 +14,7 @@ import { SimLink } from "../savings/link.js";
 import { LocalLink } from "../savings/local-link.js";
 import { MAX_DEVIATION_BP, Saver } from "../savings/wallet.js";
 import { annualized, channels, chooseIndex, compact, dateOf, deviationBp, equityWorth, newSid, prices,
-         receiptWorth, row, serverBase, tokenFor, usd } from "../savings/model.js";
+         row, serverBase, tokenFor, usd } from "../savings/model.js";
 
 const S1 = "var(--s1)";
 const S2 = "var(--s2)";
@@ -179,18 +179,15 @@ export function mountSavings(ctx) {
     householdPosition, h("p", { class: "hint" }, "Open receipts only, in BUCK. The mark uses the basket's "
       + "share price before exit costs. Return is mark divided by remaining deposit basis, less one; "
       + "closed positions and realized gains are not included."));
-  // How a saving works, by the world's basket (sim_info's basket_kind).
+  // How a saving works on the world's basket (the equity basket; the pro-rata one is retired).
   const HOW = {
-    prorata: ["Saving mints the TOKEN at its market price (the world's TOKENs are faucets), ",
-      "deposits it and takes a receipt: a claim on the basket's pools.  The basket partners it with ",
-      "freshly minted BUCK; redeeming burns that BUCK and pays you in TOKENs."],
     equity: ["Saving mints the TOKEN at its market price (the world's TOKENs are faucets), ",
       "deposits it and takes a receipt: shares of the basket's equity.  The basket draws K of credit ",
       "against it and its wheel places it in the pools; redeeming pays your shares' value in BUCK, less ",
       "the treasury's quarter of any gain.  Your key is registered as an identity (with the world's issuer) ",
       "before its first redemption: only identities may hold BUCK."],
   };
-  const howLine = h("p", { class: "hint" }, HOW.prorata);
+  const howLine = h("p", { class: "hint" }, HOW.equity);
   const walletCard = h("div", { class: "card" },
     h("div", { class: "card-head" }, h("h2", {}, "Your savings")),
     keyLine,
@@ -242,12 +239,6 @@ export function mountSavings(ctx) {
       { label: "equity", color: S1 }, { label: "lien", color: S2 }, { label: "liquidity", color: S3 }],
       note: "The depositors' equity; the BUCK the basket has drawn (at most K times that equity) to pair "
         + "its commodities in the pools; the BUCK it keeps ready for exits." }),
-    steps: lineChart({ title: "What the basket's wheel did (cumulative BUCK)", fmt: bucks, series: [
-      { label: "placed", color: S1 }, { label: "bought for the director", color: S2 },
-      { label: "trimmed", color: S3 }],
-      note: "Deploy pairs new deposits with BUCK in the pools; Fund buys the director's pick; Trim unwinds a "
-        + "position (the most overweight, or the director's pick) to refill liquidity.  Fund and Trim wait "
-        + "until no deposit is waiting to be placed." }),
     machineSteps: lineChart({ title: "What the basket's wheel did (cumulative BUCK)", fmt: bucks, series: [
       { label: "paired", color: S1 }, { label: "sold", color: S2 }, { label: "bought", color: S3 }],
       note: "A deposit is paired at once with BUCKs the basket issues beside it: nothing is sold to place "
@@ -259,10 +250,6 @@ export function mountSavings(ctx) {
       { label: "supplied (Q3)", color: S3 }, { label: "issued (Q4)", color: S4 }],
       note: "Q1 buys cheap BUCK with the desk's reserve, Q3 sells it back when BUCK is dear: supply "
         + "unchanged.  Q4 issues when BUCK stays dear, Q2 retires when it stays cheap." }),
-    deskSignal: lineChart({ title: "The desk's signal: BUCK over its basket (%)", ref: 0, fmt: pct2, series: [
-      { label: "premium (20-day)", color: S1 }],
-      note: "Above zero BUCK is dear, and the desk supplies or issues; below, cheap, and it absorbs or "
-        + "retires.  It acts only past a dead-band, and outright only after the push persists." }),
     machineSignal: lineChart({ title: "The desk's signal: BUCK over its basket (%)", ref: 0, fmt: pct2, series: [
       { label: "premium (as last sampled)", color: S1 }],
       note: "Above zero BUCK is dear, and the desk supplies or issues; below, cheap, and it absorbs or "
@@ -275,23 +262,8 @@ export function mountSavings(ctx) {
   };
   const leanGrid = h("div", { class: "chart-grid small" });
   S.lean = [];
-  // The same picture under either upkeep: the older director's leaned targets,
-  // or the basket machine's (sim_info's machine).
-  const LEAN = {
-    director: "The director's lean: each commodity's weight, % (actual, leaned target, declared)",
-    machine: "The basket's lean against price: each commodity's weight, % (actual, leaned target, declared)",
-  };
-  const leanTitle = h("h3", { class: "grid-title" }, LEAN.director);
-  const shown = { steps: charts.steps, signal: charts.deskSignal };
-  function showUpkeep(machine) {
-    const want = { steps: machine ? charts.machineSteps : charts.steps,
-                   signal: machine ? charts.machineSignal : charts.deskSignal };
-    for (const k of Object.keys(want)) {
-      if (shown[k] !== want[k]) shown[k].el.replaceWith(want[k].el);
-      shown[k] = want[k];
-    }
-    leanTitle.textContent = machine ? LEAN.machine : LEAN.director;
-  }
+  const leanTitle = h("h3", { class: "grid-title" },
+    "The basket's lean against price: each commodity's weight, % (actual, leaned target, declared)");
   const commodityGrid = h("div", { class: "chart-grid small" });
   S.commodity = [];
 
@@ -326,11 +298,11 @@ export function mountSavings(ctx) {
         h("div", { class: "chart-grid" }, charts.householdNet.el, charts.householdMortgage.el,
           charts.householdFlows.el, charts.householdBasket.el),
         h("h3", { class: "grid-title" }, "The basket: its credit, and what its wheel did"),
-        h("div", { class: "chart-grid" }, charts.credit.el, charts.steps.el),
+        h("div", { class: "chart-grid" }, charts.credit.el, charts.machineSteps.el),
         leanTitle,
         leanGrid,
         h("h3", { class: "grid-title" }, "The desks: what they did, and what it earned"),
-        h("div", { class: "chart-grid" }, charts.deskSignal.el, charts.deskOps.el, charts.earned.el,
+        h("div", { class: "chart-grid" }, charts.machineSignal.el, charts.deskOps.el, charts.earned.el,
           charts.deskInv.el, charts.ops.el),
         h("h3", { class: "grid-title" }, "Commodities: the real price, the TOKEN/USDC pool, and via BUCK"),
         commodityGrid)));
@@ -448,8 +420,7 @@ export function mountSavings(ctx) {
           S.info = info;
           const key = prefs.get("savings:key", "");
           S.saver = new Saver({ link: S.link, info, key });
-          fill(howLine, HOW[info.basket_kind] ?? HOW.prorata);
-          showUpkeep(!!info.machine);
+          fill(howLine, HOW.equity);
           for (const [key, select] of Object.entries(householdSelects)) {
             select.value = String(info.households?.[key] ?? householdDefaults[key]);
           }
@@ -645,9 +616,7 @@ export function mountSavings(ctx) {
     drawHouseholdPosition(last);
     charts.index.update(xs, [rows.map((r) => r.D), heldLine(rows)]);
     charts.credit.update(xs, [rows.map((r) => r.E), rows.map((r) => r.L), rows.map((r) => r.Q)]);
-    charts.steps.update(xs, [rows.map((r) => r.eqDeploy), rows.map((r) => r.eqFund), rows.map((r) => r.eqTrim)]);
     charts.machineSteps.update(xs, [rows.map((r) => r.eqPlace), rows.map((r) => r.eqSell), rows.map((r) => r.eqBuy)]);
-    charts.deskSignal.update(xs, [rows.map((r) => r.premium)]);
     charts.machineSignal.update(xs, [rows.map((r) => r.premium)]);
     charts.deskOps.update(xs, [0, 1, 2, 3].map((q) => rows.map((r) => r.dkQ[q])));
     const gap = (a, b) => (a === null || b === null ? null : a - b);
@@ -710,7 +679,6 @@ export function mountSavings(ctx) {
       }
     });
 
-    const sv = { O: last.O, S: last.S, B: last.B };
     const onChain = new Map((S.holdings?.receipts ?? []).map((r) => [r.id, r]));
     const list = receipts();
     // One block per receipt: what it would pay now against what it cost,
@@ -730,9 +698,8 @@ export function mountSavings(ctx) {
             h("dd", { class: "paid" }, usd(rec.paidUsd), " ", pct(rec.paidUsd / rec.usd - 1))));
       }
       const c = onChain.get(rec.id);
-      const worth = !c?.live ? null : last.kind === "equity"
-        ? equityWorth(c.shares, c.basis, { sp: last.sp, lam: last.lam, chg: last.chg })
-        : receiptWorth(c.buckPrincipal, sv);
+      const worth = !c?.live ? null
+        : equityWorth(c.shares, c.basis, { sp: last.sp, lam: last.lam, chg: last.chg });
       const worthUsd = worth ? (Number(worth.paid) / 1e6) * last.bu : null;
       const markRoi = last.kind === "equity" && worth && c.basis > 0n
         ? Number(worth.claim - c.basis) / Number(c.basis) : null;

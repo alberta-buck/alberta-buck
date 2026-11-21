@@ -18,7 +18,7 @@ import { decodeErrorResult, decodeFunctionResult, encodeFunctionData, keccak256,
          parseEventLogs } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-import { BASKET, DIRECTOR, ERC20, POOL, REASONS, RECEIPT } from "./abi.js";
+import { BASKET, ERC20, POOL, REASONS, RECEIPT } from "./abi.js";
 
 const GAS = 30_000_000n;
 /** The deposit's guard: refuse a pool more than this far from its recent
@@ -171,9 +171,9 @@ export class Saver {
 
   /** What this key holds -- each TOKEN's balance and its BUCK, each
    *  receipt's deposit and owner (and, in an equity basket, its shares and
-   *  cost basis) -- with the director's hint (a pro-rata basket's director
-   *  gives one) and each TOKEN/BUCK pool's tick now and at its average (the
-   *  deposit guard's two readings): one batch. */
+   *  cost basis) -- and each TOKEN/BUCK pool's tick now and at its average
+   *  (the deposit guard's two readings): one batch.  (The pro-rata basket's
+   *  director gave a deposit hint; the machine's basket has none.) */
   async holdings(ids) {
     const toks = this.info.tokens;
     if (this.twapWindow === undefined) {
@@ -195,8 +195,6 @@ export class Saver {
       ]),
       { address: this.info.buck, abi: ERC20, functionName: "balanceOf", args: [this.address] },
     ];
-    const hinted = !!this.info.director && !this.equity;
-    if (hinted) calls.push({ address: this.info.director, abi: DIRECTOR, functionName: "depositHint" });
     const out = await this.read(calls);
     const balances = out.slice(0, toks.length).map((r) => r.result ?? 0n);
     const ticks = toks.map((_, i) => ({
@@ -220,7 +218,6 @@ export class Saver {
       };
     });
     const buck = out[base + per * ids.length].result ?? 0n;
-    const hint = hinted ? out[out.length - 1].result : undefined;
-    return { balances, buck, receipts, hint, ticks };
+    return { balances, buck, receipts, hint: undefined, ticks };
   }
 }

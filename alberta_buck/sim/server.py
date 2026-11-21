@@ -102,13 +102,6 @@ RPC_YIELD_S = 5.0           # the most a day waits on queued RPC
 HISTORY_MAX = 4000          # lite frames kept for a reloaded page's replay
 _BUILD_LOCK = threading.Lock()   # agent classes keep build-time counters
 
-# The depositors' book, read at each frame (the venue facet's view through
-# the shell's fallback).
-_SV_ABI = [
-    {"type": "function", "name": n, "stateMutability": "view", "inputs": [],
-     "outputs": [{"type": "uint256", "name": ""}]}
-    for n in ("totalOutstandingBuck", "stressBonusPrincipal", "treasuryBuckPending")
-]
 # The equity basket's book: shares, and the equity, lien and liquidity of its
 # credit account (BuckBasketEquity).
 _SV_EQ_ABI = [
@@ -120,34 +113,6 @@ _SV_EQ_ABI = [
                  ("liquidity", "uint256"), ("headroom", "int256"),
                  ("LAMBDA_BP", "uint256"))
 ]
-_POSITIONS_ABI = [{"type": "function", "name": "positions", "stateMutability": "view",
-                   "inputs": [{"type": "bytes32", "name": "key"}],
-                   "outputs": [{"type": "uint128", "name": "liquidity"}] + [
-                       {"type": "uint256", "name": n} for n in ("fg0", "fg1")] + [
-                       {"type": "uint128", "name": n} for n in ("owed0", "owed1")]}]
-
-
-def _is_equity(d) -> bool:
-    """An equity basket (a credit holder paying its exits in BUCK)."""
-    return str(getattr(d, "basket_impl", "")).startswith("equity")
-
-
-def _depositor_buck(d) -> int | None:
-    """B of the venue's poolBuckValues -- each pool's BUCK balance, the
-    depositors' share of the basket's position (its liquidity less the
-    treasury's slice) -- read without poolBuckValues' slippage guard, which
-    reverts whenever any pool is off its average: the book is the book."""
-    from web3 import Web3
-    B = 0
-    for i in range(len(d.tokens)):
-        c = d.basket.functions.constituents(i).call()
-        pool, lo, hi, treasury_l = c[5], c[6], c[7], c[10]
-        key = Web3.solidity_keccak(["address", "int24", "int24"], [d.basket.address, lo, hi])
-        total_l = d.w3.eth.contract(address=pool, abi=_POSITIONS_ABI).functions.positions(key).call()[0]
-        if total_l <= treasury_l:
-            continue
-        B += (total_l - treasury_l) * int(d.buck.functions.balanceOf(pool).call()) // total_l
-    return B or None
 
 
 class StopSession(Exception):
@@ -464,35 +429,12 @@ class Session:
         self._fanout_threadsafe(*self._payloads(frame))
 
     def _savings(self) -> dict | None:
-        """The savings facility's book at this frame: outstanding principal
-        O (receipts P plus the credited bonus S), the depositors' BUCK side
-        B, the treasury's pending BUCK, and D -- what a depositor is paid, in
-        BUCK value, per BUCK deposited.  A redemption burns its share Rb of O
-        and pays the TOKEN side of its claim Rb*2B/O: the half, when B >= O
-        (the BUCK surplus goes to the treasury), or the claim less the burn
-        when B < O (TOKEN converted to cover it) -- per BUCK of principal
-        R = Rb*P/O, D = min(B, 2B - O) / P.  1 at the start; the wheel's
-        credits and the harvest of reversion raise it."""
+        """The savings facility's book at this frame: the equity basket's (the pro-rata basket's
+        book went with it, 2026-11-20)."""
         d = self.d
         if d is None or getattr(d, "basket", None) is None:
             return None
-        if _is_equity(d):
-            return self._savings_equity()
-        try:
-            c = d.w3.eth.contract(address=d.basket.address, abi=_SV_ABI)
-            O = int(c.functions.totalOutstandingBuck().call())
-            S = int(c.functions.stressBonusPrincipal().call())
-            T = int(c.functions.treasuryBuckPending().call())
-        except Exception:
-            return None
-        try:
-            B = _depositor_buck(d)
-        except Exception:                   # no depositors yet
-            B = None
-        P = O - S
-        D = (min(B, 2 * B - O) / P) if (B is not None and P > 0) else None
-        return {"kind": "prorata", "O": O, "S": S, "P": P, "B": B, "T": T,
-                "D": round(D, 6) if D is not None else None}
+        return self._savings_equity()
 
     def _savings_equity(self) -> dict | None:
         """The equity basket's book at this frame: its shares N (the
@@ -548,12 +490,9 @@ class Session:
             d.chain.send(d.reg.functions.register(d.issuer_addr, *ident[0]),
                          sender=addr, gas=3_000_000)
             self._enrolled[addr] = ident
-        approved = False
-        if _is_equity(d):
-            idmod.identity_approve(d.chain, d.reg, d.buck, addr, ident[0], ident[1],
-                                   d.basket.address, rng)
-            approved = True
-        return {"address": addr, "registered": True, "approved": approved}
+        idmod.identity_approve(d.chain, d.reg, d.buck, addr, ident[0], ident[1],
+                               d.basket.address, rng)
+        return {"address": addr, "registered": True, "approved": True}
 
     def _payloads(self, frame) -> tuple[str, str]:
         """(full, lite) JSON for one frame."""
@@ -624,7 +563,7 @@ class Session:
                 "router": getattr(getattr(d, "router", None), "address", None),
                 "wheel": wheel.address if wheel is not None else None,
                 "director": getattr(getattr(d, "director", None), "address", None),
-                "basket_kind": "equity" if _is_equity(d) else "prorata",
+                "basket_kind": "equity",
                 "machine": bool(getattr(d, "equity_machine", False)),
                 "name": getattr(sc, "name", None),
                 "days": getattr(sc, "days", None),

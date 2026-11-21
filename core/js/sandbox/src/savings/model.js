@@ -85,7 +85,7 @@ export function row(f) {
     E: bk(sv.E), L: bk(sv.L), Q: bk(sv.Q),
     hold: f.eq_hold ?? null,
     lean: f.eq_lean ?? null, w: f.eq_w ?? null, decl: f.eq_decl ?? null,
-    eqSync: bk(f.wh_eq_sync), eqDeploy: bk(f.wh_eq_deploy), eqFund: bk(f.wh_eq_fund), eqTrim: bk(f.wh_eq_trim),
+    eqSync: bk(f.wh_eq_sync),
     // The basket machine's responses instead (basket_machine.py book_receipt):
     // BUCKs issued beside deposited TOKEN, and the commodities it has sold
     // and bought toward their targets, in BUCK.
@@ -170,25 +170,6 @@ export function tokenFor(usd, priceUsd, decimals) {
   const micro = BigInt(Math.round(usd * 1e6));
   const p = BigInt(Math.round(priceUsd * 1e6));
   return (micro * 10n ** BigInt(decimals)) / p;
-}
-
-/** A receipt's worth at a frame's book (sv), in BUCK base units.  Its
- *  burn obligation Rb is its principal R plus its slice of the credited
- *  bonus S; its claim V = Rb * 2B / O; a redemption pays the TOKEN side:
- *  the half of V when B >= O (the BUCK surplus goes to the treasury), V
- *  less the burn when B < O.  Mirrors BuckBasketProRata._redeem. */
-export function receiptWorth(buckPrincipal, sv) {
-  const R = big(buckPrincipal);
-  const O = big(sv?.O);
-  const S = big(sv?.S);
-  if (sv?.B === null || sv?.B === undefined || O === 0n || R === 0n) return null;
-  const B = big(sv.B);
-  const slice = S === 0n ? 0n : (R * S) / (O - S);
-  const Rb = R + slice;
-  const V = (Rb * 2n * B) / O;
-  const half = V / 2n;
-  const net = V - Rb;
-  return { burn: Rb, claim: V, paid: half < net ? half : net };
 }
 
 /** An equity receipt's worth at a frame's book (sv), in BUCK base units:

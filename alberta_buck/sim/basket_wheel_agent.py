@@ -53,9 +53,7 @@ from dataclasses import replace
 
 from web3.logs import DISCARD
 
-from alberta_buck.sim import identity as idmod
 from alberta_buck.sim.agents import _register
-from alberta_buck.sim.chain import load_artifact
 from alberta_buck.sim.deploy import wheel_arb_enabled
 from alberta_buck.sim.equilibrium_agents import _ProxyAgent
 from alberta_buck.sim.experiment import spec as _spec
@@ -69,10 +67,9 @@ E6 = 10 ** 6
 
 @_register
 class BasketWheelAgent(_ProxyAgent):
-    # WheelWork kinds (BuckBasketEquityWheel): the BUCK each step moved --
-    # Sync its fees' BUCK side, Deploy the BUCK it paired, Fund the BUCK it
-    # spent on the director's pick, Trim the value it unwound.
-    EQ_KINDS = {1: "sync", 2: "deploy", 3: "fund", 4: "trim"}
+    # WheelWork kinds (BasketUpkeepFacet): the BUCK each step moved -- Sync its fees' BUCK side,
+    # Respond what the response paired or traded.
+    EQ_KINDS = {1: "sync", 2: "respond"}
 
     def setup(self, d, scenario, rng) -> None:
         cls = type(self).__name__
@@ -209,29 +206,14 @@ class BasketWheelAgent(_ProxyAgent):
         self.start = "buck" if self.canonical else str(sp("start", "token"))
         self.share_bp = 0 if self.canonical else int(sp("share_bp", 1000))
         gov = d.gov
-        self.equity = getattr(d, "wheel", None) is not None
-        if getattr(d, "equity_machine", False):
-            self.EQ_KINDS = {1: "sync", 2: "respond"}
-        if self.equity:
-            # The equity basket's wheel is deployed with it (it places the
-            # deposits); this agent adds its kinds and calls it.
-            wheel = d.wheel
-            d.chain.send(wheel.functions.setReserveParams(
-                int(sp("kappa_bp", 200)), int(float(sp("reserve_cap_buck", 100)) * E6)),
-                sender=gov)
-        else:
-            wheel = d.chain.deploy(
-                "BasketWheel", d.buck.address, d.usdc.address, gov,
-                # the reserve offsets the callers' GAS: cap it to a gas budget, not
-                # to the profit, or a BUCK start passes the profit to the callers
-                # (BASKET-WHEEL 8.7: at 50,000 BUCK and kappa 2% they took $47k of $53k)
-                int(sp("kappa_bp", 200)), int(float(sp("reserve_cap_buck", 100)) * E6))
-            # a contract working for the basket, bound like the pools
-            idmod.bind_as_operator(d.chain, d.reg, wheel.address, True, True,
-                                   sender=d.chain.deployer)
-            facet_abi, _ = load_artifact("BuckBasketUniswapV3", "BuckBasketUniswapV3")
-            host = d.w3.eth.contract(address=d.basket.address, abi=facet_abi)
-            d.chain.send(host.functions.setWheel(wheel.address), sender=gov)
+        # The basket machine's wheel is deployed with the basket (it places the deposits); this
+        # agent adds its kinds and calls it. (The older wheel this agent deployed for the
+        # pro-rata basket is retired, 2026-11-20.)
+        self.equity = True
+        wheel = d.wheel
+        d.chain.send(wheel.functions.setReserveParams(
+            int(sp("kappa_bp", 200)), int(float(sp("reserve_cap_buck", 100)) * E6)),
+            sender=gov)
         d.chain.send(wheel.functions.setArb(
             d.pool_ub, d.basket.address, self.share_bp, int(sp("cap_bp", 200)),
             int(sp("min_edge_bp", 1))), sender=gov)
@@ -248,15 +230,8 @@ class BasketWheelAgent(_ProxyAgent):
         kinds = list(sp("kinds", ["arb"]))
         if "compute" in kinds:
             d.chain.send(wheel.functions.setController(d.kctrl.address), sender=gov)
-        if "director" in kinds and d.director is not None:
-            d.chain.send(wheel.functions.setDirector(d.director.address), sender=gov)
-        if "sweep" in kinds and not self.equity:     # the equity basket has no treasury BUCK
-            d.chain.send(wheel.functions.setSweep(d.basket.address, 10 ** 15), sender=gov)
-        if "ops" in kinds and d.director is not None:
-            desk = d.desk if getattr(d, "desk", None) is not None else d.basket
-            policy = getattr(d, "monetary_policy", None) or d.director
-            d.chain.send(wheel.functions.setOps(desk.address, policy.address),
-                         sender=gov)
+        # ("director", "sweep" and "ops" were the older wheel's kinds: the machine samples and
+        # works its own desk, and the equity basket has no treasury BUCK to sweep.)
         self.sol = wheel
         self._bind_proxy(d)
         self._tok_index = {tok.address: i for i, tok in enumerate(d.tokens)}

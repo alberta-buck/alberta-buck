@@ -125,9 +125,9 @@ DEFAULTS: dict = {
         "day_step": 10,
         "seed": 0xA1BC,
         "basket": "equity-machine",    # the equity basket on the basket machine
-                                   # (doc/BASKET-MACHINE.org); "equity-ops" is
-                                   # its earlier upkeep, "prorata" the
-                                   # pro-rata basket the older record ran on
+                                   # (doc/BASKET-MACHINE.org), with its desk; the
+                                   # pro-rata basket the older record ran on is
+                                   # retired (2026-11-20)
         "tokens": ["LABR", "CNST", "FOOD", "NRGC", "PAXG"],
                                    # the symbols to keep of the builder's
                                    # constituents, the rest's weight shared

@@ -43,7 +43,7 @@ def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(mo
         assert d.net_stack.token.address == buck.address and d.net_basket.basket.address == basket.address
         assert fund.functions.basket().call() == basket.address and buck.functions.jubilee().call() == fund.address
         assert fund.functions.valuationWheel().call() == fund.functions.investmentKeeper().call() == wheel.address
-        assert d.director is None and d.equity_director is None
+        assert d.director is None
         assert d.equity_upkeep is not None and d.pair_policy is not None
         assert d.desk.functions.netAccounting().call()
         assert d.desk.functions.executionGuard().call() == d.monetary_policy.address
@@ -139,21 +139,9 @@ def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(mo
             assert tick["args"]["work"] <= 1
 
 
-@pytest.mark.parametrize("basket_impl", ["equity", "equity-ops"])
-def test_component_comparisons_keep_their_own_wheel_on_canonical_money(basket_impl, monkeypatch):
-    monkeypatch.setenv("SIM_EQUITY_MACHINE", "0")     # the machine is the default; the earlier upkeep goes in R4
-    monkeypatch.delenv("SIM_WHEEL_ARB", raising=False)
+def test_the_retired_baskets_and_controller_are_refused():
     scenario = replace(ROUTING, tokens=ROUTING.tokens[:2], csv_files=ROUTING.csv_files[:2], days=1, agents={})
-    rng = idmod.seeded_rng(scenario.seed)
-    with PyrevmAnvil(port=0) as evm:
-        chain = Chain(evm.w3, evm.w3.eth.accounts[0])
-        d = deploy(chain, evm, scenario, rng, verbose=False, basket_impl=basket_impl)
-        assert d.buck_accounting == "net" and not d.equity_machine
-        assert d.basket.functions.netAccounting().call()
-        assert not d.wheel.functions.responseMode().call()
-        assert d.net_stack.fund.functions.valuationWheel().call() == d.wheel.address
-        assert d.credit.functions.issuanceOf(d.basket.functions.creditId().call()).call()[0] == 0
-        assert d.equity_upkeep is not None and d.equity_director is not None
-        assert bool(d.desk) == (basket_impl == "equity-ops")
-        if d.desk is not None:
-            assert d.desk.functions.netAccounting().call()
+    for kwargs in ({"basket_impl": "prorata"}, {"basket_impl": "ops"}, {"controller_impl": "shadow"},
+                   {"equity_machine": False}):
+        with pytest.raises(ValueError, match="retired|unknown"):
+            deploy(None, None, scenario, None, verbose=False, **kwargs)

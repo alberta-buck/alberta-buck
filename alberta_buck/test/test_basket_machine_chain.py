@@ -36,7 +36,6 @@ def assert_response_wheel(d):
 
 
 def test_replacement_publishes_and_runs_through_the_simulator(monkeypatch, tmp_path):
-    monkeypatch.setenv("SIM_EQUITY_MACHINE", "1")
     with simulated(tmp_path, "equity-ops") as (d, frames):
         assert_response_wheel(d)
         assert d.wheel.functions.opsBasket().call() == d.desk.address

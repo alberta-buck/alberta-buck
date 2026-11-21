@@ -984,38 +984,6 @@ def test_personal_portfolio_marks_use_actual_cash_debt_receipts_and_all_custody(
     assert not chain.mismatches
 
 
-def test_readable_books_and_the_interactive_driver_run_the_opened_household_loop(household_world):
-    from alberta_buck.sim.driver import SimDriver
-    d, scenario, make = household_world
-    agent = make(0, CreditHouseholdAgent)
-    assert agent.octl_state(d)["mark_block"] == d.w3.eth.block_number
-    driver = SimDriver.__new__(SimDriver)
-    driver.d, driver.scenario, driver.anvil = d, scenario, d.anvil
-    driver.day, driver.tick, driver.done = 0, 0, False
-    driver.ts, driver.tick_secs = d.w3.eth.get_block("latest")["timestamp"], 1
-    driver.timeline_epoch = driver.ts + driver.tick_secs
-    driver.ctr = {"directTrades": 0, "cycleTrades": 0}
-    driver._begin_day = lambda: None
-    driver._whale_tick, driver.whales, driver.arbs = -1, [], [agent]
-    driver._prng = random.Random(1)
-    driver.snap = SimpleNamespace(meta={"run": {"completed": False}})
-    driver.proxy = SimpleNamespace(bump=lambda: None)   # the display cache a real driver builds
-    # The household's normal loop is open on canonical accounting: the first tick of its arrival day
-    # binds its calendar, credits its opening dollars from an authenticated receipt and prepares trading.
-    assert driver.step_tick() and driver.tick == 1 and not driver.done
-    assert not getattr(driver, "last_error", ""), driver.last_error
-    assert agent._started and agent._trading_ready and agent.calendar_machine.bound and agent.last_error == ""
-    assert agent.hypo_cash == int(agent.p["cash_k"] * 1000 * RAW) and agent.income_total == 0
-    opening = [e for e in agent.refinance_machine.events if e.get("kind") == "calendar" and e["status"] == "confirmed"]
-    assert [(e["phase"], e["operation"]) for e in opening] == [("opening-complete", "income")]
-    # Later ticks of the same day make no household decision; a migration gate stays fatal to the driver.
-    seen = len(agent.refinance_machine.events)
-    assert driver.step_tick() and len(agent.refinance_machine.events) == seen
-    agent.act = lambda *args: (_ for _ in ()).throw(NotImplementedError("a migration gate"))
-    with pytest.raises(NotImplementedError, match="migration gate"):
-        driver.step_tick()
-
-
 @pytest.mark.parametrize("case", CALENDAR["cases"], ids=lambda c: c["name"])
 def test_calendar_cash_flows_recover_once_without_stopping_the_shadow(household_world, monkeypatch, case):
     from alberta_buck.sim.household_calendar import MortgageBook

@@ -216,6 +216,40 @@ What the move showed, for the owner:
   exit proceeds. The fix is the owner's call: retire at most what the exit released, or mark the
   held BUCK at what an exit can release.
 
+** R4 as done: the families deleted (2026-11-20)
+
+- /Contracts/ (13): =BuckBasketProRata=, =BuckBasketOps=, =BuckWithBasketHooks=,
+  =PairsRebalanceDirector=, =RebalanceDirectorBase=, =IRebalanceDirector=, =BuckBasketEquityWheel=,
+  =EquityTurnDirector=, =BasketWheel=, =BuckKControllerShadow=, =ShadowObserver=,
+  =IShadowObserver=, =SimStabilizer=. None was imported by a surviving source; only comments name
+  them (R5 prunes those files).
+- /Suites/: the families' own (pro-rata, ops, stress fee, directed, wheel arb, pairs director,
+  shadow controller, sim stabilizer), =JubileeBasis= (the hooked Buck's relief) and the three
+  =setBasket= cases of =Buck.t.sol=. Forge: 1215 passed in 111 suites, none failed.
+- /Python/: =deploy()= builds only the equity basket on the machine (the pro-rata and ops shells,
+  the hooked Buck, the shadow controller and its observer, the per-class stabilizers, the pairs
+  director, the earlier upkeep, =EquityTurnDirector= and the older wheel are gone) and refuses the
+  retired options before it touches a chain; the machine's transactions keep their order, so saved
+  worlds reproduce. Deleted: the TUI with its interactive driver and inspector (it ran only the
+  pro-rata basket), =kdesign= with its ten ops experiments, =compare_ops=, =monetary_ops=,
+  =plot_basket_split=, =shadow_book=. =DirectorKeeperAgent= and =MonetaryKeeperAgent= are no-op
+  cast slots (the director keeper keeps its setup: its mints are in every saved world's history).
+  Snapshot frames keep the observer's and the shadow controller's keys as None. The savings server
+  lost its pro-rata book. Python: 1311 passed (the one failure, the new refusal test reaching the
+  chain first, fixed).
+- /JS/: the eq world builds the machine only (=opts.basket= "prorata" is refused); the pro-rata
+  artifacts left the bundle; =tevm-membench= (a Tevm benchmark on the pro-rata world) and the
+  pro-rata gate and loop tests went. The savings tab lost the pro-rata receipt worth, the director's
+  deposit hint and the older upkeep's charts; its =redeem= now has the equity shell's signature
+  (the ABI check had matched it against the pro-rata shell). JS unit tests: 165 passed.
+- /Make/: the TUI, the pro-rata rebalancing run, the basket-split plot, the monetary-ops and
+  ops-basket A/B, the director smoke sim and =test-director= are gone; =SIM_BASKET= is
+  equity-machine, equity-ops or equity.
+- /Left for wave 2/: the legacy vectors and their invariant tests (=rebalancing-sim-prorata.json=
+  and =eq-baseline-5yr-prorata.json= are still read by =test_rebalancing_sim_invariants= and
+  =sim-compare-rebalancing-eq=), and =alberta_buck/test/legacy/= (now on the machine only, not
+  collected by default).
+
 * Order of work
 1. Wave 1, and the three test tiers with =help= rewritten around them, once the
    JS conversion to webevm lands (it edits the Makefile now).

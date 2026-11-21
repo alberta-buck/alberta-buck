@@ -16,7 +16,7 @@ from alberta_buck.sim.scenario import ROUTING
 M6                              = 10 ** 6
 
 
-@pytest.fixture(params=["prorata", "equity-ops"])
+@pytest.fixture(params=["equity-ops"])     # the pro-rata basket is retired (2026-11-20)
 def households(request):
     scenario                    = replace(ROUTING, days=90, agents={"BuckCreditDebtorAgent": 2})
     scenario.experiment         = expmod.load(None, sets=[

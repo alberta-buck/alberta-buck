@@ -1,22 +1,18 @@
 """WP-14 (WAVE3.org decision 17, R16; CARRY-CONVEXITY.org D7 "The lever
-count"): the local skews' pure rules and the per-class booking, no chain.
+count"): the local skews' pure rules, no chain. (The per-class booking into the shadow
+controller's observer went with the shadow controller, 2026-11-20.)
 
   * skew_bands        the undertakings' two edges under a signed fill
   * skew_thresholds   the facility's x / y under a drawn line
   * skew_ideal        the seeder's range centre under its position
   * position_amounts / range_position   the seeder's range as a position
-  * class_books / book_classes          the per-class booking (send on change,
-                                        lazy registration, failure recording)
 
 Every kappa-0 case asserts the SAME floats come back (`is`), which is what
 makes the banked cells byte-identical (L3).
 """
 
-from types import SimpleNamespace
-
 import pytest
 
-from alberta_buck.sim import shadow_book
 from alberta_buck.sim.facility_agent import (
     HOLD, ISSUE, RETIRE, facility_decision, skew_thresholds,
 )
@@ -158,114 +154,3 @@ def test_range_position_signs():
     assert range_position("usdc", 5 * M, 0) == 0
     assert range_position("usdc", 5 * M, 2 * M) == 2 * M
     assert range_position("", 5 * M, 2 * M) == 0
-
-
-# -- the per-class booking -------------------------------------------------- #
-
-def test_class_books_signs_and_caps():
-    ctr = {"ut_issued_open": 2 * M, "ut_absorbed_open": 3 * M, "ut_cap": 15 * M,
-           "fac_drawn": 1 * M, "fac_cap": 4 * M, "sd_q": -5 * E6, "sd_cap": 10 * M}
-    b = shadow_book.class_books(ctr)
-    assert b["uts"] == (-2 * M, 15 * M)
-    assert b["utw"] == (3 * M, 15 * M)
-    assert b["fac"] == (-1 * M, 4 * M)
-    assert b["sd"] == (-5 * E6, 10 * M)
-    assert shadow_book.class_books({}) == {c: (0, 0) for c in shadow_book.CLASSES}
-    # the lumped sum of WP-13 is untouched.
-    assert shadow_book.net_inventory(ctr) == 3 * M - 2 * M - 1 * M
-
-
-class _Fn:
-    def __init__(self, log, name, args):
-        self.log, self.name, self.args = log, name, args
-
-
-class _Stab:
-    def __init__(self, log, cls):
-        self.address = "0x" + cls.ljust(40, "0")
-        self.functions = SimpleNamespace(
-            setBookAndCap=lambda q, c: _Fn(log, f"{cls}.setBookAndCap", (q, c)))
-
-
-class _Obs:
-    def __init__(self, log):
-        self.functions = SimpleNamespace(
-            setShadowOffset=lambda q: _Fn(log, "setShadowOffset", (q,)),
-            addStabilizer=lambda a, lam: _Fn(log, "addStabilizer", (a, lam)),
-            setStabilizerWeight=lambda a, w: _Fn(log, "setStabilizerWeight", (a, w)))
-
-
-def _deployment(log, perclass=True, registered=("uts", "utw")):
-    def send(fn, sender=None):
-        log.append((fn.name, fn.args, sender))
-    d = SimpleNamespace(chain=SimpleNamespace(send=send), gov="0xG0V",
-                        observer=_Obs(log))
-    if perclass:
-        d.sim_stabs = {c: _Stab(log, c) for c in shadow_book.CLASSES}
-        d.sim_stab_reg = set(registered)
-        d.sim_stab_gains = {"uts": (10 ** 18, 10 ** 18), "utw": (10 ** 18, 10 ** 18),
-                            "fac": (10 ** 18, 5 * 10 ** 17), "sd": (0, 25 * 10 ** 16)}
-    return d
-
-
-def test_book_dispatches_per_class_and_sends_only_on_change():
-    log = []
-    d = _deployment(log)
-    ctr = {}
-    shadow_book.book(d, ctr)                       # everything 0: nothing sent
-    assert log == [] and ctr.get("sh_class_txs", 0) == 0
-    ctr["ut_cap"] = 15 * M                         # the cap struck: both sides
-    shadow_book.book(d, ctr)
-    assert [(n, a) for n, a, _ in log] == [("uts.setBookAndCap", (0, 15 * M)),
-                                           ("utw.setBookAndCap", (0, 15 * M))]
-    assert ctr["sh_class_txs"] == 2 and all(s == "0xG0V" for _, _, s in log)
-    shadow_book.book(d, ctr)                       # unchanged: no tx
-    assert len(log) == 2
-    ctr["ut_issued_open"] = 2 * M                  # the strong side issues
-    shadow_book.book(d, ctr)
-    assert log[-1][:2] == ("uts.setBookAndCap", (-2 * M, 15 * M))
-    assert ctr["sh_class_txs"] == 3
-    # the lumped offset is never touched on the per-class path.
-    assert not any(n == "setShadowOffset" for n, _, _ in log)
-    assert "sh_offset" not in ctr
-
-
-def test_book_registers_a_late_class_on_its_first_cap():
-    log = []
-    d = _deployment(log, registered=("uts", "utw"))
-    ctr = {"fac_drawn": 1 * M}                     # drawn, but no cap yet
-    shadow_book.book(d, ctr)
-    assert [n for n, _, _ in log] == ["fac.setBookAndCap"]
-    assert "fac" not in d.sim_stab_reg              # cap 0: not registered
-    ctr["fac_cap"] = 4 * M
-    shadow_book.book(d, ctr)
-    names = [n for n, _, _ in log]
-    assert names[-3:] == ["fac.setBookAndCap", "addStabilizer", "setStabilizerWeight"]
-    assert log[-2][1] == (d.sim_stabs["fac"].address, 10 ** 18)
-    assert log[-1][1] == (d.sim_stabs["fac"].address, 5 * 10 ** 17)
-    assert "fac" in d.sim_stab_reg
-
-
-def test_book_records_failure_and_keeps_last_books():
-    log = []
-    d = _deployment(log)
-    ctr = {"ut_cap": 15 * M}
-    shadow_book.book(d, ctr)
-    assert ctr["shb_uts"] == (0, 15 * M)
-
-    def boom(fn, sender=None):
-        raise RuntimeError("Revert")
-    d.chain.send = boom
-    ctr["ut_absorbed_open"] = 1 * M
-    shadow_book.book(d, ctr)
-    assert ctr["shb_utw"] == (0, 15 * M) and "Revert" in ctr["sh_class_err"]
-    assert ctr["sh_class_txs"] == 2
-
-
-def test_book_lumped_path_without_the_contracts():
-    log = []
-    d = _deployment(log, perclass=False)
-    ctr = {"ut_absorbed_open": 4 * M, "ut_cap": 15 * M}
-    shadow_book.book(d, ctr)
-    assert [(n, a) for n, a, _ in log] == [("setShadowOffset", (4 * M,))]
-    assert ctr["sh_offset"] == 4 * M and "sh_class_txs" not in ctr
