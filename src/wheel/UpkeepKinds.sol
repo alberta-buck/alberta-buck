@@ -139,6 +139,11 @@ abstract contract OpsKind is WorkWheel {
     ///      It survives a caught refusal by the desk (unlike a desk self-call).
     function _prepareOps() internal virtual {}
 
+    /// @dev Whether slot `s` is the desk's operation (a composed wheel refines its view and memory).
+    function _isOpsSlot(uint256 s) internal view returns (bool) {
+        return opsBasket != address(0) && s == super._slotCount();
+    }
+
     function _due(uint256 s) internal view virtual override returns (bool) {
         uint256 b = super._slotCount();
         if (s < b) return super._due(s);

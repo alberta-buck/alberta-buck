@@ -5827,8 +5827,34 @@ outside arbitrageurs, and the relief paid on retirements.
   names, as one step of =tick= would (the idle memory, reward and =Ticked=), without passing the
   slots before it; the cursor moves past it. Tests: it runs the named slot's work; on a quiet market
   every slot does nothing; a missing slot is refused. The machine wheel 19,922 bytes (4,654 left).
-  The per-kind memo keys are next (each kind keyed on what its view reads, so an arbitrage cycle
-  stops reopening the desk and the response slots); the keepers in both worlds then call =tickAt=.
+- /The desk's view, and memory per kind/ (the owner's word: "go ahead with the memo keys and tickAt
+  keepers"). What each idle-running kind reads:
+  - /The desk/ (Ops): its run reverted =NoAdvice= whenever its policy's =monetaryEffort()= was zero,
+    and that was most of its runs. That is a view, so the machine's =_due= now asks it: the slot is
+    due only when the policy advises an operation.
+  - /The Jubilee fund's jobs/: the reserve job is due whenever the fund's excess differs from what it
+    last observed, which every BUCK transfer moves (demurrage), and its run is then an unrewarded
+    checkpoint; its investment and sale run on a day's half-life. The jobs read neither the pools'
+    spot prices nor the basket's positions.
+  - /The arbitrage routes and the basket's responses/ read the pools (their TWAPs move with every
+    trade) and the basket's holdings: narrower keys there could hide real work.
+  So =CompletionMemo= keys each slot (=_memoKey(s)=; the wheel's whole state by default), and the
+  machine keys the Jubilee jobs and an advised-but-refused desk on the hour, Buck's relief budget being
+  spent, and re-arms (=_rearms=, counted apart from work by a =_rearmed()= hook in =_markDirty=, so a
+  re-arm or a configuration change still reopens every slot): no longer on every arbitrage cycle or
+  other slot's work. The arbitrage and response slots keep the whole state. Tests
+  (=test/wheel/BasketMachineWheel.t.sol=): the desk's slot is due only when advised; a refused desk
+  stays settled while a response slot works block after block, and is retried when the hour turns;
+  the Jubilee wheel's refused entry still retries in the next block after a re-arm. Forge 1,577 passed;
+  the older wheel unchanged (24,317), the machine 20,408 (4,168 left).
+- /The keepers call =tickAt=/: Python =basket_machine.settle_receipts= and JS =world.settleWheel= run the
+  slot =pending()= names (=(cursor + steps) % slotCount=) when the wheel has =tickAt=, and tick toward it
+  on an older wheel.
+- /Measured/ (=economy=, 20 days, wallet arbitrage, the same seed; before: the bounded tick, one memory
+  for the whole wheel): 60 settles in 721 keeper transactions against 1,550; 635 of them did work
+  (592), 86 found nothing (958); the wheel's gas 3.48 against 8.45 billion; no settle reached the
+  96-tick cap (2 did), the largest 85; 393 arbitrage cycles against 331 (settles now finish), K 0.7437
+  against 0.7438, BVIB 1.0067 against 1.0082. Python 22 machine/world tests and JS 45 pass.
 - /A first look/ (=economy=, 20 days, flash against wallet, both keeping idle BUCK): too short for the
   pools' hollowness (0.9989 in both), but BVIB ends nearer parity (1.0050 against 1.0082), the outside
   arbitrageurs complete fewer cycles (28 against 34), and the basket's wallet stays empty (43 BUCK
@@ -5865,8 +5891,11 @@ idle BUCK is the basket's liquidity target.
   kernels, then =make venv-compare COMPARE=flash COMPARE_JOBS=4=; =build/logs/setup.log=,
   =compare-flash.log= and its =.done= / =.failed= marker). Report there with =make nix-venv-compare-report
   COMPARE=flash=, or copy =build/runs/flash.*= here.
+- *Also done*: the desk's slot due only when its policy advises, memory per kind (the Jubilee jobs and
+  a refused desk wait for the hour, not for other work), and the keepers calling =tickAt= in both
+  worlds: half the keeper transactions, 59% less wheel gas.
 - *Next, in order*: read the flash comparison (and choose the defaults: =arb_flash=, the retirement
-  cap); the per-kind memo keys and the keepers calling =tickAt= in both worlds; the shadow
+  cap); the shadow
   controller's deletion with the old ops (pro-rata) basket family, where it is entangled (its desk
   =MonetaryDesk=, the controller choice in =__main__= / =deploy=, =kdesign=, =shadow_book=); the stress
   arms' port; then the demand cast. Also: regenerate the pinned vectors at 12 s; the savings sandbox's

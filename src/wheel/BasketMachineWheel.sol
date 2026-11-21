@@ -9,6 +9,7 @@ import {ArbKind} from "./ArbKind.sol";
 import {JubileeKind} from "./JubileeKind.sol";
 import {IBuckJubilee} from "../IBuckJubilee.sol";
 import {IBasketArb} from "../basket/IBasketArb.sol";
+import {IDeskPolicy} from "../basket/IDeskPolicy.sol";
 import {BN254} from "../BN254.sol";
 import {IdentityRegistry} from "../IdentityRegistry.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -236,14 +237,39 @@ contract BasketMachineWheel is WorkWheel, CompletionMemo, SampleKind, JubileeKin
     }
     function _ranIdle(uint256 s) internal override(WorkWheel, CompletionMemo) { super._ranIdle(s); }
     function _moved() internal override(WorkWheel, CompletionMemo) { super._moved(); }
+    function _rearmed() internal override(WorkWheel, CompletionMemo) { super._rearmed(); }
 
     function _slotCount() internal view
         override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (uint256)
     { return super._slotCount(); }
 
+    /// @dev The desk's slot is due only when its policy advises an operation (owner, 2026-11-20: views
+    ///      that report work their run does not do cost every keeper a tick): its run reverts NoAdvice
+    ///      otherwise, and that was most of its runs.
     function _due(uint256 s) internal view
         override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (bool)
-    { return super._due(s); }
+    {
+        if (!super._due(s)) return false;
+        if (!_isOpsSlot(s)) return true;
+        try IDeskPolicy(opsDirector).monetaryEffort() returns (int32 effort, bool) { return effort != 0; }
+        catch { return false; }
+    }
+
+    /// @dev Per kind, what an idle slot waits on (owner, 2026-11-20). The Jubilee fund's jobs and the
+    ///      desk's operation run on day-scale schedules (the reserve's half-life, the desk's epoch) and
+    ///      read neither the pools' spot prices nor the basket's positions: an idle one is retried when
+    ///      the hour turns or Buck's relief budget runs out or refills, not after every arbitrage
+    ///      cycle or other slot's work (a re-arm still reopens them). The arbitrage routes and the basket's responses read the pools
+    ///      and the holdings, and keep the wheel's whole state (_inputs, and every work).
+    function _memoKey(uint256 s) internal view override returns (bytes32) {
+        if (_isJubileeSlot(s) || _isOpsSlot(s)) {
+            (bool ok, bytes memory relief) = address(payToken).staticcall(
+                abi.encodeWithSignature("availableReliefScaled()"));
+            return keccak256(abi.encode(s, _rearms, block.timestamp / RETRY_SPAN,
+                                        ok && relief.length == 32 && abi.decode(relief, (uint256)) == 0));
+        }
+        return super._memoKey(s);
+    }
 
     function _run(uint256 s) internal
         override(WorkWheel, ComputeKind, OpsKind, ResponseKind, ArbKind, SampleKind, JubileeKind) returns (uint256)

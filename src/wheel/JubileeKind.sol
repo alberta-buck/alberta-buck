@@ -100,6 +100,12 @@ abstract contract JubileeKind is WorkWheel {
             : jubileePolicy.retirementCap == 0 ? 3 : 4);
     }
 
+    /// @dev Whether slot `s` is one of this kind's jobs (a composed wheel keys their memory).
+    function _isJubileeSlot(uint256 s) internal view returns (bool) {
+        uint256 base = super._slotCount();
+        return s >= base && s < JubileeKind._slotCount();
+    }
+
     function _due(uint256 s) internal view virtual override returns (bool) {
         uint256 base = super._slotCount();
         if (s < base) return super._due(s);

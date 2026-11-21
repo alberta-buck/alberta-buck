@@ -165,9 +165,9 @@ SETTLE_SCAN = 4     # slots one settling tick may pass (each costs its due view'
 
 def settle_receipts(d, *, max_ticks=SETTLE_TICKS, dispatch=None, proxy=None, receipts=None,
                     publications=None):
-    """Turn the wheel to completion: while its pending() view reads work, tick toward the slot it
-    names (tick(1, steps + 1), at most SETTLE_SCAN slots a transaction) and publish the valuation
-    after each.
+    """Turn the wheel to completion: while its pending() view reads work, run the slot it names
+    (the machine's tickAt; an older wheel ticks toward it, tick(1, steps + 1), at most SETTLE_SCAN
+    slots a transaction) and publish the valuation after each.
 
     pending() is an eth_call -- no gas, no transaction -- and exact on the machine's wheel
     (CompletionMemo): a slot that ran without work is not counted again until the wheel works,
@@ -180,14 +180,22 @@ def settle_receipts(d, *, max_ticks=SETTLE_TICKS, dispatch=None, proxy=None, rec
     d.last_wheel_receipts = receipts
     send = dispatch or (lambda name, args: d.chain.send(getattr(d.wheel.functions, name)(*args)))
     pending = d.wheel.functions.pending()
+    # The machine's tickAt (owner, 2026-11-20) runs the slot pending() names and passes nothing; an
+    # older wheel ticks toward it.
+    direct = any(f.get("name") == "tickAt" for f in d.wheel.abi)
+    count = int(d.wheel.functions.slotCount().call()) if direct else 0
     for _ in range(max_ticks):
         due, steps = pending.call()
         if not due:
             return receipts, publications, True
-        # Toward the slot it names, at most SETTLE_SCAN slots a transaction: each slot the tick
-        # passes evaluates its view on-chain (an arbitrage route's plan is costly), as the bounded
-        # rotation does. Passing them moves the cursor; the slot named runs when it is reached.
-        receipts.append(send("tick", [1, min(steps + 1, SETTLE_SCAN)]))
+        if direct:
+            slot = (int(d.wheel.functions.cursor().call()) + steps) % count
+            receipts.append(send("tickAt", [slot]))
+        else:
+            # Toward the slot it names, at most SETTLE_SCAN slots a transaction: each slot the tick
+            # passes evaluates its view on-chain (an arbitrage route's plan is costly), as the bounded
+            # rotation does. Passing them moves the cursor; the slot named runs when it is reached.
+            receipts.append(send("tick", [1, min(steps + 1, SETTLE_SCAN)]))
         publication = publish_jubilee_valuation(d, proxy=proxy)
         if publication is not None:
             publications.append(publication)

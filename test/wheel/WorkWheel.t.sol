@@ -134,6 +134,7 @@ contract IdleWheel is WorkWheel, CompletionMemo {
     }
     function _ranIdle(uint256 s) internal override(WorkWheel, CompletionMemo) { super._ranIdle(s); }
     function _moved() internal override(WorkWheel, CompletionMemo) { super._moved(); }
+    function _rearmed() internal override(WorkWheel, CompletionMemo) { super._rearmed(); }
     function _inputs() internal view override returns (bytes32) {
         return clockInputs ? super._inputs() : inputs;
     }

@@ -437,17 +437,26 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
      *  no gas -- and exact on the machine's wheel (CompletionMemo): it reads false exactly when a
      *  tick would find nothing. Returns { receipts, settled }; settled is false only when maxTicks
      *  ran out first (Python: basket_machine.settle_receipts). */
+    // The machine's tickAt (owner, 2026-11-20) runs the slot pending() names and passes nothing.
+    const direct = wheel.abi.some((f) => f.type === "function" && f.name === "tickAt");
     world.settleWheel = async ({ tag, maxTicks = SETTLE_TICKS } = {}) => {
       const base = tag ?? "eq:wheel";
       const receipts = [];
       world.lastWheelReceipts = receipts;
+      const count = direct ? await session.call(wheel, "slotCount", []) : 0n;
       for (let i = 0; i < maxTicks; i++) {
         const [due, steps] = await session.call(wheel, "pending", [], { gas: VIEW_GAS });
         if (!due) return { receipts, settled: true };
-        // Toward the slot it names, at most SETTLE_SCAN slots a transaction (each slot passed
-        // evaluates its view on-chain; an arbitrage plan is costly): the bounded rotation's rule.
-        receipts.push(await session.send(wheel, "tick", [1n, steps + 1n < SETTLE_SCAN ? steps + 1n : SETTLE_SCAN],
-          { tag: `${base}:tick:${i}`, gas: world.tickGas ?? TICK_GAS }));
+        if (direct) {
+          const slot = ((await session.call(wheel, "cursor", [])) + steps) % count;
+          receipts.push(await session.send(wheel, "tickAt", [slot],
+            { tag: `${base}:tick:${i}`, gas: world.tickGas ?? TICK_GAS }));
+        } else {
+          // Toward the slot it names, at most SETTLE_SCAN slots a transaction (each slot passed
+          // evaluates its view on-chain; an arbitrage plan is costly): the bounded rotation's rule.
+          receipts.push(await session.send(wheel, "tick", [1n, steps + 1n < SETTLE_SCAN ? steps + 1n : SETTLE_SCAN],
+            { tag: `${base}:tick:${i}`, gas: world.tickGas ?? TICK_GAS }));
+        }
         await session.send(wheel, "refreshValuation", [], { tag: `${base}:valuation:${i}`, expect: "either" });
       }
       const [due] = await session.call(wheel, "pending", [], { gas: VIEW_GAS });

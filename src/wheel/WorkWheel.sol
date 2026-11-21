@@ -228,8 +228,13 @@ abstract contract WorkWheel {
     function _markDirty() internal {
         idleClock = 0;
         scannedIdle = 0;
+        _rearmed();
         _moved();
     }
+
+    /// @dev A re-arm or a configuration change (not work): a wheel that remembers idle slots reopens
+    ///      every one, whatever it keys them on.
+    function _rearmed() internal virtual {}
 
     // --- Completion: what a wheel remembers of the slots it found idle (CompletionMemo) ---- //
 
@@ -260,20 +265,28 @@ abstract contract WorkWheel {
 ///         tick would find nothing -- and a keeper turns the wheel to completion by reading it.
 abstract contract CompletionMemo is WorkWheel {
     uint256 internal _generation;                   // bumped by every work and every re-arm
+    uint256 internal _rearms;                       // bumped by every re-arm and configuration change
     mapping(uint256 => bytes32) internal _idleUnder; // slot => the state it ran idle in; 0: none
 
     function _settled(uint256 s) internal view virtual override returns (bool) {
         bytes32 memo = _idleUnder[s];
-        return memo != 0 && memo == _stateKey();
+        return memo != 0 && memo == _memoKey(s);
     }
 
-    function _ranIdle(uint256 s) internal virtual override { _idleUnder[s] = _stateKey(); }
+    function _ranIdle(uint256 s) internal virtual override { _idleUnder[s] = _memoKey(s); }
 
     function _moved() internal virtual override { _generation++; }
+
+    function _rearmed() internal virtual override { _rearms++; }
 
     function _stateKey() internal view returns (bytes32) {
         return keccak256(abi.encode(_generation, _inputs()));
     }
+
+    /// @dev The state a slot that ran idle waits on. By default the wheel's: any work, any re-arm or
+    ///      any change in its inputs. A wheel may key a kind on less, only what its view and its run
+    ///      read, so that unrelated work (an arbitrage cycle) does not reopen it.
+    function _memoKey(uint256) internal view virtual returns (bytes32) { return _stateKey(); }
 
     /// @dev Beyond the wheel's own work and re-arms, what can turn an idle slot into work. By
     ///      default the clock: an idle slot is tried again in the next block. A wheel over markets
