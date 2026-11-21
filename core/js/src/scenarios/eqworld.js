@@ -359,7 +359,10 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
                      { tag: "eq:basket.openCredit" });
   await session.send(basket, "setResponse", [MACHINE.response], { tag: "eq:setResponse" });
   if (opts.refreshBand) await session.send(basket, "setRefreshBand", opts.refreshBand, { tag: "eq:refreshBand" });
-  if (opts.zeroWalletReserve) {
+  if (opts.portfolioLimits !== false) {
+    await session.send(basket, "setPortfolioLimits", [true], { tag: "eq:portfolioLimits" });
+  }
+  if (opts.zeroWalletReserve !== false) {
     const params = [...await session.call(basket, "eq")];
     params[0] = params[1] = 0;
     await session.send(basket, "setEquityParams", [params], { tag: "eq:zeroWalletReserve" });

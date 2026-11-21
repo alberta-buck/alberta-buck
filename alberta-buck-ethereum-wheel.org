@@ -497,7 +497,8 @@ waits for the venue's TWAP band.  Burning and re-minting LP liquidity leaves spo
 For purchases, placements and refreshes, the basket issues the BUCK owed directly to the
 pool in its V3 callback.  This preserves the age and net value of cash already in the wallet.
 The carried BUCK withdrawn during refresh waits for redemption or scheduled retirement.
-The retirement job can reduce principal with cash above the wallet reserve.  The amount of
+The normal operating-cash target is zero. The retirement job uses spendable surplus within
+its per-job cap and the fund’s relief budget. A portfolio with no remaining debt can still hold cash.  The amount of
 debt left is an outcome of funding the portfolio, while return on deposited equity is the
 measure of its performance.
 
@@ -505,8 +506,10 @@ Two rules act with no view on prices and ask the policy nothing.
 
 - *The leash.*  A constituent more than 30% of its declared weight from its declared share is
   worked toward its target at once.  The lean times the mandate; the leash enforces it.
-- *The ceiling.*  BUCKs let out beyond half of =K x equity= are bought back at once, every
-  constituent giving its share.  A large exit is paid first and sold down over the next turns.
+- *The ceiling.*  In the portfolio policy the response discounts K by a tenth. Its normal
+  ceiling on net issuance is =E x K_eff / (1 - K_eff)=. Above the ceiling each constituent
+  contributes toward a sale within the step and depth limits. The upper limit set by the
+  credit is K times the marked TOKEN exposure, after netting held BUCK.
 
 The venue (=BasketVenueFacet=) is Uniswap V3 with nothing optional.  A missing TWAP is an
 unavailable price.  A swap must execute within a tolerance of the TWAP and leave the spot within

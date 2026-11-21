@@ -9,12 +9,13 @@ import {BuckBasketReceipt}  from "./BuckBasketReceipt.sol";
 import {IBuckBasketVenue}   from "./IBuckBasketVenue.sol";
 import {IUniswapV3Factory, IBuckMintBurn} from "./BuckBasketStorage.sol";
 import {BuckBasketEquityStorage, IMarkedCredit, IBuckNetAccount, IBasketCreditFund} from "./BuckBasketEquityStorage.sol";
-import {PortfolioMath} from "./PortfolioMath.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
 import {IBuckBasketPosition} from "./IBuckBasketPosition.sol";
 import {IBasketArb} from "./IBasketArb.sol";
 import {IBuckFlashBorrower} from "../IBuckFlashBorrower.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {BasketExitFacet} from "./BasketExitFacet.sol";
+import {BasketJubileeMath} from "./BasketJubileeMath.sol";
 import {BasketMarketOps} from "./BasketMarketOps.sol";
 import {IBuckNetView} from "../IBuckNetView.sol";
 
@@ -80,6 +81,7 @@ import {IBuckNetView} from "../IBuckNetView.sol";
 ///         does.
 contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     using SafeERC20 for IERC20;
+    BasketExitFacet private immutable _exitFacet = new BasketExitFacet();
 
     error PositionReentrant();
     error PositionAssetMismatch();
@@ -172,14 +174,21 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
 
     event ResponseConfigured(ResponseParams params);
 
-    /// @dev A target never leans as far as the leash, so the safeguard that
-    ///      keeps a constituent inside its leash cannot fight the lean.
+    /// @notice Apply the TOKEN-exposure credit limit and its discounted response ceiling.
+    function setPortfolioLimits(bool enabled) external onlyGov {
+        portfolioLimits = enabled;
+        _markS(_snap());
+    }
+
+    /// @notice Refresh the most discounted eligible pool below the floor toward the top.
     function setRefreshBand(uint16 floorBp, uint16 topBp) external onlyGov {
         require(floorBp <= topBp && topBp <= 10000, "refresh band");
         refreshFloorBp = floorBp;
         refreshTopBp = topBp;
     }
 
+    /// @dev A target never leans as far as the leash, so the safeguard that
+    ///      keeps a constituent inside its leash cannot fight the lean.
     function setResponse(ResponseParams calldata p) external onlyGov {
         require(p.leashBp > 0 && p.leashBp <= 10000 && p.interval > 0
                 && p.tiltBp <= 10000 && p.leanCapBp < p.leashBp, "response params");
@@ -436,7 +445,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         (Snap memory sn, uint256 before) = _exitSnapshot();
         (uint256 cut, uint256 cutValue) = _treasuryCut(sn, shares, basis);
         uint256 left;
-        (paid, left) = _exit(shares - cut, sn, msg.sender, inKind);
+        (paid, left) = _exit(shares - cut, sn, msg.sender, inKind, before);
         uint256 remainingBp = _retire(id, h, shares, left, basis);
         if (paid < minBuck) revert MinOut();
         _positionEntered = false;
@@ -486,7 +495,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         (Snap memory sn, uint256 before) = _exitSnapshot();
         treasuryShares -= out;
         uint256 left;
-        (paid, left) = _exit(out, sn, to, false);
+        (paid, left) = _exit(out, sn, to, false, before);
         treasuryShares += left;
         _positionEntered = false;
         _holdShortfall(before);
@@ -519,82 +528,13 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         _markS(s);
     }
 
-    /// @dev Retire `out` shares, paying `to`.  In BUCK from cash when the
-    ///      account can spend it and still fund the principal the exit may
-    ///      have to retire (at most K x the payment); else from its share of
-    ///      the positions (`_exitInKind`): sold for BUCK, or delivered in kind
-    ///      on request.  The exit fee (the stress fee's hook) retires the
-    ///      shares but leaves its fraction of the assets.  Returns the BUCK
-    ///      paid and the shares NOT retired.
-    function _exit(uint256 out, Snap memory sn, address to, bool inKind)
+    function _exit(uint256 out, Snap memory sn, address to, bool inKind, uint256 openingShortfall)
         internal returns (uint256 pay, uint256 left)
     {
-        uint256 S = totalShares;
-        uint256 fWad = (out - out * eq.exitFeeBp / 10000) * 1e18 / S;
-        uint256 eLow = _equityS(sn, MARK_LOW);
-        uint256 value = eLow * fWad / 1e18;
-        if (value == 0) revert Underwater();
-        pay = value * (1e18 - _chargeBuck(sn.k)) / 1e18;
-
-        // Legacy Buck constrains an implicit draw through this prospective
-        // mark. Canonical Buck spends cash only; its final actual collateral
-        // and unchanged principal are checked after receipt retirement.
-        if (!netAccounting) _markAt(_creditValueS(sn, eLow - pay));
-        if (!inKind && pay + (netAccounting ? pay * sn.k / 1e18 : 0) <= _cashAvailable()) {
-            totalShares = S - out;
-            _payCash(to, pay);
-            dayFlow -= int256(pay);
-            return (pay, 0);
-        }
-        (pay, left) = _exitInKind(out, fWad, sn, to, inKind || !netAccounting);
-    }
-
-    /// @dev The pro-rata exit, in kind: fraction `fWad` of every position and
-    ///      of the wallet's TOKEN goes to `to` by transfer -- no swap, no
-    ///      market moved. Canonical LP proceeds remain cash, never automatic
-    ///      repayment. Net equity is paid by retaining TOKEN for a negative
-    ///      BUCK residue (released cash + its fraction of cash-principal+claim).
-    ///      Actual principal stays fixed; _exitSnapshot guards final backing.
-    ///      Legacy Buck alone treats proceeds as implicit repayment. Corners:
-    ///        * short of its lien share (leverage above one), it leaves TOKEN
-    ///          behind worth the shortfall, at the low marks;
-    ///        * legacy: past what an under-water account can spend, the rest stays in
-    ///          the receipt as shares at the price that remains -- the exit
-    ///          completes, and nobody's claim moves ahead of anybody's.
-    function _exitInKind(uint256 out, uint256 fWad, Snap memory sn, address to, bool inKind)
-        internal returns (uint256 pay, uint256 left)
-    {
-        uint256 S = totalShares;
-        (int256 residue, uint256 flow) = BasketMarketOps.exitAssets(idleToken, liquidityOf, address(buck),
-            netAccounting, fWad, sn.buckEq * int256(fWad) / 1e18, to, inKind, constituents.length);
-        if (residue > 0) {
-            uint256 spend = _cashAvailable();
-            pay = uint256(residue) < spend ? uint256(residue) : spend;
-            uint256 unpaid = uint256(residue) - pay;
-            if (unpaid > 0) {
-                // Value what stays from a FRESH read: the positions just burned
-                // are no longer in the snapshot's marks.
-                uint256 eAfter = _equityS(_snap(), MARK_LOW);
-                uint256 stay = S - out;
-                left = eAfter > unpaid ? unpaid * stay / (eAfter - unpaid) : 0;
-            }
-            if (pay > 0) _payCash(to, pay);
-            flow += pay;
-        }
-        totalShares = S - out + left;
-        dayFlow -= int256(flow);
-        // Canonical mode checks/marks after the receipt holding also changes.
-        if (!netAccounting) _markS(_snap());
-    }
-
-    /// @notice (1+K)/2 of the dearest pool fee: what placing a BUCK deposit
-    ///         costs, charged on BUCK in and BUCK out alike (1e18).
-    function _chargeBuck(uint256 k) internal view returns (uint256) {
-        uint256 feeMax = 0;
-        for (uint256 i = 0; i < constituents.length; i++) {
-            if (constituents[i].feeTier > feeMax) feeMax = constituents[i].feeTier;
-        }
-        return feeMax * 1e12 * (1e18 + k) / 2e18;
+        (bool ok, bytes memory result) = address(_exitFacet).delegatecall(
+            abi.encodeCall(BasketExitFacet.exitShares, (out, sn, to, inKind, openingShortfall)));
+        if (!ok) assembly ("memory-safe") { revert(add(result, 32), mload(result)) }
+        return abi.decode(result, (uint256, uint256));
     }
 
     // --- The work wheel's credits (its arbitrage captures) ------------------------ //
@@ -718,13 +658,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     }
 
     function _weights(bool includeIdle) private view returns (uint256[] memory) {
-        uint256[] memory values = new uint256[](constituents.length);
-        for (uint256 i; i < values.length; ++i) {
-            IBuckBasketVenue.Marks memory m = _marks(i);
-            values[i] = m.posTwap;
-            if (includeIdle) values[i] += idleToken[i] * m.pTwap / (10 ** constituents[i].decimals);
-        }
-        return PortfolioMath.weights(values);
+        return BasketJubileeMath.weights(constituents, liquidityOf, idleToken, includeIdle);
     }
 
     // --- Dispatch: the components facet, else the venue ------------------------- //

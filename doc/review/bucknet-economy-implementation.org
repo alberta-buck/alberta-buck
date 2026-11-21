@@ -2,6 +2,90 @@
 #+DATE: 2026-11-08
 #+OPTIONS: ^:nil toc:3
 
+* Current restart point — refined basket, 2026-11-21
+
+Work in =.claude/worktrees/buck-compound= on =feature/household-minimal-ecosystem=.
+The historical checkpoints below are dated. The refresh baseline commit is =61aa2cf4=.
+Claude Code's project memory index is =~/.claude/projects/-Users-perry-src-alberta-buck/memory/MEMORY.md=.
+
+** Owner decisions and discriminating evidence
+
+- Maximize depositor return from mean reversion and arbitrage after costs. A settled wallet
+  near zero is the operating target. Outstanding principal funds positions and has no zero target.
+  Use mint on demand. Evaluate a small wallet buffer only if measured gas savings justify carry.
+- For ordinary BUCK redemptions use available credit, then sell holdings when it is insufficient.
+  Explicit in-kind exits still take assets. Check the post-sale collateral of the remaining shares.
+- Ten local economy days at the refresh baseline, seed 41404, zero reserve: 86 positive basket
+  facility draws in the observed wheel receipts across 10 blocks. Minimum 2611 BUCK, median 12853,
+  24 below 10000, none below 1000. This is a short bootstrap sample. It measures mint sizes;
+  it does not measure gas saved by a buffer. The repeated payments in a block warrant testing
+  an atomic batch. A wallet's nominal and net proportions mix, so a batch must preserve the
+  outgoing fresh value established by the real-contract regression.
+- Three-day reserve comparison and the exact wallet/lien distinction appear in "Fresh pool
+  funding and the wallet reserve experiment". The earlier two-year burn study's final frame
+  figures have been corrected below. For ROI compare share-price change from a common entry,
+  then holder proceeds after fees and slippage against holding the initial constituents.
+
+** Live work and how to read it
+
+- Datasim, =~/src/alberta-buck-refresh-61aa2cf4=, isolated, patched pyrevm. =refresh.toml= has
+  six 730-day worlds (off, 9900/9950, 9950/9970 bp; flow reserve/zero). Four workers. The
+  three-day preflight completed. Logs =build/logs/refresh.log= and =smoke.log=, records under
+  =build/runs/refresh.*=. =basket-stress.toml= in that worktree is a second 730-day comparison:
+  zero reserve, four matched arms at seed 41404. Day 7 disturbances: LABR -20% for 30 days,
+  K upper rail 0.5 for 30 days, or half the existing investors asked to exit. Control undisturbed.
+  Logs =build/logs/basket-stress.log= and =build/sim/compare/basket-stress/runs/*.log=, frames
+  under =build/runs/basket-stress.*/frames.jsonl=. Run there
+  =.venv/bin/python -m alberta_buck.sim.compare report basket-stress= (or =report refresh=).
+  These baseline arms use fresh pool funding and the original credit limits and redemption rule.
+- Local Mac, frozen at =61aa2cf4=: the completed 730-day default refresh band, zero wallet target,
+  recorded in =build/runs/refined-730d/refresh.band-base.reserve-zero=. Log =/tmp/buck-refresh-mac-730.log=.
+  Maximum total local workers four. The prior datasim five-year baseline stays in =alberta-buck-net=;
+  its savings-server sibling is independent.
+- The local zero-reserve arm at =61aa2cf4= completed 730 frames. First/last marked BUCK per
+  share 0.992523 / 1.006348, +1.393% over the recorded interval. End wallet 0.013405 BUCK,
+  end principal 15,932,160 BUCK, K 0.48758, BVIB 1.00864, TOKEN pool net/gross 0.9948–0.9956.
+  One explicit refresh (1.618M BUCK) occurred; ordinary fresh purchases also freshen the pools.
+  All 40 household error rows were debtors: 19 refinance-terms reassessments, 17 issuance
+  reconciliations, 4 repayment owner-funds refusals. No dispatcher faults. These are reported
+  household errors; their incidence should be compared across arms.
+- The four datasim baseline stress arms passed day 610. The day-7 LABR reference fell from
+  0.244467 to 0.195573 in its arm. The clamp arm recorded K=0.5 against control 0.750729.
+  Withdrawal schedules 50% of current investors, whose subsequent execution must be read
+  from their receipts and ledger. The earlier five-year suite still lacks =suites.done=.
+
+** New portfolio policy and qualification
+
+- The Python and JS worlds enable =portfolioLimits= and a zero flow/percentage reserve.
+  The matched control can set =machine.portfolio_limits=false= or JS =portfolioLimits:false=.
+  The hard facility mark is X+(H+C)/K, with X at LOW; the soft limit is 0.9K times book
+  equity divided by (1-0.9K). The parity lean still chooses exposure inside the limit.
+  Whether neutral parity should aim at the ceiling itself remains a separate experiment.
+- A BUCK exit uses wallet BUCK and issues its shortfall up to executable credit room. If
+  it crosses the limit the basket sells the remaining share of the portfolio and accounts
+  for the fall in collateral on LP still held. An initial mixed-exit test failed when
+  the basket paid before measuring this loss. Retiring from cash could not remedy it:
+  paying one BUCK off the lien also removes one BUCK of collateral. The corrected exit
+  caps the second payment at post-sale room and retains shares for unpaid value. Its
+  comparison uses the opening shortfall captured before the draw or sale. Last-share
+  liquidation and explicit in-kind exit keep the inventory path.
+- =BasketExitFacet= is created by and immutable to each equity shell. Redemption execution
+  runs by delegatecall under the shell's position lock. This keeps both deployed runtimes
+  below the 24576-byte limit. The real-pool exit suite passed 18/18, including a pure
+  credit payout and a mixed draw/sale after a K cut. The shell compiled to 23012 runtime
+  bytes and 40322 creation bytes before constructor arguments, the exit facet to 9428.
+  The storage pin includes the facet. Frames expose LOW TOKEN exposure, net issuance,
+  K times exposure and the TWAP-based response ceiling. Reports include first-to-last
+  marked share return before personal exit fees.
+- The local 10-day Python confirmation at =build/runs/portfolio-smoke= scheduled 15 of 30
+  investors to withdraw on day 7. Four exits had completed by day 8. One debtor refinance
+  reassessment and zero dispatcher faults across the ten days. The webevm savings and
+  equilibrium-bootstrap suites passed all 42 tests.
+- Compare the new run in its own checkout against the baseline. Review actual exits,
+  receipt returns versus holding, headroom, pool carry and realized arbitrage. Five-year
+  qualification, browser-only release work, parity vectors, the remaining release papers
+  and the master merge remain ahead.
+
 * Start here: what remains before the sandboxes and the five-year runs
 
 Written 2026-11-12 for a session that knows nothing of the work so far. Read
@@ -5886,11 +5970,14 @@ wheel (=deploy.basket_retirement_cap_m= = 1, a million a job). At day 729:
 |----------------------+-------+--------+----------+------------------+----------+---------------+-------------------+-----------------+-------------+---------------|
 | wallet, keep         | 0.500 |  0.596 |   1.0135 |            1.42% |     38.9 |          17.2 |               3.6 |           0.977 |       2.70% |           677 |
 | flash, keep          | 0.508 |  0.602 |   1.0122 |            1.33% |     38.2 |          16.5 |               3.7 |           0.976 |       2.73% |         1,325 |
-| wallet, burn         | 0.767 |  0.763 |   0.9898 |            0.86% |     29.4 |           0.0 |              11.4 |           0.973 |       2.42% |           474 |
-| flash, burn          | 0.773 |  0.771 |   0.9930 |            1.04% |     30.9 |           0.0 |              12.9 |           0.975 |       2.27% |         1,188 |
+| wallet, burn         | 0.767 |  0.763 |   0.9898 |            0.86% |     29.4 |           0.000 |              11.4 |           0.973 |       2.42% |           474 |
+| flash, burn          | 0.773 |  0.771 |   0.9930 |            1.04% |     30.9 |           0.035 |              12.9 |           0.975 |       2.27% |         1,188 |
 
-- /Burning the idle BUCK is the large effect./ The basket's lien is retired to zero within the first
-  year (1.8M at day 180, none from day 365) and stays there. Supply is 7.3 to 9.5M lower, K holds at
+- /Burning the idle BUCK is the large effect on supply./ At day 729 the wallet-funded burn arm
+  had zero lien and 224,759 BUCK in its wallet. The flash-funded burn arm had 35,256 BUCK of
+  principal and 72,340 BUCK in its wallet (verified from the final frames). Ending share prices
+  with and without retirement were 0.9814 and 1.0187 with wallet arbitrage, 0.9780 and 1.0137
+  with flash. These are marked BUCK per share, before an individual holder's exit costs. Supply is 7.3 to 9.5M lower, K holds at
   0.74 to 0.79 from day 180 on (against 0.65 at day 180 sliding to 0.50 when kept), BVIB stays within
   a point and a half of parity and ends just under it, and the mean deviation falls by a third.
 - /The economy answers it./ With K high, the proportional population's arrivals shift from investors

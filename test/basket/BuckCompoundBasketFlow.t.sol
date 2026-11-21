@@ -388,6 +388,31 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         assertGt(Math.mulDiv(afterNet, 1e18, afterGross), Math.mulDiv(net, 1e18, gross));
     }
 
+    function test_lowMarksSupportTokenExposureAndHeldCashAtTheirRespectiveRates() public {
+        _pools();
+        _open(1e12);
+        vm.prank(GOV);
+        basket.setPortfolioLimits(true);
+        _machine();
+        IBasketUpkeep(address(basket)).wheelStep(2, 0);
+        vm.prank(ALICE);
+        buck.transfer(address(basket), 25e6);
+        for (uint256 i; i < 4; ++i) {
+            uint256[4] memory rails = [uint256(0.1e18), 0.5e18, 0.75e18, 0.9e18];
+            k.setK(rails[i]);
+            b.refreshMark();
+            uint256 held;
+            for (uint256 j; j < 3; ++j) {
+                held += IBuckBasketVenue(address(basket)).marks(j, basket.liquidityOf(j)).posLow / 2;
+            }
+            uint256 tokens = basket.grossAt(2) - held;
+            uint256 cash = buck.netBalanceOf(address(basket));
+            assertEq(basket.markNow(), tokens + (held + cash) * 1e18 / rails[i]);
+            assertApproxEqAbs(buck.flashRoom(basket.creditId()),
+                              tokens * rails[i] / 1e18 + held + cash - basket.lien(), 1);
+        }
+    }
+
     function test_faceCapStopsFurtherDrawsWithoutActivatingOrMintingExtraRoom() public {
         _pools();
         _open(600e6);

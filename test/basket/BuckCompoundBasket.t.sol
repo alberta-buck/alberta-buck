@@ -75,8 +75,11 @@ contract BuckCompoundBasketTest is JubileeEquityFixture {
         assertEq(basket.indexOf(address(asset)), 1);
     }
 
-    function test_basketAndValuationLibraryFitEvmRuntimeLimit() public pure {
-        assertLe(type(BuckBasketEquity).runtimeCode.length, 24_576);
+    function test_basketAndValuationLibraryFitEvmRuntimeLimit() public {
+        BuckBasketEquity shell = new BuckBasketEquity(address(buck), address(k), address(basket.v3Factory()),
+                                                      GOV, 3000, 600, 64, 500, 1e3);
+        assertLe(address(shell).code.length, 24_576);
+        assertLe(type(BuckBasketEquity).creationCode.length + 9 * 32, 49_152);
         assertLe(type(BasketJubileeMath).runtimeCode.length, 24_576);
     }
 

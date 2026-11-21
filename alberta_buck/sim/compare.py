@@ -220,7 +220,12 @@ def headline(frames: list[dict]) -> dict:
     roles                       = _get(last, "population", "roles") or {}
     money                       = lambda *p: None if _get(last, *p) is None else float(_get(last, *p)) / RAW
     mean                        = lambda xs: sum(xs) / len(xs) if xs else None
+    first_share = _num(_get(frames[0], "basket", "share_price"))
+    last_share = _num(_get(last, "basket", "share_price"))
     return {
+        "share_price_end": last_share,
+        "share_return": last_share / first_share - 1 if first_share and last_share is not None else None,
+        "wallet_buck_end": money("basket", "idle_buck"),
         "days": len(frames),
         "k_end": ks[-1] if ks else None, "k_mean": mean(ks), "k_min": min(ks, default=None), "k_max": max(ks, default=None),
         "bvib_end": bv[-1] if bv else None, "bvib_gap_mean": mean([abs(x - 1) for x in bv]),
@@ -409,11 +414,12 @@ def report(args) -> int:
     figures                     = body["summary"]["figures"]
     print(f"\n{spec.name}: {spec.question}\n")
     print(f"{'run':52} {'status':9} {'days':>5} {'K end':>7} {'K mean':>7} {'BVIB end':>9} {'|BVIB-1|':>9} "
-          f"{'BUCK/USD':>9} {'supply M':>9}")
+          f"{'BUCK/USD':>9} {'supply M':>9} {'share ROI%':>10}")
     for rid, f in figures.items():
         print(f"{rid:52} {f.get('status') or '-':9} {f['days']:>5} {_fmt(f.get('k_end')):>7} {_fmt(f.get('k_mean')):>7} "
               f"{_fmt(f.get('bvib_end')):>9} {_fmt(f.get('bvib_gap_mean')):>9} {_fmt(f.get('buck_usd_end')):>9} "
-              f"{_fmt(None if f.get('supply_end') is None else f['supply_end'] / 1e6, 2):>9}")
+              f"{_fmt(None if f.get('supply_end') is None else f['supply_end'] / 1e6, 2):>9} "
+              f"{_fmt(None if f.get('share_return') is None else 100 * f['share_return'], 3):>10}")
     for axis in body["axes"]:
         every                   = [p for p in body["summary"]["pairs"] if p["axis"] == axis["name"]]
         rows                    = [p for p in every if p["diverges"]]

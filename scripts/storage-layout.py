@@ -28,7 +28,7 @@ PIN = REPO / "scripts" / "storage-layout.json"
 
 # Each shell, and the facets that run on its storage by delegatecall.
 GROUPS = {
-    "BuckBasketEquity": ["BuckBasketUniswapV3", "BasketVenueFacet", "BasketUpkeepFacet"],
+    "BuckBasketEquity": ["BuckBasketUniswapV3", "BasketVenueFacet", "BasketUpkeepFacet", "BasketExitFacet"],
     "BasketDesk": ["BuckBasketUniswapV3"],
 }
 

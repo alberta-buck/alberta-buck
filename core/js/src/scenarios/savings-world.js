@@ -234,6 +234,23 @@ export class SavingsWorld {
       frame.eq_w = (await s.call(b, "responseWeightsBp")).map(Number);
       frame.eq_lean = await this.targetsBp();
     } catch { /* the weights read before the first pairing */ }
+    if (await s.call(b, "portfolioLimits")) {
+      const [gross, lien, equity, relief, cash] = await Promise.all([
+        s.call(b, "grossAt", [2]), s.call(b, "lien"), s.call(b, "equity"),
+        s.call(b, "reliefAccrued"), s.call(w.buck, "netBalanceOf", [b.address]),
+      ]);
+      const marks = await Promise.all(w.tokens.map(async (_, i) => {
+        const liquidity = await s.call(b, "liquidityOf", [BigInt(i)]);
+        return s.call(b, "marks", [BigInt(i), liquidity]);
+      }));
+      const held = marks.reduce((sum, mark) => sum + mark.posLow / 2n, 0n);
+      const exposure = gross - held;
+      const effectiveK = (K > E18 ? E18 : K) * 9n / 10n;
+      frame.eq_token_exposure = String(exposure);
+      frame.eq_net_issued = String(lien - held - cash);
+      frame.eq_hard_limit = String(exposure * K / E18);
+      frame.eq_ceiling = String((equity > relief ? equity - relief : 0n) * effectiveK / (E18 - effectiveK));
+    }
     frame.sv = await this.savings();
     for (const [key, value] of Object.entries(this.keeper.responseCounters)) {
       frame[key] = typeof value === "bigint" ? String(value) : value;

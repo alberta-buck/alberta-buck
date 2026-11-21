@@ -307,6 +307,13 @@
    "offset": 0,
    "type": "uint16",
    "bytes": 2
+  },
+  {
+   "label": "portfolioLimits",
+   "slot": 33,
+   "offset": 2,
+   "type": "bool",
+   "bytes": 1
   }
  ],
  "BasketDesk": [

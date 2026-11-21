@@ -160,13 +160,19 @@ library BasketMarketOps {
         else received = (afterNet - beforeNet) / Q;
     }
 
-    function positionMint(address token, uint256 i, uint256 tokens, uint256 netBuck)
-        public returns (uint128 liquidity, uint256 tokenUsed, uint256 netBuckUsed)
+    /// @dev The upkeep has prepared the credit draw and selected its authenticated pool
+    /// payment callbacks. Only withdrawn TOKEN and freshly issued BUCK go back into the LP.
+    function refreshPosition(mapping(uint256 => uint256) storage idle, mapping(uint256 => uint128) storage liquidity,
+                             uint256 i, uint128 slice, uint256 budget) public returns (uint256 issued)
     {
-        (, uint256 beforeNet) = IMarketCash(token).accountBalancesScaled(address(this));
-        (liquidity, tokenUsed,) = IBuckBasketVenue(address(this)).positionMint(i, tokens, nominalForNet(token, netBuck));
-        (, uint256 afterNet) = IMarketCash(token).accountBalancesScaled(address(this));
-        netBuckUsed = Math.ceilDiv(beforeNet - afterNet, Q);
+        IBuckBasketVenue venue = IBuckBasketVenue(address(this));
+        (uint256 tokens, uint256 bucks) = venue.positionBurn(i, slice);
+        uint128 restored;
+        uint256 paired;
+        (restored, paired, issued) = venue.positionMint(i, tokens, Math.min(bucks, budget));
+        if (restored == 0) revert NetCashUnavailable();
+        liquidity[i] = liquidity[i] - slice + restored;
+        idle[i] += tokens - paired;
     }
 
     /// @notice A receipt's exit from the positions (BuckBasketEquity._exitInKind): withdraw

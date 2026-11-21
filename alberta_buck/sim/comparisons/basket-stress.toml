@@ -1,0 +1,16 @@
+question = "How do redemptions, credit tightening and a commodity drawdown affect depositor return and basket funding?"
+experiment = "economy"
+days = 730
+
+[set]
+"scenario.seed" = 41404
+"machine.zero_wallet_reserve" = true
+
+[[axis]]
+name = "stress"
+note = "Each disturbance starts on day 7; the control has the same seed, cast and price history."
+[axis.values]
+control = {}
+markdown = { "interventions" = [{ day = 7, action = "price_shock", token = "LABR", mult = 0.8, until_day = 37 }] }
+credit = { "interventions" = [{ day = 7, action = "set_rails", kmin = 0.1, kmax = 0.5 }, { day = 37, action = "set_rails", kmin = 0.1, kmax = 0.9 }] }
+withdrawals = { "interventions" = [{ day = 7, action = "set_population", exit_now = 0.5 }] }

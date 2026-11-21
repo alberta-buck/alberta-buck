@@ -274,6 +274,38 @@ contract BuckCompoundBasketExitTest is JubileeEquityFixture {
         assertEq(asset.balanceOf(ALICE), userTokens);
     }
 
+    function test_portfolioExitDrawsCreditAndKeepsItsLiquidity() public {
+        (, uint256 id) = _poolDebt();
+        vm.prank(GOV);
+        basket.setPortfolioLimits(true);
+        uint128 liquidity = basket.liquidityOf(0);
+        uint256 debt = basket.lien();
+        uint256 balance = buck.netBalanceOf(ALICE);
+        (uint128 shares,) = basket.holdings(id);
+        vm.prank(ALICE);
+        (, uint256 paid,,) = basket.redeemShares(id, shares / 10, 1);
+        assertGt(basket.lien(), debt);
+        assertEq(buck.netBalanceOf(ALICE) - balance, paid);
+        assertEq(basket.liquidityOf(0), liquidity);
+        assertGe(basket.headroom(), 0);
+    }
+
+    function test_portfolioExitCrossingCreditLimitAlsoSells() public {
+        (, uint256 id) = _poolDebt();
+        vm.prank(GOV);
+        basket.setPortfolioLimits(true);
+        k.setK(0.1e18);
+        uint128 liquidity = basket.liquidityOf(0);
+        uint256 debt = basket.lien();
+        (uint128 shares,) = basket.holdings(id);
+        vm.prank(ALICE);
+        (, uint256 paid,,) = basket.redeemShares(id, shares / 3, 1);
+        assertGt(paid, 0);
+        assertGt(basket.lien(), debt);
+        assertLt(basket.liquidityOf(0), liquidity);
+        assertGe(basket.headroom(), 0);
+    }
+
     function test_lowKPoolExitProceedsAndHoldsTheShortfall() public {
         _lowKExit(0.05e18);
     }

@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import {BuckBasketEquityStorage} from "./BuckBasketEquityStorage.sol";
+import {IBuckNetView} from "../IBuckNetView.sol";
+import {BasketMarketOps} from "./BasketMarketOps.sol";
 import {BasketCreditSetup} from "./BasketCreditSetup.sol";
 import {IBuckBasketVenue} from "./IBuckBasketVenue.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
@@ -43,8 +45,8 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 /// asks for the other half. The leash keeps the declared weights.
 contract BasketUpkeepFacet is BasketCreditSetup {
     uint256 private constant NONE = type(uint256).max;
-    /// @notice The most BUCKs to have issued in normal running, of K x equity.
-    uint256 public constant CEILING_BP = 5000;
+    /// @notice The response discounts K by a tenth when sizing its normal exposure.
+    uint256 public constant KAPPA_BP = 1000;
     IRebalancePolicy public immutable pairPolicy;
     /// @notice The parity reference: the basket's cost in BUCK, as last sampled.
     IBasketReference public immutable parity;
@@ -115,16 +117,11 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         if (quote == 0) return 0;
         (uint256 budget, uint256 gap) = _fundCash(quote, true);
         if (budget < quote) return 0;
-        (uint256 tokens, uint256 bucks) = _v().positionBurn(i, slice);
         _paymentCredit = creditId + 1;
-        (uint128 restored, uint256 paired, uint256 issued) = _v().positionMint(i, tokens, PM.min(bucks, budget));
+        used = BasketMarketOps.refreshPosition(idleToken, liquidityOf, i, slice, budget);
         _paymentCredit = 0;
-        require(restored != 0, "refresh dust");
-        liquidityOf[i] = liquidityOf[i] - slice + restored;
-        idleToken[i] += tokens - paired;
         _finishBuy(gap);
-        emit Responded(8, NONE, i, 0, issued);
-        return issued;
+        emit Responded(8, NONE, i, 0, used);
     }
 
     function wheelStep(uint8 kind, uint256 i) external returns (uint256) {
@@ -240,7 +237,9 @@ contract BasketUpkeepFacet is BasketCreditSetup {
                                 : -s.buckEq - int256(held);
         int256 equity = int256(token) - b.issued;
         if (equity < 0) equity = 0;
-        b.ceiling = s.k * uint256(equity) / 1e18 * CEILING_BP / 10000;
+        uint256 effectiveK = PM.min(s.k, 1e18) * (10000 - KAPPA_BP) / 10000;
+        b.ceiling = portfolioLimits && netAccounting ? uint256(equity) * effectiveK / (1e18 - effectiveK)
+                                  : s.k * uint256(equity) / 2e18;
         // With no fresh reading the book stays the size it is.
         int256 aim = b.issued;
         if (parityGain == 0 && parityGainDear == 0) aim = 0;
@@ -458,9 +457,18 @@ contract BasketUpkeepFacet is BasketCreditSetup {
 
     function _buy(uint256 i, uint256 budget, bool pairOnly) internal returns (uint256 used) {
         uint256 openingShortfall;
-        (budget, openingShortfall) = _fundCash(budget, true);
+        bool issuer = address(credit) != address(0);
+        if (!issuer && netAccounting) {
+            // A basket trading before it opens credit may spend full-value cash.
+            // A Carrying wallet with an outstanding fee waits for its facility.
+            (uint256 gross, uint256 net) = IBuckNetView(address(buck)).accountBalancesScaled(address(this));
+            if (gross != net) return 0;
+            budget = PM.min(budget, net / 1e36);
+        } else {
+            (budget, openingShortfall) = _fundCash(budget, true);
+        }
         if (budget == 0) return 0;
-        if (netAccounting) _paymentCredit = creditId + 1;
+        if (netAccounting && issuer) _paymentCredit = creditId + 1;
         uint256 half = pairOnly ? 0 : budget / 2;
         uint256 spent;
         if (half > 0) {

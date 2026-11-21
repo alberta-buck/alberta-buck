@@ -58,7 +58,8 @@ DEFAULTS = {
     "arb_flash": True,
     "refresh_floor_bp": 9900,
     "refresh_top_bp": 9950,
-    "zero_wallet_reserve": False,
+    "zero_wallet_reserve": True,
+    "portfolio_limits": True,
 }
 ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_AGE", "dt_max": "SIM_MACHINE_DT_MAX",
                "leash_bp": "SIM_MACHINE_LEASH_BP", "tilt": "SIM_MACHINE_TILT", "lean_cap_bp": "SIM_MACHINE_LEAN_CAP_BP",
@@ -331,6 +332,8 @@ def activate(d, given=None, turn_seconds=0) -> None:
                                              int(s["lean_cap_bp"]))), sender=gov)
     if (s["refresh_floor_bp"], s["refresh_top_bp"]) != (9900, 9950):
         chain.send(basket.functions.setRefreshBand(s["refresh_floor_bp"], s["refresh_top_bp"]), sender=gov)
+    if s["portfolio_limits"]:
+        chain.send(basket.functions.setPortfolioLimits(True), sender=gov)
     if s["zero_wallet_reserve"]:
         params = list(basket.functions.eq().call())
         params[:2] = [0, 0]  # floorBp and flowZx100 together determine the reserve

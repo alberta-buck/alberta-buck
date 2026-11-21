@@ -229,6 +229,17 @@ def _eqsave_frame(d, ctr) -> dict:
                 f["eq_held_buck"] = sum(held)
                 f["eq_carried_fee"] = f["eq_held_buck_nominal"] - f["eq_held_buck"]
                 f["eq_unpaid_relief"] = int(b.functions.reliefAccrued().call())
+                if b.functions.portfolioLimits().call():
+                    k = int(b.functions.kNow().call())
+                    cash = int(d.buck.functions.netBalanceOf(b.address).call())
+                    exposure = int(b.functions.grossAt(2).call()) - sum(held)
+                    effective_k = min(k, 10**18) * 9 // 10
+                    equity = max(0, f["eq_equity"] - f["eq_unpaid_relief"])
+                    f["eq_token_exposure"] = exposure
+                    f["eq_net_issued"] = f["eq_lien"] - sum(held) - cash
+                    f["eq_hard_limit"] = exposure * k // 10**18
+                    f["eq_ceiling"] = equity * effective_k // (10**18 - effective_k)
+
             else:
                 held = [int(b.functions.marks(i, int(b.functions.liquidityOf(i).call())).call()[1]) // 2 for i in range(n)]
                 f["eq_held_buck"] = sum(held)

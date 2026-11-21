@@ -3,9 +3,16 @@ pragma solidity ^0.8.20;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IBuckNetView} from "../IBuckNetView.sol";
+import {BuckBasketStorage} from "./BuckBasketStorage.sol";
+import {IBuckBasketVenue} from "./IBuckBasketVenue.sol";
+import {PortfolioMath} from "./PortfolioMath.sol";
+import {BuckTypes} from "../BuckTypes.sol";
 import {CarryRatio} from "../lib/CarryRatio.sol";
 
 interface IJubileeCashSnapshot is IBuckNetView {
+    function issue(uint256 id, uint256 coverage, uint256 amount, uint256 maxPremium, address pool) external;
+    function maturitiesPending() external view returns (bool);
+    function totalIssued() external view returns (uint256);
     function balanceOf(address owner) external view returns (uint256);
     function jubilee() external view returns (address);
     function fundBalancesScaled() external view returns (uint256 gross, uint256 net);
@@ -13,6 +20,7 @@ interface IJubileeCashSnapshot is IBuckNetView {
 }
 
 interface IJubileeFacilitySnapshot {
+    function creditInfo(uint256 id) external view returns (uint256, uint256, uint32);
     function issuanceOf(uint256 id) external view returns (uint256 principal, uint256 seconds_);
 }
 
@@ -66,6 +74,59 @@ library BasketJubileeMath {
 
     error InvalidJubileeInputs();
     error JubileeValueOverflow();
+
+    function weights(BuckBasketStorage.Constituent[] storage assets,
+                     mapping(uint256 => uint128) storage liquidity, mapping(uint256 => uint256) storage idle,
+                     bool includeIdle) public view returns (uint256[] memory)
+    {
+        uint256[] memory values = new uint256[](assets.length);
+        for (uint256 i; i < values.length; ++i) {
+            IBuckBasketVenue.Marks memory m = IBuckBasketVenue(address(this)).marks(i, liquidity[i]);
+            values[i] = m.posTwap;
+            if (includeIdle) values[i] += idle[i] * m.pTwap / (10 ** assets[i].decimals);
+        }
+        return PortfolioMath.weights(values);
+    }
+
+    error NonzeroBasketPremium();
+
+    /// @notice Executable new principal on the self-insured, zero-premium basket credit.
+    function issuable(address buck, address credit, uint256 creditId, uint256 k, uint256 appraised)
+        public view returns (uint256 room)
+    {
+        IJubileeCashSnapshot token = IJubileeCashSnapshot(buck);
+        if (token.maturitiesPending()) return 0;
+        (uint256 principal, uint256 seconds_) = IJubileeFacilitySnapshot(credit).issuanceOf(creditId);
+        if (principal != 0 && seconds_ == principal * (50 * (365 days + 6 hours))) return 0;
+        (uint256 face,, uint32 rate) = IJubileeFacilitySnapshot(credit).creditInfo(creditId);
+        if (rate != 0) revert NonzeroBasketPremium();
+        uint256 mark = Math.min(face, appraised);
+        uint256 limit = Math.mulDiv(mark, k, 1e18);
+        if (principal >= limit) return 0;
+        room = Math.min(limit - principal, BuckTypes.MAX_BALANCE - principal);
+        (uint256 gross,) = token.accountBalancesScaled(address(this));
+        room = Math.min(room, (BuckTypes.MAX_BALANCE * 1e36 - gross) / 1e36);
+        room = Math.min(room, type(uint256).max / 1e36 - token.totalIssued());
+    }
+
+    /// @notice The part of a redemption payable without selling TOKEN. New debt and a
+    /// payment out of collateral cash both consume economic room. The facility's face,
+    /// maturity and supply limits apply separately to the actual draw.
+    function fundExit(address buck, address facility, uint256 id, uint256 mark, uint256 k,
+                      uint256 spend, uint256 lien, uint256 quote, uint256 shares)
+        public returns (uint256 paid, uint256 redeemed)
+    {
+        uint256 limit = Math.mulDiv(mark, k, 1e18);
+        if (limit <= lien || quote == 0) return (0, 0);
+        uint256 capacity = Math.min(limit - lien, spend + issuable(buck, facility, id, k, mark));
+        redeemed = capacity >= quote ? shares : Math.mulDiv(shares, capacity, quote);
+        paid = Math.mulDiv(quote, redeemed, shares);
+        if (paid == 0) return (0, 0);
+        if (paid > spend) {
+            (uint256 face, uint256 active,) = IJubileeFacilitySnapshot(facility).creditInfo(id);
+            IJubileeCashSnapshot(buck).issue(id, face - active, paid - spend, 0, address(0));
+        }
+    }
 
     /// @notice One cash/principal/claim read for the existing basket shell and
     ///         its facets. Preconditions and exact valuation are as in claim.

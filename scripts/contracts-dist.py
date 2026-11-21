@@ -87,6 +87,7 @@ CONTRACTS = [
     "BasketDesk",              # the monetary desk: its own credit holder
     # The basket machine (doc/BASKET-MACHINE.org): one upkeep facet on a credit
     # marked net, a policy it asks, and the wheel that turns them.
+    "BasketExitFacet",         # immutable redemption execution deployed by the equity shell
     "BasketUpkeepFacet",       # the upkeep facet
     "BasketVenueFacet",        # the venue facet with the marks the upkeep reads
     "PairSignals",             # the pair observer

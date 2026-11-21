@@ -169,6 +169,8 @@ def frame_record(flat: dict, tokens) -> dict:
                        share_price=_ratio(flat.get("eq_share_price")), held_buck=flat.get("eq_held_buck"),
                        idle_buck=flat.get("eq_liquidity"), headroom=flat.get("eq_headroom"), mark=flat.get("eq_mark"),
                        unpaid_relief=flat.get("eq_unpaid_relief"),
+                       token_exposure=flat.get("eq_token_exposure"), net_issued=flat.get("eq_net_issued"),
+                       hard_limit=flat.get("eq_hard_limit"), ceiling=flat.get("eq_ceiling"),
                        carried_fee=flat.get("eq_carried_fee"), weights=weights,
                        wheel=dict(buy=flat.get("wh_eq_buy"), sell=flat.get("wh_eq_sell"), respond=flat.get("wh_eq_respond"),
                                   buys=flat.get("wh_eq_buy_n"), sells=flat.get("wh_eq_sell_n"),

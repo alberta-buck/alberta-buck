@@ -8,7 +8,6 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BasketJubileeMath} from "./BasketJubileeMath.sol";
 import {BasketMarketOps} from "./BasketMarketOps.sol";
-import {BuckTypes} from "../BuckTypes.sol";
 
 interface IBuckKSource {
     function currentBuckK() external view returns (uint256);   // 1e18
@@ -179,6 +178,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     bool public netAccounting;
     uint16 internal refreshFloorBp;
     uint16 internal refreshTopBp;
+    bool public portfolioLimits;
 
     /// @notice The basket's share of a receipt's gain over its cost basis.
     uint256 public constant LAMBDA_BP = 2500;
@@ -211,13 +211,6 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     {
         if (netAccounting) return BasketMarketOps.monetaryLeg(address(buck), i, sellBuck, amount);
         return IBuckBasketVenue(address(this)).monetaryLeg(i, sellBuck, amount);
-    }
-
-    function _mintPosition(uint256 i, uint256 tokens, uint256 netBuck)
-        internal returns (uint128 liquidity, uint256 tokenUsed, uint256 buckUsed)
-    {
-        if (netAccounting) return BasketMarketOps.positionMint(address(buck), i, tokens, netBuck);
-        return IBuckBasketVenue(address(this)).positionMint(i, tokens, netBuck);
     }
 
     function _payCash(address to, uint256 value) internal {
@@ -352,19 +345,8 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     ///      The unpaid Jubilee claim never enters this collateral calculation.
     function _issuableS(Snap memory s) internal view returns (uint256 room) {
         if (address(credit) == address(0)) return 0;
-        IBuckNetAccount token = IBuckNetAccount(address(buck));
-        if (token.maturitiesPending()) return 0;
-        (uint256 principal, uint256 seconds_) = credit.issuanceOf(creditId);
-        if (principal != 0 && seconds_ == principal * (50 * (365 days + 6 hours))) return 0;
-        (uint256 face,, uint32 rate) = credit.creditInfo(creditId);
-        if (rate != 0) revert NonzeroBasketPremium();
-        uint256 mark = Math.min(face, _creditValueS(s, _equityS(s, MARK_LOW)));
-        uint256 limit = Math.mulDiv(mark, s.k, 1e18);
-        if (principal >= limit) return 0;
-        room = Math.min(limit - principal, BuckTypes.MAX_BALANCE - principal);
-        (uint256 gross,) = token.accountBalancesScaled(address(this));
-        room = Math.min(room, (BuckTypes.MAX_BALANCE * 1e36 - gross) / 1e36);
-        room = Math.min(room, type(uint256).max / 1e36 - token.totalIssued());
+        return BasketJubileeMath.issuable(address(buck), address(credit), creditId, s.k,
+                                         _creditValueS(s, _equityS(s, MARK_LOW)));
     }
 
     /// @dev Pre: authorized upkeep, no position mutation in progress. Refresh
@@ -444,15 +426,15 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
         for (uint256 i = 0; i < s.m.length; i++) held += s.m[i].posLow / 2;
     }
 
-    /// @notice What the credit is marked at for `equity`. Buck allows a lien
-    ///         of K x the mark, so adding the held BUCKs over K makes that
-    ///         K x equity + held: the lien net of them is what K x equity bounds.
+    /// @notice Canonical net-mark credit supports the portfolio's TOKEN exposure at K
+    /// and its own net BUCK at face value. The fund's unpaid relief has no credit value.
     function _creditValueS(Snap memory s, uint256 equity) internal view returns (uint256) {
-        // Approved policy: unpaid claims affect LP prices, never issuance
-        // collateral. Preserve the independent held-BUCK offset below.
         if (netAccounting) equity = equity > s.relief ? equity - s.relief : 0;
         if (!netMark || s.k == 0) return equity;
-        return equity + _heldBuckS(s) * 1e18 / s.k;
+        uint256 held = _heldBuckS(s);
+        if (!netAccounting || !portfolioLimits) return equity + held * 1e18 / s.k;
+        uint256 tokens = _grossS(s, MARK_LOW) - held;
+        return tokens + Math.mulDiv(held + s.cash, 1e18, s.k);
     }
 
     /// @dev Write the appraised value, leaving canonical issuance untouched.
