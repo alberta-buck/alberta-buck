@@ -6077,25 +6077,41 @@ carried BUCK can wait (measured).
    =retirementCap= 1M), flash arbitrage on (=machine.arb_flash=; JS =arbFlash= unless false), K's
    rails [0.1, 0.9] (=experiment.py= and the JS =DEPLOY_DEFAULTS=); the =flash= comparison's arms
    now name their settings, so it still compares the four.
-2. /The fresh-issue rule/: =_fundCash(desired, fresh)=; with =fresh= the whole amount is drawn on
-   the line whatever the wallet holds. Pairing, buying and the refresh's re-mint pass it; exits do
-   not (they pay from the wallet). Tests: a pairing with carried BUCK in the wallet issues fresh and
-   leaves the wallet as it was; the solvency postcondition (=_finishBuy=) still holds.
-3. /The refresh primitive/ (the machine's venue, =onlySelf=): =refresh(i, liquidity)= burns that
-   much of the basket's position in pool i (=positionBurn=; TOKEN and carried BUCK to the wallet),
-   draws fresh BUCK for the BUCK side and mints the same liquidity back (=positionMint=); no price
-   moved. Tests: the pool's net/gross rises by f x (1 - r) for the fraction f of the pool's BUCK
-   replaced; the position's liquidity and the price are unchanged; the carried BUCK waits in the
-   wallet; the burn job then retires it with its relief.
-4. /The response decides when/ (the upkeep facet): when no sale or buy is due and some pool's
-   net/gross is under the band's floor, refresh the most carried one back to the band's top: replace
-   f = (top - r) / ((1 - r) x s) of the basket's position, s the basket's share of the pool's
-   liquidity, at most the whole position; one pool a response; the band in =ResponseParams= or a
-   setter of its own (governance). Tests: under the floor it refreshes, inside the band it does not,
-   a displaced pool (venue band) waits.
-5. /The worlds/: Python and JS read the refreshes (an event, counted per pool) beside each pool's
-   net/gross in the frames.
-6. /The comparison/ (above): refresh off, 0.990-0.995, 0.995-0.997; two years, burn and flash on.
+2. /The fresh-issue rule/ (=BuckBasketEquityStorage._fundCash=, line ~375; its one caller is
+   =BasketUpkeepFacet._buy=, which pairing (=_placeAll= -> =_buy(i, b, true)=), the policy's buys
+   (=_execute=) and the refresh all use): add =bool fresh=; with it the draw is the whole amount
+   (=draw = funded=, not =funded - s.spend=) and =funded= is bounded by the room to issue alone
+   (=_issuableS=), not by wallet cash plus room. =_buy= passes true. Exits and anything paying
+   out of the basket (=redeem=, =BasketMarketOps.execute='s non-flash legs) keep spending the
+   wallet. Tests: a pairing with carried BUCK in the wallet issues fresh and leaves the wallet's
+   BUCK where it was (then the retirement job retires it); =_finishBuy='s shortfall postcondition
+   holds; the pool's net/gross after a pairing is the fresh one.
+3. /The refresh/ (in the upkeep facet, not the venue: =liquidityOf= and =idleToken= are the equity
+   storage's, which the venue facet cannot see): =_refresh(s, i, liq)= = =positionBurn(i, liq)=
+   (=liquidityOf[i] -= liq=, =idleToken[i] += tokenOut=, the carried BUCK stays in the wallet as
+   cash), then =_buy(i, value, true)= (fresh BUCK pairs the released TOKEN back into the same
+   pool). No price moves (an LP change), no swap fee; the position ends the size it was, to
+   rounding. Tests: the pool's net/gross rises by f x (1 - r) for the fraction f of the pool's BUCK
+   replaced; liquidity and spot unchanged; the wallet holds the carried BUCK; the lien rises by the
+   fresh BUCK until the retirement job retires the carried BUCK, with its relief.
+4. /When/ (=_respond=, after =_placeAll= and =_execute=, only when neither did work, so a turn is one
+   job): read each pool's (gross, net) BUCK (=CarryRatio.read(address(buck), pool)=, as
+   =BasketMarketOps= does); take the most carried pool under the floor; replace
+   f = (top - r) / ((1 - r) x share) of the basket's liquidity there, at most all of it, where share
+   = =liquidityOf[i]= / the pool's active liquidity (full-range positions). The band as two
+   constants (=REFRESH_FLOOR_BP = 9900=, =REFRESH_TOP_BP = 9950=): constants, not
+   =ResponseParams= fields, so the storage layout does not move. A displaced pool (the venue's TWAP
+   band, =_staleMark=) waits. Report it as a =Responded= action bit (8: refreshed) so the worlds count
+   it. Bytes: the upkeep facet has 737 after R6; the refresh reuses =_buy= and the venue's
+   =positionBurn=, so it should fit; if not, move the decision's arithmetic into =BasketMarketOps=.
+5. /The worlds/: Python =basket_machine.book_receipt= and the JS world's receipt reader count the
+   refresh bit per pool (=wh_eq_refresh=, =wh_eq_refresh_n=); the frames already carry each pool's
+   net/gross (=market.pools[].net=, =market.dollar_pool_net=) and the book's spread.
+6. /The comparison/ =comparisons/refresh.toml= (=economy=, two years, the new defaults): refresh
+   off (an =off= constant of the floor at 0, or the frozen commit), band 0.990-0.995, band
+   0.995-0.997. Read the pools' net/gross and spread, the arbitrageurs' volume, the share price,
+   relief paid and the fund's cash and receipt sales, the wallet's carried BUCK waiting, lien and
+   supply, K and BVIB.
 
 *** Notes on decision 5 (for later)
 
@@ -6106,43 +6122,107 @@ carried BUCK can wait (measured).
   leverage compound to =lien <= K x equity / (1 - K)= (3x equity at K = 0.75): the spiral the KMAX
   cap exists for. Any such optimization needs that bound stated first.
 
-*** The basket's leverage against K (under discussion, 2026-11-21)
+*** The basket's leverage against K (decided 2026-11-21)
 
-The owner (2026-11-21): the limit "seems more reasonable" counting the leveraged portfolio; target a
-fraction of it that is inverse to K (about 90% at K = 0.25, 50% at K = 0.9), and bound it with more
-reasonable KMIN and KMAX. The proposal under discussion:
+/The owner's decisions/: the limit counts the leveraged portfolio, measured on the TOKEN exposure
+(pairing is a matched book); the soft limit is a fraction of it that falls as K rises, by one
+constant kappa = 0.1; no separate cap on the exposure; K's rails [0.1, 0.9] (done, defaults).
 
-- /Leverage on the TOKEN exposure/: N = BUCK issued net of what the positions hold and the wallet's
-  cash (the book's =issued= today), E the equity at the exits' marks less unpaid relief, the TOKEN
-  exposure X = E + N. Pairing is a matched book (BUCK owed against BUCK held), not leverage: counting
-  the positions' BUCK half as assets would let a fully paired, unlevered basket hold its pairing
-  only at K >= 0.5.
-- /The hard limit compounds/: N <= K x (E + N), so N <= K E / (1 - K), X <= E / (1 - K) (the mark
-  becomes E + N + heldBUCK / K, against E + heldBUCK / K today).
-- /The target levers as if K were a fraction kappa lower/: K_eff = (1 - kappa) K,
-  N* = K_eff E / (1 - K_eff), the fraction of the limit
-  phi(K) = (1 - kappa)(1 - K) / (1 - (1 - kappa) K). K may fall by kappa x K before the lien meets
-  the limit; the room between them pays exits before anything is sold. kappa = 0.08 gives the
-  owner's 90% at 0.25 and 55% at 0.9; kappa = 0.1 gives 87% and 47%. The inverse shape is the
-  limit's sensitivity, dN_max/dK = E / (1 - K)^2: 1.8 E per unit of K at 0.25, 100 E at 0.9.
-- /The rails, decided (owner, 2026-11-21): [0.1, 0.9]/. "Any K that wants to go beyond that is an
-  indicator of an unrealistic economy, and should be fixed by monetary responses of reasonable actors
-  in real life: people retiring BUCK liability at a steep discount when K is low, and issuers issuing
-  BUCK at a steep premium when K is that high." K is the whole system's LTV, so KMAX bounds everyone's
-  leverage at 1 / (1 - 0.9) = 10x; the basket's target at kappa 0.1 then runs from 1.10 E at
-  K = 0.1 (89% of the limit) through 1.82 E at 0.5 and 3.08 E at 0.75 to 5.26 E at 0.9 (47%). The
-  five-year runs kept K in 0.47 to 0.79, where neither rail binds; a railed K in a run is a finding
-  about the cast (the demand and retirement agents), not a setting to tune. At 0.1 the near-zero-K
-  exit shortfall cannot arise (the exit already proceeds at 0.05). Defaults in both worlds.
-- /Still open/: leverage measured on the TOKEN exposure (pairing a matched book)? kappa 0.1, one
-  governance constant? Is about 3x commodity exposure at K = 0.75 intended, or a hard cap on X / E
-  while it is measured? (A comparison arm either way: today's ceiling against the target.)
-- /The size of the change/: today's target is X = E (1 + K / 2) (=CEILING_BP= 50% of N <= K E):
-  1.38 E at K = 0.75; the proposal gives 3.08 E (kappa 0.1). The sell-down as K falls,
-  dX/dK = (1 - kappa) E / (1 - K_eff)^2, is 8.5 E per unit of K at 0.75 against E / 2 today: a K
-  falling 0.01 sells 8.5% of equity in TOKEN and retires the BUCK. That is K's transmission (K falls
-  when BUCK is cheap; the basket then buys BUCK back), about seventeen times stronger, and the
-  depositors' commodity exposure about doubled.
+**** The quantities (each at the exits' LOW marks, net BUCK)
+
+- X: the TOKEN exposure, the TOKEN side of every position plus the idle TOKEN (=_heldBuckS='s
+  sibling: =posLow / 2= is each position's BUCK half, and its TOKEN half is the same value at the
+  LOW mark; =_tokenValue= the idle TOKEN). The unpaid relief is not in it (not collateral).
+- H: the positions' BUCK half (=_heldBuckS=); C: the wallet's net cash (=s.cash=).
+- N = lien - H - C: the BUCK issued beyond what the basket holds (the response's =issued= in
+  =_book=, there at TWAP marks). E = X - N, the equity less unpaid relief.
+
+**** The hard limit (Buck's, through the credit's mark)
+
+- Today: mark = E + H / K (=_creditValueS=), so the lien <= K x mark gives N + C <= K x E.
+- Decided: mark = X + (H + C) / K, so the lien <= K x mark gives *N <= K x X*, the same as
+  N <= K x (E + N), N <= K E / (1 - K), X <= E / (1 - K). The positions' BUCK and the wallet's
+  cash back the lien one for one (owed and held); only the TOKEN exposure is levered.
+- =Buck.flashRoom= becomes K x X - N: the line's room grows with the exposure, so flash arbitrage
+  (on by default) is bounded by the pools (=capBp=, 5% of the first pool's reserve), not by credit.
+
+**** The soft limit (the response's ceiling)
+
+- Today: =b.ceiling = K x equity x CEILING_BP / 10000= with =CEILING_BP= 5000 (=BasketUpkeepFacet._book=):
+  half of K x E, "the other half of the line is what exits are paid from".
+- Decided: K_eff = (1 - kappa) K, kappa = 0.1 (a constant, =KAPPA_BP = 1000=, in place of
+  =CEILING_BP=), *ceiling = K_eff x equity / (1 - K_eff)*: the hard limit computed at a K a tenth
+  lower. Its fraction of the hard limit is phi(K) = (1 - kappa)(1 - K) / (1 - (1 - kappa) K):
+
+  | K                     |  0.1 | 0.25 |  0.5 | 0.75 |  0.9 |
+  |-----------------------+------+------+------+------+------|
+  | phi                   | 0.89 | 0.87 | 0.82 | 0.69 | 0.47 |
+  | ceiling, in E         | 0.10 | 0.29 | 0.82 | 2.08 | 4.26 |
+  | hard limit, in E      | 0.11 | 0.33 | 1.00 | 3.00 | 9.00 |
+  | room for exits, in E  | 0.01 | 0.04 | 0.18 | 0.92 | 4.74 |
+
+- What kappa buys: K may fall by a tenth (K x 0.1) before the issued BUCK at the ceiling meets the
+  hard limit; equally, the TOKEN may fall 10% in BUCK at a fixed K (the limit K x X falls with X,
+  N does not). Exits are paid from the room between them before anything is sold; at low K that
+  room is small and a large exit is sold down at once (as today beyond the ceiling).
+
+**** How the book uses it (as recorded: the ceiling is a bound; confirm)
+
+The response aims its book at =equity + aim= TOKEN (=_book=): =aim= is the parity lean
+(=-error x gain x equity=, gains 5 in both worlds), held within =+-ceiling=. So the leverage the
+basket actually carries is the lean's: about 5 to 10% of equity at the BVIB errors the runs see
+(BUCK dear: let out, buy TOKEN; cheap: hold BUCK). The new ceiling (2.08 E at K = 0.75 against
+0.375 E today) then almost never binds the lean; it binds as a sell-down when K falls far enough
+under what has been issued, and through the hard limit. *The alternative, for the owner*: aim the
+book at the ceiling itself (lever to N* by default, the lean moving it), which is what "this gives us
+higher leverage when K is less likely to fall" may mean. The two differ by an order of magnitude in
+the exposure, so the build below makes the aim a choice and the experiments run both.
+
+**** Cap or no cap (the owner chose no cap; the implications, for the record)
+
+- /With the ceiling as a bound (as recorded)/: the exposure is E + aim, so a cap on X / E (3, say)
+  would never bind; no cap costs nothing. What grows is the hard limit and the flash room.
+- /If the book aims at the ceiling/: X = E / (1 - K_eff): 1.11 E at K = 0.1, 1.82 E at 0.5,
+  3.08 E at 0.75, 5.26 E at 0.9 (10x at most, the rail). Then:
+  - The depositors' commodity exposure is levered: a 10% fall of the TOKEN in BUCK costs
+    10% / (1 - K_eff) of equity (31% at K = 0.75, 53% at 0.9), and puts the basket at its hard
+    limit (kappa); share-price volatility scales the same way.
+  - The sell-down as K falls is dX/dK = (1 - kappa) E / (1 - K_eff)^2: 8.5 E per unit of K at 0.75,
+    25 E at 0.9 (a K falling 0.01 from 0.9 sells a quarter of equity), against E / 2 today. That is
+    K's transmission: K falls when the BUCK is cheap, and the basket then sells TOKEN and retires BUCK
+    (buys it back), about seventeen times stronger at 0.75; but in one response it is a market
+    order of that size, so it needs the release law's pacing, not "sold down at once".
+  - A cap (X <= 3 E) would bound those at high K and weaken the transmission exactly when the BUCK
+    is dear and K high. No cap keeps the transmission; the rails bound it (10x).
+- The owner's view of the rails covers the tail: a K driven toward 0.9 is an unrealistic economy,
+  answered by issuers issuing at a premium (and toward 0.1 by debtors retiring at a discount).
+
+**** The build (L1 to L5), in order
+
+- L1. /The hard limit/: =_creditValueS(s, equity)= (=BuckBasketEquityStorage=, shared by the shell
+  and the facets) returns X + (H + C) / K under =netMark= (X from the snap: the TOKEN halves at LOW
+  plus the idle TOKEN), instead of (equity - relief) + H / K. Tests (=BasketUpkeepFacet.t.sol=,
+  =BuckCompoundBasket*.t.sol=): the mark equals X + (H + C) / K; a lien at K x X - epsilon issues,
+  past it reverts; =flashRoom= = K X - N; the near-water cases keep their sense. The storage layout
+  is unchanged (=make storage-layout-check=).
+- L2. /The soft limit/: =BasketUpkeepFacet._book=: =KAPPA_BP = 1000= replaces =CEILING_BP=;
+  =ceiling = kEff x equity / (1 - kEff)= with =kEff = s.k x (10000 - KAPPA_BP) / 10000= (1e18
+  scale; guard 1 - kEff > 0: the rail keeps K <= 0.9). Tests: the ceiling at K 0.1 / 0.5 / 0.75 /
+  0.9 against the table; the sell-down beyond it; a large exit paid from the room, then sold down.
+- L3. /The aim, a choice/: a governance flag (=ResponseParams= cannot grow without moving the later
+  fields: add one bool to the end of the equity storage, after =netAccounting=, and re-pin the
+  layout deliberately): false, the lean alone (as recorded); true, the book aims at the ceiling plus
+  the lean, within [0, hard room]. Pace the sell-down by the release law when the excess is large.
+- L4. /The worlds/: the frames carry X, N, the ceiling and the hard limit (=basket.*= in the run
+  record; =net_snapshot.py= and the JS world's record), so the dashboard shows the leverage.
+- L5. /The comparison/ =comparisons/leverage.toml= (=economy=, two years; burn, flash, refresh at
+  its default once built): (a) today's limits (an =old= switch kept only for the comparison, or the
+  frozen commit 39e7ade7), (b) the new limits with the lean as the aim, (c) the book aimed at the
+  ceiling, (d) (c) with X <= 3 E. Read: X / E and N over time, the share price and its volatility,
+  K and BVIB (and the correlation of the basket's sells with K's falls: the transmission), the
+  sell-down volume against each pool's depth, retirements and relief, lien and supply, the
+  depositors' return against holding, any headroom below zero. Then the stress arms (a 20% TOKEN
+  fall, a K step down, a raid) on (b) and (c), and the five-year suite on the winner.
 
 *** Measuring it
 
@@ -6151,28 +6231,81 @@ band 0.990-0.995, band 0.995-0.997. Read the pools' net/gross and the book's spr
 share of the volume, the basket's share price, the fund's cash and receipt sales, relief paid,
 supply and lien, K and BVIB.
 
-** Resume here (2026-11-21)
+** Resume here (2026-11-21, before a compaction: enough for another agent to carry on)
 
-- *Branch*: =feature/household-minimal-ecosystem= (worktree =.claude/worktrees/buck-compound=), head
-  3bba6fb4, pushed.
-- *Done since 2026-11-20*: the old baskets' retirement R1 to R5 (doc/review/consolidation-plan.org,
-  "Retiring the old baskets": the earlier upkeep unpublished; deploy, server and savings page on the
-  machine only; every Solidity fixture on the machine; the pro-rata and ops baskets, hooked Buck,
-  earlier upkeep, pairs director and shadow controller deleted; the wheel slimmed, =setArb= four
-  arguments; a storage-layout check with the shells' layouts pinned, and the dead director fields and
-  stabilizer seam pruned behind it). Forge 1,215, Python 1,312, JS 300 pass. The flash comparison read
-  (above): burn on, flash neutral, hollowness untouched.
-- *Running on datasim*: the seeded suite in =~/src/alberta-buck-net= (4d7497aa), the lifecycle worlds
-  near their end and econ-F at about day 1,027 (some 13 hours more); read with =runrecord years=.
-- *Next, in order*: (1) burn and flash on by default (owner); (2) R6, done (the venue's pro-rata accounting gone; the venue has 7.9 KB, the shell 963 bytes); (3) the
-  pool refresh ("Keeping the pools at a target discount", decided) with the fresh-issue rule, and its
-  comparison; (4) a new five-year suite at the new
-  head (two seeds) on datasim; (5) the stress arms' port (task 30, then delete the catalogue);
-  (6) the demand cast; (7) the release path (recommendation 6).
-- *Gotchas*: the JS artifact bundle (=core/js/artifacts/bundle.mjs=, generated) goes stale after a
-  contract change: =node core/js/bin/bundle-artifacts.mjs= before the webevm tests; a change to
-  =foundry.toml='s outputs needs one =forge build --force=; =scripts/storage-layout.py --update= after a
-  deliberate storage change (=make storage-layout-check= fails until then).
+*** Where things are
+
+- /Branch/ =feature/household-minimal-ecosystem=, worktree =.claude/worktrees/buck-compound= (all work
+  happens there; the main checkout is someone else's). Pushed to origin; head after this section's
+  commit. The release and the --no-ff merge to master are still ahead (the owner sets the timing).
+- /Done 2026-11-20 and 21/: the old baskets' retirement R1 to R6 (=doc/review/consolidation-plan.org=,
+  "Retiring the old baskets" and "R6 as done"); the storage-layout check (=make storage-layout-check=,
+  pin =scripts/storage-layout.json=); the flash comparison and the seeded suite read ("The flash
+  comparison and the seeded suite, read"); the defaults (39e7ade7): burning idle BUCK ($1M a job),
+  flash arbitrage on, K's rails [0.1, 0.9], in both worlds. Tests at 39e7ade7: forge 1,215 (111
+  suites), Python 1,312, JS 304 (the unit files and every webevm file that builds the eq world).
+- /Decided and designed, not built/:
+  1. The pool refresh ("Keeping the pools at a target discount", its decisions, the fresh-issue rule
+     and "The build, in order" steps 2 to 6, with code pointers).
+  2. The basket's leverage against K ("The basket's leverage against K (decided 2026-11-21)", with
+     the build L1 to L5).
+- /One thing to confirm with the owner before L3/: the leverage formula is recorded as the response's
+  ceiling (a bound; the parity lean, gains 5, keeps choosing the leverage within it, about 5 to 10% of
+  equity), not as the level the book aims at. If the owner meant "lever to it", L3's flag aims the book
+  at the ceiling; the comparison (L5) runs both either way. The implications of each, and of a cap,
+  are in that section.
+- /Running on datasim/ (=ssh datasim.local=, use is authorized; it has 32 cores): the seeded five-year
+  suite in =~/src/alberta-buck-net= at 4d7497aa (fifteen worlds; the lifecycle worlds near day 1,826,
+  econ-F about two-thirds through). It predates the households' fixes, burning, flash and R1 to R6:
+  read it as the old baseline. When =build/logs/suites.done= exists, read
+  =.venv/bin/python -m alberta_buck.sim.runrecord years build/runs/<id> ...= and record the final
+  numbers under "The seeded five-year suite". Leave =~/src/alberta-buck-savings-sandbox= (the savings
+  server) alone. The flash comparison (=~/src/alberta-buck-flash=) is complete and read.
+
+*** Next, in order
+
+1. Build the refresh, steps 2 to 4 (tests first, forge then the worlds), then steps 5 and 6.
+2. Confirm the leverage aim with the owner; build L1 and L2 (they hold under either reading), then
+   L3 and L4.
+3. Run =comparisons/refresh.toml= and =comparisons/leverage.toml= on datasim, two years each (a
+   worktree of their own at the commit, as =~/src/alberta-buck-flash= was: clone or =git worktree=
+   at the commit, =make nix-venv=, =make nix-venv-pyrevm-patched= (our pyrevm: worlds refuse to start
+   without it), =make sim-build=, the kernels (=make core-build-py=), then
+   =make venv-compare COMPARE=<name> COMPARE_JOBS=4= under =nohup= with a =.done= / =.failed= marker;
+   report with =make nix-venv-compare-report COMPARE=<name>=, and read the frames for what the report
+   lacks: =market.pools[].net=, =market.book.buck_bid / buck_ask=, =supply.*=, =basket.*=,
+   =population.roles.*=, =households.*=; =/tmp/flashread-e9ef.py= on datasim is a reader to adapt).
+4. A new five-year suite at the head with the winners (=scripts/world-suite.sh=, two seeds).
+5. The stress arms' port (task 30: the catalogue's excursion and attack arms as =economy=
+   interventions, one comparison spec), then delete the catalogue and wave 2's legacy simulations
+   (consolidation plan, "Order of work").
+6. The persistent BUCK demand cast (balances, payroll), after the pools are fixed.
+7. The release path: regenerate the pinned 12 s vectors, the savings sandbox's step 6, publish the
+   contracts (=scripts/contracts-dist.py=), --no-ff merge to master.
+
+*** How to work here (gotchas that cost time)
+
+- /Commands/: =nix develop --command make test FORGE_JOBS=4= (all forge; bare =forge build= / =forge
+  test= fail on the generated RegressVerifier, so use make, or pass =FORGE_OPTS="--optimize
+  --optimizer-runs 200 -j 4 --skip test/RegressionTest.sol --match-test X -vvvv"= to =make
+  path-<File>.t.sol=); =make nix-venv-test-python= (Python, about five minutes);
+  JS: =cd core/js && nix develop ../.. --command node --test --test-concurrency=3 <files>= after
+  =node core/js/bin/bundle-artifacts.mjs= (the generated bundle goes stale on any contract change);
+  =make storage-layout-check= (=storage-layout.py --update= after a deliberate storage change).
+- /The nix banner/ prints to stdout: filter it (=| grep -v 'Alberta\|^  [a-z]'=) before parsing.
+- /Forge traps/: in fixtures read =vm.getBlockTimestamp()=, never =block.timestamp= after a warp
+  (via-IR caches it in some inheriting contracts: time stood still in a suite); a change to
+  =foundry.toml='s outputs needs one =forge build --force=.
+- /Bytes/: Buck 646 left, BuckCredit about 60 (find bytes first), the shell 963, the upkeep facet
+  737, =BasketMarketOps= 1,427, the machine's venue 7,865 (=forge build --sizes=).
+- /Worlds/: the machine is the only basket; =deploy()= refuses "prorata", "ops", "shadow" and
+  =equity_machine=False=. The director and monetary keepers are no-op cast slots (renumbering the
+  cast would change every saved world). Snapshot frames keep their keys (None) for compatibility.
+- /House rules/ (CLAUDE.md, the owner): ASCII commit messages, no co-author or AI attribution lines;
+  --no-ff merges into master; never a bare =git stash=; at most four cores on the Mac (datasim
+  unlimited); never start, kill or probe ports 8000, 8797 or 8798 (tunnel origins; a local server uses
+  8897); the owner publishes packages (pyrevm build, webevm) and owns Cloudflare/tunnel steps; write
+  phase-end observations into the org docs before a phase's commit.
 
 ** Resume here (superseded: 2026-11-20)
 

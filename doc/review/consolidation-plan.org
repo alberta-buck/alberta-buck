@@ -316,6 +316,9 @@ What the move showed, for the owner:
 
 * Order of work (from 2026-11-21), with the recommended approach for each
 
+(The basket's own next work, the pool refresh and the leverage against K, is in
+=doc/review/bucknet-economy-implementation.org=, "Resume here (2026-11-21, before a compaction)".)
+
 1. /R6/: done (above).
 2. /Wave 2, once the stress arms are ported/ (task 30): port the catalogue's excursion and attack
    arms as =economy= interventions (one comparison spec, like =comparisons/shocks.toml=), then delete
