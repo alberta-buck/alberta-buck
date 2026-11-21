@@ -250,6 +250,32 @@ What the move showed, for the owner:
   =sim-compare-rebalancing-eq=), and =alberta_buck/test/legacy/= (now on the machine only, not
   collected by default).
 
+** R5 as done: the shared code, behind a layout check (2026-11-20)
+
+- /The wheel/: =DirectorKind=, =SweepKind= and =EquityKind= went (only the retired wheel used them).
+  =ArbKind= keeps the routes and the slots; planning and execution are the composed wheel's (the
+  machine's funded basket arbitrage), so the older flash-swap executor, =CycleMath=, the caller
+  share, the start modes and the =Cycled= event went, and =setArb= is =(pool, basket, capBp,
+  minEdgeBp)= (Python, JS and the suites follow). The machine wheel is 316 bytes smaller.
+- /The layout check/ (=scripts/storage-layout.py=, =make storage-layout-check=, in =test-packaging=):
+  every variable a facet declares must sit at its shell's slot, offset and type (the equity shell
+  with the V3 venue, the machine's venue and its upkeep; the desk with the V3 venue), and the
+  shells' layouts are pinned in =scripts/storage-layout.json=, so moving a field must be deliberate
+  (=make storage-layout-update=). =foundry.toml= now asks for =storageLayout= in every artifact
+  (packaging copies only abi and bytecode).
+- /Pruned behind it/: =director= and =lastRebalanceStepEpoch= (shared storage), =equityDirector=
+  with =setEquityDirector= and =IEquityDirector=, the desk's fallback to =director=, the
+  =DirectorSet= and =RebalanceStepped= events, and the =IStabilizer= seam (the desk keeps
+  =netInventory=, =capacity= and =positionCap= as its own views; =saturation= went with the observer
+  that read it). The check reported exactly these and the later fields' moves, the facets still
+  agree, and the new layout is pinned (the shell 48 variables, the desk 38).
+- /Proposed R6, for the owner/: the V3 venue facet still carries the pro-rata basket's accounting:
+  =provideForToken=, =withdrawLiquidity=, =investFromBucks=, =convertIntoBucks= and =setupPool=
+  (no contract calls them), =creditDepositors= with =stressBonusPrincipal=, =creditTreasury= with
+  =treasuryBuckPending=, the stress-fee fields and =totalOutstandingBuck= (read by =poolBuckValues=,
+  which the desk still uses). Pruning them shrinks the venue and the shared storage further, under
+  the same check.
+
 * Order of work
 1. Wave 1, and the three test tiers with =help= rewritten around them, once the
    JS conversion to webevm lands (it edits the Makefile now).

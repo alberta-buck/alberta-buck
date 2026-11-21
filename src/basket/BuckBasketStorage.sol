@@ -84,8 +84,6 @@ abstract contract BuckBasketStorage {
     IUniswapV3Factory public v3Factory;
     IBuckBasketVenue  public venue;        // the delegatecall AMM-venue facet
     address           public governance;
-    address           public director;     // optional IRebalanceDirector advisor
-    uint32            public lastRebalanceStepEpoch;   // +1-encoded; 0 = never
 
     uint24  public defaultFeeTier;
     uint32  public twapWindow;
@@ -198,9 +196,6 @@ abstract contract BuckBasketStorage {
     event TreasuryWithdrawn(address indexed to, uint256 amount);
     event TreasuryReinvested(uint256 indexed poolIdx, uint256 buckConsumed, uint128 liquidity);
     event VenueSet(address indexed venue);
-    event DirectorSet(address indexed director);
-    event RebalanceStepped(uint256 indexed sellIdx, uint256 indexed buyIdx,
-                           uint256 valueMoved, uint256 buckReinvested, uint128 liquidity);
     /// @param quadrant 1=absorb 2=retire 3=supply 4=issue
     event MonetaryOperation(uint8 indexed quadrant, int32 effortBp, bool outright,
                             uint256 buckMoved, int256 outstanding, uint256 buckHeld);

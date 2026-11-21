@@ -5,7 +5,6 @@ import {IERC20}              from "@openzeppelin/contracts/token/ERC20/IERC20.so
 
 import {BuckBasketStorage}   from "./BuckBasketStorage.sol";
 import {IBuckBasketVenue}    from "./IBuckBasketVenue.sol";
-import {IStabilizer}         from "./IStabilizer.sol";
 
 interface IMonetaryDirector {
     function monetaryEffort() external view returns (int32 effortBp, bool outright);
@@ -120,7 +119,7 @@ interface IMonetaryDirector {
 ///         because that is the shape of the observer facet of the monetary
 ///         Diamond (WP-11).  What `BuckKControllerShadow` integrates is the
 ///         observer's `shadowValueInBuck()`, not anything on this shell.
-abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
+abstract contract MonetaryDesk is BuckBasketStorage {
 
     struct OpsParams {
         uint32 maxLegBp;        // per-leg cap, bp of that pool's BUCK reserve
@@ -131,15 +130,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
 
     OpsParams public opsParams;
 
-    /// @notice Director consulted for `monetaryEffort()`.  Deliberately
-    ///         SEPARATE from `director`, which gates the shell's advisory
-    ///         deposit routing and rebalance step.  In the chain simulation
-    ///         the rebalance director is driven externally by a keeper and
-    ///         `setDirector` is never called, so pointing the monetary path
-    ///         at `director` would have switched on advisory routing as a
-    ///         side effect -- and the comparison this basket exists for must
-    ///         differ from its baseline by monetary operations and nothing
-    ///         else.  Falls back to `director` when unset.
+    /// @notice The policy consulted for `monetaryEffort()` and its epoch clock.
     address public monetaryDirector;
 
     event OpsParamsSet(OpsParams p);
@@ -173,8 +164,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     }
 
     function _monDir() internal view returns (address) {
-        address md = monetaryDirector;
-        return md != address(0) ? md : director;
+        return monetaryDirector;
     }
 
     /// @notice Capitalize the desk with TOKEN reserves.
@@ -442,7 +432,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
         }
     }
 
-    // --- IStabilizer: the desk's own book ----------------------------------- //
+    // --- The desk's own book ----------------------------------------------- //
 
     /// @notice absorbed - issued, BUCK native units.
     ///
@@ -473,7 +463,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///         unchanged); Q2 burn the 100 held -> held 0, outstanding 0 ->
     ///         0; Q2 burn a further 50 bought fresh -> outstanding -50 -> 0:
     ///         permanent, K sees the real bvib, no double count.
-    function netInventory() public view virtual override returns (int256) {
+    function netInventory() public view virtual returns (int256) {
         int256 issued = monetaryOutstanding > 0 ? monetaryOutstanding : int256(0);
         return int256(monetaryBuckHeld) - issued;
     }
@@ -490,7 +480,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///         `maxLegBp` is a per-operation pacing limit, not a book bound,
     ///         and TOKEN-reserve exhaustion is an ordinary state the desk
     ///         refills by issuing; neither enters capacity.
-    function capacity() public view virtual override returns (uint256) {
+    function capacity() public view virtual returns (uint256) {
         OpsParams memory op = opsParams;
         if (!op.enabled) return 0;
         uint256 nav = _deskNavSafe();
@@ -499,11 +489,6 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
         uint256 outRoom = _room(nav * op.maxOutrightBp / 10000,
                                 o < 0 ? uint256(-o) : uint256(o));
         return posRoom < outRoom ? posRoom : outRoom;
-    }
-
-    /// @notice 1e18 - capacity(): 1e18 once either bound has been hit.
-    function saturation() public view override returns (uint256) {
-        return 1e18 - capacity();
     }
 
     /// @notice WP-13: the desk's inventory bound in BUCK, `maxPositionBp` x
@@ -520,7 +505,7 @@ abstract contract MonetaryDesk is BuckBasketStorage, IStabilizer {
     ///         does not read as a change of position); the bound otherwise.
     ///         The holding logic lives in the OBSERVER: the shell adds
     ///         nothing but this view (EIP-170 headroom).
-    function positionCap() external view override returns (uint256) {
+    function positionCap() external view returns (uint256) {
         OpsParams memory op = opsParams;
         if (!op.enabled) return 0;
         uint256 nav = _deskNavSafe();

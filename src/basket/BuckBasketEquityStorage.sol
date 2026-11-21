@@ -14,16 +14,6 @@ interface IBuckKSource {
     function currentBuckK() external view returns (uint256);   // 1e18
 }
 
-/// @notice The director the equity basket consults: leaning targets and the
-///         two gates (EquityTurnDirector).  Optional: with none set the basket
-///         keeps its declared targets and a plain band.
-interface IEquityDirector {
-    function observe() external;
-    function targetsBp() external view returns (uint256[] memory);
-    function mayTrim(uint256 i) external view returns (bool);
-    function mayFund(uint256 i) external view returns (bool);
-}
-
 /// @notice Buck, as the basket sees it: an ordinary credit holder's account.
 interface IBuckHolder {
     function signedBalanceOf(address a) external view returns (int256);
@@ -139,7 +129,6 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     int256  public dayFlow;              // today's net flow (BUCK)
     uint64  public lastDay;              // the day Daily last ran (block.timestamp / 1 days)
     address public equityWheel;          // the components facet
-    address public equityDirector;       // optional IEquityDirector
     mapping(uint256 => uint64) public lastSyncDay;    // Sync: once a day per pool
 
     IMarkedCredit public credit;         // the BuckCredit its credit lives in

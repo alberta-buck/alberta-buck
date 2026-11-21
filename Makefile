@@ -68,6 +68,7 @@ help:
 	  'Contract packages (README-build.org; local build only):' \
 	  '  make nix-contracts-dist            # emit npm and Python ABI/bytecode bundles' \
 	  '  make nix-contracts-dist-check      # compiler and size checks on built artifacts' \
+	  '  make nix-storage-layout-check      # the basket shell and its facets share one pinned layout' \
 	  '  make nix-third-party-notices-check # package licences and generated notices' \
 	  'Use make help without Nix or a venv; it starts no services or simulations.' \
 	  'Every simulation and validation run -- start, re-run, steer, read the results: make help-runs'
@@ -230,7 +231,7 @@ test-js: sim-build core-build-wasm core-build-wasm-web
 test-browsers:
 	$(MAKE) core-net-math-test wallet-sandbox-test sandbox-savings-test
 test-packaging:
-	$(MAKE) contracts-dist-check third-party-notices-check stage-uniswap-check fmt-check
+	$(MAKE) contracts-dist-check storage-layout-check third-party-notices-check stage-uniswap-check fmt-check
 test-smoke: sim-build core-build-py
 	rm -rf build/test/smoke-runs
 	SIM_RUNS=build/test/smoke-runs python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy.toml \
@@ -1824,6 +1825,14 @@ contracts-dist:		contracts-dist-build
 
 contracts-dist-check:	contracts-dist-build
 	python3 scripts/contracts-dist.py --check
+
+# One storage layout for the basket shell and every facet it delegatecalls, and the shells' layouts
+# pinned in scripts/storage-layout.json (a change to them must be deliberate: storage-layout-update).
+.PHONY: storage-layout-check storage-layout-update
+storage-layout-check:	contracts-dist-build
+	python3 scripts/storage-layout.py --check
+storage-layout-update:	contracts-dist-build
+	python3 scripts/storage-layout.py --update
 
 core-js-deps:
 	@test ! -L core/js/node_modules || { echo 'core/js/node_modules is a symlink; remove the symlink itself before installing dependencies'; exit 1; }

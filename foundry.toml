@@ -10,6 +10,9 @@ via_ir = true
 gas_limit = "18446744073709551615"   # u64::MAX -- the simulation test runs hundreds of millions of gas
 memory_limit = 1073741824             # 1 GiB -- JSON serialisation accumulates a large memory string
 evm_version = "cancun"
+# The storage layout in every artifact: scripts/storage-layout.py checks that a shell and the
+# facets it delegatecalls share one layout, and pins the shells'.
+extra_output = ["storageLayout"]
 
 # ONE compiler for our contracts, declared here rather than passed as
 # --use on some command lines and not others.

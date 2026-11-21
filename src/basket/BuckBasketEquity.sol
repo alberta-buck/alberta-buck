@@ -168,11 +168,6 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         emit ArbitrageCreditorSet(source);
     }
 
-    function setEquityDirector(address d) external onlyGov {
-        equityDirector = d;
-        emit DirectorSet(d);
-    }
-
     event ResponseConfigured(ResponseParams params);
 
     /// @dev A target never leans as far as the leash, so the safeguard that

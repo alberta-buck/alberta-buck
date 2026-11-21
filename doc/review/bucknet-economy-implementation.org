@@ -5915,13 +5915,16 @@ idle BUCK is the basket's liquidity target.
   already ran on the machine, so R2 to R4 change none of its numbers (the machine path's
   transactions keep their order); the savings server and page now offer only the machine, and a
   page's =scenario.basket= set is refused; the sandbox bundle no longer carries the pro-rata
-  artifacts. Recommendation: R5 next (the shared storage's dead fields need a layout check first),
-  before the release, so the published shell's storage is the one we keep.
+  artifacts.
+- *Also done*: R5, the shared code: the wheel's dead kinds and the older flash-swap arbitrage gone
+  (=setArb= takes four arguments), a storage-layout check (=make storage-layout-check=: a shell and
+  its facets share one layout, and the shells' layouts are pinned), and behind it the dead director
+  fields and the stabilizer seam pruned. Recommendation: R6 (the V3 venue's pro-rata accounting,
+  doc/review/consolidation-plan.org) before the release, so the published shell's storage is the one
+  we keep.
 - *Next, in order*: read the flash comparison (and choose the defaults: =arb_flash=, the retirement
-  cap); R5 (the shared code: =ArbKind='s flash-swap path, =DirectorKind=, =SweepKind=, =EquityKind=,
-  the =IStabilizer= seam, the dead storage behind a layout check); the stress arms' port; then the
-  demand cast. Also: the owner's call on the near-zero-K exit; regenerate the pinned vectors at 12 s;
-  the savings sandbox's step 6.
+  cap); the owner's word on R6; the stress arms' port; then the demand cast. Also: the owner's call
+  on the near-zero-K exit; regenerate the pinned vectors at 12 s; the savings sandbox's step 6.
 
 ** Resume here (superseded: 2026-11-15, night)
 

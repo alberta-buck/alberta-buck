@@ -1,0 +1,608 @@
+{
+ "BuckBasketEquity": [
+  {
+   "label": "constituents",
+   "slot": 0,
+   "offset": 0,
+   "type": "struct BuckBasketStorage.Constituent[]",
+   "bytes": 32
+  },
+  {
+   "label": "indexOf",
+   "slot": 1,
+   "offset": 0,
+   "type": "mapping(address => uint256)",
+   "bytes": 32
+  },
+  {
+   "label": "deposits",
+   "slot": 2,
+   "offset": 0,
+   "type": "mapping(uint256 => struct BuckBasketStorage.Deposit)",
+   "bytes": 32
+  },
+  {
+   "label": "totalOutstandingBuck",
+   "slot": 3,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "treasuryBuckPending",
+   "slot": 4,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "buck",
+   "slot": 5,
+   "offset": 0,
+   "type": "contract IBuckMintBurn",
+   "bytes": 20
+  },
+  {
+   "label": "receipt",
+   "slot": 6,
+   "offset": 0,
+   "type": "contract BuckBasketReceipt",
+   "bytes": 20
+  },
+  {
+   "label": "controller",
+   "slot": 7,
+   "offset": 0,
+   "type": "contract IBuckKController",
+   "bytes": 20
+  },
+  {
+   "label": "v3Factory",
+   "slot": 8,
+   "offset": 0,
+   "type": "contract IUniswapV3Factory",
+   "bytes": 20
+  },
+  {
+   "label": "venue",
+   "slot": 9,
+   "offset": 0,
+   "type": "contract IBuckBasketVenue",
+   "bytes": 20
+  },
+  {
+   "label": "governance",
+   "slot": 10,
+   "offset": 0,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "defaultFeeTier",
+   "slot": 10,
+   "offset": 20,
+   "type": "uint24",
+   "bytes": 3
+  },
+  {
+   "label": "twapWindow",
+   "slot": 10,
+   "offset": 23,
+   "type": "uint32",
+   "bytes": 4
+  },
+  {
+   "label": "observationCardinality",
+   "slot": 10,
+   "offset": 27,
+   "type": "uint16",
+   "bytes": 2
+  },
+  {
+   "label": "defaultMaxDeviationBp",
+   "slot": 11,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "minSeedLiquidity",
+   "slot": 12,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "monetaryOutstanding",
+   "slot": 13,
+   "offset": 0,
+   "type": "int256",
+   "bytes": 32
+  },
+  {
+   "label": "monetaryBuckHeld",
+   "slot": 14,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "monetaryTokenHeld",
+   "slot": 15,
+   "offset": 0,
+   "type": "mapping(uint256 => uint256)",
+   "bytes": 32
+  },
+  {
+   "label": "lastMonetaryEpoch",
+   "slot": 16,
+   "offset": 0,
+   "type": "uint32",
+   "bytes": 4
+  },
+  {
+   "label": "_callbackPool",
+   "slot": 16,
+   "offset": 4,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "_swapCallbackPool",
+   "slot": 17,
+   "offset": 0,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "stressFeeDeadbandBp",
+   "slot": 18,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "stressFeeSlopeBp",
+   "slot": 19,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "stressFeeMaxBp",
+   "slot": 20,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "stressBonusPrincipal",
+   "slot": 21,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "wheel",
+   "slot": 22,
+   "offset": 0,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "_nominalReference",
+   "slot": 22,
+   "offset": 20,
+   "type": "bool",
+   "bytes": 1
+  },
+  {
+   "label": "holdings",
+   "slot": 23,
+   "offset": 0,
+   "type": "mapping(uint256 => struct BuckBasketEquityStorage.Holding)",
+   "bytes": 32
+  },
+  {
+   "label": "totalShares",
+   "slot": 24,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "treasuryShares",
+   "slot": 25,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "idleToken",
+   "slot": 26,
+   "offset": 0,
+   "type": "mapping(uint256 => uint256)",
+   "bytes": 32
+  },
+  {
+   "label": "liquidityOf",
+   "slot": 27,
+   "offset": 0,
+   "type": "mapping(uint256 => uint128)",
+   "bytes": 32
+  },
+  {
+   "label": "flowMs",
+   "slot": 28,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "dayFlow",
+   "slot": 29,
+   "offset": 0,
+   "type": "int256",
+   "bytes": 32
+  },
+  {
+   "label": "lastDay",
+   "slot": 30,
+   "offset": 0,
+   "type": "uint64",
+   "bytes": 8
+  },
+  {
+   "label": "equityWheel",
+   "slot": 30,
+   "offset": 8,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "lastSyncDay",
+   "slot": 31,
+   "offset": 0,
+   "type": "mapping(uint256 => uint64)",
+   "bytes": 32
+  },
+  {
+   "label": "credit",
+   "slot": 32,
+   "offset": 0,
+   "type": "contract IMarkedCredit",
+   "bytes": 20
+  },
+  {
+   "label": "creditId",
+   "slot": 33,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "creditLive",
+   "slot": 34,
+   "offset": 0,
+   "type": "bool",
+   "bytes": 1
+  },
+  {
+   "label": "eq",
+   "slot": 35,
+   "offset": 0,
+   "type": "struct BuckBasketEquityStorage.EquityParams",
+   "bytes": 32
+  },
+  {
+   "label": "response",
+   "slot": 36,
+   "offset": 0,
+   "type": "struct BuckBasketEquityStorage.ResponseParams",
+   "bytes": 32
+  },
+  {
+   "label": "referencePrice",
+   "slot": 37,
+   "offset": 0,
+   "type": "mapping(uint256 => uint256)",
+   "bytes": 32
+  },
+  {
+   "label": "lastResponseAt",
+   "slot": 38,
+   "offset": 0,
+   "type": "uint64",
+   "bytes": 8
+  },
+  {
+   "label": "arbitrageCreditor",
+   "slot": 38,
+   "offset": 8,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "netMark",
+   "slot": 38,
+   "offset": 28,
+   "type": "bool",
+   "bytes": 1
+  },
+  {
+   "label": "netAccounting",
+   "slot": 38,
+   "offset": 29,
+   "type": "bool",
+   "bytes": 1
+  }
+ ],
+ "BasketDesk": [
+  {
+   "label": "constituents",
+   "slot": 0,
+   "offset": 0,
+   "type": "struct BuckBasketStorage.Constituent[]",
+   "bytes": 32
+  },
+  {
+   "label": "indexOf",
+   "slot": 1,
+   "offset": 0,
+   "type": "mapping(address => uint256)",
+   "bytes": 32
+  },
+  {
+   "label": "deposits",
+   "slot": 2,
+   "offset": 0,
+   "type": "mapping(uint256 => struct BuckBasketStorage.Deposit)",
+   "bytes": 32
+  },
+  {
+   "label": "totalOutstandingBuck",
+   "slot": 3,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "treasuryBuckPending",
+   "slot": 4,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "buck",
+   "slot": 5,
+   "offset": 0,
+   "type": "contract IBuckMintBurn",
+   "bytes": 20
+  },
+  {
+   "label": "receipt",
+   "slot": 6,
+   "offset": 0,
+   "type": "contract BuckBasketReceipt",
+   "bytes": 20
+  },
+  {
+   "label": "controller",
+   "slot": 7,
+   "offset": 0,
+   "type": "contract IBuckKController",
+   "bytes": 20
+  },
+  {
+   "label": "v3Factory",
+   "slot": 8,
+   "offset": 0,
+   "type": "contract IUniswapV3Factory",
+   "bytes": 20
+  },
+  {
+   "label": "venue",
+   "slot": 9,
+   "offset": 0,
+   "type": "contract IBuckBasketVenue",
+   "bytes": 20
+  },
+  {
+   "label": "governance",
+   "slot": 10,
+   "offset": 0,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "defaultFeeTier",
+   "slot": 10,
+   "offset": 20,
+   "type": "uint24",
+   "bytes": 3
+  },
+  {
+   "label": "twapWindow",
+   "slot": 10,
+   "offset": 23,
+   "type": "uint32",
+   "bytes": 4
+  },
+  {
+   "label": "observationCardinality",
+   "slot": 10,
+   "offset": 27,
+   "type": "uint16",
+   "bytes": 2
+  },
+  {
+   "label": "defaultMaxDeviationBp",
+   "slot": 11,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "minSeedLiquidity",
+   "slot": 12,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "monetaryOutstanding",
+   "slot": 13,
+   "offset": 0,
+   "type": "int256",
+   "bytes": 32
+  },
+  {
+   "label": "monetaryBuckHeld",
+   "slot": 14,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "monetaryTokenHeld",
+   "slot": 15,
+   "offset": 0,
+   "type": "mapping(uint256 => uint256)",
+   "bytes": 32
+  },
+  {
+   "label": "lastMonetaryEpoch",
+   "slot": 16,
+   "offset": 0,
+   "type": "uint32",
+   "bytes": 4
+  },
+  {
+   "label": "_callbackPool",
+   "slot": 16,
+   "offset": 4,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "_swapCallbackPool",
+   "slot": 17,
+   "offset": 0,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "stressFeeDeadbandBp",
+   "slot": 18,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "stressFeeSlopeBp",
+   "slot": 19,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "stressFeeMaxBp",
+   "slot": 20,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "stressBonusPrincipal",
+   "slot": 21,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "wheel",
+   "slot": 22,
+   "offset": 0,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "_nominalReference",
+   "slot": 22,
+   "offset": 20,
+   "type": "bool",
+   "bytes": 1
+  },
+  {
+   "label": "opsParams",
+   "slot": 23,
+   "offset": 0,
+   "type": "struct MonetaryDesk.OpsParams",
+   "bytes": 32
+  },
+  {
+   "label": "monetaryDirector",
+   "slot": 24,
+   "offset": 0,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "basket",
+   "slot": 25,
+   "offset": 0,
+   "type": "contract IBasketView",
+   "bytes": 20
+  },
+  {
+   "label": "credit",
+   "slot": 26,
+   "offset": 0,
+   "type": "contract IMarkedCredit",
+   "bytes": 20
+  },
+  {
+   "label": "creditId",
+   "slot": 27,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "creditLive",
+   "slot": 28,
+   "offset": 0,
+   "type": "bool",
+   "bytes": 1
+  },
+  {
+   "label": "turnoverRemaining",
+   "slot": 29,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "capitalFloor",
+   "slot": 30,
+   "offset": 0,
+   "type": "uint256",
+   "bytes": 32
+  },
+  {
+   "label": "executionGuard",
+   "slot": 31,
+   "offset": 0,
+   "type": "address",
+   "bytes": 20
+  },
+  {
+   "label": "netAccounting",
+   "slot": 31,
+   "offset": 20,
+   "type": "bool",
+   "bytes": 1
+  }
+ ]
+}
