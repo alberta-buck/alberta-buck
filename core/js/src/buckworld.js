@@ -59,7 +59,7 @@ function requireNetIssueAbi(artifact) {
 // Controller deploy defaults -- the SAME values experiment.deploy_params
 // derives for the Python sim (gains real*1e12: Kp = kp_frac*dk_rail/e_max
 // = 0.1 -> 1e11; Ki = dk_rail/(e_max*tau_I) = 0.5/777600s -> 643004;
-// dt 1800s; K rails 0..0.95; K0 0.75, the target K, and a one-year
+// dt 1800s; K rails 0.1..0.9 (owner, 2026-11-21); K0 0.75, the target K, and a one-year
 // integrator leak back to it).  leakTau (seconds) sets
 // BuckKControllerDirect.setLeak after deploy (0n: none; the contract's default is a year).
 export const DEPLOY_DEFAULTS = {
@@ -67,8 +67,8 @@ export const DEPLOY_DEFAULTS = {
   ki: 643_004n,
   kd: 0n,
   dt: 1800n,
-  kmin: 0n,
-  kmax: 950_000_000_000_000_000n,
+  kmin: 100_000_000_000_000_000n,
+  kmax: 900_000_000_000_000_000n,
   k0: 750_000_000_000_000_000n,
   leakTau: 365n * 86_400n,
 };

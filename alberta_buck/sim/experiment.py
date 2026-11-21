@@ -18,7 +18,7 @@ reproduce the standard macro run):
     [deploy]              # controller + pool-depth initial conditions
     k0 = 0.75             # the target K the integrator leaks back to
     leak_days = 365.0     # the integrator's leak time constant (0 = none)
-    kmax = 0.95           # rails; 0.95 keeps "railed" solvent (1/(1-K)=20x)
+    kmax = 0.9            # rails [0.1, 0.9] (owner, 2026-11-21); 1/(1-KMAX) = 10x at most
     tau_i_days = 90.0     # integral time (with dk_rail/e_max -> Ki)
 
     [agents.SaverAgent]   # per-class knob overrides for agent setup():
@@ -101,10 +101,10 @@ E18 = 10 ** 18
 M6 = 1_000_000 * 10 ** 6          # $1M in 6-dec token units
 
 # ---------------------------------------------------------------------------
-# Defaults -- reproduce the standard macro run (EQUILIBRIUM.md) except
-# kmax = 0.95: the banked K=1.0 ceiling is the infinite-leverage boundary
-# (1/(1-K)), so a controller pinned there is meaningless; 0.95 keeps a
-# railed K solvent and makes "pinned vs settled" observable.
+# Defaults -- reproduce the standard macro run (EQUILIBRIUM.md) except K's
+# rails, [0.1, 0.9] since 2026-11-21 (owner): K = 1 is the infinite-leverage
+# boundary (1/(1-K)), and a K that wants beyond the rails is an unrealistic
+# economy, which reasonable actors' monetary responses should correct.
 # ---------------------------------------------------------------------------
 
 DEFAULTS: dict = {
@@ -147,8 +147,11 @@ DEFAULTS: dict = {
     "deploy": {
         "k0": 0.75,                # the target K the integrator leaks back to (the owner suspects it is
                                    # near the natural equilibrium, 2026-11-14)
-        "kmin": 0.0,
-        "kmax": 0.95,
+        # K's rails (owner, 2026-11-21): a K that wants beyond [0.1, 0.9] is an unrealistic
+        # economy, to be fixed by the monetary responses of reasonable actors (retiring BUCK
+        # liability at a steep discount when K is low, issuing at a steep premium when it is high).
+        "kmin": 0.1,
+        "kmax": 0.9,
         # Gains: raw real-gain overrides (kp/ki/kd) win when present;
         # otherwise derived: Ki = dk_rail/(e_max*tau_I), Kp = kp_frac*dk_rail/e_max.
         "kp": None,
@@ -169,8 +172,8 @@ DEFAULTS: dict = {
         "target_buck_lp_m": 10.0,  # $M BUCK/USDC seed
         # The wheel's job retiring the basket's own principal from cash above its liquidity
         # target (JubileeKind, retireCredit through the fund's relief): $M of principal a job,
-        # 0 disables it (as deployed before 2026-11-14).
-        "basket_retirement_cap_m": 0.0,
+        # 0 disables it. On by default since 2026-11-21 (owner: burn the basket's idle BUCK).
+        "basket_retirement_cap_m": 1.0,
     },
     "agents": {},                  # {cls: {knob: [lo,hi] | scalar}}
     "interventions": [],

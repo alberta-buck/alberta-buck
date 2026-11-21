@@ -212,7 +212,7 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
     credit = chain.deploy("BuckCredit")
     # Rescaled direct PID (ppm process/error, dt in seconds).  Gains stored as
     # real_gain * 1e12.  K is the LTV cap => max system leverage 1/(1-K):
-    # K0~0.75 rests at ~4x; the default KMAX 0.95 keeps a railed K solvent
+    # K0~0.75 rests at ~4x; the default KMAX 0.9 (owner, 2026-11-21) keeps a railed K solvent
     # (20x) instead of sitting on the 1/(1-K) spiral boundary.
     # Ki sized for a target "max variance before the rail":
     #   Ki_real = dK_rail / (e_max * tau_I)   [ per (fractional error * second) ]

@@ -39,8 +39,8 @@ SaverAgent = 4
 # ---------------------------------------------------------------------------
 [deploy]
 k0 = 0.75                 # neutral feed-forward LTV (max leverage 1/(1-K))
-kmin = 0.0                # output rails; kmax 0.95 keeps a railed K solvent
-kmax = 0.95               # (20x) instead of the 1/(1-K) spiral boundary at 1.0
+kmin = 0.1                # output rails (owner, 2026-11-21): beyond [0.1, 0.9] the economy is
+kmax = 0.9                # unrealistic; 1/(1-KMAX) = 10x at most
 dk_rail = 0.5             # Ki sizing: rail authority ...
 e_max = 0.10              # ... consumed by a sustained e_max deviation ...
 tau_i_days = 90.0         # ... over the integral time

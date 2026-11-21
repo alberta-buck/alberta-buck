@@ -369,7 +369,8 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   // Use the existing bounded jobs; portfolio trades remain outside Buck's
   // lock. Optional basket-principal scheduling remains a policy parameter.
   const jubileePolicy = opts.jubileePolicy ?? { maturitySteps: 8, saleCapBp: 1000, slippageBp: 100,
-    deferredBurnCap: targetBuck / 100n, retirementMinimum: 1_000_000n, retirementCap: 0n };
+    deferredBurnCap: targetBuck / 100n, retirementMinimum: 1_000_000n,
+    retirementCap: 1_000_000n * 1_000_000n };      // burn the basket's idle BUCK, $1M a job (owner, 2026-11-21)
   await session.send(wheel, "setJubilee", [fund.address, jubileePolicy], { tag: "eq:wheel.setJubilee" });
   world.net.wheel = wheel;
   world.net.upkeep = upkeep;
@@ -460,7 +461,8 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     await session.send(wheel, "setArb", [poolUB.address, basket.address,
       opts.arbCapBp ?? 500, opts.arbMinEdgeBp ?? 0], { tag: "eq:arb.configure" });
     // Flash arbitrage (owner, 2026-11-20): each cycle's BUCK leg borrowed fresh from the basket's line.
-    if (opts.arbFlash) await session.send(wheel, "setArbFlash", [true], { tag: "eq:arb.flash" });
+    // On by default (owner, 2026-11-21); opts.arbFlash false funds the legs from the wallet.
+    if (opts.arbFlash ?? true) await session.send(wheel, "setArbFlash", [true], { tag: "eq:arb.flash" });
     for (const [i, t] of tokens.entries()) await session.send(wheel, "setTriangle",
       [BigInt(i), [t.erc20.address, t.poolBuck.address, t.poolUsdc.address, BigInt(i)]],
       { tag: `eq:arb.register:${t.sym}` });

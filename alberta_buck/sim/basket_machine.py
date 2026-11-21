@@ -54,7 +54,8 @@ DEFAULTS = {
     "book_markets": True,
     # Flash arbitrage (owner, 2026-11-20): the basket borrows each cycle's BUCK leg fresh from its credit
     # line for the cycle's length (Buck.flashIssue; BasketMachineWheel.setArbFlash), not from its wallet.
-    "arb_flash": False,
+    # On by default since 2026-11-21 (owner: the basket should not be BUCK-constrained in arbitrage).
+    "arb_flash": True,
 }
 ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_AGE", "dt_max": "SIM_MACHINE_DT_MAX",
                "leash_bp": "SIM_MACHINE_LEASH_BP", "tilt": "SIM_MACHINE_TILT", "lean_cap_bp": "SIM_MACHINE_LEAN_CAP_BP",

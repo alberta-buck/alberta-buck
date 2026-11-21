@@ -15,12 +15,12 @@ days = 730
 name = "arb"
 note = "the basket's arbitrage cycles: funded from its wallet, or borrowed by flash from its credit line"
 [axis.values]
-wallet = {}
+wallet = { "machine.arb_flash" = false }
 flash = { "machine.arb_flash" = true }
 
 [[axis]]
 name = "burn"
 note = "the basket's idle BUCK above its liquidity target: kept, or retired by the Jubilee wheel"
 [axis.values]
-keep = {}
+keep = { "deploy.basket_retirement_cap_m" = 0.0 }
 burn = { "deploy.basket_retirement_cap_m" = 1.0 }

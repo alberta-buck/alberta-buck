@@ -6073,9 +6073,10 @@ carried BUCK can wait (measured).
 
 *** The build, in order
 
-1. /Defaults/: burning on (=deploy.basket_retirement_cap_m = 1.0=) and flash arbitrage on
-   (=machine.arb_flash=, =arbFlash=) in the deploy defaults, =economy.toml=, =economy-lifecycle.toml=
-   and the JS world; the =flash= comparison kept for the record.
+1. /Defaults/ (done 2026-11-21): burning on (=deploy.basket_retirement_cap_m = 1.0=; JS
+   =retirementCap= 1M), flash arbitrage on (=machine.arb_flash=; JS =arbFlash= unless false), K's
+   rails [0.1, 0.9] (=experiment.py= and the JS =DEPLOY_DEFAULTS=); the =flash= comparison's arms
+   now name their settings, so it still compares the four.
 2. /The fresh-issue rule/: =_fundCash(desired, fresh)=; with =fresh= the whole amount is drawn on
    the line whatever the wallet holds. Pairing, buying and the refresh's re-mint pass it; exits do
    not (they pay from the wallet). Tests: a pairing with carried BUCK in the wallet issues fresh and
@@ -6124,10 +6125,18 @@ reasonable KMIN and KMAX. The proposal under discussion:
   the limit; the room between them pays exits before anything is sold. kappa = 0.08 gives the
   owner's 90% at 0.25 and 55% at 0.9; kappa = 0.1 gives 87% and 47%. The inverse shape is the
   limit's sensitivity, dN_max/dK = E / (1 - K)^2: 1.8 E per unit of K at 0.25, 100 E at 0.9.
-- /The rails/: K is the whole system's LTV, so KMAX bounds everyone's leverage (1 / (1 - KMAX):
-  20x at 0.95, 6.7x at 0.85) and keeps the basket's target finite (4.3x equity at 0.85, kappa 0.1);
-  a KMIN above zero keeps credit from freezing (0.25 or 0.3). Proposed: [0.25, 0.85], K0 0.75
-  inside; the five-year runs kept K in 0.47 to 0.79, where neither rail binds.
+- /The rails, decided (owner, 2026-11-21): [0.1, 0.9]/. "Any K that wants to go beyond that is an
+  indicator of an unrealistic economy, and should be fixed by monetary responses of reasonable actors
+  in real life: people retiring BUCK liability at a steep discount when K is low, and issuers issuing
+  BUCK at a steep premium when K is that high." K is the whole system's LTV, so KMAX bounds everyone's
+  leverage at 1 / (1 - 0.9) = 10x; the basket's target at kappa 0.1 then runs from 1.10 E at
+  K = 0.1 (89% of the limit) through 1.82 E at 0.5 and 3.08 E at 0.75 to 5.26 E at 0.9 (47%). The
+  five-year runs kept K in 0.47 to 0.79, where neither rail binds; a railed K in a run is a finding
+  about the cast (the demand and retirement agents), not a setting to tune. At 0.1 the near-zero-K
+  exit shortfall cannot arise (the exit already proceeds at 0.05). Defaults in both worlds.
+- /Still open/: leverage measured on the TOKEN exposure (pairing a matched book)? kappa 0.1, one
+  governance constant? Is about 3x commodity exposure at K = 0.75 intended, or a hard cap on X / E
+  while it is measured? (A comparison arm either way: today's ceiling against the target.)
 - /The size of the change/: today's target is X = E (1 + K / 2) (=CEILING_BP= 50% of N <= K E):
   1.38 E at K = 0.75; the proposal gives 3.08 E (kappa 0.1). The sell-down as K falls,
   dX/dK = (1 - kappa) E / (1 - K_eff)^2, is 8.5 E per unit of K at 0.75 against E / 2 today: a K

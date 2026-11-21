@@ -29,6 +29,10 @@ test("canonical equilibrium bootstrap reuses one fund/basket and issues actual p
   const world = await buildEquilibriumWorld(s, artifact, { identity,
     wheelArb: false, // Component fault/receipt tests keep their market under explicit control.
     targetBuck: 100_000n * 1_000_000n,
+    // The refinance vectors were made on a basket that keeps its idle BUCK: no burning job here
+    // (the world's default burns it since 2026-11-21), so their reserve quotes hold.
+    jubileePolicy: { maturitySteps: 8, saleCapBp: 1000, slippageBp: 100,
+      deferredBurnCap: 100_000n * 1_000_000n / 100n, retirementMinimum: 1_000_000n, retirementCap: 0n },
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
     tokens: [{ sym: "CNST", name: "Construction", dec: 18, p0: 2_500_000n, weightBp: 7500 },
       { sym: "FOOD", name: "Food", dec: 18, p0: 4_000_000n, weightBp: 2500 }],
