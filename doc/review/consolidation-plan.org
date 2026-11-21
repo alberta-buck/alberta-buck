@@ -168,6 +168,44 @@ Order, each step qualified (forge, Python, JS) and committed:
 - R5. /Shared code/: ArbKind's flash-swap path, =DirectorKind=, =SweepKind=, =EquityKind=, the
   =IStabilizer= seam, and the storage's dead fields behind a new layout check.
 
+** R3 as done: the fixtures on the machine (2026-11-20)
+
+Every shared Solidity fixture now installs the machine's facets: =BasketVenueFacet= and
+=BasketUpkeepFacet= under a policy at rate 0 (=test/harness/BasketIntent.sol=: it pairs what the
+basket holds and asks for no rebalancing), with the credit marked net. =JubileeEquityFixture=,
+=BuckBasketEquityFixture= and =BasketIdentityFixture= moved; =BuckCompoundArbFixture= builds a
+=BasketMachineWheel=; the older arms of =JubileeWheel=, =BasketRetirementWheel=,
+=BasketPublicLifecycle= and =BuckCompoundFundedArb= are gone, and so are the old components' own
+tests in the canonical suites, and the earlier upkeep's own suites (=EquityTurnDirector.t.sol=,
+=BasketWheelEquity.t.sol=), which inherited the equity test and can only run the old wheel. The
+facet, machine, lean and arb-income suites inherit the fixture, no longer the equity test, so its
+29 tests run once instead of five times. Forge: 1444 passed (122 suites), then the two retired
+suites removed.
+
+What the move showed, for the owner:
+
+- /Five equity tests encoded the old components/ (a gross mark, a liquidity target the wheel keeps
+  spent, deleveraging by trimming after a K cut). On the machine they assert its rules instead:
+  the credit is marked net (=_netMark()=: equity at the exits' marks plus the positions' BUCK side
+  over K), the lien stays within K x that mark, and a deposit after a cut calls nothing back and
+  adds K x its value to the limit. A K cut alone no longer puts the machine under water much: the
+  BUCKs it issued sit in its positions and count whole.
+- /The machine's venue refuses to sell into a displaced pool/: after a large outside TOKEN sale the
+  Jubilee fund's scheduled sale reverts =Slippage()= (spot outside its TWAP band) where the old
+  venue sold at the dropped price. The tests now assert the refusal, then that the sale goes
+  through once the average catches up, at well under the earlier mark.
+- /The desk invariant/ measures the basket's mark against the net mark; the desk's grant is still
+  never in it.
+- /A forge trap/: the equity fixture's loops read =block.timestamp= after =vm.warp=, and via-IR
+  cached it in some inheriting contracts, so time stood still in those suites (the arb-income
+  suite's wheel ran one response in sixty rounds). The fixture now reads =vm.getBlockTimestamp()=.
+- /Known issue, pinned/ (=test_nearZeroKExitOfAFullyPairedBasketIsShortByTheMarkedHeldBuck=): at a
+  near-zero K a fully paired machine basket's exit reverts =InsufficientSpendableBalance=. The
+  shortfall rule retires the marked share of the held BUCK (502.41 in the test), but the exit
+  recovers only the BUCK it actually releases (499.99) after paying the leaver. At K = 0.05 the
+  exit proceeds. The fix is the owner's call: retire at most what the exit released, or mark the
+  held BUCK at what an exit can release.
+
 * Order of work
 1. Wave 1, and the three test tiers with =help= rewritten around them, once the
    JS conversion to webevm lands (it edits the Makefile now).

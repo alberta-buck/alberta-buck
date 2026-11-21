@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BuckBasketEquityTest, IBasketUpkeep} from "./BuckBasketEquity.t.sol";
+import {BuckBasketEquityFixture, IBasketUpkeep} from "./BuckBasketEquity.t.sol";
 
-contract BasketArbIncomeTest is BuckBasketEquityTest {
+contract BasketArbIncomeTest is BuckBasketEquityFixture {
     function test_arbIncomeAuthorityCannotSpendOrPerformUpkeep() public {
         _placed();
         vm.prank(alice);

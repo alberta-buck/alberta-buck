@@ -7,9 +7,7 @@ import {BasketMarketOps} from "../../src/basket/BasketMarketOps.sol";
 import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
 import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
-import {BuckBasketEquityWheel} from "../../src/basket/BuckBasketEquityWheel.sol";
 import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
-import {BasketWheel} from "../../src/wheel/BasketWheel.sol";
 import {EqToken, IPool} from "../basket/BuckBasketEquity.t.sol";
 import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {ArbKind} from "../../src/wheel/ArbKind.sol";
@@ -151,8 +149,9 @@ contract BuckCompoundFundedArbTest is BuckCompoundArbFixture {
         basket.deposit(address(second), 100_000e18, 0);
         buck.transfer(address(basket), 100_000e6);
         vm.stopPrank();
+        vm.warp(block.timestamp + 1800);                 // the response interval since setUp's
         vm.prank(address(wheel));
-        assertEq(IBasketUpkeep(address(basket)).wheelStep(2, 1), 1);
+        assertEq(IBasketUpkeep(address(basket)).wheelStep(2, 0), 1);
         vm.prank(GOV);
         wheel.setTriangle(1, ArbKind.Triangle(address(second), own2, usd2, 1));
         assertEq(BasketMachineWheel(address(wheel)).arbRouteCount(), 3);
@@ -180,27 +179,6 @@ contract BuckCompoundFundedArbTest is BuckCompoundArbFixture {
         (uint160 current,,,,,,) = IUniswapV3Pool(ub).slot0();
         if (target != current) IUniswapV3Pool(ub).swap(address(this), target < current, int256(1_000_000e6), target, "");
         vm.warp(block.timestamp + 601);
-    }
-
-    function test_feeBasisExchangeImprovesNetCashWhileNominalCashFalls() public {
-        vm.warp(t0 + YEAR);
-        buck.transfer(ub, 2_000_000e6);
-        _alignUb();
-        BasketWheel nominal = new BasketWheel(address(buck), address(usdc), GOV, 0, 0);
-        vm.startPrank(GOV);
-        nominal.setArb(ub, address(basket), 0, 100, 0);
-        nominal.setTriangle(0, ArbKind.Triangle(address(asset), own, market, 0));
-        vm.stopPrank();
-        (uint256 oldInput,,) = nominal.plan(0);
-        assertEq(oldInput, 0, "nominal pool prices leave no direct-profit cycle");
-        IBasketArb.ArbPlan memory p = _plan();
-        assertGt(p.amount, 0); assertGt(p.cashReturn, 0);
-        uint256 beforeNominal = buck.balanceOf(address(basket));
-        uint256 beforeNet = buck.netBalanceOf(address(basket));
-        IBasketArb.ArbPlan memory actual = _execute(p, 2);
-        assertLt(buck.balanceOf(address(basket)), beforeNominal);
-        assertGt(buck.netBalanceOf(address(basket)), beforeNet);
-        assertGt(actual.totalReturn, 0);
     }
 
     function test_positiveBasketReturnCanExecuteWithADirectCashLoss() public {
@@ -254,9 +232,7 @@ contract BuckCompoundFundedArbTest is BuckCompoundArbFixture {
     }
 
     function test_sharedLibraryAndExistingFacetsFitRuntimeLimit() public {
-        BuckBasketEquityWheel component = new BuckBasketEquityWheel();
         BasketUpkeepFacet machine = new BasketUpkeepFacet(address(0), address(0), 0, 0);
-        assertLe(address(component).code.length, 24_576);
         assertLe(address(machine).code.length, 24_576);
         assertLe(address(basket).code.length, 24_576);
         assertLe(address(BasketMarketOps).code.length, 24_576);

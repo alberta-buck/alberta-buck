@@ -98,14 +98,14 @@ contract BasketDeskTest is BasketDeskFixture {
     function test_desk_grantIsNotTheDepositorsCollateral() public {
         _placed();
         _daily();                                           // a step marks the credit
-        assertApproxEqRel(b.markNow(), _equityLow(), 0.01e18, "the mark: the depositors' equity");
+        assertApproxEqRel(b.markNow(), _netMark(), 0.01e18, "the mark: the depositors' (net) equity");
         uint256 limit0 = buck.creditLimit(address(b));
 
         _grantDesk(0, 1_000_000e18);                        // 1,000,000 BUCK of T0
-        vm.warp(block.timestamp + 1 days);
-        vm.roll(block.number + 1);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        vm.roll(vm.getBlockNumber() + 1);
         _daily();
-        assertApproxEqRel(b.markNow(), _equityLow(), 0.01e18,
+        assertApproxEqRel(b.markNow(), _netMark(), 0.01e18,
                           "the desk's grant is not in the depositors' mark");
         assertApproxEqRel(buck.creditLimit(address(b)), limit0, 0.02e18,
                           "nor in the limit the components spend against");
@@ -184,8 +184,8 @@ contract BasketDeskTest is BasketDeskFixture {
         md.set(50, true);
         desk.monetaryOperation();
         int256 out0 = desk.monetaryOutstanding();
-        vm.warp(block.timestamp + 365 days);
-        vm.roll(block.number + 1);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        vm.roll(vm.getBlockNumber() + 1);
         uint256 r = buck.reliefOf(address(desk));
         assertGt(r, 0, "the desk's lien earned relief");
         uint256 basketRelief = buck.reliefOf(address(b));

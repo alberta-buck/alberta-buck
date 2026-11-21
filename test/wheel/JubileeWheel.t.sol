@@ -9,7 +9,6 @@ import {JubileeFund, IJubileeValuationWheel} from "../../src/JubileeFund.sol";
 import {WorkWheel} from "../../src/wheel/WorkWheel.sol";
 import {JubileeKind} from "../../src/wheel/JubileeKind.sol";
 import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
-import {BasketWheel} from "../../src/wheel/BasketWheel.sol";
 import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {EqToken, IPool} from "../basket/BuckBasketEquity.t.sol";
 import {MachineEquityMock} from "./BasketMachineWheel.t.sol";
@@ -25,10 +24,8 @@ abstract contract JubileeWheelFixture is JubileeEquityFixture {
         return JubileeKind.JubileePolicy(1, 1000, 100, 5e6, 0, 0);
     }
 
-    function _attach(bool older) internal returns (JubileeKind w) {
-        w = older
-            ? JubileeKind(address(new BasketWheel(address(buck), address(2), GOV, 0, 0)))
-            : JubileeKind(address(new BasketMachineWheel(address(buck), address(2), GOV, 0, 0)));
+    function _attach() internal returns (JubileeKind w) {
+        w = JubileeKind(address(new BasketMachineWheel(address(buck), address(2), GOV, 0, 0)));
         vm.startPrank(GOV);
         (bool ok,) = address(basket).call(abi.encodeWithSignature("setWheel(address)", address(w)));
         require(ok);
@@ -50,7 +47,7 @@ contract JubileeWheelTest is JubileeWheelFixture {
         w.setJubilee(fund, p);
         vm.expectRevert(JubileeKind.BadJubileeConfiguration.selector);
         vm.prank(GOV); w.setJubilee(fund, p);
-        w = _attach(false);
+        w = _attach();
         assertEq(w.slotCount(), 3);
         p.slippageBp = 501;
         vm.expectRevert(JubileeKind.BadJubileeConfiguration.selector);
@@ -66,7 +63,7 @@ contract JubileeWheelTest is JubileeWheelFixture {
 
     function test_idleCashCheckpointEarnsNothingThenMaturesIntoOneReceipt() public {
         _credit(ALICE, 1_000_000e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         vm.warp(t0 + YEAR);
         (uint256 amount,) = fund.previewInvestment();
         assertEq(amount, 0, "unobserved cash must not be backdated");
@@ -96,7 +93,7 @@ contract JubileeWheelTest is JubileeWheelFixture {
 
     function test_failedEntryShareBoundPreservesCashBudgetAndReceiptThenRetriesNextBlock() public {
         _credit(ALICE, 1_000_000e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         vm.warp(t0 + YEAR); w.tick(3, 0);
         vm.warp(vm.getBlockTimestamp() + 1 days); vm.roll(vm.getBlockNumber() + 1);
         (, uint256 cash) = buck.fundBalancesScaled();
@@ -117,11 +114,11 @@ contract JubileeWheelTest is JubileeWheelFixture {
         assertEq(work, 1); assertGt(fund.positionId(), 0);
     }
 
-    function _cashSale(bool older) private {
+    function test_machineWheelRestoresCashFromTheSameReceipt() public {
         _credit(ALICE, 1_000_000e6);
         vm.warp(t0 + YEAR);
         (uint256 id,,) = _invest(19_000e6);
-        JubileeKind w = _attach(older);
+        JubileeKind w = _attach();
         (uint128 shares,) = basket.holdings(id);
         (, uint256 beforeCash) = buck.fundBalancesScaled();
         (uint256 target,,) = fund.previewReserve();
@@ -137,13 +134,10 @@ contract JubileeWheelTest is JubileeWheelFixture {
         assertEq(work, 0, "rearm cannot run this block's reserve job twice");
     }
 
-    function test_machineWheelRestoresCashFromTheSameReceipt() public { _cashSale(false); }
-    function test_existingBasketWheelHasTheSameFundMaintenance() public { _cashSale(true); }
-
     function test_revokedKeeperDoesNotBlockUnrelatedBasketWork() public {
         _credit(ALICE, 1_000_000e6);
         vm.warp(t0 + YEAR); _invest(19_000e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         vm.prank(GOV); fund.setInvestmentKeeper(address(0));
         MachineEquityMock other = new MachineEquityMock();
         vm.prank(GOV); BasketMachineWheel(address(w)).setEquity(address(other));
@@ -161,7 +155,7 @@ contract JubileeWheelTest is JubileeWheelFixture {
     function test_maturityBacklogAdvancesInBoundedBatchesWithoutClosingOwnersNfts() public {
         uint256 a = _credit(ALICE, 100e6);
         uint256 b = _credit(BOB, 100e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         vm.warp(t0 + 50 * YEAR);
         assertTrue(buck.claimBook().pending());
         (uint256 work,) = w.tick(3, 0);
@@ -178,7 +172,7 @@ contract JubileeWheelTest is JubileeWheelFixture {
     function test_deferredBurnWaitsForSharedBudgetAndResumesWithGovernedCap() public {
         uint256 a = _credit(ALICE, 1000e6);
         _credit(BOB, 1000e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         vm.warp(t0 + 50 * YEAR); buck.processMaturities(10);
         vm.prank(ALICE); fund.closeMatured(a);
         assertEq(buck.claimBook().deferredPrincipal(), 1000e6);
@@ -204,7 +198,7 @@ contract JubileeWheelTest is JubileeWheelFixture {
         b.openAccountingCredit(address(credit), 1e14);
         b.issueForAccounting(5_000e6);
         vm.stopPrank();
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         k.setK(0.01e18);
         assertLt(basket.headroom(), 0);
         MachineEquityMock other = new MachineEquityMock();
@@ -223,7 +217,7 @@ contract JubileeWheelTest is JubileeWheelFixture {
     function test_valuationPublicationNeverRunsDuePortfolioWork() public {
         _credit(ALICE, 1_000_000e6);
         vm.warp(t0 + YEAR); (uint256 id,,) = _invest(19_000e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         assertTrue(w.jubileeDue(2));
         uint256 cursor = w.cursor();
         (uint128 shares,) = basket.holdings(id);
@@ -259,7 +253,7 @@ contract JubileeWheelTest is JubileeWheelFixture {
         (uint256 id,,) = _invest(39_000e6);
         assertEq(IBasketUpkeep(address(basket)).wheelStep(2, 0), 1);
         vm.warp(vm.getBlockTimestamp() + 601); vm.roll(vm.getBlockNumber() + 1);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         if (tight) {
             JubileeKind.JubileePolicy memory p = _policy(); p.slippageBp = 2;
             vm.prank(GOV); w.setJubilee(fund, p);

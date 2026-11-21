@@ -7,7 +7,6 @@ import {Buck} from "../../src/Buck.sol";
 import {BuckCredit} from "../../src/BuckCredit.sol";
 import {JubileeFund, IJubileeBasket} from "../../src/JubileeFund.sol";
 import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
-import {BuckBasketEquityWheel} from "../../src/basket/BuckBasketEquityWheel.sol";
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
 import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
@@ -33,7 +32,7 @@ abstract contract BasketIdentityFixture is IdentityRegistryFixture {
         vm.prank(GOV); reg.setBuck(address(token));
         basket = new BuckBasketEquity(address(token), address(k), address(1), GOV, 3000, 600, 64, 500, 1000);
         vm.startPrank(GOV);
-        basket.setEquityWheel(address(new BuckBasketEquityWheel()));
+        basket.setEquityWheel(address(new BasketUpkeepFacet(address(0), address(0), 0, 0)));   // the machine's
         basket.enableNetAccounting();
         vm.stopPrank();
         setup = IBasketUpkeep(address(basket));
@@ -132,14 +131,5 @@ contract BasketCreditSetupTest is BasketIdentityFixture {
         _open();
         vm.expectRevert(BuckBasketStorage.AlreadyPresent.selector);
         vm.prank(GOV); basket.openCredit(address(credit), 1000e6);
-    }
-
-    function test_machineUpkeepFacetSuppliesTheSameSetupWithoutAnotherDeployedInitializer() public {
-        BasketUpkeepFacet facet = new BasketUpkeepFacet(address(0), address(0), 0, 0);
-        vm.prank(GOV);
-        basket.setEquityWheel(address(facet));
-        _bind(); _open();
-        assertEq(credit.ownerOf(basket.creditId()), address(basket));
-        assertEq(token.totalIssued(), 0);
     }
 }

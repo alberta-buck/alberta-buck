@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {BasketDeskFixture} from "./BasketDesk.t.sol";
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
-import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
+import {ControlledPairIntent} from "../harness/BasketIntent.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
 import {BasketReference} from "../../src/basket/BasketReference.sol";

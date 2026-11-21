@@ -16,7 +16,10 @@ import {BuckLinear as Buck}                    from "../../src/legacy/BuckLinear
 import {BuckCredit}              from "../../src/BuckCredit.sol";
 import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
 import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
-import {BuckBasketEquityWheel} from "../../src/basket/BuckBasketEquityWheel.sol";
+import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
+import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
+import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
+import {BasketIntent} from "../harness/BasketIntent.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
 import {BuckBasketUniswapV3}   from "../../src/basket/BuckBasketUniswapV3.sol";
 import {BuckBasketReceipt}     from "../../src/basket/BuckBasketReceipt.sol";
@@ -171,8 +174,13 @@ abstract contract BuckBasketEquityFixture is Test {
         b = _newBasket(factory);
         _bind(address(b), false);                         // a credit holder: non-Carrying
         vm.startPrank(GOV);
-        b.setVenue(address(new BuckBasketUniswapV3()));
-        b.setEquityWheel(address(new BuckBasketEquityWheel()));
+        // The basket machine's facets; a policy at rate 0 only pairs (the earlier components facet is
+        // retired, 2026-11-20). wheelStep(2, 0) is the response.
+        b.setVenue(address(new BasketVenueFacet(address(0))));
+        BasketIntent intent = new BasketIntent(address(b));
+        intent.setRate(0);
+        b.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(0), 0, 0)));
+        b.setNetMark(true);
         (bool ok,) = address(b).call(abi.encodeWithSignature("setWheel(address)", address(this)));
         require(ok, "setWheel");
         b.openCredit(address(credit), FACE);
@@ -230,8 +238,8 @@ abstract contract BuckBasketEquityFixture is Test {
 
     /// @dev Let the TWAPs catch up with the spots.
     function _age() internal {
-        vm.warp(block.timestamp + 700);
-        vm.roll(block.number + 1);
+        vm.warp(vm.getBlockTimestamp() + 700);
+        vm.roll(vm.getBlockNumber() + 1);
     }
 
     /// @dev The outside arbitrageur: pool i back to its reference price.
@@ -266,8 +274,8 @@ abstract contract BuckBasketEquityFixture is Test {
                 }
             }
             for (uint256 i = 0; i < 3; i++) _repin(i);
-            vm.warp(block.timestamp + (days_ ? 1 days : 700));
-            vm.roll(block.number + 1);
+            vm.warp(vm.getBlockTimestamp() + (days_ ? 1 days : 700));
+            vm.roll(vm.getBlockNumber() + 1);
         }
     }
 
@@ -306,6 +314,20 @@ abstract contract BuckBasketEquityFixture is Test {
     function _cutUnderWater() internal returns (uint256 k2) {
         k2 = _lien() * 1e18 / b.markNow() * 8 / 10;
         ctrl.setK(k2);
+    }
+
+    /// @dev The machine's net mark: the equity at the exits' marks, plus the positions' BUCK side
+    ///      over K (K bounds the BUCKs issued net of those the positions hold).
+    function _netMark() internal view returns (uint256) {
+        int256 net = int256(b.grossAt(2)) + buck.signedBalanceOf(address(b)) + int256(buck.reliefOf(address(b)));
+        uint256 held;
+        for (uint256 i; i < 3; ++i) held += IBuckBasketVenue(address(b)).marks(i, b.liquidityOf(i)).posLow / 2;
+        return (net > 0 ? uint256(net) : 0) + (ctrl.k() == 0 ? 0 : held * 1e18 / ctrl.k());
+    }
+
+    /// @dev Within the limit: the lien at most K x the mark, to rounding.
+    function _withinLimit() internal view {
+        assertLe(_lien(), ctrl.k() * b.markNow() / 1e18 + b.gross() / 1000, "within K x its mark");
     }
 }
 
@@ -415,7 +437,7 @@ contract BuckBasketEquityTest is BuckBasketEquityFixture {
         _bind(carrying, true);
         buck.transfer(carrying, 2000 * B);
         uint256 id = _deposit(carrying, address(buck), 1000 * B);
-        vm.warp(block.timestamp + 365 days);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
         uint256 nominal = buck.balanceOf(carrying);
         uint256 expectedNet = nominal - buck.balanceOfFees(carrying);
         (, uint128 basisBefore) = b.holdings(id);
@@ -440,7 +462,7 @@ contract BuckBasketEquityTest is BuckBasketEquityFixture {
         address carrying = address(new EqHolder());
         _bind(carrying, true);
         buck.transfer(carrying, 1000 * B);
-        vm.warp(block.timestamp + 365 days);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
         uint256 expectedNet = 1000 * B - buck.balanceOfFees(carrying);
         uint256 id = _deposit(carrying, address(buck), 1000 * B);
         (, uint128 basis) = b.holdings(id);
@@ -591,16 +613,17 @@ contract BuckBasketEquityTest is BuckBasketEquityFixture {
 
     /// Ruled (JUBILEE-ISSUANCE 6.2.2): an under-water account stops issuing,
     /// so a deposit's credit first restores the limit.
-    function test_deposit_underWaterRestoresTheLimitFirst() public {
+    function test_deposit_afterACutCallsNothingBackAndGoesToTheLimit() public {
         _placed();
         uint256 k2 = _cutUnderWater();
-        int256 h0 = b.headroom();
-        assertLt(h0, 0, "the cut left it under water");
         uint256 lien0 = _lien();
+        _deposit(bob, address(tok[0]), 1e18);                       // re-marks at the cut K
+        assertEq(b.markNow(), _netMark(), "marked net: the positions' BUCK counts whole");
+        int256 h0 = b.headroom();
         _deposit(bob, address(tok[0]), 10_000e18);                  // 10k BUCK of T0
         assertEq(_lien(), lien0, "a deposit calls nothing back and issues nothing");
         assertApproxEqRel(uint256(b.headroom() - h0), k2 * 10_000 * B / 1e18, 0.01e18,
-                          "its K x value goes to the limit first");
+                          "its K x value goes to the limit");
         _books();
     }
 
@@ -616,10 +639,8 @@ contract BuckBasketEquityTest is BuckBasketEquityFixture {
             assertApproxEqAbs(w[i], 3333, 500, "near the declared targets");
         }
         assertApproxEqRel(b.equity(), 300_000 * B, 0.01e18, "equity about what was brought");
-        assertGt(_lien(), 0, "placing issued on its credit");
-        assertLe(_lien(), ctrl.k() * b.equity() / 1e18, "within K x equity");
-        assertLe(b.liquidity(), b.liquidityTarget() * 3 / 2 + b.gross() / 1000,
-                 "only liquidity waits unspent");
+        assertGt(_lien(), 0, "placing issued on its credit, so no BUCK waits idle");
+        _withinLimit();
         _books();
     }
 
@@ -655,7 +676,7 @@ contract BuckBasketEquityTest is BuckBasketEquityFixture {
         uint256 t = b.liquidityTarget();
         assertGe(b.liquidity() + b.gross() / 1000, t * (10000 - 5000) / 10000,
                  "liquidity back within its band");
-        assertLe(_lien(), ctrl.k() * b.equity() / 1e18, "within K x equity");
+        _withinLimit();
         _books();
     }
 
@@ -730,9 +751,7 @@ contract BuckBasketEquityTest is BuckBasketEquityFixture {
         assertGe(b.sharePrice(), p0 * 999 / 1000, "the stayers' price about whole");
         // The credit is marked at what stays (its positions are gone), never at
         // what was: the limit must not outlive the collateral.
-        int256 eLow = int256(b.grossAt(2)) + buck.signedBalanceOf(address(b))
-                    + int256(buck.reliefOf(address(b)));
-        assertEq(b.markNow(), uint256(eLow), "marked at the equity that stays");
+        assertEq(b.markNow(), _netMark(), "marked at what stays");
         _books();
     }
 
@@ -740,15 +759,16 @@ contract BuckBasketEquityTest is BuckBasketEquityFixture {
 
     /// No margin calls: a K cut calls nothing back; the wheel then brings the
     /// basket back under its new limit at its own pace.
-    function test_kCut_callsNothingBack_theWheelDeleverages() public {
+    function test_kCut_callsNothingBack_theWheelKeepsTheLimit() public {
         _placed();
         uint256 lien0 = _lien();
         _cutUnderWater();
-        assertLt(b.headroom(), 0, "the cut took the headroom");
+        assertLt(b.headroom(), 0, "the cut took the headroom at the old mark");
         assertEq(_lien(), lien0, "nothing called back");
         _wheel(80, false);
-        assertLt(_lien(), lien0, "the wheel repaid the lien, trimming");
-        assertGe(b.headroom(), -int256(b.gross() / 1000), "back under the limit");
+        // The machine marks its positions' BUCK whole, so a cut bounds only what it issued net of
+        // them; the wheel keeps within that, selling down to its ceiling if it must.
+        _withinLimit();
         uint256 id = _deposit(bob, address(buck), 1000 * B);
         vm.prank(bob);
         b.redeem(id, 10000);
@@ -763,7 +783,7 @@ contract BuckBasketEquityTest is BuckBasketEquityFixture {
         _placed();
         uint256 lien0 = _lien();
         uint256 p0 = b.sharePrice();
-        vm.warp(block.timestamp + 365 days + 6 hours);
+        vm.warp(vm.getBlockTimestamp() + 365 days + 6 hours);
         uint256 r = buck.reliefOf(address(b));
         assertApproxEqRel(r, lien0 * 2 / 100, 0.01e18, "2% of the lien over the year");
         uint256 e0 = b.equity();

@@ -65,11 +65,11 @@ contract BasketDeskInvariantTest is BasketDeskFixture {
     }
 
     /// @dev After a basket verb that marks at its end (a deposit, an exit):
-    ///      the mark it wrote against equity(LOW) in the same state.  (A
+    ///      the mark it wrote against the machine's net mark in the same state.  (A
     ///      wheel round re-pins the pools after its steps mark, so it is not
     ///      checked here: its steps are pinned by the unit tests.)
     function _checkMark() internal {
-        uint256 e = _equityLow();
+        uint256 e = _netMark();                     // the machine's own collateral: equity, positions' BUCK whole
         uint256 m = b.markNow();
         if (e == 0 || m <= e) return;
         uint256 over = (m - e) * 10000 / e;

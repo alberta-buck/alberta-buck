@@ -6,13 +6,21 @@ import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
 import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPool} from "./BuckBasketEquity.t.sol";
+import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
 
 /// @dev Real pools, canonical cash and the existing desk. These vectors
 ///      distinguish the nominal issuance reference from liquidation value.
 ///      The PID observes this basket independently; this is a unit/denomination
 ///      check, not a closed-loop economy or a controller-gain comparison.
 contract BuckCompoundPriceUnitsTest is BuckCompoundDeskFixture {
+    /// The machine's venue reads K's reference net by default; these vectors are about the nominal
+    /// (quoted) reference, which governance keeps for comparison.
+    function _nominal() private {
+        vm.prank(GOV); BasketVenueFacet(address(basket)).setNominalReference(true);
+    }
+
     function test_idleFeesChangeNetCollateralButNotTheNominalReferenceOrPidInput() public {
+        _nominal();
         _grant(1000e18);
         BuckKControllerDirect observer = new BuckKControllerDirect(
             1e12, 0, 0, 1, 0.1e18, 0.95e18, 0.75e18, GOV);
@@ -84,6 +92,7 @@ contract BuckCompoundPriceUnitsTest is BuckCompoundDeskFixture {
     }
 
     function test_freshPairedLiquidityDilutesCarriedFeesWithoutMovingNominalPriceOrSupply() public {
+        _nominal();
         _grant(1000e18);
         vm.warp(block.timestamp + YEAR);
         int256 nominalReference = IBuckBasketVenue(address(basket)).basketValueInBuck();

@@ -2,8 +2,8 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-import {BuckBasketEquityTest, IBasketUpkeep} from "./BuckBasketEquity.t.sol";
-import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
+import {BuckBasketEquityFixture, IBasketUpkeep} from "./BuckBasketEquity.t.sol";
+import {ControlledPairIntent} from "../harness/BasketIntent.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
@@ -11,7 +11,7 @@ import {PortfolioMath as PM} from "../../src/basket/PortfolioMath.sol";
 
 /// @notice A target that leans against price: the shell's tilt, its cap and
 /// the reference price each constituent is taken to return to.
-contract BasketLeanTest is BuckBasketEquityTest {
+contract BasketLeanTest is BuckBasketEquityFixture {
     ControlledPairIntent intent;
 
     // A paired book at its declared weights, and a policy that asks for everything.

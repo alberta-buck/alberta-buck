@@ -31,9 +31,9 @@ contract BasketRetirementWheelTest is JubileeWheelFixture {
         vm.stopPrank();
     }
 
-    function _repay(bool older) private {
+    function test_machineWheelActuallyRetiresPrincipalAndClosesItsActivatedLiability() public {
         _cashDebt(40e6);
-        JubileeKind w = _attach(older);
+        JubileeKind w = _attach();
         assertEq(w.slotCount(), 4);
         uint256 supply = buck.totalIssued();
         uint256 cash = buck.balanceOf(address(basket));
@@ -52,12 +52,9 @@ contract BasketRetirementWheelTest is JubileeWheelFixture {
         assertEq(credit.ownerOf(basket.creditId()), address(basket));
     }
 
-    function test_machineWheelActuallyRetiresPrincipalAndClosesItsActivatedLiability() public { _repay(false); }
-    function test_olderWheelUsesTheSameBoundedPrincipalRetirement() public { _repay(true); }
-
     function test_partialDustDoesNotRunButACompleteDustTailClearsWithoutReward() public {
         CompoundBasketHarness b = _cashDebt(40e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         uint256 out = buck.balanceOf(address(basket)) - 3;
         vm.prank(GOV); b.sendCash(BOB, out);
         (uint256 work,) = w.tick(4, 0);
@@ -73,7 +70,7 @@ contract BasketRetirementWheelTest is JubileeWheelFixture {
 
     function test_sharedBudgetDownsizesPrincipalAndNextBlockCanContinue() public {
         _cashDebt(900e6, 1000e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         JubileeKind.JubileePolicy memory p = _policy(); p.retirementCap = 500e6;
         vm.prank(GOV); w.setJubilee(fund, p);
         vm.warp(t0 + YEAR);
@@ -95,7 +92,7 @@ contract BasketRetirementWheelTest is JubileeWheelFixture {
 
     function test_anExhaustedBudgetDoesNotAuthorizeOrPretendToRepayBasketDebt() public {
         CompoundBasketHarness b = _cashDebt(900e6, 1000e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         vm.prank(GOV); b.sendCash(ALICE, 500e6);
         vm.warp(t0 + YEAR);
         uint256 aliceId = credit.tokenOfOwnerByIndex(ALICE, 0);
@@ -124,7 +121,7 @@ contract BasketRetirementWheelTest is JubileeWheelFixture {
         // Leave less than nine raw units liquid, the rest in the actual
         // mutual receipt. This makes single-BUCK-second rounding material.
         _invest(899_999_992);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         JubileeKind.JubileePolicy memory p = _policy();
         p.retirementMinimum = 1; p.retirementCap = 5;
         vm.prank(GOV); w.setJubilee(fund, p);
@@ -149,7 +146,7 @@ contract BasketRetirementWheelTest is JubileeWheelFixture {
         _cashDebt(40e6);
         vm.warp(t0 + YEAR);
         (uint256 id,,) = _invest(100e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         (uint128 shares,) = basket.holdings(id);
         uint256 cash = buck.netBalanceScaled(address(basket));
         (uint256 work,) = w.tick(4, 0);
@@ -163,7 +160,7 @@ contract BasketRetirementWheelTest is JubileeWheelFixture {
 
     function test_maturedFacilityIsNotClosedOrRepaidByTheWheel() public {
         _cashDebt(40e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         vm.warp(t0 + 50 * YEAR);
         w.tick(4, 0);
         vm.roll(vm.getBlockNumber() + 1); w.tick(4, 0);
@@ -195,7 +192,7 @@ contract BasketRetirementWheelTest is JubileeWheelFixture {
         b.openAccountingCredit(address(credit), 1e15); b.issueForAccounting(40e6);
         b.sendCash(BOB, 38_500_000);
         vm.stopPrank();
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         k.setK(0.1e18);
         assertLt(basket.headroom(), 0);
         uint256 target = basket.liquidityTarget();
@@ -241,7 +238,7 @@ contract CarryingBasketRetirementWheelTest is JubileeWheelFixture {
     function test_aCarryingBasketBurnsItsIdleBuckAboveItsTarget() public {
         assertTrue(identity.isCarrying(address(basket)));
         _cashDebt(40e6);
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         uint256 supply = buck.totalIssued();
         uint256 cash = buck.netBalanceOf(address(basket));
         (uint256 work,) = w.tick(4, 0);
@@ -262,7 +259,7 @@ contract CarryingBasketRetirementWheelTest is JubileeWheelFixture {
         vm.warp(block.timestamp + 365 days);            // its BUCK now carry a year's fee
         (uint256 gross, uint256 net) = buck.accountBalancesScaled(address(basket));
         assertGt(gross, net, "hollow: nominal above net");
-        JubileeKind w = _attach(false);
+        JubileeKind w = _attach();
         uint256 lien = basket.lien();
         (uint256 work,) = w.tick(4, 0);
         assertEq(work, 1);

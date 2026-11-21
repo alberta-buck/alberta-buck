@@ -11,8 +11,10 @@ import {Buck} from "../../src/Buck.sol";
 import {BuckRenewal, BuckRenewalConsent} from "../../src/BuckRenewalConsent.sol";
 import {JubileeFund, IJubileeBasket, IJubileeValuationWheel} from "../../src/JubileeFund.sol";
 import {BuckBasketEquity} from "../../src/basket/BuckBasketEquity.sol";
-import {BuckBasketEquityWheel} from "../../src/basket/BuckBasketEquityWheel.sol";
-import {BuckBasketUniswapV3} from "../../src/basket/BuckBasketUniswapV3.sol";
+import {BuckBasketStorage} from "../../src/basket/BuckBasketStorage.sol";
+import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
+import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
+import {BasketIntent} from "../harness/BasketIntent.sol";
 import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
 import {EqController, EqHolder, EqToken, IPool} from "./BuckBasketEquity.t.sol";
 import {BasketMachineWheel} from "../../src/wheel/BasketMachineWheel.sol";
@@ -65,8 +67,13 @@ abstract contract JubileeEquityFixture is Test {
         credit.setCreditIssuer(INSURER, true);
         vm.startPrank(GOV);
         basket.enableNetAccounting();
-        basket.setVenue(address(new BuckBasketUniswapV3()));
-        basket.setEquityWheel(address(new BuckBasketEquityWheel()));
+        // The basket machine's facets; a policy at rate 0 only pairs (the earlier components facet is
+        // retired, 2026-11-20). wheelStep(2, 0) is the response.
+        basket.setVenue(address(new BasketVenueFacet(address(0))));
+        BasketIntent intent = new BasketIntent(address(basket));
+        intent.setRate(0);
+        basket.setEquityWheel(address(new BasketUpkeepFacet(address(intent), address(0), 0, 0)));
+        basket.setNetMark(true);                        // the machine marks its credit net
         (bool ok,) = address(basket).call(abi.encodeWithSignature("setWheel(address)", address(this)));
         require(ok);
         fund.configure(buck, IJubileeBasket(address(basket)));
@@ -218,16 +225,18 @@ contract JubileeEquityIntegrationTest is JubileeEquityFixture {
         _bind(pool, true, address(this));
         (,,,,,, int24 lower, int24 upper,,,) = basket.constituents(0);
         IPool(pool).mint(address(this), lower, upper, 1e18, "");
+        // The machine's venue has no spot fallback at all: before the new pool has a TWAP window's
+        // history, the basket refuses even the deposit that would need its mark.
         vm.startPrank(ALICE);
         asset.approve(address(basket), type(uint256).max);
+        vm.expectRevert(bytes("OLD"));
         basket.deposit(address(asset), 100_000e18, 0);
         vm.stopPrank();
+        vm.warp(block.timestamp + 601);
+        vm.prank(ALICE);
+        basket.deposit(address(asset), 100_000e18, 0);
         _invest(10_000e6);
         assertGt(basket.idleToken(0), 0);
-
-        vm.expectRevert(JubileeFund.MarkUnavailable.selector);
-        fund.previewRelief(a, 50_000e6);
-        vm.warp(block.timestamp + 601);
         (uint256 relief,, bool exceeds) = fund.previewRelief(a, 50_000e6);
         assertGt(relief, 0);
         assertFalse(exceeds);
@@ -514,6 +523,16 @@ contract JubileeEquityIntegrationTest is JubileeEquityFixture {
             sqrtPriceLimitX96: buckIs0 ? MAX_SQRT - 1 : MIN_SQRT + 1,
             minimumNetBuck: 1
         });
+        if (shock == 1) {
+            // The machine's venue does not sell into a pool whose spot has left its TWAP band
+            // (BasketVenueFacet.monetaryLeg): the fund's scheduled sale waits for the average,
+            // then realizes the dropped price against the mark taken before it.
+            vm.expectRevert(BuckBasketStorage.Slippage.selector);
+            vm.prank(GOV);
+            fund.redeemScheduled(requested, 0, routes);
+            vm.warp(block.timestamp + 601);
+            (, cashBefore) = buck.fundBalancesScaled();      // the fund's own account moved meanwhile
+        }
         vm.prank(GOV);
         uint256 proceeds = fund.redeemScheduled(requested, 0, routes);
         emit log_named_uint("requested marked BUCK", requestedMark);

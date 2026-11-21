@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.20;
 
-import {BuckBasketEquityTest, IBasketUpkeep, EqToken, IPool} from "./BuckBasketEquity.t.sol";
+import {BuckBasketEquityFixture, IBasketUpkeep, EqToken, IPool} from "./BuckBasketEquity.t.sol";
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
-import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
+import {ControlledPairIntent} from "../harness/BasketIntent.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
 import {BasketReference} from "../../src/basket/BasketReference.sol";
 import {OuterBandDeskPolicy} from "../../src/basket/OuterBandDeskPolicy.sol";
 import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
 import {BuckKControllerDirect} from "../../src/BuckKControllerDirect.sol";
 
-contract BasketMachineTest is BuckBasketEquityTest {
+contract BasketMachineTest is BuckBasketEquityFixture {
     BasketReference internal signals;
 
     function _assertReferenceNormalization() internal view {

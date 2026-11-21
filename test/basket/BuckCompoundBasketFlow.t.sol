@@ -9,7 +9,7 @@ import {BuckBasketUniswapV3} from "../../src/basket/BuckBasketUniswapV3.sol";
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
 import {IBasketUpkeep} from "../../src/basket/IBasketUpkeep.sol";
-import {ControlledPairIntent} from "./BasketUpkeepFacet.t.sol";
+import {ControlledPairIntent} from "../harness/BasketIntent.sol";
 import {EqToken, EqController, IPool} from "./BuckBasketEquity.t.sol";
 import {BasketReference} from "../../src/basket/BasketReference.sol";
 import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
@@ -284,27 +284,6 @@ contract BuckCompoundBasketFlowTest is JubileeEquityFixture {
         vm.prank(GOV);
         assertEq(b.fundForAccounting(120e6), 120e6);
         assertEq(basket.lien(), 40e6); // Existing cash does not cause a second draw.
-    }
-
-    function test_componentWheelIssuesForActualLpPlacementAndFundPurchase() public {
-        _pools();
-        _open(1e12);
-        assertEq(buck.balanceOf(address(basket)), 0);
-        uint256 supplyBefore = buck.totalIssued();
-        for (uint256 i; i < 3; ++i) {
-            assertEq(IBasketUpkeep(address(basket)).wheelStep(2, i), 1);
-            assertGt(basket.liquidityOf(i), 0);
-        }
-        uint256 beforePrincipal = basket.lien();
-        // The component wheel can sell part of waiting TOKEN to balance a
-        // reserve-constrained pair. Its debt is the actual draw, not all TOKEN.
-        assertGt(beforePrincipal, 2000e6);
-        assertEq(buck.totalIssued() - supplyBefore, beforePrincipal);
-        assertTrue(basket.creditLive());
-        assertLt(buck.balanceOf(address(basket)), 1e6);
-        assertEq(IBasketUpkeep(address(basket)).wheelStep(3, 0), 1);
-        assertGt(basket.lien(), beforePrincipal);
-        assertGt(basket.idleToken(0) + basket.idleToken(1) + basket.idleToken(2), 0);
     }
 
     function test_cashFundedPurchaseCannotLeaveActualActivatedBackingShort() public {
