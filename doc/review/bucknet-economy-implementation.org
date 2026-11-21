@@ -5725,6 +5725,14 @@ operation, fault or unavailable relief in any frame of any world.
   issue; a known refused remainder abandoned when the household leaves; a retire plan redeeming a
   receipt before spending dollars. /Deferred/ (the owner's earlier direction): K's slide, the leak's
   standing error and whether K bounds the basket's gross lien, until the demand cast.
+- /Later the same day/: an arbitrage cycle may be 5% of its first pool's reserve in the worlds (the
+  machine wheel's limit; it was 1%): "yes, raise to 5%". And retire the old basket families now
+  ("yes, retire"): the pro-rata and ops baskets with their desk (=MonetaryDesk=), the earlier upkeep
+  family with the older comparison wheel (=BasketWheel=, =BuckBasketEquityWheel=, =EquityTurnDirector=
+  and the kinds only they use), the pairs director, the shadow controller, and the legacy simulations
+  and tests only they serve (=doc/review/consolidation-plan.org=, waves 2 and 3; not the USD
+  controller, the BuckNet facade, signed Buck or the V2 integration). Still open, the release's timing
+  and the demand cast's scope.
 
 ** Fresh BUCK in the pools, and flash mint/burn: the design (2026-11-20)
 
