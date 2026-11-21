@@ -6105,6 +6105,36 @@ carried BUCK can wait (measured).
   leverage compound to =lien <= K x equity / (1 - K)= (3x equity at K = 0.75): the spiral the KMAX
   cap exists for. Any such optimization needs that bound stated first.
 
+*** The basket's leverage against K (under discussion, 2026-11-21)
+
+The owner (2026-11-21): the limit "seems more reasonable" counting the leveraged portfolio; target a
+fraction of it that is inverse to K (about 90% at K = 0.25, 50% at K = 0.9), and bound it with more
+reasonable KMIN and KMAX. The proposal under discussion:
+
+- /Leverage on the TOKEN exposure/: N = BUCK issued net of what the positions hold and the wallet's
+  cash (the book's =issued= today), E the equity at the exits' marks less unpaid relief, the TOKEN
+  exposure X = E + N. Pairing is a matched book (BUCK owed against BUCK held), not leverage: counting
+  the positions' BUCK half as assets would let a fully paired, unlevered basket hold its pairing
+  only at K >= 0.5.
+- /The hard limit compounds/: N <= K x (E + N), so N <= K E / (1 - K), X <= E / (1 - K) (the mark
+  becomes E + N + heldBUCK / K, against E + heldBUCK / K today).
+- /The target levers as if K were a fraction kappa lower/: K_eff = (1 - kappa) K,
+  N* = K_eff E / (1 - K_eff), the fraction of the limit
+  phi(K) = (1 - kappa)(1 - K) / (1 - (1 - kappa) K). K may fall by kappa x K before the lien meets
+  the limit; the room between them pays exits before anything is sold. kappa = 0.08 gives the
+  owner's 90% at 0.25 and 55% at 0.9; kappa = 0.1 gives 87% and 47%. The inverse shape is the
+  limit's sensitivity, dN_max/dK = E / (1 - K)^2: 1.8 E per unit of K at 0.25, 100 E at 0.9.
+- /The rails/: K is the whole system's LTV, so KMAX bounds everyone's leverage (1 / (1 - KMAX):
+  20x at 0.95, 6.7x at 0.85) and keeps the basket's target finite (4.3x equity at 0.85, kappa 0.1);
+  a KMIN above zero keeps credit from freezing (0.25 or 0.3). Proposed: [0.25, 0.85], K0 0.75
+  inside; the five-year runs kept K in 0.47 to 0.79, where neither rail binds.
+- /The size of the change/: today's target is X = E (1 + K / 2) (=CEILING_BP= 50% of N <= K E):
+  1.38 E at K = 0.75; the proposal gives 3.08 E (kappa 0.1). The sell-down as K falls,
+  dX/dK = (1 - kappa) E / (1 - K_eff)^2, is 8.5 E per unit of K at 0.75 against E / 2 today: a K
+  falling 0.01 sells 8.5% of equity in TOKEN and retires the BUCK. That is K's transmission (K falls
+  when BUCK is cheap; the basket then buys BUCK back), about seventeen times stronger, and the
+  depositors' commodity exposure about doubled.
+
 *** Measuring it
 
 A comparison like =comparisons/flash.toml= (=economy=, two years, burn and flash on): refresh off,
