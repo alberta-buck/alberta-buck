@@ -48,6 +48,14 @@ export function annualized(a, b, days) {
   return (b / a) ** (365 / days) - 1;
 }
 
+/** Annualized change between observed share prices once a month of marks exists. */
+export function annualizedSavings(rows) {
+  const first = rows.find((r) => r.D > 0);
+  const last = rows.at(-1);
+  if (!first || last.day - first.day < 30) return null;
+  return annualized(first.D, last.D, last.day - first.day);
+}
+
 /** BUCK's premium over its basket, %: the older desk's signal (the common
  *  mode on its 20-day rung, sign flipped), or the basket machine's (its parity
  *  reference: the basket's cost in BUCK as last sampled, 1e18). */

@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { BASKET, ERC20, POOL, RECEIPT } from "../sandbox/src/savings/abi.js";
-import { annualized, channels, chooseIndex, dateOf, deviationBp, equityWorth, hintIndex, newSid, prices,
+import { annualized, annualizedSavings, channels, chooseIndex, dateOf, deviationBp, equityWorth, hintIndex, newSid, prices,
          row, serverBase, tokenFor } from "../sandbox/src/savings/model.js";
 
 const loc = (href) => new URL(href);
@@ -112,6 +112,8 @@ test("a growth compounded to a year", () => {
   assert.ok(Math.abs(annualized(1, 1.01, 90) - (1.01 ** (365 / 90) - 1)) < 1e-12);
   assert.equal(annualized(1, 1.01, 0), null);
   assert.equal(annualized(0, 1, 30), null);
+  assert.equal(annualizedSavings([{ day: 0, D: null }, { day: 1, D: .98 }, { day: 366, D: .98 }]), 0);
+  assert.equal(annualizedSavings([{ day: 0, D: .98 }, { day: 29, D: 1 }]), null);
 });
 
 test("an equity receipt pays its shares' value, less the treasury's cut and the exit charge", () => {

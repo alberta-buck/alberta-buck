@@ -34,7 +34,18 @@ test("the savings world runs days, frames them for the page, and serves the page
 
   t = performance.now();
   const frames = [];
-  for (let d = 0; d < 3; d++) frames.push(await world.step());
+  const lowMarks = () => Promise.all(world.world.tokens.map(async (_, i) =>
+    Number((await session.call(world.world.basket, "marks", [BigInt(i), 0n])).pLow)));
+  frames.push(await world.step());
+  const openingMarks = await lowMarks();
+  const weights = await Promise.all(world.world.tokens.map(async (_, i) =>
+    Number((await session.call(world.world.basket, "constituents", [BigInt(i)]))[9])));
+  for (let d = 1; d < 3; d++) frames.push(await world.step());
+  const closingMarks = await lowMarks();
+  const weightsTotal = weights.reduce((a, b) => a + b, 0);
+  const passive = closingMarks.reduce((sum, p, i) => sum + weights[i] * p / openingMarks[i], 0) / weightsTotal;
+  assert.equal(row(frames[0]).hold, 1);
+  assert.equal(row(frames.at(-1)).hold, passive, "fixed opening TOKEN quantities marked at today's LOW prices");
   const dayMs = (performance.now() - t) / 3;
   console.log(JSON.stringify({ bootMs: Math.round(bootMs), dayMs: Math.round(dayMs),
                                members: world.pop.members.length,

@@ -19,7 +19,6 @@ for (const arbFlash of [false, true]) test(`canonical JS wheel repairs a USDC wi
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
   });
   assert.equal(await s.call(world.wheel, "arbFlash"), arbFlash);
-  const supply0 = await s.call(world.buck, "totalIssued");
   const { buck, basket, wheel, simlp, poolUB, tokens } = world;
   assert.equal(await s.call(world.reg, "isCarrying", [basket.address]), true);
   assert.equal(await s.call(buck, "approvedCarryingIssuer", [basket.address]), true);
@@ -36,6 +35,7 @@ for (const arbFlash of [false, true]) test(`canonical JS wheel repairs a USDC wi
     b0 ? 4295128740n : 1461446703485210103287273052203988822378723970341n,
     await s.call(poolUB, "token0"), await s.call(poolUB, "token1")]);
   const before = (await s.call(poolUB, "slot0"))[0];
+  const supply0 = await s.call(buck, "totalIssued");
   const receipts = [];
   for (let i = 0; i < 2; i++) {
     const last = await world.turnWheel({ tag: `arb:shock:${i}` });
@@ -62,8 +62,11 @@ for (const arbFlash of [false, true]) test(`canonical JS wheel repairs a USDC wi
     assert.equal(flashes.length, arb.length, "one flash a cycle");
     assert.ok(flashes.every(({ args }) => args.borrower.toLowerCase() === basket.address.toLowerCase()));
   }
-  // A flash adds nothing to the standing supply: only the deposit and the keeper's own issuance moved it.
-  if (arbFlash) assert.ok(await s.call(buck, "totalIssued") >= supply0);
+  const buckLogs = logs.filter(({ address }) => address.toLowerCase() === buck.address.toLowerCase());
+  const principal = (eventName) => parseEventLogs({ abi: buck.abi, logs: buckLogs, eventName })
+    .reduce((total, { args }) => total + args.principal, 0n);
+  assert.equal(await s.call(buck, "totalIssued"), supply0 + principal("FacilityIssued") - principal("CashRetired"),
+    "only permanent draws and retirements change the standing supply during the rotations");
   for (const receipt of receipts) {
     assert.ok(receipt.gasUsed < 12_000_000n);
     const ticks = parseEventLogs({ abi: wheel.abi, logs: receipt.logs, eventName: "Ticked" });

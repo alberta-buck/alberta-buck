@@ -198,6 +198,7 @@ export class SavingsWorld {
     ];
     for (const a of this.cast) if (a.setup) await a.setup(w);
     this.frames = [];
+    this.holdBasis = null;
     return this.cast.length;
   }
 
@@ -234,15 +235,27 @@ export class SavingsWorld {
       frame.eq_w = (await s.call(b, "responseWeightsBp")).map(Number);
       frame.eq_lean = await this.targetsBp();
     } catch { /* the weights read before the first pairing */ }
+    const marks = await Promise.all(w.tokens.map(async (_, i) => {
+      const liquidity = await s.call(b, "liquidityOf", [BigInt(i)]);
+      return s.call(b, "marks", [BigInt(i), liquidity]);
+    }));
+    const prices = marks.map((mark) => Number(mark.pLow));
+    frame.eq_hold = null;
+    if (prices.length && prices.every((price) => price > 0)) {
+      if (!this.holdBasis) {
+        const constituents = await Promise.all(w.tokens.map((_, i) => s.call(b, "constituents", [BigInt(i)])));
+        const weights = constituents.map((c) => Number(c[9]));
+        this.holdBasis = { prices, weights, total: weights.reduce((sum, w) => sum + w, 0) };
+      }
+      const basis = this.holdBasis;
+      frame.eq_hold = prices.reduce((sum, price, i) => sum + basis.weights[i] * price / basis.prices[i], 0)
+        / (basis.total || 1);
+    }
     if (await s.call(b, "portfolioLimits")) {
       const [gross, lien, equity, relief, cash] = await Promise.all([
         s.call(b, "grossAt", [2]), s.call(b, "lien"), s.call(b, "equity"),
         s.call(b, "reliefAccrued"), s.call(w.buck, "netBalanceOf", [b.address]),
       ]);
-      const marks = await Promise.all(w.tokens.map(async (_, i) => {
-        const liquidity = await s.call(b, "liquidityOf", [BigInt(i)]);
-        return s.call(b, "marks", [BigInt(i), liquidity]);
-      }));
       const held = marks.reduce((sum, mark) => sum + mark.posLow / 2n, 0n);
       const exposure = gross - held;
       const effectiveK = (K > E18 ? E18 : K) * 9n / 10n;

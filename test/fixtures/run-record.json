@@ -158,7 +158,8 @@
    "ubTrades": 3,
    "eq_headroom": 900000,
    "eq_mark": 14000000,
-   "basketValNominal": null
+   "basketValNominal": null,
+   "eq_hold": 1
   },
   {
    "day": 1,
@@ -314,7 +315,8 @@
    "ubTrades": 4,
    "eq_headroom": 300000,
    "eq_mark": 14400000,
-   "basketValNominal": 1015000000000000000
+   "basketValNominal": 1015000000000000000,
+   "eq_hold": 1.012
   },
   {
    "day": 2,
@@ -496,7 +498,15 @@
      false,
      true
     ]
-   ]
+   ],
+   "eq_token_exposure": 15000000,
+   "eq_net_issued": -250000,
+   "eq_hard_limit": 11205000,
+   "eq_ceiling": 33112364,
+   "wh_eq_refresh": 200000,
+   "wh_eq_refresh_n": 1,
+   "wh_eq_refresh_1_n": 1,
+   "eq_hold": 1.018
   }
  ],
  "frames": [
@@ -568,11 +578,16 @@
     "lien": 10000000,
     "nav": 25000000,
     "share_price": 1.0,
+    "hold_index": 1,
     "held_buck": 10000000,
     "idle_buck": 0,
     "headroom": 900000,
     "mark": 14000000,
     "unpaid_relief": 20000,
+    "token_exposure": null,
+    "net_issued": null,
+    "hard_limit": null,
+    "ceiling": null,
     "carried_fee": 0,
     "weights": [
      {
@@ -594,6 +609,9 @@
      "respond": 0,
      "buys": 0,
      "sells": 0,
+     "refresh": null,
+     "refreshes": null,
+     "refreshes_by_pool": null,
      "responds": 0
     }
    },
@@ -716,11 +734,16 @@
     "lien": 10500000,
     "nav": 26000000,
     "share_price": 1.0,
+    "hold_index": 1.012,
     "held_buck": 10500000,
     "idle_buck": 100000,
     "headroom": 300000,
     "mark": 14400000,
     "unpaid_relief": 40000,
+    "token_exposure": null,
+    "net_issued": null,
+    "hard_limit": null,
+    "ceiling": null,
     "carried_fee": 5000,
     "weights": [
      {
@@ -742,6 +765,9 @@
      "respond": 900000,
      "buys": 3,
      "sells": 2,
+     "refresh": null,
+     "refreshes": null,
+     "refreshes_by_pool": null,
      "responds": 1
     }
    },
@@ -883,11 +909,16 @@
     "lien": 11200000,
     "nav": 27400000,
     "share_price": 1.0,
+    "hold_index": 1.018,
     "held_buck": 11200000,
     "idle_buck": 250000,
     "headroom": -250000,
     "mark": 14660000,
     "unpaid_relief": 60000,
+    "token_exposure": 15000000,
+    "net_issued": -250000,
+    "hard_limit": 11205000,
+    "ceiling": 33112364,
     "carried_fee": 10000,
     "weights": [
      {
@@ -909,6 +940,12 @@
      "respond": 1800000,
      "buys": 6,
      "sells": 4,
+     "refresh": 200000,
+     "refreshes": 1,
+     "refreshes_by_pool": [
+      0,
+      1
+     ],
      "responds": 2
     }
    },

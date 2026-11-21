@@ -24,13 +24,15 @@ Q = 10**36
 RAW = 10**6
 
 
-def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(monkeypatch, tmp_path):
+@pytest.mark.parametrize("arb_flash", [False, True])
+def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(monkeypatch, tmp_path, arb_flash):
     monkeypatch.setenv("SIM_WHEEL_ARB", "0")
     BootstrapDMAgent._counter = 0
     scenario = replace(ROUTING, tokens=[(*ROUTING.tokens[0][:3], 7500), (*ROUTING.tokens[1][:3], 2500)],
                        csv_files=ROUTING.csv_files[:2], days=1, agents={"BootstrapDMAgent": 2})
     scenario.experiment = expmod.load(None, sets=["deploy.target_buck_m=1", "deploy.target_buck_lp_m=1",
-                                                 "machine.desk_capital_usd=1000"])
+                                                 "machine.desk_capital_usd=1000",
+                                                 f"machine.arb_flash={arb_flash}"])
     rng = idmod.seeded_rng(scenario.seed)
     with PyrevmAnvil(port=0) as evm:
         journal_path = tmp_path / "bootstrap.jsonl"
@@ -125,6 +127,7 @@ def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(mo
             4295128740 if b0 else 1461446703485210103287273052203988822378723970341,
             ub.functions.token0().call(), ub.functions.token1().call()))
         before_price = ub.functions.slot0().call()[0]
+        supply_before_turns = buck.functions.totalIssued().call()
         counters = {}
         turn_wheel(d, rounds=2, ctr=counters)
         assert int(counters.get("wh_arb_cycles", 0)) > 0
@@ -133,6 +136,17 @@ def test_existing_python_machine_bootstraps_actual_cash_principal_and_premium(mo
         assert after_price > before_price if b0 else after_price < before_price
         assert len(d.last_wheel_receipts) > 1
         from web3.logs import DISCARD
+
+        def buck_events(event):
+            return [row["args"] for receipt in d.last_wheel_receipts
+                    for row in event().process_receipt(receipt, errors=DISCARD) if row["address"] == buck.address]
+
+        flashes = buck_events(buck.events.FlashIssued)
+        assert len(flashes) == (counters["wh_arb_cycles"] if arb_flash else 0)
+        assert all(row["borrower"] == basket.address for row in flashes)
+        drawn = sum(row["principal"] for row in buck_events(buck.events.FacilityIssued))
+        retired = sum(row["principal"] for row in buck_events(buck.events.CashRetired))
+        assert buck.functions.totalIssued().call() == supply_before_turns + drawn - retired
         for receipt in d.last_wheel_receipts:
             assert int(receipt["gasUsed"]) < 12_000_000
             tick = wheel.events.Ticked().process_receipt(receipt, errors=DISCARD)[0]

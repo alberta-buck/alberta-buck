@@ -13,7 +13,7 @@ import { fill, h, prefs } from "./dom.js";
 import { SimLink } from "../savings/link.js";
 import { LocalLink } from "../savings/local-link.js";
 import { MAX_DEVIATION_BP, Saver } from "../savings/wallet.js";
-import { annualized, channels, chooseIndex, compact, dateOf, deviationBp, equityWorth, newSid, prices,
+import { annualizedSavings, channels, chooseIndex, compact, dateOf, deviationBp, equityWorth, newSid, prices,
          row, serverBase, tokenFor, usd } from "../savings/model.js";
 
 const S1 = "var(--s1)";
@@ -588,7 +588,7 @@ export function mountSavings(ctx) {
       last.households ? stat("Household decisions", last.households.errors ? `${last.households.errors} waiting after errors` : "ready",
         "Members with an execution error at their latest decision; pending assets remain in their accounts.") : null,
       stat("Savings index", last.D === null ? "–" : last.D.toFixed(4), "Paid per BUCK saved, in BUCK value"),
-      stat("A year", signed(yearly(rows), (v) => `${(v * 100).toFixed(2)}%`),
+      stat("A year", signed(annualizedSavings(rows), (v) => `${(v * 100).toFixed(2)}%`),
         "The savings index's growth, compounded to a year"),
       stat("Over holding", signed(overHolding(rows), (v) => `${(v * 100).toFixed(2)}%`),
         `The savings index against the basket's commodities held from day ${HOLD_FROM_DAY}`),
@@ -741,14 +741,6 @@ export function mountSavings(ctx) {
   const choice = (last) => chooseIndex(S.holdings?.hint, last.weights, devs(), MAX_DEVIATION_BP);
 
   const pct = (x) => h("span", { class: x >= 0 ? "good" : "bad" }, `${x >= 0 ? "+" : ""}${(x * 100).toFixed(2)}%`);
-
-  // The savings index's growth from its base of 1, compounded to a year.
-  const yearly = (rows) => {
-    const first = rows.find((r) => r.D !== null && r.D > 0);
-    const last = rows[rows.length - 1];
-    if (!first || !last || last.D === null || last.day - first.day < 30) return null;   // too short to say
-    return annualized(1, last.D, last.day - first.day);
-  };
 
   // The basket's commodities bought on HOLD_FROM_DAY at the savings index's
   // value that day, and held: a fixed bundle's value moves by eq_hold's ratio.

@@ -94,7 +94,12 @@ def test_divergence_finds_the_first_day_a_pair_differs():
 
 def test_headline_figures_and_their_differences():
     a = [frame(d, k=0.75 - d / 100, bvib=1 + d / 100, errors=1) for d in range(4)]
+    for day, f in enumerate(a):
+        f["basket"].update(share_price=1.02 + day * .01, hold_index=1.03 - day * .01)
     h = compare.headline(a)
+    assert h["share_return"] == pytest.approx(1.05 / 1.02 - 1)
+    assert h["hold_return"] == pytest.approx(1 / 1.03 - 1)
+    assert compare.headline([frame(0)])["hold_return"] is None
     assert h["days"] == 4 and h["k_end"] == pytest.approx(0.72) and h["k_min"] == pytest.approx(0.72)
     assert h["bvib_gap_mean"] == pytest.approx(0.015) and h["bvib_above"] == pytest.approx(0.75)
     assert h["supply_end"] == 24_000_000 and h["arrived"] == {"investor": 33} and h["refused_days"] == 4
