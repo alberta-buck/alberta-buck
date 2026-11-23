@@ -2,6 +2,185 @@
 #+DATE: 2026-11-08
 #+OPTIONS: ^:nil toc:3
 
+* Mature basket ownership, multi-year comparisons and dashboard restart, 2026-11-23
+
+From the buck-compound worktree use =make basket-study-catalog= to select
+a study, =make nix-venv-basket-study-list= to discover saved and mirrored
+campaigns, and =make basket-study-links= to return to the local dashboard
+on port 8890. The canonical Make controls and settings are documented in
+=README-simulations.org=. The live funded campaign's local mirror is
+=build/sim/stock-grid-730d-datasim=. The completed short mirror is
+=build/sim/stock-grid-36d-datasim=. Status shows individual arm progress
+before the paired result is available. Stock studies write normal dashboard
+frames, household records and event streams; older signal-capture imports
+expose only the fields that were measured.
+
+** What changes as the shareholder base grows
+
+In the 730-close withdrawal run at =a1d4deb1= the fund ended with a basket
+receipt worth 767,343 BUCK on 18,205,763 BUCK equity (4.21%). Investors held
+51.82% and all households together held 63.09%. At day 30 the fund held
+0.52% and investors 4.74%. The older five-year =133e992c= world ended with
+3.613M of Jubilee receipt value on 40.491M equity (8.92%); the economic
+policy differs. Neither run establishes how large the fund should be.
+
+Gross household receipt flows, measured from confirmed BUCK subscriptions
+and redemptions and divided by prior-close equity, averaged 0.472% on days
+1–30 and 0.118% on days 365–729. In year two the median was 0.0158% per
+day. Holding the previous close's TOKEN quantities fixed and moving their
+external prices gives a median one-way weight drift of 0.308% of equity.
+It exceeded gross household flows on 318 of 365 days. This benchmark excludes
+intraday LP behavior, target lean and Jubilee's own purchases. It measures
+the size of a price movement, not a profit or executable order. At five
+times equity per unit parity error, a 10 bp change in the BUCK parity reading
+also moves desired net issuance by 0.5% of equity before constraints. That
+whole-book demand remains even without shareholder funding. Reproduce with
+=scripts/measure-basket-stock-flow.py= from the saved 730-day ledger.
+
+** Funded stock, flow and price treatment
+
+The opening experiment reallocates existing Ordinary SimLP cash to the
+Jubilee fund. Its normal governed investment buys real receipt shares.
+A 2M allocation raised the fund to 24.27% of opening shares at initialization
+while leaving total issued BUCK, basket principal and source principal
+unchanged. It also reduced the funding holder's cash capacity. A separate
+liquid-cash allocation is available in the study TOML. Natural demurrage
+and claims accrue over the common warmup and are read from the ledger.
+The counterfactual arms share agents, prices, funding and the full warmup.
+At the switch, both deploy both research facets and change only the selected
+upkeep. The strict control keeps arbitrage, flows, book sizing and safeguards.
+
+Datasim completed 96 matched 36-day pairs, crossing four price regimes, two
+noise levels, funded investments of 0/1M/2M BUCK, two investor arrival rates
+and two withdrawal fractions. The treatment interval starts after a seven-day
+warmup. Across the eight settings per endowment on three-phase prices,
+production minus maintenance averaged +1.425, -0.115 and +0.505 percentage
+points respectively (descriptive, one household seed). A larger passive
+pool did not monotonically improve active ROI. With a 2M deposit the eight
+inflating/reverting-tape runs produced zero changed discretionary plans.
+
+The two-year study is running in =datasim.local:src/alberta-buck-stock-multiyear-5bb86e77=,
+=build/sim/stock-grid-730d=, with 16 pair workers launched November 23.
+The saved configuration =alberta_buck/sim/studies/basket-stock-730d.toml=
+uses 730 closes, a 30-day common warmup, four price paths, investments of
+0 and 2M BUCK, and quiet/brisk investor flow profiles. The local dashboard
+reads records mirrored every three minutes. If the mirror is stopped, restart
+it with the README's Make sync command and ~BASKET_SYNC_ARGS="--watch 180"~.
+A stopped local viewer or mirror does not stop datasim. The 36-day stock
+matrix remains frozen in =src/alberta-buck-stock-flow-5bb86e77=.
+
+** Reading the marked investor returns
+
+In the 96 completed cases, 63 active baskets gained in BUCK, 90 beat their
+own passive TOKEN benchmark, and 27 gained at the sampled USDC bid over
+the 29-day treatment. The median active gain was +0.458% in BUCK and
+-1.137% in USDC. Relative to strict maintenance the active policy won
+37 cases, tied 38 and lost 21. On three-phase prices all 24 active returns
+were positive in BUCK (median +2.447%); twelve were positive in USDC
+(median +0.627%). The story differs by numeraire, starting close and
+reference strategy. The short study uses one household seed and connected
+price paths. The case counts cannot be treated as independent trials.
+
+The funded 730-day study provides a different test. At the November 23
+21:46 UTC mirror all active arms had reached day 431 and six quiet-flow
+arms had reached day 729. Between day 29 and day 365 all four three-phase
+arms gained 18.17%–24.19% in BUCK and 18.79%–25.23% at the USDC bid.
+On day 729, at zero and 2M initial fund investment respectively, the
+historical quiet-flow arms had BUCK returns of -1.33% and +3.80%
+(+17.53% and +23.58% in USDC). The reverting arms had -0.25% and +5.39%
+(-3.13% and +3.28% in USDC); the inflating arms had -0.73% and +5.85%
+(+2.46% and +9.58% in USDC). These are share marks and each funding change
+also reallocates capital from the initial SimLP. The matched maintenance
+controls were still in progress. Use =basket-study-marks= with ~BASKET_DAY=729~
+to reproduce the snapshot as controls arrive.
+
+The Mac started the separate =stock-stress= campaign with two workers and
+20 paired 120-day cases spanning mixed, combined shock, temporary and permanent
+markdowns and non-reverting relative commodity trends. Use the funded stress
+TOML and Make targets in =README-simulations.org= to resume. Both isolated
+shock tapes mark LABR down 20% on day 40; only the temporary one recovers
+on day 80.
+
+** Five-year launch and distinguishing price opportunity from execution
+
+The historical source supplies recorded monthly wage, construction, food,
+energy and gold anchors. Their intervening daily observations are generated.
+From day 29 through day 365 of the funded 730-day study, form complete,
+nonoverlapping 15-day intervals and compute each TOKEN's log move relative
+to the geometric mean of its four peers. The median absolute move on the
+three-phase tape was 22.354 log-percentage points; all 105 adjacent
+TOKEN intervals reversed sign. The corresponding historical figures were
+2.545 and 68/105. The 15-day interval is half the synthetic generator's
+fixed 30-day period. This measures relative price motion available to a
+trader; the fills, direction, funding and costs determine the actual result.
+Reproduce with =basket-study-marks=, ~BASKET_DAY=365~ on the two-year mirror.
+
+The new =basket-stock-5y.toml= study runs 8 funded active/maintenance pairs
+on datasim at the same source snapshot as the two-year pilot, in a separate
+=build/sim/stock-grid-5y= campaign. It uses the historical bridge and its
+reverting variant, 0 or 2M contributed Jubilee investment, and household
+seeds 41404/41405 on each identical exogenous price path. Each arm has
+1,825 closes inclusive of a 30-close common warmup. Six annual investor
+arrivals and zero scheduled withdrawals hold demand fixed. The Mac
+separately runs a production/maintenance pair for 1,825 closes using only
+the last monthly anchor available under the 61-day convention. Its path
+covers November 1, 2020 through October 30, 2025. See =basket-study-links=,
+the README and the local =build/sim/basket-studies/anchor-5y-asof= manifest.
+On datasim the first five-year attempt stopped in mandatory PDF preflight.
+The installed plotting package needs the Nix GCC C++ library in
+=LD_LIBRARY_PATH=. Preflight passed with the host GCC 15.2 runtime and the
+workers were relaunched in the original campaign. The Linux snapshot's
+=build/logs/stock-grid-5y.log= records both attempts.
+
+The 36-day forced-exit cohort provides another measure of performance. In
+the 48 matched scheduled-withdrawal pairs, every selected investor completed
+the exit (384 investors per arm). Matching cell and member leaves 160
+investors with a funded receipt in both worlds. Across these investors,
+aggregate receipt payout versus BUCK deposited returned +0.330% active
+and +0.221% maintenance. Their actual USDC proceeds versus entry spend
+returned -2.396% and -2.457%, respectively. Wallet-to-USDC sales also
+include residual working BUCK, so individual receipt USDC returns cannot
+be inferred from those exits. See =basket-study-exits= and its CSV.
+
+** Evidence on weak holder returns
+
+The two-year anchor comparison is complete on the Mac. Over closes 0–729,
+production minus strict maintenance gained 0.573 percentage points on the
+monthly pinned bridge, tied on straight interpolation and lost 2.324 points
+on last-observation carry-forward. At their last identical monthly observation
+(day 699), those advantages were +1.523, 0 and +0.383 points. The carry-forward
+arm had no new discretionary changes after that close. Holdings built earlier
+and the ending price therefore matter when interpreting the sign change.
+
+Of 291 eligible TOKEN decisions on the pinned bridge, 191 requested a positive
+pair amount, 54 changed the constrained order and 54 matched a fill on that
+side. Of these fills, 53 had a positive current pair rate and one used
+previously banked allowance. Reproduce the full decision-to-fill breakdown
+with =basket-study-report= and ~BASKET_STUDY=anchors~ on the saved anchor
+campaign. The retained report is =build/sim/basket-multiyear/anchor-bottlenecks.md=.
+Straight interpolation produced zero eligible gaps. Carry-forward had
+164 eligible, 139 positive requests and 28 changes matched by fills. The
+complete 280-cell short grid has 20 production/control pairs: 11 positive,
+five negative and four tied. Current households on the fifteen archived
+daily price paths produced fourteen positive differences and one tie over
+121 closes; one must compare their size, passive baseline and shareholder
+exit costs before inferring an investor benefit. See =build/sim/basket-multiyear/returns.md=
+and the dashboard's named price-regime and common-anchor comparisons.
+On the generated pinned bridge, 34 of 41 unique filled TOKEN/side/days
+moved favorably relative to the geometric mean of the other TOKENs over
+three subsequent closes. Eighteen of 21 that had moved adversely over the
+prior three closes reversed direction. At the first complete monthly
+release-to-release interval after the fill, only 6 of 22 buys and 6 of 17
+sells were favorable. Carry-forward had no movement over the next one,
+three or seven closes for its 24 filled TOKEN/side/days. These are overlapping
+relative reference-price changes; executable returns also depend on entry
+price, size, fees, carry and the BUCK exchange rate.
+
+Use withheld paths and replicate household seeds before changing the default
+tilt, accrual threshold or braking release. The next comparison should hold
+book exposure and tilt fixed and measure fill quality, LP/carry costs and
+realizable exit proceeds in the same external numeraire.
+
 * Matched basket turn-signal experiment and restart, 2026-11-22
 
 ** Results with the household economy and how to resume

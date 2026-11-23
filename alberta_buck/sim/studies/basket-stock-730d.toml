@@ -1,0 +1,20 @@
+# Inherit the canonical household economy. CLI study axes override these values.
+[study]
+experiment = "../experiments/economy.toml"
+design = "pilot"
+days = 730
+warmup_days = 30
+regime = ["three-phase", "history", "revert", "inflating"]
+noise = [0.0]
+endowment = [0, 2000000]  # whole BUCK invested in the fund's basket receipt
+opening_cash = 0  # additional funded BUCK retained initially, before ordinary fund work
+investor_rate = [6.0, 60.0]  # base annual arrival rate after warmup
+exit_fraction = [0.0, 0.25]  # fraction of present investors scheduled to exit halfway through treatment
+seed = [41404]
+inflation = 0.03  # common annual price growth layered onto reverting relative paths
+
+# Use the normal economy TOML hierarchy for overrides, for example
+# [settings.machine]
+# tilt = 0.5
+# [settings.agents.HouseholdPopulationAgent]
+# initial_savers = 6

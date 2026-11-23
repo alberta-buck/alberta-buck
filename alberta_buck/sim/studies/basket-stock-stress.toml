@@ -1,0 +1,14 @@
+# Twelve-month rates govern the non-reverting relative prices in commodity-trend.
+# Use a separate campaign ID from the 36-day and 730-day matrices.
+[study]
+experiment = "../experiments/economy.toml"
+design = "pilot"
+days = 120
+warmup_days = 14
+regime = ["mixed", "shock", "shock-temporary", "shock-permanent", "commodity-trend"]
+noise = [0.0]  # Use --noise 0.01 for the same relative paths with seeded noise.
+endowment = [0, 2000000]
+opening_cash = 0
+investor_rate = [6.0, 60.0]
+exit_fraction = [0.0, 0.25]
+seed = [41404]

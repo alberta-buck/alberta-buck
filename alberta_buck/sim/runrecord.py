@@ -142,6 +142,7 @@ def frame_record(flat: dict, tokens) -> dict:
     weights                     = [dict(symbol=s, held_bp=_at(flat.get("eq_w"), i), target_bp=_at(flat.get("eq_lean"), i),
                                         declared_bp=_at(flat.get("eq_decl"), i))
                                    for i, s in enumerate(tokens)] if flat.get("eq_w") else None
+    ownership = {"ownership": flat["ownership"]} if "ownership" in flat else {}
     return _jsonable({
         "day": flat["day"],
         "block": net.get("block"),
@@ -165,7 +166,7 @@ def frame_record(flat: dict, tokens) -> dict:
         "supply": dict(total=supply, active_principal=net.get("active_principal"),
                        deferred_principal=net.get("deferred_principal"), basket_lien=flat.get("eq_lien"),
                        household_principal=hh.get("drawn") if hh else None, holders=held),
-        "basket": dict(equity=flat.get("eq_equity"), lien=flat.get("eq_lien"), nav=flat.get("basketNav"),
+        "basket": dict(**ownership, equity=flat.get("eq_equity"), lien=flat.get("eq_lien"), nav=flat.get("basketNav"),
                        share_price=_ratio(flat.get("eq_share_price")), hold_index=flat.get("eq_hold"),
                        held_buck=flat.get("eq_held_buck"),
                        idle_buck=flat.get("eq_liquidity"), headroom=flat.get("eq_headroom"), mark=flat.get("eq_mark"),

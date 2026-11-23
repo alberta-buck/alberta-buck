@@ -12,7 +12,7 @@ import { RAW, format } from "./series.js";
 
 export const MAX_RUNS = 6;     // one categorical hue per run, never cycled: more values, fewer at once
 
-const num = (v) => (v === null || v === undefined ? null : Number(v));
+const num = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v));
 const buck = (raw) => (raw === null || raw === undefined ? null : Number(raw) / RAW);
 const get = (f, path) => path.reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), f);
 
@@ -37,6 +37,8 @@ export const METRICS = [
 
 // The runs of a comparison with `vary` free and every other axis at `held`'s value, in the varied
 // axis's order (its reference first).
+export const clipFrames = (frames, endDay) => endDay == null ? frames : frames.filter((frame) => frame.day <= endDay);
+
 export function selection(index, vary, held = {}) {
   const axis = index.axes.find((a) => a.name === vary);
   if (!axis) return [];
@@ -44,7 +46,7 @@ export function selection(index, vary, held = {}) {
   return index.runs
     .filter((r) => index.axes.every((a) => a.name === vary || r.values[a.name] === (held[a.name] ?? a.reference)))
     .sort((a, b) => order.indexOf(a.values[vary]) - order.indexOf(b.values[vary]))
-    .map((r) => ({ id: r.id, label: r.values[vary] }));
+    .map((r) => ({ ...r, id: r.id, label: r.values[vary] }));
 }
 
 // Every setting of a resolved experiment as dotted keys (the manifest's "experiment"; its source path
@@ -85,23 +87,35 @@ export function divergence(a, b) {
   return out;
 }
 
+// Return percentages are unavailable until their explicitly recorded baseline exists.
+export function roi(value, baseline) {
+  const v = num(value), b = num(baseline);
+  return v !== null && b !== null && Number.isFinite(v) && Number.isFinite(b) && b > 0 ? 100 * (v / b - 1) : null;
+}
+
 // One run's headline figures (compare.py's headline, the ones the table shows).
-export function headline(frames) {
+export function headline(frames, run = {}) {
   if (!frames.length) return { days: 0 };
   const last = frames[frames.length - 1];
   const ks = frames.map((f) => num(f.control?.k)).filter((v) => v !== null);
   const bv = frames.map((f) => num(f.control?.bvib)).filter((v) => v !== null);
   const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
   return {
-    days: frames.length, k_end: ks.at(-1) ?? null, k_mean: mean(ks),
+    days: frames.length, k_end: num(last.control?.k), k_mean: mean(ks),
     bvib_gap_mean: mean(bv.map((x) => Math.abs(x - 1))), buck_usd_end: num(last.market?.buck_usd),
     supply_end: buck(last.supply?.total), lien_end: buck(last.supply?.basket_lien),
-    arrived: Object.values(last.population?.roles ?? {}).reduce((s, r) => s + (r.arrived ?? 0), 0),
-    refused_days: frames.reduce((s, f) => s + (num(f.health?.errors) ?? 0), 0),
+    arrived: Object.keys(last.population?.roles ?? {}).length && Object.values(last.population.roles).every((r) => num(r.arrived) !== null) ? Object.values(last.population.roles).reduce((s, r) => s + num(r.arrived), 0) : null,
+    refused_days: frames.every((f) => num(f.health?.errors) !== null) ? frames.reduce((s, f) => s + num(f.health.errors), 0) : null,
+    share_roi: roi(last.basket?.share_price, frames[0].basket?.share_price),
+    passive_roi: roi(last.basket?.hold_index, frames[0].basket?.hold_index),
+    treatment_roi: run.treatment_day != null && last.day >= run.treatment_day ? roi(last.basket?.share_price, run.baseline_share_price) : null,
   };
 }
 
 export const COLUMNS = [
+  { key: "share_roi", label: "Share return from first close", unit: "pct" },
+  { key: "passive_roi", label: "Passive return from first close", unit: "pct" },
+  { key: "treatment_roi", label: "Share return from pre-switch", unit: "pct" },
   { key: "k_end", label: "K at end", unit: "ratio" }, { key: "k_mean", label: "Mean K", unit: "ratio" },
   { key: "bvib_gap_mean", label: "Mean |BVIB - 1|", unit: "ratio" }, { key: "buck_usd_end", label: "BUCK/USD at end", unit: "ratio" },
   { key: "supply_end", label: "Supply at end", unit: "buck" }, { key: "lien_end", label: "Basket lien at end", unit: "buck" },
@@ -112,15 +126,17 @@ export const COLUMNS = [
 // first departs from the first run.
 export function rows(runs) {
   const ref = runs[0];
-  const refFigures = ref ? headline(ref.frames) : null;
+  const refFigures = ref ? headline(ref.frames, ref) : null;
   return runs.map((r, i) => {
-    const h = headline(r.frames);
+    const h = headline(r.frames, r);
+    const comparable = !!(ref?.frames.length && r.frames.length &&
+      ref.frames[0].day === r.frames[0].day && ref.frames.at(-1).day === r.frames.at(-1).day);
     const diff = {};
     for (const c of COLUMNS) {
       const a = h[c.key], b = refFigures?.[c.key];
-      diff[c.key] = i === 0 || a === null || b === null || a === undefined || b === undefined ? null : a - b;
+      diff[c.key] = i === 0 || !comparable || a === null || b === null || a === undefined || b === undefined ? null : a - b;
     }
-    return { label: r.label, id: r.id, figures: h, diff, diverges: i === 0 ? null : divergence(r.frames, ref.frames) };
+    return { label: r.label, id: r.id, figures: h, diff, comparable, diverges: i === 0 ? null : divergence(r.frames, ref.frames) };
   });
 }
 
@@ -135,10 +151,33 @@ export function merge(runs) {
   return [...days.values()].sort((a, b) => a.day - b.day);
 }
 
+// A marked share in USDC: the BUCK-denominated share mark times that day's
+// recorded full-value BUCK bid. No executable holder sale is implied.
+export function bidMark(frame) {
+  const share = num(frame?.basket?.share_price), bid = num(frame?.market?.book?.buck_bid);
+  return share !== null && bid !== null && share > 0 && bid > 0 ? share * bid : null;
+}
+export function commonBidBaseline(runs) {
+  const candidates = runs.map((run) => ({run, marks: new Map(run.frames.map((f) => [f.day, bidMark(f)]).filter(([, v]) => v !== null))})).filter((x) => x.marks.size);
+  if (!candidates.length) return {day: null, marks: new Map()};
+  const days = [...candidates[0].marks.keys()].sort((a, b) => a - b);
+  const day = days.find((d) => candidates.every((x) => x.marks.has(d)));
+  return day === undefined ? {day: null, marks: new Map()} : {day, marks: new Map(candidates.map((x) => [x.run.id, x.marks.get(day)]))};
+}
+
 export function specs(runs) {
-  return METRICS.map((m) => ({
-    id: m.id, title: m.title, unit: m.unit, kind: "line", reference: m.reference,
-    series: runs.map((r) => ({ key: r.label, label: r.label, value: (f) => m.value(f.runs[r.label]) })),
+  const commonBid = commonBidBaseline(runs);
+  const roiMetrics = [
+    { id: "share-bid-roi", title: "Share return in USDC at the market BUCK bid", unit: "pct", kind: "line",
+      note: "Same-day BUCK share mark multiplied by the recorded market BUCK bid, rebased to the earliest common day with both observations for the available runs. Missing bids stay unavailable. This is a mark, not the proceeds from redeeming and selling a holder position; fees, slippage and exit restrictions are excluded.",
+      value: (f, r) => f && commonBid.day !== null && f.day >= commonBid.day ? roi(bidMark(f), commonBid.marks.get(r.id)) : null },
+    { id: "share-roi", title: "Share return from first close", unit: "pct", kind: "line", value: (f, r) => roi(f?.basket?.share_price, r.frames[0]?.basket?.share_price) },
+    { id: "passive-roi", title: "Passive TOKEN return from first close", unit: "pct", kind: "line", value: (f, r) => roi(f?.basket?.hold_index, r.frames[0]?.basket?.hold_index) },
+    { id: "treatment-roi", title: "Share return from pre-switch mark", unit: "pct", kind: "line", value: (f, r) => f?.day >= r.treatment_day ? roi(f?.basket?.share_price, r.baseline_share_price) : null },
+  ];
+  return [...roiMetrics, ...METRICS].map((m) => ({
+    id: m.id, title: m.title, unit: m.unit, kind: "line", reference: m.reference, note: m.note,
+    series: runs.map((r) => ({ key: r.label, label: r.label, value: (f) => m.value(f.runs[r.label], r) })),
   }));
 }
 
@@ -176,13 +215,28 @@ export function signed(v, unit) {
   return `${sign}${format(m, unit)}`;
 }
 
+// Empty means latest; reject negatives, fractions, unsafe integers and malformed URLs.
+export function parseThroughDay(value) {
+  if (value == null || value === "") return null;
+  if (!/^\d+$/.test(String(value))) return NaN;
+  const n = Number(value);
+  return Number.isSafeInteger(n) ? n : NaN;
+}
+export function effectiveEndDay(requested, maximum) {
+  if (maximum == null) return requested;
+  return requested == null ? maximum : Math.min(requested, maximum);
+}
+
 export class CompareTab {
   // source: { comparisons(), comparison(name), runs(), manifest(id), frames(id) }
   constructor(root, bus, source) {
     this.root = root;
     this.bus = bus;
     this.source = source;
-    this.state = { mode: "comparison", name: null, vary: null, held: {}, a: null, b: null };
+    const query = new URL(location.href).searchParams;
+    const requestedDay = parseThroughDay(query.get("day"));
+    this.state = { mode: "comparison", name: query.get("comparison"), vary: null, held: {}, a: null, b: null,
+      through: Number.isNaN(requestedDay) ? null : requestedDay };
     this.controls = html("div", { class: "compare-controls" });
     this.question = html("p", { class: "note" });
     this.differs = html("div", { class: "compare-differs" });
@@ -191,20 +245,25 @@ export class CompareTab {
     this.problem = html("p", { class: "problem", role: "alert", hidden: "" });
     root.replaceChildren(this.controls, this.question, this.problem, this.differs, this.table, this.grid);
     this.cache = new Map();
+    this.loading = false;
   }
 
-  async show() {
+  async show(refresh = false) {
+    if (this.loading) return;
+    this.loading = true;
     try {
       this.list = await this.source.comparisons();
       this.runList = await this.source.runs();
     } catch (e) {
+      this.loading = false;
       return this.fail(`Could not list comparisons: ${e.message}`);
     }
+    this.cache.clear();
     if (!this.state.name && this.list.length) this.state.name = this.list[0].name;
-    if (!this.list.length) this.state.mode = "pair";
+    if (!this.list.length && !this.state.name) this.state.mode = "pair";
     this.state.a ??= this.runList[1]?.id ?? this.runList[0]?.id ?? null;
     this.state.b ??= this.runList[0]?.id ?? null;
-    await this.draw();
+    try { await this.draw(refresh); } finally { this.loading = false; }
   }
 
   fail(text) {
@@ -231,7 +290,7 @@ export class CompareTab {
     return this.cache.get(id);
   }
 
-  async draw() {
+  async draw(refresh = false) {
     this.problem.hidden = true;
     const st = this.state;
     const modes = [["comparison", "A comparison"], ["pair", "Any two runs"]];
@@ -240,9 +299,10 @@ export class CompareTab {
     if (st.mode === "comparison") {
       if (!this.list.length) return this.fail("No comparisons yet: make nix-venv-compare COMPARE=<name> (alberta_buck/sim/comparisons/).");
       controls.push(this.select("Comparison", this.list.map((c) => [c.name, c.name]), st.name, (v) => {
-        Object.assign(st, { name: v, vary: null, held: {} }); this.draw();
+        Object.assign(st, { name: v, vary: null, held: {} }); const url = new URL(location.href); url.searchParams.set("comparison", v); history.replaceState(null, "", url); this.draw();
       }));
-      index = this.list.find((c) => c.name === st.name) ?? this.list[0];
+      index = this.list.find((c) => c.name === st.name);
+      if (!index) return this.fail(`Comparison ${st.name} is not available yet; this page will retry.`);
       if (!index.axes?.length) return this.fail(`${index.name}: ${index.error ?? "no axes"}`);
       st.vary ??= index.axes[0].name;
       controls.push(this.select("Vary", index.axes.map((a) => [a.name, a.name]), st.vary, (v) => { st.vary = v; this.draw(); }));
@@ -263,12 +323,42 @@ export class CompareTab {
       runs = [{ id: st.b, label: "reference" }, { id: st.a, label: "run" }].filter((r) => r.id);
       this.question.textContent = "Any two runs: the settings that differ between them, and what differs in their days.";
     }
-    this.controls.replaceChildren(...controls);
-    try {
-      for (const r of runs) r.frames = await this.frames(r.id);
-    } catch (e) {
-      return this.fail(`Could not read the runs: ${e.message}`);
+    const effective = effectiveEndDay(st.through, index?.end_day);
+    const dayLabel = html("label", { class: "compare-pick" });
+    dayLabel.append(document.createTextNode("Through day "));
+    const dayInput = html("input", { type: "number", min: "0", step: "1", placeholder: "Latest", "aria-label": "Through day", style: "width: 6.5em" });
+    if (index?.end_day != null) dayInput.max = String(index.end_day);
+    if (st.through != null) dayInput.value = String(effective);
+    dayInput.addEventListener("change", () => {
+      const day = parseThroughDay(dayInput.value);
+      if (Number.isNaN(day) || (index?.end_day != null && day != null && day > index.end_day)) {
+        dayInput.setCustomValidity(index?.end_day != null ? `Enter a whole day from 0 to ${index.end_day}.` : "Enter a non-negative whole day.");
+        dayInput.reportValidity();
+        return;
+      }
+      dayInput.setCustomValidity("");
+      st.through = day;
+      const url = new URL(location.href);
+      if (day == null) url.searchParams.delete("day"); else url.searchParams.set("day", String(day));
+      history.replaceState(null, "", url);
+      this.draw();
+    });
+    dayLabel.append(dayInput);
+    controls.push(dayLabel);
+    if (st.through != null && index?.end_day != null && st.through > index.end_day) {
+      this.question.textContent += ` Limited to day ${index.end_day} by this comparison.`;
     }
+    await Promise.all(runs.map(async (r) => {
+      const info = this.runList.find((item) => item.id === r.id);
+      r.status = info?.status ?? "not started";
+      try { const all = info ? await this.frames(r.id) : []; r.frames = clipFrames(all, effective); }
+      catch (e) { r.frames = []; r.status = `unavailable: ${e.message}`; }
+    }));
+    const { updated: _updated, ...stableIndex } = index ?? {};
+    const signature = JSON.stringify({index: stableIndex, runs});
+    if (refresh && signature === this.signature) return;
+    this.signature = signature;
+    this.controls.replaceChildren(...controls);
     await this.drawDiffers(index, runs);
     this.drawTable(runs);
     this.drawCharts(runs);
@@ -286,7 +376,7 @@ export class CompareTab {
         list.append(html("li", {}, `${r.label}${r.label === axis.reference ? " (reference)" : ""}: ${sets || "the experiment's own settings"}`));
       }
     } else if (runs.length === 2) {
-      const [ma, mb] = await Promise.all(runs.map((r) => this.source.manifest(r.id)));
+      const [ma, mb] = await Promise.all(runs.map((r) => this.source.manifest(r.id).catch(() => null)));
       const diff = settingsDiff(mb, ma);
       if (!diff.length) list.append(html("li", {}, "No setting differs: the runs should be the same."));
       for (const d of diff) list.append(html("li", {}, `${d.key}: ${d.a} (run) against ${d.b} (reference)`));
@@ -297,13 +387,15 @@ export class CompareTab {
   drawTable(runs) {
     const t = html("table");
     const head = html("tr");
-    for (const text of ["Run", "First differs", ...COLUMNS.map((c) => c.label)]) head.append(html("th", { scope: "col" }, text));
+    for (const text of ["Run", "Status", "First differs", ...COLUMNS.map((c) => c.label)]) head.append(html("th", { scope: "col" }, text));
     t.append(html("thead"));
     t.firstChild.append(head);
     const body = html("tbody");
     for (const r of rows(runs)) {
       const tr = html("tr");
       tr.append(html("th", { scope: "row", title: r.id }, r.label));
+      const source = runs.find((item) => item.id === r.id);
+      tr.append(html("td", {}, `${source?.status ?? "unknown"} · ${source?.frames?.length ?? 0} days${source?.frames?.length ? ` (${source.frames[0].day}–${source.frames.at(-1).day})` : ""}${source?.provisional ? " · provisional" : ""}${r.diverges && !r.comparable ? " · different endpoints; no deltas" : ""}`));
       tr.append(html("td", {}, r.diverges ? dayText(r.diverges) : "reference"));
       for (const c of COLUMNS) {
         const td = html("td", { class: "num" }, format(r.figures[c.key], c.unit));

@@ -556,6 +556,181 @@ which actions it supports (=src/live.js=), so the same page can later show a sma
 the browser tab without a page of its own. The plan is in
 [[file:doc/review/bucknet-economy-implementation.org][the implementation plan]], "One run record, one dashboard".
 
+* Basket research studies
+
+=make basket-study-catalog= lists the studies and workflow. These matched
+real-EVM experiments use the working tree. Prepare the contracts and Python
+kernels once with =make nix-venv-sim-build nix-venv-core-build-py=. The study
+targets then use that build on each launch.
+
+| =BASKET_STUDY= | What runs | Default selection |
+|----------------+-----------+-------------------|
+| =stock= | Household flow and opening Jubilee allocation, paired active and maintenance worlds on each tape | [[file:alberta_buck/sim/studies/basket-stock-36d.toml][36-day matrix]] |
+| =signals= | Velocity, excursion and their product against production and maintenance | 8-day smoke, with =BASKET_SIGNAL_PRESET=first= or =full= for the 36-day matrices |
+| =braking= | Production braking scale and release rate, with production and maintenance controls | Same preset selector on cycle and historical tapes |
+| =anchors= | Production and maintenance with pinned interpolation, straight interpolation and carry-forward from the same monthly anchors | Six 730-day runs; the manifest records the price availability convention |
+| =archive= | Production and maintenance on normalized daily closes from the archived three-TOKEN lab | All distinct tapes in the prepared pack, 121 closes each |
+
+** Stock matrix and dashboard
+
+#+begin_src sh
+make nix-venv-basket-study-plan BASKET_ID=stock-36d
+make nix-venv-basket-study-run BASKET_ID=stock-36d BASKET_JOBS=2
+make nix-venv-basket-study-status BASKET_ID=stock-36d
+make nix-venv-basket-study-report BASKET_ID=stock-36d
+make nix-venv-basket-study-dashboard               # http://127.0.0.1:8890/
+#+end_src
+
+The plan writes prices and =manifest.json= under
+=build/sim/basket-studies/<BASKET_ID>=. The run records active and maintenance
+arms under =build/runs= as each progresses, with sequential arms inside each
+parallel pair. Status reads both locations. Use ~BASKET_STATUS_ARGS=--all~
+to include every planned and finished pair. The report writes =summary.md= and
+registers the comparison in the dashboard's /Compare/ tab as
+=<BASKET_ID>-stock=. Set =BASKET_OUT= and =BASKET_RUNS= to use different
+locations, and pass the same values to status, report and dashboard. The
+dashboard binds to loopback in read-only mode. Its port is =DASHBOARD_PORT=.
+
+Select the [[file:alberta_buck/sim/studies/basket-stock-730d.toml][730-day matrix]]
+or [[file:alberta_buck/sim/studies/basket-stock-smoke.toml][short smoke matrix]] with
+=BASKET_CONFIG=. The 36-day matrix crosses four tapes, two daily noise
+levels, three opening Jubilee allocations, two investor arrival rates and
+two exit fractions for 96 matched pairs. The 730-day matrix uses 16 pairs
+across the four tapes, two allocations and two household flow profiles.
+One profile schedules six investor arrivals per year at the base rate and
+no forced withdrawals. The other uses a base rate of 60 arrivals per year
+and schedules a 25% investor withdrawal halfway through treatment. The
+8-day smoke uses four pairs on a noisy cycle.
+
+A custom TOML can set =days=, =warmup_days=, =design=, =regime=, =noise=,
+=inflation=, =endowment=, =opening_cash=, =investor_rate=, =exit_fraction=
+and =seed= under =[study]=. Its =experiment= path is
+relative to that TOML. =[settings]= accepts the normal nested experiment
+configuration for other component or household settings. Pass command-line
+overrides through =BASKET_ARGS=, for example
+~BASKET_ARGS="--days 18 --warmup-days 4 --regime history --endowment 0"~.
+Use a new =BASKET_ID= when the inputs or implementation change. Repeat the
+same command and ID to keep completed, verified pairs and retry incomplete
+ones. The report can read completed pairs while the matrix grows.
+
+For a stock study already running on datasim, pull its available artifacts
+and run records before requesting status or building the comparison.
+
+#+begin_src sh
+make nix-venv-basket-study-sync BASKET_OUT=build/sim/stock-grid-36d-datasim
+make nix-venv-basket-study-status BASKET_OUT=build/sim/stock-grid-36d-datasim
+make nix-venv-basket-study-report BASKET_OUT=build/sim/stock-grid-36d-datasim
+make nix-venv-basket-study-sync BASKET_OUT=build/sim/stock-grid-730d-datasim \
+  BASKET_REMOTE_ROOT=src/alberta-buck-stock-multiyear-5bb86e77 BASKET_REMOTE_CAMPAIGN=stock-grid-730d
+#+end_src
+
+The sync reads ~BASKET_REMOTE=datasim.local~ and defaults to the 36-day
+campaign. Set =BASKET_REMOTE_ROOT= and =BASKET_REMOTE_CAMPAIGN= to mirror
+another checkout and campaign. Use ~BASKET_SYNC_ARGS="--watch 60"~ for
+periodic pulls and automatic report updates. Give the mirror its own
+=BASKET_ID=.
+
+** Returning to saved comparisons
+
+Run =make basket-study-links= for the dashboard URLs and
+=make nix-venv-basket-study-list= for current local and mirrored campaign
+counts, directories and last manifest times. Use =BASKET_OUT= with a listed
+directory to inspect its cells. =make nix-venv-basket-study-multiyear=
+publishes measured historical, interpolated and carry-forward two-year
+records into Compare at both the final close and the last common monthly
+anchor. The older five-year seed references are grouped separately when
+their extraction bundle is available. =make nix-venv-basket-study-dashboard=
+serves the run root on loopback; use the URLs directly if already running.
+
+=study.endowment= sets the initial investment in Jubilee's basket receipt.
+=study.opening_cash= separately assigns liquid BUCK to the fund before its
+ordinary reserve and investment work. Both come from the simulated funding
+holder's existing BUCK. A warmup lets demurrage and claims accrue through
+actual contract activity. The recorded opening ledger distinguishes cumulative
+earned demurrage from contributed principal and investment value. The canonical
+economic TOML and its optional =[settings]= overrides determine pool depths,
+bootstrap agent counts, active components, household financial behavior and
+machine tuning. The plan saves the resolved economic TOML, effective machine
+settings, initial agent counts and input price hashes. For example, repeat
+the same study with ~BASKET_ID=stock-no-tilt BASKET_ARGS="--set machine.tilt=0"~
+to isolate the target-weight tilt at identical opening stock and flows.
+The funded =basket-stock-5y.toml= pairs production and maintenance on 1,825
+daily closes, crossing two opening Jubilee positions (0 and 2M BUCK), two
+household seeds and two price treatments (historical bridge and its reverting
+variant). Six annual investor arrivals and zero forced exits are held fixed.
+The frozen datasim workspace is shared with the 730-day campaign. To restart
+its mirror, use the same remote root with ~BASKET_REMOTE_CAMPAIGN=stock-grid-5y~
+and ~BASKET_OUT=build/sim/stock-grid-5y-datasim~. Use the dashboard's
+Through day control or append ~&day=365~ to a comparison URL for a fixed close.
+For actual investor exits, =basket-study-exits= reconciles purchased BUCK and
+subsequent USDC proceeds, and separately reports fully redeemed receipt
+deposits and proceeds in BUCK.
+
+The separate =basket-stock-stress.toml= runs 20 matched 120-day cases with
+mixed cycles, combined shocks, isolated temporary and permanent LABR
+markdowns, and persistent unequal commodity trends. The isolated markdowns
+share size and onset. The drift recipe has a distinct annual log rate per
+TOKEN. These differ from the =inflating= treatment's common price growth
+on top of reverting relative prices.
+
+#+begin_src sh
+make nix-venv-basket-study-run BASKET_ID=stock-stress BASKET_CONFIG=alberta_buck/sim/studies/basket-stock-stress.toml BASKET_JOBS=2
+make nix-venv-basket-study-marks BASKET_OUT=build/sim/stock-grid-730d-datasim BASKET_DAY=365
+#+end_src
+
+The marks target reads the available run frames at one chosen close and
+uses the final common warmup close as its starting point. A control with
+insufficient observations remains blank. The completed stock report uses
+the exact pre-switch baseline for share ROI and shows BUCK and bid-marked
+USDC returns, the passive TOKEN benchmark and paired wins by regime.
+
+Use ~--set deploy.target_buck_lp_m=20~ to change the opening BUCK/USDC
+pool size, then inspect the share and BUCK/USDC price series together. Keep =--jobs= at four
+or below on the Mac.
+
+** Signal, anchor and archive output
+
+The same plan, run, status and report targets accept the study selector.
+=BASKET_ARGS= passes the selected driver's options, such as
+~BASKET_ARGS="--days 36 --regime history --noise-sigma 0 --seed 41404"~
+for =signals=. The anchor study defaults to 730 closes and seed 41404.
+Use ~BASKET_ARGS="--days 1825 --treatment carry-forward --timeout 432000"~
+to run the five-year release-only pair. Generate the
+archive's portable price pack once from a checkout holding the archived
+=doc/control-lab=, or provide an existing file with =BASKET_ARCHIVE_PACK=.
+
+#+begin_src sh
+make nix-venv-basket-study-plan BASKET_STUDY=signals BASKET_ID=signals-first BASKET_SIGNAL_PRESET=first
+make nix-venv-basket-archive-pack BASKET_ARCHIVE_ROOT=/path/to/checkout/doc/control-lab
+make nix-venv-basket-study-run BASKET_STUDY=archive BASKET_ID=archive-121
+make nix-venv-basket-study-report BASKET_STUDY=archive BASKET_ID=archive-121
+make nix-venv-basket-study-import BASKET_STUDY=archive BASKET_ID=archive-121 \
+  BASKET_IMPORT_ARGS="--filter 'regime=interactive-mixed-*' --filter 'arm=production'"
+#+end_src
+
+Trace reports write the offline viewer to =<BASKET_OUT>/index.html=. Keep
+its adjacent data directory when the report uses sidecars. Read
+=<BASKET_OUT>/signal-attribution.md= to trace eligible decisions through
+requested orders, changes to the constrained plan, and actual fills on
+the same TOKEN and transaction. It counts orders released from previously
+accrued capacity separately from orders with a positive current rate. The signal and
+braking reports also write =summary.md=. Import uses completed captures and
+adds partial dashboard records for the saved prices, weights, trades and
+share marks. The offline viewer retains the pair and decision diagnostics.
+Stock studies already write full household and portfolio records. Archive
+replays preserve the sampled daily price changes on three mapped TOKENs.
+Their current economics, cadence and TWAP share returns differ from the
+archived intraday runs and external book marks.
+
+To plot saved signal, anchor or archive captures as one PDF, use
+=make nix-venv-basket-study-pdf BASKET_STUDY=anchors BASKET_ID=NAME=. It
+plots one matched path per regime, with production buys and sells and a named
+pair's signal; incomplete cells are marked unavailable. Set =BASKET_OUT= to
+an existing campaign directory, =BASKET_PDF= to choose the output file, and
+=BASKET_PDF_ARGS="--sigma 0.01 --seed 41404"= to choose a path. Without
+overrides it selects 1% noise where available and otherwise the first saved
+noise level. The target reads saved data and does not run the EVM.
+
 * Comparisons: change one thing, keep everything else
 
 Most questions about the economy are of one form: what does this one setting change, everything

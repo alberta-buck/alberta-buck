@@ -61,6 +61,11 @@ help:
 	  '  make nix-venv-economy-report CAMPAIGN=my-run  # saved JSON -> PDFs and index' \
 	  '  make nix-venv-sim-report SIM_REPORT_VECTORS="build/sim/run.json"  # standalone PDFs' \
 	  '  make nix-venv-economy-test          # model, shared policy and runner regressions' \
+	  'Basket research (README-simulations.org):' \
+	  '  make basket-study-catalog           # stock and flow, signals, braking, anchors, archive' \
+	  '  make nix-venv-basket-study-list     # discover saved campaigns, progress and failures' \
+	  '  make nix-venv-basket-study-plan     # write the default stock matrix and price inputs' \
+	  '  make nix-venv-basket-study-status BASKET_ID=NAME' \
 	  'Interactive views (README-sandboxes.org):' \
 	  '  make nix-sandbox SANDBOX_PORT=8980  # browser EVM, no Python economy' \
 	  '  make nix-venv-sim-savings SIM_SAVINGS_PORT=8981  # server/page; household decisions still gated' \
@@ -154,6 +159,14 @@ help-runs:
 #      sim-equilibrium, sim-rebalancing-eq[-<name>], sim-rebalancing-eq-matrix, sim-catalogue[-<name>],
 #      sim-sweep[-<name>], sim-metrics, sim-debtors, sim-isolation, sim-policy, sim-flow,
 #      sim-historical and the other sim-* targets.
+#   h  Current basket research (see make basket-study-catalog and README-simulations.org)
+#      make basket-study-links                       # open the saved comparisons at these URLs
+#      make nix-venv-basket-study-list               # locate saved and running studies
+#      make nix-venv-basket-study-plan BASKET_STUDY=stock BASKET_ID=stock-36d
+#      make nix-venv-basket-study-run BASKET_STUDY=stock BASKET_ID=stock-36d BASKET_JOBS=2
+#      make nix-venv-basket-study-status BASKET_ID=stock-36d
+#      make nix-venv-basket-study-report BASKET_ID=stock-36d
+#      make nix-venv-basket-study-dashboard   # loopback, read-only dashboard
 #
 # 4  Re-running
 #    - Working-tree runs (3a, 3c, 3e, economy-smoke, COMPARE_ARGS=--here) run whatever is checked out,
@@ -1031,6 +1044,136 @@ dashboard-live-check:
 dashboard-compare-check:
 	mkdir -p build/test
 	cd core/js && node dashboard/bin/compare-check.mjs http://127.0.0.1:$(DASHBOARD_PORT)/ ../../build/test/dashboard-compare.png
+
+# Real-EVM basket research, separate from the household acceptance campaign.
+# Prepare artifacts once with sim-build and core-build-py. Re-running a study
+# reuses valid captures. Give changed settings or code a new BASKET_ID.
+BASKET_STUDIES          = stock signals braking anchors archive
+BASKET_STUDY           ?= stock
+BASKET_ID              ?= $(BASKET_STUDY)
+BASKET_OUT             ?= build/sim/basket-studies/$(BASKET_ID)
+BASKET_RUNS            ?= $(if $(SIM_RUNS),$(SIM_RUNS),build/runs)
+BASKET_JOBS            ?= $(JOBS)
+BASKET_ARGS            ?=
+BASKET_CONFIG          ?= alberta_buck/sim/studies/basket-stock-36d.toml
+BASKET_SIGNAL_PRESET   ?= smoke
+BASKET_ARCHIVE_ROOT    ?= $(if $(wildcard doc/control-lab/interactive/manifest.json),doc/control-lab,../../../doc/control-lab)
+BASKET_ARCHIVE_PACK    ?= build/sim/basket-studies/archive-price-pack.json
+BASKET_STATUS_ARGS     ?=
+BASKET_REPORT_ARGS     ?=
+BASKET_IMPORT_ARGS     ?= --filter arm=production
+BASKET_REMOTE          ?= datasim.local
+BASKET_REMOTE_ROOT     ?= src/alberta-buck-stock-flow-5bb86e77
+BASKET_REMOTE_CAMPAIGN ?= stock-grid-36d
+BASKET_SYNC_ARGS       ?=
+
+BASKET_DRIVER_stock   = scripts/run-basket-stock-grid.py "$(BASKET_OUT)" --config "$(BASKET_CONFIG)" --runs "$(BASKET_RUNS)"
+BASKET_DRIVER_signals = scripts/run-basket-signal-grid.py --output "$(BASKET_OUT)" --preset "$(BASKET_SIGNAL_PRESET)"
+BASKET_DRIVER_braking = scripts/run-basket-braking-grid.py --output "$(BASKET_OUT)" --preset "$(BASKET_SIGNAL_PRESET)"
+BASKET_DRIVER_anchors = scripts/run-basket-anchor-grid.py --output "$(BASKET_OUT)"
+BASKET_DRIVER_archive = scripts/run-basket-archive-grid.py --output "$(BASKET_OUT)" --price-pack "$(BASKET_ARCHIVE_PACK)"
+
+.PHONY: basket-study-catalog basket-study-kind basket-study-plan basket-study-run basket-study-status
+.PHONY: basket-study-report basket-study-dashboard basket-study-import basket-study-sync basket-archive-pack
+basket-study-catalog:
+	@printf '%s\n' \
+	  'Basket research suites (set BASKET_STUDY):' \
+	  '  stock    Jubilee opening allocation and household flows; 96 pairs by default, with two-year, five-year, stress and smoke TOMLs' \
+	  '  signals  velocity, excursion and product sizing against production and maintenance' \
+	  '  braking  production outward braking scale and release rate' \
+	  '  anchors  production and maintenance on three tapes from the same monthly anchors, 730 days' \
+	  '  archive  production and maintenance on normalized daily closes from the archived control lab' \
+	  'Targets (prefix with nix-venv- outside a prepared shell):' \
+	  '  basket-study-links         show direct dashboard URLs for saved and running comparisons' \
+	  '  basket-study-list          discover saved studies and progress across sessions' \
+	  '  basket-study-multiyear     publish the saved two-year regime and common-anchor dashboards' \
+	  '  basket-study-plan / run    set BASKET_ID to name a campaign, BASKET_JOBS to limit workers' \
+	  '  basket-study-status        inspect the manifest and available dashboard records' \
+	  '  basket-study-report        stock dashboard and summary, or offline signal viewer and decision-to-fill report' \
+	  '  basket-study-exits         reconcile completed investor cash cycles and receipt redemptions' \
+	  '  basket-study-pdf           regenerate a signal, anchor or archive comparison PDF' \
+	  '  basket-study-marks         compare stock arms at the same close (BASKET_DAY=365)' \
+	  '  basket-study-import        add selected trace captures to the dashboard as partial records' \
+	  '  basket-study-dashboard     serve BASKET_RUNS on loopback, read-only (DASHBOARD_PORT=8890)' \
+	  '  basket-study-sync          pull a datasim stock study into BASKET_OUT and BASKET_RUNS' \
+	  '  basket-archive-pack        prepare the transferable archive price pack from BASKET_ARCHIVE_ROOT' \
+	  'Campaigns use build/sim/basket-studies/<BASKET_ID> by default. Repeat the ID and settings to resume.' \
+	  'See README-simulations.org for overrides, paths and the plan → run → report → dashboard workflow.'
+
+basket-study-kind:
+	@test "$(words $(BASKET_STUDY))" = 1 && test -n "$(filter $(BASKET_STUDIES),$(BASKET_STUDY))" || \
+	  { echo 'Set BASKET_STUDY to one of: $(BASKET_STUDIES)' >&2; exit 2; }
+
+basket-study-plan basket-study-run: basket-study-kind
+	python $(BASKET_DRIVER_$(BASKET_STUDY)) --jobs $(BASKET_JOBS) $(BASKET_ARGS) $(if $(filter basket-study-plan,$@),--plan)
+
+# Discover campaigns across sessions, including local mirrors of datasim.
+.PHONY: basket-study-list
+basket-study-list:
+	python scripts/basket-study-status.py build/sim --list --runs "$(BASKET_RUNS)"
+
+basket-study-status: basket-study-kind
+	python scripts/basket-study-status.py "$(BASKET_OUT)" --runs "$(BASKET_RUNS)" $(BASKET_STATUS_ARGS)
+
+.PHONY: basket-study-exits
+basket-study-exits:
+	python scripts/measure-basket-holder-exits.py "$(BASKET_OUT)" --runs "$(BASKET_RUNS)" --output "$(BASKET_OUT)/investor-exits.csv"
+
+BASKET_DAY ?= 365
+.PHONY: basket-study-marks
+basket-study-marks:
+	python scripts/basket-study-progress-returns.py "$(BASKET_OUT)" --runs "$(BASKET_RUNS)" --day $(BASKET_DAY) --output "$(BASKET_OUT)/returns-day-$(BASKET_DAY).md"
+
+basket-study-report: basket-study-kind
+ifeq ($(BASKET_STUDY),stock)
+	python scripts/summarize-basket-stock-grid.py "$(BASKET_OUT)" --runs "$(BASKET_RUNS)" \
+	  --output "$(BASKET_OUT)/summary.md" $(BASKET_REPORT_ARGS)
+else
+	python scripts/render-basket-signal-grid.py "$(BASKET_OUT)" --output "$(BASKET_OUT)/index.html" $(BASKET_REPORT_ARGS)
+	python scripts/attribute-basket-signals.py "$(BASKET_OUT)" --output "$(BASKET_OUT)/signal-attribution.md"
+ifneq ($(filter $(BASKET_STUDY),signals braking),)
+	python scripts/summarize-basket-signal-grid.py "$(BASKET_OUT)" --output "$(BASKET_OUT)/summary.md"
+endif
+endif
+
+basket-study-import: basket-study-kind
+	@test "$(BASKET_STUDY)" != stock || { echo 'Stock runs already write dashboard records' >&2; exit 2; }
+	python scripts/import-basket-research.py --campaign "$(BASKET_OUT)" --runs "$(BASKET_RUNS)" $(BASKET_IMPORT_ARGS)
+
+.PHONY: basket-study-multiyear basket-study-links
+basket-study-multiyear:
+	python scripts/publish-basket-multiyear.py --runs "$(BASKET_RUNS)" $(BASKET_REPORT_ARGS)
+
+basket-study-links:
+	@printf '%s\n' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=multiyear-price-regimes' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=multiyear-common-anchors' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=multiyear-active-reference-seeds' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-grid-36d-datasim-stock' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-grid-730d-datasim-stock' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-stress-stock' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-grid-5y-datasim-stock'
+
+basket-study-dashboard:
+	python -m alberta_buck.sim.dashboard --host 127.0.0.1 --port $(DASHBOARD_PORT) --runs "$(BASKET_RUNS)" --no-live
+
+basket-study-sync: basket-study-kind
+	@test "$(BASKET_STUDY)" = stock || { echo 'basket-study-sync pulls stock studies' >&2; exit 2; }
+	python scripts/sync-basket-stock-study.py "$(BASKET_OUT)" --remote "$(BASKET_REMOTE)" \
+	  --remote-root "$(BASKET_REMOTE_ROOT)" --campaign "$(BASKET_REMOTE_CAMPAIGN)" --runs "$(BASKET_RUNS)" $(BASKET_SYNC_ARGS)
+
+basket-archive-pack:
+	python scripts/run-basket-archive-grid.py --archive-root "$(BASKET_ARCHIVE_ROOT)" --prepare-pack "$(BASKET_ARCHIVE_PACK)"
+
+# Plot saved signal, anchor, or archive captures; no EVM execution.
+# BASKET_PDF_ARGS may select --sigma and --seed.
+BASKET_PDF ?= $(BASKET_OUT)/grid-comparison.pdf
+BASKET_PDF_ARGS ?=
+.PHONY: basket-study-pdf
+basket-study-pdf: basket-study-kind
+	@test -n "$(filter $(BASKET_STUDY),signals anchors archive)" || { echo 'basket-study-pdf expects a signal, anchor or archive capture grid' >&2; exit 2; }
+	python scripts/plot-basket-signal-grid.py "$(BASKET_OUT)" --output "$(BASKET_PDF)" $(BASKET_PDF_ARGS)
+
 # Full household lifecycle gate, including currently unported canonical
 # action cases. Use economy-accounting-test for completed migration blocks;
 # its passing component checks do not imply this full lifecycle is enabled.

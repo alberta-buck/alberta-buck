@@ -123,9 +123,45 @@ const netLienRatio = (f) => {
 };
 const pct = (v) => (v === null || v === undefined || !Number.isFinite(v) ? null : v * 100);
 
+// Flows are shares, valued at the opening share mark and divided by opening equity.
+// The common mark cancels, so the exact ratio is flow shares / opening total shares.
+const ownership = (f) => f.basket?.ownership;
+const sharePercent = (part, total) => {
+  if (part === null || part === undefined || total === null || total === undefined) return null;
+  const a = Number(part), b = Number(total);
+  return Number.isFinite(a) && Number.isFinite(b) && b > 0 ? 100 * a / b : null;
+};
+const flowPercent = (f, kind, owner) => {
+  const o = ownership(f);
+  if (!o || Number(o.opening?.equity_buck) <= 0 || o.opening?.equity_buck == null) return null;
+  return sharePercent(o.flows?.[kind]?.[owner], o.opening?.total_shares);
+};
+const ownerPercent = (f, key) => {
+  const o = ownership(f), c = o?.closing;
+  return sharePercent(key === "treasury" ? c?.treasury_shares : c?.receipt_shares?.[key], c?.total_shares);
+};
+const OWNERSHIP_CHARTS = [
+  {
+    id: "ownership-flows", title: "Gross receipt flows / opening equity", unit: "pct", kind: "line", optional: true,
+    note: "Shares minted and retired during each observation window, valued at the opening share mark and divided by opening equity. This equals gross shares divided by opening shares; it is not cash paid. Jubilee and other use authenticated basket events; unattributed is a supply change without a matching receipt event. Older runs have no observation.",
+    series: [
+      ...["jubilee", "other", "unattributed"].map((owner) => ({ key: `mint-${owner}`, label: `Mint · ${owner}`, value: (f) => flowPercent(f, "minted", owner) })),
+      ...["jubilee", "other", "unattributed"].map((owner) => ({ key: `retire-${owner}`, label: `Retire · ${owner}`, value: (f) => flowPercent(f, "retired", owner) })),
+    ],
+  },
+  {
+    id: "receipt-ownership", title: "Receipt share ownership", unit: "pct", kind: "line", optional: true,
+    note: "Closing shares as a percentage of all shares. Time/investor and household shares are tracked receipt IDs; other is the untracked residual. Treasury shares include redemption cuts and are not receipt ownership. Older runs have no observation.",
+    series: [
+      ...[["jubilee", "Jubilee"], ["time", "Time / investors"], ["household", "Households"], ["other_untracked", "Untracked receipts"], ["treasury", "Basket treasury"]].map(([key, label]) => ({ key, label, value: (f) => ownerPercent(f, key) })),
+    ],
+  },
+];
+
 // The BuckBasket tab. Leverage against K's cap is the chart behind observation F2: below the cap,
 // K does not restrain the basket's issuance.
 export const BASKET = (tokens = []) => [
+  ...OWNERSHIP_CHARTS,
   {
     id: "limit", title: "Lien against K's limit", unit: "buck", kind: "line",
     note: "The basket may issue up to K times its credit's mark, and the mark is its equity plus the BUCK it holds in its own pool positions over K: so the limit is K x equity + held BUCK. Above it the basket is under water; the wheel trims back only when its liquidity is also short. Records made before 2026-11-14 lack the contract's headroom and are estimated by that formula.",
@@ -258,6 +294,7 @@ export const MARKET = (tokens = [], split = true) => [
 
 // The Jubilee fund tab.
 export const JUBILEE = () => [
+  ...OWNERSHIP_CHARTS,
   {
     id: "fund", title: "Jubilee fund", unit: "buck", kind: "line",
     note: "The fund's nominal and net cash, and the mark of its basket position. Demurrage on every balance (2% a year) pays in; relief to issuers (2% of principal a year) pays out.",

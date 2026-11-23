@@ -261,6 +261,7 @@ async function main() {
     theme(order[(order.indexOf(store.get("dashboard-theme") ?? "auto") + 1) % order.length]);
   });
   tabs();
+  setInterval(() => { if (state.tab === "compare" && views.compare) views.compare.show(true); }, 10000);
   panel = new ControlPanel($("live"));
   newSessionForm($("new-session"), (started) => follow(started));
   for (const b of document.querySelectorAll("#range button")) {
@@ -270,7 +271,8 @@ async function main() {
       if (state.frames.length) render(true);
     });
   }
-  const wantedTab = new URL(location.href).searchParams.get("tab");
+  const query = new URL(location.href).searchParams;
+  const wantedTab = query.get("tab") ?? (query.has("comparison") ? "compare" : null);
   select(TABS.some(([t, , off]) => t === wantedTab && !off) ? wantedTab : "overview");
   const runs = await refreshRuns();
   const pick = $("run");

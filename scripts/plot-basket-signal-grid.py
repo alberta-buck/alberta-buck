@@ -67,7 +67,7 @@ def main():
             baseline = captures.get('maintenance')
             reference_days = [f['day'] for f in baseline['frames']] if baseline else None
             fig, ax = plt.subplots(3, 1, figsize=(11.7, 8.3), sharex=True)
-            fig.subplots_adjust(left=.09, right=.91, top=.86, bottom=.17, hspace=.45)
+            fig.subplots_adjust(left=.09, right=.91, top=.86, bottom=.21, hspace=.45)
             fig.text(.09, .96, f'Signal grid  /  {regime}', fontsize=19, weight='bold')
             noise_label = 'archived path' if sigma is None else f'Noise σ {sigma:g}'
             candidate_names = [name for name in LAWS if name in arms]

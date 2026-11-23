@@ -30,14 +30,16 @@ def day_price(value):
     return round(value * USDC) // PRICE_SCALE
 
 
-def build_tapes():
+def build_tapes(days=DAYS):
+    if days < 1:
+        raise ValueError("days must be positive")
     sources = {"us": QuoteSource(Unit.USD, tokens=US_TOKENS), "xau": QuoteSource(Unit.USD)}
     bindings = [(token, metric, feed) for token, _, metric, feed in BINDINGS if feed != "btc"]
     anchors = [dict((ts.date(), price) for ts, price in sources[feed].anchors(metric))
                for _, metric, feed in bindings]
     common = sorted(set.intersection(*(set(series) for series in anchors)))
     first_day = FIRST_MONTH + AVAILABILITY_LAG
-    closing_day = first_day + timedelta(days=DAYS - 1)
+    closing_day = first_day + timedelta(days=days - 1)
     terminal_month = closing_day - AVAILABILITY_LAG
     first = bisect_right(common, FIRST_MONTH) - 1
     next_after_end = bisect_right(common, terminal_month)
@@ -52,7 +54,7 @@ def build_tapes():
     tapes = {treatment: [] for treatment in TREATMENTS}
     for (_, metric, feed), values in zip(bindings, anchors, strict=True):
         pinned, straight, held = [], [], []
-        for offset in range(DAYS):
+        for offset in range(days):
             day = first_day + timedelta(days=offset)
             left = bisect_right(available, day) - 1
             a, b = months[left:left + 2]
@@ -85,27 +87,30 @@ def build_tapes():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--days", type=int, default=DAYS, help="Daily observations (default: 730)")
+    parser.add_argument("--treatment", action="append", choices=TREATMENTS,
+                        help="Tape to run; repeatable (default: all three)")
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--timeout", type=int, default=14400, help="Seconds per cell")
     parser.add_argument("--plan", action="store_true", help="Write the tapes and manifest only")
     args = parser.parse_args()
-    if args.jobs < 1 or args.timeout < 1:
-        parser.error("use at least one job and one second per cell")
+    if args.jobs < 1 or args.timeout < 1 or args.days < 1:
+        parser.error("use at least one day, one job and one second per cell")
     args.output = args.output.resolve()
     args.experiment = ROOT / "alberta_buck/sim/experiments/economy.toml"
-    args.days = DAYS
     args.preset = "monthly-anchors"
 
     spec = importlib.util.spec_from_file_location("signal_grid", ROOT / "scripts/run-basket-signal-grid.py")
     grid = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(grid)
-    tokens, tapes, calendar = build_tapes()
-    grid.selections = lambda _args: ((treatment, 0., SEED, False) for treatment in TREATMENTS)
+    tokens, tapes, calendar = build_tapes(args.days)
+    treatments = tuple(dict.fromkeys(args.treatment or TREATMENTS))
+    grid.selections = lambda _args: ((treatment, 0., SEED, False) for treatment in treatments)
     base_arms = grid.arms
     grid.arms = lambda cross: (arm for arm in base_arms(cross) if arm[0] in grid.CONTROLS)
 
     def close_prices(scenario, treatment, days, seed, noise):
-        if (tokens, DAYS, SEED, 0.) != ([token[0] for token in scenario.tokens], days, seed, noise):
+        if (tokens, args.days, SEED, 0.) != ([token[0] for token in scenario.tokens], days, seed, noise):
             raise ValueError("anchor tapes require the five production TOKENs, fixed horizon and seed, and no added noise")
         return tapes[treatment]
 

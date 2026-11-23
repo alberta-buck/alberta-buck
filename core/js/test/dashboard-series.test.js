@@ -17,7 +17,7 @@ test("every Overview chart reads the recorded frame shape", () => {
     assert.deepEqual(d.days, [0, 1, 2]);
     for (const series of d.series) {
       assert.ok(series.values.every((v) => v === null || Number.isFinite(v)), `${s.id}.${series.key}`);
-      assert.ok(series.values.some((v) => v !== null), `${s.id}.${series.key} is recorded in the fixture`);
+      if (!s.optional) assert.ok(series.values.some((v) => v !== null), `${s.id}.${series.key} is recorded in the fixture`);
     }
   }
   assert.deepEqual(chartData(spec("price"), frames).series.map((s) => s.values),
@@ -65,7 +65,7 @@ test("the BuckBasket, Market and Jubilee tabs read the recorded frame shape", as
       const d = chartData(s, frames);
       for (const series of d.series) {
         assert.ok(series.values.every((v) => v === null || Number.isFinite(v)), `${s.id}.${series.key}`);
-        assert.ok(series.values.some((v) => v !== null), `${s.id}.${series.key} is recorded in the fixture`);
+        if (!s.optional) assert.ok(series.values.some((v) => v !== null), `${s.id}.${series.key} is recorded in the fixture`);
       }
     }
   }
@@ -118,4 +118,21 @@ test("the life-stage chart reads the population's stages, and is empty without t
   const with_ = [{ day: 0, population: { roles: {}, stages: { young: 4, middle: 16, retired: 6 } } }];
   assert.deepEqual(stages.series.map((x) => x.value(with_[0])), [4, 16, 6]);
   assert.deepEqual(stages.series.map((x) => x.value({ day: 0, population: { roles: {}, stages: null } })), [null, null, null]);
+});
+
+
+test("optional ownership flows and shares use the opening denominator and leave old runs missing", async () => {
+  const { BASKET } = await import("../dashboard/src/series.js");
+  const specs = BASKET([]);
+  const sample = { day: 1, basket: { ownership: {
+    opening: { total_shares: "1000", equity_buck: "2000000" },
+    closing: { total_shares: "1100", treasury_shares: "100", receipt_shares: { jubilee: "200", time: "300", household: "400", other_untracked: "100" } },
+    flows: { minted: { jubilee: "100", other: "50", unattributed: "0" }, retired: { jubilee: "0", other: "50", unattributed: "0" } },
+  } } };
+  const flows = chartData(specs.find((s) => s.id === "ownership-flows"), [{day: 0}, sample]).series;
+  assert.deepEqual(flows.map((s) => s.values), [[null, 10], [null, 5], [null, 0], [null, 0], [null, 5], [null, 0]]);
+  const owners = chartData(specs.find((s) => s.id === "receipt-ownership"), [sample]).series;
+  assert.ok(Math.abs(owners.reduce((sum, s) => sum + s.values[0], 0) - 100) < 1e-9);
+  sample.basket.ownership.opening.equity_buck = "0";
+  assert.equal(chartData(specs.find((s) => s.id === "ownership-flows"), [sample]).series[0].values[0], null);
 });

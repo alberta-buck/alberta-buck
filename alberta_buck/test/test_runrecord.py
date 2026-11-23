@@ -207,3 +207,26 @@ def test_digest_counts_faults_from_dispatcher_events_when_the_counter_is_absent(
     frames = [dict(f) for f in FIXTURE["flat"]]
     frames[-1]["household_faults"] = 4
     assert digest.digest(dict(frames=frames))["faults"] == 4
+
+
+def test_optional_ownership_frame_and_delayed_recorder(tmp_path):
+    import importlib.util
+    path = Path(__file__).resolve().parents[2] / 'scripts/capture-basket-ownership.py'
+    spec = importlib.util.spec_from_file_location('ownership_capture', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    rec = runrecord.RunRecorder(tmp_path, run_id='ownership').open(tokens=FIXTURE['tokens'])
+    rows = []
+    def capture(flat):
+        rows.append({'day': flat['day'], 'opening': {'total_shares': '100'},
+                     'closing': {'total_shares': '110'}, 'transactions': [{'tx': 'private detail'}]})
+    proxy, finish = module.dashboard_recorder(rec, capture, rows)
+    flat = FIXTURE['flat'][0]
+    proxy.frame(flat)
+    assert not (rec.dir / 'frames.jsonl').exists()
+    finish(flat)
+    saved, _ = runrecord.read_lines(rec.dir / 'frames.jsonl')
+    assert saved[0]['basket']['ownership']['opening']['total_shares'] == '100'
+    assert 'transactions' not in saved[0]['basket']['ownership']
+    assert 'ownership' not in runrecord.frame_record(flat, FIXTURE['tokens'])['basket']
+    rec.close()

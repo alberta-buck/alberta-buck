@@ -66,3 +66,51 @@ test("the table's figures, differences from the reference, and the charts' merge
   assert.deepEqual(departures(rows([...runs, { ...runs[1], id: "r3", label: "again" }, third])),
     [{ day: 1, label: "none, again depart" }, { day: 2, label: "late departs" }], "one marker a day");
 });
+
+test("ROI keeps first-close and explicit treatment baselines distinct, and missing data absent", async () => {
+  const { headline, specs, merge, clipFrames } = await import("../dashboard/src/compare.js");
+  const frames = [{day: 0, basket: {share_price: 1, hold_index: 1}}, {day: 1, basket: {share_price: 1.2, hold_index: 1.1}}, {day: 2, basket: {share_price: 1.3, hold_index: 1.2}}];
+  const run = {id: "a", label: "a", frames, treatment_day: 1, baseline_share_price: 1.1};
+  const h = headline(frames, run);
+  assert.ok(Math.abs(h.share_roi - 30) < 1e-9);
+  assert.ok(Math.abs(h.treatment_roi - 100 * (1.3 / 1.1 - 1)) < 1e-9);
+  assert.equal(h.arrived, null); assert.equal(h.refused_days, null);
+  const untreated = {...run, baseline_share_price: undefined};
+  assert.equal(headline(frames, untreated).treatment_roi, null);
+  const treatment = specs([run]).find((s) => s.id === 'treatment-roi').series[0];
+  assert.equal(treatment.value(merge([run])[0]), null);
+  assert.ok(Math.abs(treatment.value(merge([run])[2]) - h.treatment_roi) < 1e-9);
+  assert.deepEqual(clipFrames(frames, 1).map((f) => f.day), [0,1]);
+  assert.equal(frames.length, 3, 'clipping does not mutate cached frames');
+});
+
+test("share mark in USDC uses same-day bid and common available start", async () => {
+  const { bidMark, commonBidBaseline, specs, merge } = await import("../dashboard/src/compare.js");
+  const f = (day, share, bid) => ({day, basket: {share_price: share}, market: {book: {buck_bid: bid}}});
+  const a = {id:'a',label:'active',frames:[f(0,1,null),f(1,1.1,2),f(2,1.2,2.1)]};
+  const b = {id:'b',label:'maintenance',frames:[f(0,2,1),f(1,2,1.1),f(2,2.1,null)]};
+  assert.equal(bidMark(a.frames[0]), null);
+  assert.equal(commonBidBaseline([a,b]).day,1);
+  const series=specs([a,b]).find(s=>s.id==='share-bid-roi').series, points=merge([a,b]);
+  assert.equal(series[0].value(points[0]), null);
+  assert.equal(series[1].value(points[2]), null);
+  assert.ok(Math.abs(series[0].value(points[2]) - (2.52/2.2-1)*100) < 1e-9);
+  const missing = {id:'c',label:'missing',frames:[f(0,1,null)]};
+  assert.equal(commonBidBaseline([a,missing]).day,1, 'missing sibling does not hide available curve');
+  assert.equal(specs([a,missing])[0].series[1].value(merge([a,missing])[0]), null);
+});
+
+test("through-day parsing, limits, and mismatched endpoints never fabricate deltas", async () => {
+  const { parseThroughDay, effectiveEndDay, clipFrames } = await import("../dashboard/src/compare.js");
+  assert.equal(parseThroughDay(null), null); assert.equal(parseThroughDay(""), null);
+  assert.equal(parseThroughDay("365"), 365);
+  for (const s of ["-1", "1.5", "1e2", "1x", "9007199254740992"]) assert.ok(Number.isNaN(parseThroughDay(s)));
+  assert.equal(effectiveEndDay(729, 699), 699); assert.equal(effectiveEndDay(null, 699), 699);
+  const base=[0,1,2].map((d)=>frame(d)), newer=[0,1,2,3].map((d)=>frame(d,.7));
+  const unaligned=rows([{id:'a',label:'a',frames:base},{id:'b',label:'b',frames:newer}]);
+  assert.equal(unaligned[1].comparable,false); assert.equal(unaligned[1].diff.k_end,null);
+  const aligned=rows([{id:'a',label:'a',frames:base},{id:'b',label:'b',frames:clipFrames(newer,2)}]);
+  assert.equal(aligned[1].comparable,true); assert.ok(aligned[1].diff.k_end<0);
+  const late=rows([{id:'a',label:'a',frames:base},{id:'b',label:'b',frames:newer.slice(1,3)}]);
+  assert.equal(late[1].diff.k_end,null);
+});

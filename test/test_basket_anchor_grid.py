@@ -37,6 +37,22 @@ class BasketAnchorGridTest(unittest.TestCase):
         self.assertNotEqual(self.tapes["pinned-bridge"], self.tapes["straight-bridge"])
         self.assertNotEqual(self.tapes["straight-bridge"], self.tapes["carry-forward"])
 
+    def test_five_year_tapes_preserve_prefix_and_check_coverage(self):
+        tokens, tapes, calendar = GRID.build_tapes(1825)
+        self.assertEqual(tokens, self.tokens)
+        self.assertEqual((calendar["first_date"], calendar["last_date"]), ("2020-11-01", "2025-10-30"))
+        self.assertEqual(calendar["availability_lag_calendar_days"], 61)
+        self.assertGreater(calendar["first_anchor_beyond_horizon"]["day"], 1824)
+        for name, tape in tapes.items():
+            self.assertTrue(all(len(column) == 1825 for column in tape))
+            self.assertEqual([column[:730] for column in tape], self.tapes[name])
+            for anchor in calendar["common_anchors"]:
+                self.assertEqual([column[anchor["day"]] for column in tape], anchor["prices"])
+        with self.assertRaises(ValueError):
+            GRID.build_tapes(0)
+        with self.assertRaises(ValueError):
+            GRID.build_tapes(36500)
+
     def test_carry_forward_does_not_use_an_anchor_before_availability(self):
         anchors = self.calendar["common_anchors"]
         first = date.fromisoformat(self.calendar["first_date"])
