@@ -774,6 +774,19 @@ the urgency threshold. In all three, the book already called for a larger sale. 
 the discretionary amount from the plan changed no order. These share returns compare the
 first and last daily TWAP in BUCK, before an individual holder's cost of exit.
 
+Over 730 daily closes on the monthly-anchored historical path, the production
+rule gained 0.831% per share. Keeping the same book management and arbitrage
+while disabling discretionary rebalancing gained 0.258%. The production rule
+changed 54 of 12,680 TOKEN plans at the moment of decision. For executed
+orders whose plan it increased, the TOKEN outperformed its peers over the
+next three days on 18 of 23 buy days and underperformed on 16 of 18 sell
+days. A rule sized solely by the allocation gap gained 0.768%. Requiring
+confirmed inward velocity before trading produced the maintenance result.
+The passive opening constituents in the production world gained 2.723% at
+LOW marks. These are results from one household economy and one price tape.
+The short grid also found a sign change across mixed trends and cycles,
+and the archived all-actor permanent repricing lost value against maintenance.
+
 ** A simulated economy
 :PROPERTIES:
 :CUSTOM_ID: evidence-economy

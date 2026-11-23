@@ -22,8 +22,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('campaign', type=Path)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--sigma', type=float, default=.01)
-    parser.add_argument('--seed', type=int, default=41404)
+    parser.add_argument('--sigma', type=float, help='select daily noise (default: 0.01 when present, else first available)')
+    parser.add_argument('--seed', type=int, help='select seed (default: 41404 when present, else first available)')
     args = parser.parse_args()
     manifest = json.loads((args.campaign / 'manifest.json').read_text())
     cells = manifest['cells']
@@ -33,8 +33,16 @@ def main():
 
     with PdfPages(args.output, metadata={'Title': 'Matched signal-grid comparison'}) as pdf:
         for regime in regimes:
-            chosen = [c for c in cells if c['regime'] == regime and c['noise_sigma'] == args.sigma
-                      and c['seed'] == args.seed and (c['arm'] in ('production', 'maintenance')
+            regime_cells = [c for c in cells if c['regime'] == regime]
+            available_noise = [c.get('noise_sigma') for c in regime_cells]
+            sigma = args.sigma if args.sigma is not None else (.01 if .01 in available_noise else available_noise[0])
+            noise_cells = [c for c in regime_cells if c.get('noise_sigma') == sigma]
+            seeds = [c['seed'] for c in noise_cells]
+            seed = args.seed if args.seed is not None else (41404 if 41404 in seeds else seeds[0] if seeds else None)
+            matched_cells = [c for c in noise_cells if c['seed'] == seed]
+            groups = list(dict.fromkeys(c['group'] for c in matched_cells))
+            group = groups[0] if groups else None
+            chosen = [c for c in matched_cells if c['group'] == group and (c['arm'] in ('production', 'maintenance')
                       or (c['arm'] == 'candidate' and c['onset'] == 'standard' and c['speed'] == 'fast'
                           and c['response'] in LAWS))]
             arms = {c['response'] if c['arm'] == 'candidate' else c['arm']: c for c in chosen}
@@ -61,7 +69,10 @@ def main():
             fig, ax = plt.subplots(3, 1, figsize=(11.7, 8.3), sharex=True)
             fig.subplots_adjust(left=.09, right=.91, top=.86, bottom=.17, hspace=.45)
             fig.text(.09, .96, f'Signal grid  /  {regime}', fontsize=19, weight='bold')
-            fig.text(.09, .915, f'Noise σ {args.sigma:g} · seed {args.seed} · standard onset / fast speed · '
+            noise_label = 'archived path' if sigma is None else f'Noise σ {sigma:g}'
+            candidate_names = [name for name in LAWS if name in arms]
+            sizing_label = ' · standard onset / fast speed' if candidate_names else ''
+            fig.text(.09, .915, f'{noise_label} · seed {seed}{sizing_label} · '
                      f'{manifest.get("days", "?")} days planned', fontsize=10)
             if source:
                 frames, tokens = source['frames'], source['tokens']
@@ -112,7 +123,7 @@ def main():
                     axes.text(.5, .5, 'Capture unavailable', transform=axes.transAxes, ha='center')
             ax[2].set_ylabel('Pair velocity\n(bp / day)')
             ax[2].set_xlabel('Simulation day')
-            for name in ('maintenance', 'production', *LAWS):
+            for name in ('maintenance', 'production', *candidate_names):
                 capture, cell = captures.get(name), arms.get(name)
                 if not capture or not baseline or not cell or (digest and cell.get('price_digest') != digest):
                     continue
@@ -131,8 +142,19 @@ def main():
             else:
                 ax[1].text(.5, .5, 'Matched return unavailable', transform=ax[1].transAxes, ha='center')
             ax[1].set_ylabel('Share / passive\nreturn (%)')
+            delta_label = 'Production − maintenance: unavailable'
+            prod_rows = production.get('frames', []) if production else []
+            maint_rows = baseline.get('frames', []) if baseline else []
+            if (prod_rows and maint_rows and [f['day'] for f in prod_rows] == reference_days
+                    and arms.get('production', {}).get('price_digest') == digest
+                    and prod_rows[0].get('share') and maint_rows[0].get('share')):
+                delta = 100 * (prod_rows[-1]['share'] / prod_rows[0]['share']
+                               - maint_rows[-1]['share'] / maint_rows[0]['share'])
+                sign = 'positive' if delta > 0 else 'negative' if delta < 0 else 'zero'
+                delta_label = f'Production − maintenance: {delta:+.3f} pp ({sign})'
+            ax[1].set_title(delta_label, loc='left', fontsize=9)
             counts = []
-            for name in ('production', *LAWS):
+            for name in ('production', *candidate_names):
                 cap = captures.get(name)
                 frames = cap.get('frames', []) if cap else []
                 decisions = [d for f in frames for d in f.get('decisions', [])]
@@ -146,7 +168,7 @@ def main():
                     sells = sum(d['plannedSell'] != d['planWithoutPairSell'] for d in decisions)
                     counts.append(f'{name}: buy {buys}, sell {sells}')
             statuses = ', '.join(f'{name}: {load_errors.get(name, arms[name]["status"]) if name in arms else "not planned"}'
-                                 for name in ('maintenance', 'production', *LAWS))
+                                 for name in ('maintenance', 'production', *candidate_names))
             fig.text(.09, .12, 'Pair changes planned amount vs same-prestate no-pair counterfactual (decision counts):', fontsize=8)
             fig.text(.09, .10, '   ·   '.join(counts), fontsize=8)
             fig.text(.09, .075, 'Status: ' + statuses, fontsize=7)

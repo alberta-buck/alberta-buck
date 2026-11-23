@@ -4,6 +4,142 @@
 
 * Matched basket turn-signal experiment and restart, 2026-11-22
 
+** Results with the household economy and how to resume
+
+Local checkpoint =01ae4034= contains the sizing grid and decision capture. The
+Mac completed all five matched 730-day historical arms. At 03:48 UTC on November 23 the
+36-day mirrored datasim manifest had 252/280 complete, zero failed; the braking
+experiment had 21/36 complete. The Linux two-year replication was still
+running. Local copies of the short results and report are under
+=build/sim/basket-signal-grid-datasim=. The 730-day report and PDF are in
+=build/sim/signal-history-730-mac=. The 36-day Mac shock and Linux results
+agree on the production and maintenance returns. Each campaign uses
+=manifest.json= for the current count. The earlier 36-day withdrawal table
+later in this document is a separate experiment with the earlier control.
+
+| 730 closes, historical bridge, seed 41404 | BUCK share return | TOKEN decisions changed by discretionary plan | Total basket purchases + sales |
+|-------------------------------------------+-------------------+-----------------------------------------------+--------------------------------|
+| Production                                | +0.8310%          | 54 of 12,680                                  | 3,771 |
+| Strict maintenance                        | +0.2581%          | 0                                             | 2,938 |
+| Confirmed closing velocity                | +0.2581%          | 0                                             | 2,938 |
+| Allocation excursion                      | +0.7676%          | 83                                            | 3,567 |
+| Velocity times excursion                  | +0.2581%          | 0                                             | 2,938 |
+
+Production earned 0.573 percentage points more than matched maintenance.
+The passive opening TOKEN index in the production world gained 2.723% in
+BUCK at LOW marks. Each world's BUCK price and household flows can evolve
+differently. At their actual entry dates the open household basket positions
+ended 0.51% below their funded cost in production and 1.24% below in maintenance.
+These are aggregate open-position marks, excluding already exited members
+and the rest of each household balance sheet. Of the 54 changes of plan, 53 had a positive current pair
+rate. At three subsequent daily closes, 18 of 23 unique signal-increased
+TOKEN buy days and 16 of 18 sale days moved in the favorable direction
+versus the other holdings. These counts use executed orders, one record
+per TOKEN, side and day, and ex-post external relative prices. The days
+overlap and the marked change excludes costs; use the matched share
+comparison for realized portfolio effects. Of 7,280 ready pair observations
+at daily close, zero velocity intervals lay wholly on one side of zero.
+That explains why a pure confirmed-velocity gate can miss usable braking.
+
+| 36-day regime | Production minus strict maintenance, range (pp) | Completed production/control pairs |
+|---------------+-----------------------------------------------+------------------------------------|
+| Three-phase   | +0.953 to +2.424 | 4 |
+| Mixed trends and cycles | -0.556 to +0.971 | 4 |
+| Temporary and permanent price shocks | +0.196 to +1.045 | 4 |
+| Historical monthly anchors with daily bridge | -0.380 to 0.000 | 4 |
+| Same bridge with extra mean reversion | -0.597 to +0.432 | 3 at snapshot |
+
+In the 252-cell snapshot the velocity-only and product arms had 72 and 71
+completed cells, respectively. Each had four positive decision-time rates
+and zero changed orders. Moving eligibility earlier can simply increase the count of eligible
+decisions when the rate is still zero. In the four shock comparisons, an
+excursion rule with standard patience and a three-day half-life beat matched
+maintenance by 0.51–0.99 points. Standard patience and a one-day half-life ranged
+from -0.28 to +1.26. This supports testing deliberate resizing on fresh
+paths and seeds before changing any default.
+
+*** The next policy comparison
+
+Keep production's braking release as the reference. Test multiplying that
+release by a bounded function of the eligible allocation gap, alongside
+production's ordinary use of accrued allowances. Preserve the minimum
+separation, two-market live check, own-impact allowance, leverage and depth
+constraints. First cross the existing neutral and half target tilt with
+timing enabled and disabled at identical equity exposure. This distinguishes
+the return from choosing a different target from the return from choosing
+the time to trade. For timing alone, hold the target definition, book
+response and allowance treatment fixed.
+
+Record decision-time relative velocity, change in velocity, each venue's
+prediction-error and lag terms, and signed ex-post relative TOKEN returns.
+Test calibration on withheld windows and seeds and simulate a one-venue
+disturbance, correlated price shocks, shallow liquidity and simultaneous
+redemptions. Rank policies on active-minus-maintenance return in an external
+numeraire, matched executable holder exit proceeds, drawdown and per-cohort
+capital retention. Track turnover and who actually pays gas. Limit taking
+additional mean-reversion risk on evidence of a lasting repricing, and
+evaluate that safeguard on both permanent and otherwise identical temporary
+shocks. These are experiments to run before promoting new parameters.
+
+*** Restoring the archived comparison
+
+The main checkout's =doc/control-lab/interactive= records 310 unique real-EVM
+runs on ten external paths, with 481 step observations each. The clean, mixed
+and temporary A-shock paths each have three walk settings. The commodity
+profile has a single effective path. In the adjacent =basket-sizing/all-actors=
+campaign there are fourteen settings on each of seven paths. Its outside
+buyer spent from 1M USDC and its issuer sold from a finite 1M BUCK line.
+K moved and the desk was enabled. These actors differ from the current
+household balance sheets, savings, mortgages and redeemable basket shares.
+
+| Archived 120-day profile | Lab minus maintenance at external USD marks, fixed K | Lab minus maintenance, all lab actors |
+|--------------------------+---------------------------------------------------+---------------------------------------|
+| Three-phase clean       | +96,241 | +96,623 |
+| Three-phase, noise20    | +98,495 | +99,005 |
+| Three-phase, noise80    | +99,564 | +100,584 |
+| Flat, noise80           | +6 | +6 |
+| Historical bridge       | +8,540 | -1,860 |
+| Two-step repricing      | -7,787 | -7,534 |
+| Commodity-like          | +34,633 | +33,263 |
+
+In the all-actor archive, changing the target tilt from zero to one half to
+one raised clean excess from 55,646 to 96,623 to 131,128 USD. The same
+progression took the two-step case from -3,482 to -7,534 to -11,257 USD.
+Hold target tilt fixed when studying timing, and measure a tilt-zero control
+before attributing the entire active gain to acceleration. A persistent
+repricing can change the relative anchor at which buying a laggard pays.
+
+=scripts/run-basket-archive-grid.py= samples the exact 0–120 integer-day
+quotes behind the archived interactive and sizing campaigns. Seventeen
+profile labels yield fifteen distinct three-TOKEN paths. The production
+and strict-maintenance arms use the same current economic agents on each.
+Archived A/B/C relative moves are assigned to PAXG/NRGC/LABR. Absolute
+opening prices and rescaled weights use the current mandate. The old
+experiment used equal weights and four ticks per day, the new one uses two.
+The portable 179 KiB price pack stores the lineage of each path and the
+checksum of the archived source. Replay commands:
+
+#+begin_src sh
+export PYTHONPATH=.:core/python:core/contracts/python
+.venv/bin/python scripts/run-basket-archive-grid.py --archive-root ../../../doc/control-lab \
+  --prepare-pack build/sim/basket-archive-replay/price-pack.json
+.venv/bin/python scripts/run-basket-archive-grid.py --price-pack build/sim/basket-archive-replay/price-pack.json \
+  --output build/sim/basket-archive-replay/run --jobs 12 --timeout 14400
+#+end_src
+
+The thirty cells are queued on datasim when the standard 36-day grid ends.
+The Mac also runs mixed at full walk and the two-step repricing in
+=build/sim/basket-archive-replay/mac=. A separate six-cell 730-day campaign
+on both hosts tests three paths using the same 24 in-window monthly observations.
+They are the original bridge, straight interpolation, and latest-observation
+carry-forward. The trial assumes availability 61 days after the observation
+month's first day. For an identical cross-treatment endpoint use day 699,
+the last common anchor, alongside the complete within-treatment returns.
+Launch =scripts/run-basket-anchor-grid.py --output build/sim/basket-anchor-grid
+--jobs 2 --timeout 86400=. The Mac output uses the suffix =-mac=. Datasim
+launches the six arms after the short grid finishes. No first-release vintages
+are available for the five-holding set.
+
 ** What the historical trades tell us
 
 The current controller detects slowing outward relative prices before a reversal.

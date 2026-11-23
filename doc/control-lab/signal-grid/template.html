@@ -432,31 +432,101 @@
             .join('') || '<p>No candidate cells for this path.</p>'
         );
       }
+      let chosenPair = '';
       function signalTimeline(c) {
-        const frames = c?.capture?.frames || [],
-          pairs = new Map();
-        for (const f of frames)
-          for (const p of f.pairs || []) {
-            if (!presentNumber(f.day) || !presentNumber(p.rate) || p.ready !== 3) continue;
-            const key = (p.tokens || []).map((i) => c.capture.tokens?.[i] ?? i).join(' / ');
-            if (!pairs.has(key)) pairs.set(key, []);
-            pairs.get(key).push({ day: Number(f.day), rate: Number(p.rate), ready: p.ready });
+        const frames = c?.capture?.frames || [];
+        const pairs = frames.find((f) => Array.isArray(f.pairs) && f.pairs.length)?.pairs || [];
+        if (!pairs.length) return '<p>Pair observations unavailable.</p>';
+        const label = (p) => (p.tokens || []).map((i) => c.capture.tokens?.[i] ?? i).join(' / ');
+        const keys = pairs.map((p) => (p.tokens || []).join(','));
+        if (!keys.includes(chosenPair)) chosenPair = keys[0];
+        const selected = pairs[keys.indexOf(chosenPair)],
+          names = label(selected);
+        const points = frames
+          .map((f) => ({
+            day: Number(f.day),
+            pair: (f.pairs || []).find((p) => (p.tokens || []).join(',') === chosenPair),
+          }))
+          .filter((p) => Number.isFinite(p.day));
+        const ready = points.filter((p) => p.pair?.ready === 3);
+        const options = pairs
+          .map(
+            (p, i) =>
+              `<option value="${esc(keys[i])}" ${keys[i] === chosenPair ? 'selected' : ''}>${esc(label(p))}</option>`,
+          )
+          .join('');
+        if (!ready.length)
+          return `<label>Pair <select id="pair-select">${options}</select></label><p>No fully ready observations for ${esc(names)}.</p>`;
+        function graph(fields, title, unit) {
+          const vals = ready.flatMap((p) =>
+            fields
+              .map((f) => p.pair[f[0]])
+              .filter(presentNumber)
+              .map(Number),
+          );
+          if (!vals.length) return `<p>${esc(title)} unavailable.</p>`;
+          let xmin = Math.min(...points.map((p) => p.day)),
+            xmax = Math.max(...points.map((p) => p.day)),
+            ymin = Math.min(0, ...vals),
+            ymax = Math.max(0, ...vals);
+          if (xmin === xmax) xmax++;
+          if (ymin === ymax) {
+            ymin -= 0.001;
+            ymax += 0.001;
           }
-        const all = [...pairs.values()].flat();
-        if (!all.length) return '<p>Pair rate observations unavailable.</p>';
-        let xmin = Math.min(...all.map((x) => x.day)),
-          xmax = Math.max(...all.map((x) => x.day)),
-          ymin = Math.min(0, ...all.map((x) => x.rate)),
-          ymax = Math.max(0, ...all.map((x) => x.rate));
-        if (xmin === xmax) xmax++;
-        if (ymin === ymax) {
-          ymin -= 0.001;
-          ymax += 0.001;
+          const x = (v) => 60 + ((v - xmin) / (xmax - xmin)) * 820,
+            y = (v) => 20 + ((ymax - v) / (ymax - ymin)) * 190;
+          const lines = fields
+            .map(([key, color]) => {
+              let runs = [],
+                run = [];
+              for (const p of points) {
+                if (p.pair?.ready === 3 && presentNumber(p.pair[key]))
+                  run.push(`${x(p.day)},${y(Number(p.pair[key]))}`);
+                else if (run.length) {
+                  runs.push(run);
+                  run = [];
+                }
+              }
+              if (run.length) runs.push(run);
+              return runs
+                .map(
+                  (r) =>
+                    `<polyline fill="none" stroke="${color}" stroke-width="2" points="${r.join(' ')}"/>`,
+                )
+                .join('');
+            })
+            .join('');
+          return `<h4>${esc(title)} · ${esc(unit)}</h4><div class="legend">${fields.map(([key, color, text]) => `<span style="color:${color}">● ${esc(text)}</span>`).join('')}</div><svg viewBox="0 0 900 245" role="img" aria-label="${esc(title)}"><path d="M60 20V210H880" fill="none" stroke="#aabbb0"/><text x="2" y="24" font-size="12">${num(ymax, 3)}</text><text x="2" y="210" font-size="12">${num(ymin, 3)}</text><text x="60" y="235" font-size="12">Day ${num(xmin, 0)}</text><text x="810" y="235" font-size="12">Day ${num(xmax, 0)}</text>${lines}</svg>`;
         }
-        const x = (v) => 60 + ((v - xmin) / (xmax - xmin)) * 820,
-          y = (v) => 20 + ((ymax - v) / (ymax - ymin)) * 200,
-          colors = ['#087b5a', '#b15c22', '#6555a2', '#b33766', '#536f97'];
-        return `<h3>Pair rate · basis points per day</h3><div class="legend">${[...pairs.keys()].map((k, i) => `<span style="color:${colors[i % colors.length]}">● ${esc(k)}</span>`).join('')}</div><svg viewBox="0 0 900 250" role="img" aria-label="Observed pair rates per day"><path d="M60 20V220H880" fill="none" stroke="#aabbb0"/><text x="2" y="24" font-size="12">${num(ymax, 4)}</text><text x="2" y="220" font-size="12">${num(ymin, 4)}</text>${[...pairs.values()].map((ps, i) => `<polyline fill="none" stroke="${colors[i % colors.length]}" stroke-width="2" points="${ps.map((p) => x(p.day) + ',' + y(p.rate)).join(' ')}"/>`).join('')}</svg>`;
+        return (
+          `<h3>Selected pair signal</h3><label>Pair <select id="pair-select">${options}</select></label><p>Gaps mark observations without both routes ready. Turn rates are fractions of the gap per day; they are policy readings, not fills.</p>` +
+          graph(
+            [
+              ['rate', '#145a87', 'Velocity'],
+              ['low', '#a74d20', 'Low allowance'],
+              ['high', '#8a55a0', 'High allowance'],
+            ],
+            'Relative velocity and allowance',
+            'bp / day',
+          ) +
+          graph(
+            [
+              [
+                'forward',
+                '#087b5a',
+                `Sell ${names.split(' / ')[0]} toward ${names.split(' / ')[1]}`,
+              ],
+              [
+                'reverse',
+                '#b33766',
+                `Sell ${names.split(' / ')[1]} toward ${names.split(' / ')[0]}`,
+              ],
+            ],
+            'Directional turn rates',
+            'fraction / day',
+          )
+        );
       }
       function timeline(c) {
         const frames = c?.capture?.frames || [];
@@ -560,6 +630,14 @@
         document.querySelector('#chart').innerHTML = chart(c, m);
         document.querySelector('#trace').innerHTML = trace(c);
         document.querySelector('#timeline').innerHTML = timeline(c) + signalTimeline(c);
+        const pairSelect = document.querySelector('#pair-select');
+        if (pairSelect)
+          pairSelect.onchange = (event) => {
+            chosenPair = event.target.value;
+            const panel = document.querySelector('#timeline');
+            panel.innerHTML = timeline(c) + signalTimeline(c);
+            panel.querySelector('#pair-select').onchange = pairSelect.onchange;
+          };
       }
       render();
     </script>

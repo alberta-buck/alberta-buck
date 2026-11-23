@@ -93,24 +93,47 @@ def render(campaign, manifest, groups, errors):
     summaries, unmatched = matched(groups)
     out = [f"# Matched basket share returns · {campaign.name}", "",
            f"{manifest['days']} daily closes. Returns use the first and last BUCK TWAP share "
-           "marks before individual exit costs. Deltas are percentage points.",
-           "",
+           "marks before individual exit costs. Deltas are percentage points.", "",
+           "## Matched controls", "",
+           "Each row compares production and maintenance on the same seed and verified price tape.", "",
+           "| Regime | Daily noise | Seed | Production ROI | Maintenance ROI | Δ production − maintenance (pp) | Sign |",
+           "|---|---:|---:|---:|---:|---:|---|"]
+    for group_id, group in sorted(groups.items()):
+        production, maintenance = group.get("production"), group.get("maintenance")
+        control = production or maintenance
+        if control is None:
+            continue
+        cell = control[0]
+        noise = "archive" if cell.get("noise_sigma") is None else f"{cell['noise_sigma']:g}"
+        same = production and maintenance and all(
+            production[0].get(field) == maintenance[0].get(field)
+            for field in ("regime", "noise_sigma", "seed", "price_digest"))
+        if same and production[1] is not None and maintenance[1] is not None:
+            prod, maint = production[1], maintenance[1]
+            delta = prod - maint
+            values = [f"{prod:+.3%}", f"{maint:+.3%}", f"{100 * delta:+.3f}",
+                      "positive" if delta > 0 else "negative" if delta < 0 else "zero"]
+        else:
+            values = ["—"] * 4
+            unmatched.append((group_id, "production/maintenance", "missing, invalid, or different inputs"))
+        out.append("| " + " | ".join(map(str, [cell['regime'], noise, cell['seed'], *values])) + " |")
+    if summaries:
+        out.extend(["", "## Candidate comparisons", "",
            "Each comparison uses the candidate and both controls from its own seed and price tape. "
            "The averages give each distinct price tape equal weight after averaging matched seeds "
            "on that tape. Seeds sharing a zero-noise tape still vary the economy. This is a "
-           "descriptive comparison of the measured tapes.",
-           "",
+           "descriptive comparison of the measured tapes.", "",
            "| Regime | Daily noise | Law | Onset | Speed | Matched / planned | Distinct tapes | "
            "Candidate ROI | Production ROI | Maintenance ROI | Δ production (pp) | Δ maintenance (pp) |",
-           "|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|"]
-    for (regime, noise, law, onset, speed), summary in sorted(summaries.items()):
+           "|---|---:|---|---|---|---:|---:|---:|---:|---:|---:|---:|"])
+    for (regime, noise, law, onset, speed), summary in sorted(summaries.items(), key=lambda item: tuple(str(x) for x in item[0])):
         paths = summary["paths"]
         count = sum(len(instances) for instances in paths.values())
         path_means = [[mean(values) for values in zip(*instances)] for instances in paths.values()]
         averages = [mean(values) for values in zip(*path_means)]
         values = ([f"{value:+.3%}" for value in averages[:3]]
                   + [f"{100 * value:+.3f}" for value in averages[3:]]) if count else ["—"] * 5
-        fields = [regime, f"{noise:g}", law, onset, speed, f"{count}/{summary['planned']}",
+        fields = [regime, "archive" if noise is None else f"{noise:g}", law, onset, speed, f"{count}/{summary['planned']}",
                   str(len(paths)), *values]
         out.append("| " + " | ".join(fields) + " |")
     if unmatched or errors:
