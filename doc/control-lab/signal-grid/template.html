@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>BUCK · Signal grid</title>
+    <style>
+      :root {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        color: #20332e;
+        background: #f5f6f1;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        max-width: 1200px;
+        margin: auto;
+        padding: 2rem;
+      }
+      h1 {
+        font-size: clamp(2rem, 5vw, 3.7rem);
+        line-height: 1.05;
+        margin: 0.4rem 0;
+      }
+      h2 {
+        margin-top: 2rem;
+      }
+      p {
+        max-width: 80ch;
+      }
+      a {
+        color: #156550;
+      }
+      .eyebrow {
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        color: #387460;
+      }
+      .panel {
+        background: white;
+        border: 1px solid #d6e0d8;
+        border-radius: 12px;
+        padding: 1.2rem;
+        margin: 1rem 0;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+      .controls label {
+        display: grid;
+        gap: 0.25rem;
+        font-weight: 650;
+        font-size: 0.85rem;
+      }
+      select {
+        font: inherit;
+        padding: 0.4rem;
+        border: 1px solid #aabbb0;
+        border-radius: 5px;
+        background: white;
+        max-width: 18rem;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.7rem;
+      }
+      .metric {
+        background: #f1f6f1;
+        padding: 0.8rem;
+        border-radius: 7px;
+      }
+      .metric strong {
+        display: block;
+        font-size: 1.25rem;
+      }
+      .muted {
+        color: #596d62;
+      }
+      .scroll {
+        overflow: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.85rem;
+      }
+      td,
+      th {
+        text-align: left;
+        padding: 0.45rem;
+        border-bottom: 1px solid #e1e9e2;
+        vertical-align: top;
+      }
+      th {
+        white-space: nowrap;
+      }
+      svg {
+        width: 100%;
+        height: auto;
+        min-height: 150px;
+      }
+      .active {
+        color: #087b5a;
+      }
+      .maintenance {
+        color: #a45c26;
+      }
+      code,
+      #selection {
+        overflow-wrap: anywhere;
+      }
+      details {
+        margin: 1rem 0;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 650;
+      }
+      #status {
+        font-weight: 650;
+      }
+      .legend {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">BUCK · Real EVM experiment</div>
+      <h1>Signals into action</h1>
+      <p>
+        Compare policy settings on the same realized price path. Noise σ is the standard deviation
+        of the daily log-price increment. Historical inputs use observed monthly anchors joined by
+        deterministic bridges. The default grid adds daily log-price noise with standard deviation
+        0% or 1%. Each selection shows saved execution observations, not a browser simulation.
+      </p>
+      <p id="status" role="status"></p>
+      <section class="panel">
+        <div class="controls" id="controls"></div>
+        <p id="selection" class="muted"></p>
+      </section>
+      <section class="panel">
+        <h2>Parameter grid</h2>
+        <p class="muted">
+          Incremental growth relative to matched maintenance, by onset and speed. Select a cell to
+          inspect its saved run. Blank combinations were not planned.
+        </p>
+        <div id="grid"></div>
+      </section>
+      <section class="panel">
+        <h2>Matched outcome</h2>
+        <p class="muted">
+          Return and maximum drawdown use each arm’s first captured BUCK-denominated share mark as
+          its baseline. The two BUCK marks are endogenous to their respective runs, so differences
+          are not a common-dollar valuation. Maintenance shares the regime, noise and seed.
+          Incremental growth is the ratio of active to maintenance growth factors minus one; the
+          daily figure takes its geometric root over the recorded day span. Both require matching
+          observation endpoints. Trade counts are observed outcomes; changes cannot by themselves be
+          attributed to the pair signal. Marks exclude caller gas.
+        </p>
+        <div id="metrics" class="metrics"></div>
+        <div id="chart"></div>
+      </section>
+      <section class="panel">
+        <h2>Price and signal timeline</h2>
+        <p class="muted">
+          Prices are indexed to each token’s first observation. Triangles mark actual buys and sells
+          by observation day. Pair rates are in basis points per day; observations without both
+          routes ready are omitted. Rates do not imply execution.
+        </p>
+        <div id="timeline"></div>
+      </section>
+      <section class="panel">
+        <h2>Signal and execution trace</h2>
+        <p class="muted">
+          Daily pair values and actual trade events are recorded from the selected active run.
+          Readiness is the contract’s bit mask; an unready pair is not a zero signal. Expand a day
+          for pair and execution detail. The pair effect compares planned buy and sell with the same
+          prestate after removing the discretionary pair amount; it is not itself a fill. Pair rate
+          is zero when the policy is not consulted because eligibility or leash gates block it.
+          Amounts and caps are in BUCK, gap is a signed fraction, and urgency is in share-days.
+        </p>
+        <div id="trace"></div>
+      </section>
+      <details>
+        <summary>Method and regeneration</summary>
+        <p>
+          Cells are precomputed with the pyrevm backend. A group shares its realized input path
+          across arms; compare only matching groups. A missing or failed arm remains visible as
+          unavailable. Returns and drawdowns depend on the recorded window and valuation, and do not
+          include caller gas.
+        </p>
+        <p>
+          Run the grid with
+          <code
+            >PYTHONPATH=.:core/python:core/contracts/python .venv/bin/python
+            scripts/run-basket-signal-grid.py --preset first --output build/sim/basket-signal-grid
+            --jobs N</code
+          >, then render with
+          <code>python scripts/render-basket-signal-grid.py build/sim/basket-signal-grid</code>.
+          Re-render as the campaign progresses. For a portable large bundle, keep the generated
+          index-data directory beside the HTML. Use <code>--mode embedded</code> for one file or
+          <code>--mode sidecar</code> to load captures on demand.
+        </p>
+      </details>
+    </main>
+    <script>
+      /* CAMPAIGN_DATA */
+      const cells = campaign.cells || [],
+        controls = document.querySelector('#controls');
+      const esc = (x) =>
+        String(x ?? '—').replace(
+          /[&<>"']/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+        );
+      const num = (x, n = 3) =>
+        Number.isFinite(Number(x)) && x !== null && x !== undefined ? Number(x).toFixed(n) : '—';
+      const pct = (x) => (Number.isFinite(x) ? (100 * x).toFixed(2) + '%' : '—');
+      const presentNumber = (x) =>
+        x !== null && x !== undefined && x !== '' && Number.isFinite(Number(x));
+      const directionalChange = (d) => {
+        const keys = ['plannedBuy', 'plannedSell', 'planWithoutPairBuy', 'planWithoutPairSell'];
+        if (!keys.every((k) => presentNumber(d[k]))) return 'Unavailable';
+        const buy = Number(d.plannedBuy) - Number(d.planWithoutPairBuy),
+          sell = Number(d.plannedSell) - Number(d.planWithoutPairSell);
+        return buy === 0 && sell === 0
+          ? 'No change'
+          : `Buy ${buy > 0 ? '+' : ''}${num(buy, 5)}; sell ${sell > 0 ? '+' : ''}${num(sell, 5)}`;
+      };
+      const fields = [
+        ['regime', 'Regime'],
+        ['noise_sigma', 'Noise σ'],
+        ['seed', 'Seed'],
+        ['arm', 'Policy arm'],
+        ['onset', 'Onset'],
+        ['speed', 'Speed'],
+        ['response', 'Response'],
+      ];
+      const selected = {};
+      let generation = 0;
+      const inflight = new Map();
+      window.signalGridReceive = (id, data) => {
+        const c = cells.find((x) => x.id === id);
+        if (c) c.capture = data;
+      };
+      function loadCapture(c) {
+        if (!c || c.capture || !c.asset) return Promise.resolve();
+        if (inflight.has(c.id)) return inflight.get(c.id);
+        const promise = new Promise((resolve) => {
+          const script = document.createElement('script');
+          script.src = c.asset;
+          script.onload = () => {
+            if (!c.capture) c.load_error = 'Sidecar did not contain this capture';
+            else delete c.load_error;
+            script.remove();
+            resolve();
+          };
+          script.onerror = () => {
+            c.load_error = 'Sidecar unavailable: ' + c.asset;
+            script.remove();
+            resolve();
+          };
+          document.head.append(script);
+        }).finally(() => inflight.delete(c.id));
+        inflight.set(c.id, promise);
+        return promise;
+      }
+
+      function options() {
+        let subset = cells.filter((c) => c.arm !== 'maintenance');
+        if (!subset.length) subset = cells;
+        for (const [key, label] of fields) {
+          let values = [...new Set(subset.map((c) => JSON.stringify(c[key] ?? null)))];
+          if (!values.length) continue;
+          if (!values.includes(selected[key])) selected[key] = values[0];
+          const wrap = document.createElement('label');
+          wrap.textContent = label;
+          const s = document.createElement('select');
+          s.setAttribute('aria-label', label);
+          for (const value of values) {
+            const o = document.createElement('option');
+            o.value = value;
+            o.textContent = JSON.parse(value) ?? '—';
+            o.selected = value === selected[key];
+            s.append(o);
+          }
+          s.onchange = () => {
+            selected[key] = s.value;
+            let seen = false;
+            for (const [k] of fields) {
+              if (seen) delete selected[k];
+              if (k === key) seen = true;
+            }
+            render();
+          };
+          wrap.append(s);
+          controls.append(wrap);
+          subset = subset.filter((c) => JSON.stringify(c[key] ?? null) === selected[key]);
+        }
+        return subset[0];
+      }
+      function stats(cell) {
+        const f = cell?.capture?.frames || [];
+        if (!f.length) return {};
+        const result = {
+          trades: f.every((x) => Array.isArray(x.trades))
+            ? f.reduce((n, x) => n + x.trades.length, 0)
+            : undefined,
+          days: f.length,
+        };
+        if (!f.every((x) => presentNumber(x.share))) return result;
+        const v = f.map((x) => Number(x.share));
+        if (!v[0]) return result;
+        let peak = v[0],
+          dd = 0;
+        for (const x of v) {
+          peak = Math.max(peak, x);
+          dd = Math.min(dd, x / peak - 1);
+        }
+        return { ...result, ret: v.at(-1) / v[0] - 1, dd };
+      }
+      function chart(a, b) {
+        const series = [
+          [a, '#087b5a', 'Active'],
+          [b, '#a45c26', 'Maintenance'],
+        ]
+          .map(([c, color, name]) => ({ f: c?.capture?.frames || [], color, name }))
+          .filter(
+            (s) =>
+              s.f.length &&
+              s.f.every((f) => presentNumber(f.day) && presentNumber(f.share)) &&
+              Number(s.f[0].share) !== 0,
+          );
+        if (!series.length) return '';
+        let pts = series.flatMap((s) =>
+          s.f
+            .map((f) => ({ x: Number(f.day), y: Number(f.share) / Number(s.f[0].share) - 1 }))
+            .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+        );
+        if (!pts.length) return '';
+        let xmin = Math.min(...pts.map((p) => p.x)),
+          xmax = Math.max(...pts.map((p) => p.x)),
+          ymin = Math.min(0, ...pts.map((p) => p.y)),
+          ymax = Math.max(0, ...pts.map((p) => p.y));
+        if (xmin === xmax) xmax++;
+        if (ymin === ymax) {
+          ymin -= 0.001;
+          ymax += 0.001;
+        }
+        let x = (p) => 60 + ((p - xmin) / (xmax - xmin)) * 820,
+          y = (p) => 20 + ((ymax - p) / (ymax - ymin)) * 210;
+        return `<div class="legend"><span class="active">● Active</span><span class="maintenance">● Maintenance</span></div><svg viewBox="0 0 900 260" role="img" aria-label="Share-price return over days"><path d="M60 20V230H880" fill="none" stroke="#aabbb0"/><text x="2" y="24" font-size="12">${pct(ymax)}</text><text x="2" y="230" font-size="12">${pct(ymin)}</text><text x="60" y="250" font-size="12">Day ${num(xmin, 0)}</text><text x="810" y="250" font-size="12">Day ${num(xmax, 0)}</text>${series.map((s) => `<polyline fill="none" stroke="${s.color}" stroke-width="2.5" points="${s.f.map((f) => [x(Number(f.day)), y(Number(f.share) / Number(s.f[0].share) - 1)].join(',')).join(' ')}"/>`).join('')}</svg>`;
+      }
+      function trace(c) {
+        const cap = c?.capture,
+          frames = cap?.frames || [];
+        if (!frames.length) return '<p>No capture available for this selection.</p>';
+        let tokens = cap.tokens || [];
+        const name = (i) =>
+          esc(
+            typeof tokens[i] === 'object'
+              ? tokens[i].symbol || tokens[i].name || i
+              : (tokens[i] ?? i),
+          );
+        return frames
+          .map((f) => {
+            let pairs = f.pairs || [],
+              trades = f.trades || [],
+              decisions = f.decisions || [];
+            return `<details><summary>Day ${esc(f.day)} · ${Array.isArray(f.pairs) ? pairs.filter((p) => p.ready).length + '/' + pairs.length + ' pairs with readiness bits' : 'pair data unavailable'} · ${Array.isArray(f.trades) ? trades.length + ' trades' : 'trades unavailable'} · ${Array.isArray(f.decisions) ? decisions.length + ' decisions' : 'decisions unavailable'}</summary><div class="scroll"><table><thead><tr><th>Pair</th><th>Ready mask</th><th>Level</th><th>Rate · bp/day</th><th>Low / high · bp/day</th><th>Forward / reverse desire</th></tr></thead><tbody>${pairs.map((p) => `<tr><td>${(p.tokens || []).map(name).join(' / ')}</td><td>${esc(p.ready)}</td><td>${num(p.level, 5)}</td><td>${num(p.rate, 5)}</td><td>${num(p.low, 5)} / ${num(p.high, 5)}</td><td>${num(p.forward, 5)} / ${num(p.reverse, 5)}</td></tr>`).join('')}</tbody></table></div>${trades.length ? `<h3>Trades</h3><div class="scroll"><table><thead><tr><th>Side</th><th>Token</th><th>Amount (BUCK)</th><th>Tick</th><th>Transaction / log</th></tr></thead><tbody>${trades.map((t) => `<tr><td>${esc(t.side)}</td><td>${name(t.token)}</td><td>${num(t.amount)}</td><td>${esc(t.tick)}</td><td>${esc(t.tx)} / ${esc(t.index)}</td></tr>`).join('')}</tbody></table></div>` : ''}${decisions.length ? `<h3>Decision → execution plans</h3><div class="scroll"><table><thead><tr><th>Token / tick</th><th>Gap</th><th>Eligible / leash</th><th>Pair rate / amount</th><th>Book / ceiling</th><th>Planned buy / sell</th><th>Without pair buy / sell</th><th>Pair effect on plan</th><th>Depth / buy step / sell step cap</th><th>Urgency</th><th>Transaction / log</th></tr></thead><tbody>${decisions.map((d) => `<tr><td>${name(d.token)} / ${esc(d.tick)}</td><td>${num(d.gap, 5)}</td><td>${esc(d.eligible)} / ${esc(d.leash)}</td><td>${num(d.pairRate, 5)} / ${num(d.pairAmount)}</td><td>${num(d.bookAmount)} / ${num(d.ceilingAmount)}</td><td>${num(d.plannedBuy)} / ${num(d.plannedSell)}</td><td>${num(d.planWithoutPairBuy)} / ${num(d.planWithoutPairSell)}</td><td>${directionalChange(d)}</td><td>${num(d.depthCap)} / ${num(d.buyStepCap)} / ${num(d.sellStepCap)}</td><td>${num(d.urgency)}</td><td>${esc(d.tx)} / ${esc(d.index)}</td></tr>`).join('')}</tbody></table></div>` : ''}</details>`;
+          })
+          .join('');
+      }
+      function heatmap(c, m) {
+        if (!c) return '';
+        const group = cells.filter((x) => x.group === c.group && x.arm === 'candidate'),
+          laws = [...new Set(group.map((x) => x.response))],
+          onsets = [...new Set(group.map((x) => x.onset))],
+          speeds = [...new Set(group.map((x) => x.speed))];
+        const value = (x) => {
+          const a = x?.summary,
+            b = m?.summary;
+          if (
+            !a ||
+            !b ||
+            a.start_day !== b.start_day ||
+            a.end_day !== b.end_day ||
+            (x.price_digest && m.price_digest && x.price_digest !== m.price_digest) ||
+            1 + b.return <= 0
+          )
+            return null;
+          return (1 + a.return) / (1 + b.return) - 1;
+        };
+        return (
+          laws
+            .map(
+              (law) =>
+                `<h3>${esc(law)}</h3><div class="scroll"><table><thead><tr><th>Onset / speed</th>${speeds.map((v) => `<th>${esc(v)}</th>`).join('')}</tr></thead><tbody>${onsets
+                  .map(
+                    (onset) =>
+                      `<tr><th>${esc(onset)}</th>${speeds
+                        .map((speed) => {
+                          const x = group.find(
+                              (z) => z.response === law && z.onset === onset && z.speed === speed,
+                            ),
+                            v = value(x);
+                          const shade =
+                            v === null
+                              ? '#f1f3f0'
+                              : v === 0
+                                ? '#f1f3f0'
+                                : v > 0
+                                  ? `rgba(21,128,100,${Math.min(0.28, 0.08 + Math.abs(v) * 10)})`
+                                  : `rgba(167,77,32,${Math.min(0.28, 0.08 + Math.abs(v) * 10)})`;
+                          return `<td>${x ? `<button type="button" style="background:${shade};color:#20332e" data-cell="${esc(x.id)}">${v === null ? esc(x.load_error ? 'unavailable' : x.status) : pct(v)}</button>` : '—'}</td>`;
+                        })
+                        .join('')}</tr>`,
+                  )
+                  .join('')}</tbody></table></div>`,
+            )
+            .join('') || '<p>No candidate cells for this path.</p>'
+        );
+      }
+      function signalTimeline(c) {
+        const frames = c?.capture?.frames || [],
+          pairs = new Map();
+        for (const f of frames)
+          for (const p of f.pairs || []) {
+            if (!presentNumber(f.day) || !presentNumber(p.rate) || p.ready !== 3) continue;
+            const key = (p.tokens || []).map((i) => c.capture.tokens?.[i] ?? i).join(' / ');
+            if (!pairs.has(key)) pairs.set(key, []);
+            pairs.get(key).push({ day: Number(f.day), rate: Number(p.rate), ready: p.ready });
+          }
+        const all = [...pairs.values()].flat();
+        if (!all.length) return '<p>Pair rate observations unavailable.</p>';
+        let xmin = Math.min(...all.map((x) => x.day)),
+          xmax = Math.max(...all.map((x) => x.day)),
+          ymin = Math.min(0, ...all.map((x) => x.rate)),
+          ymax = Math.max(0, ...all.map((x) => x.rate));
+        if (xmin === xmax) xmax++;
+        if (ymin === ymax) {
+          ymin -= 0.001;
+          ymax += 0.001;
+        }
+        const x = (v) => 60 + ((v - xmin) / (xmax - xmin)) * 820,
+          y = (v) => 20 + ((ymax - v) / (ymax - ymin)) * 200,
+          colors = ['#087b5a', '#b15c22', '#6555a2', '#b33766', '#536f97'];
+        return `<h3>Pair rate · basis points per day</h3><div class="legend">${[...pairs.keys()].map((k, i) => `<span style="color:${colors[i % colors.length]}">● ${esc(k)}</span>`).join('')}</div><svg viewBox="0 0 900 250" role="img" aria-label="Observed pair rates per day"><path d="M60 20V220H880" fill="none" stroke="#aabbb0"/><text x="2" y="24" font-size="12">${num(ymax, 4)}</text><text x="2" y="220" font-size="12">${num(ymin, 4)}</text>${[...pairs.values()].map((ps, i) => `<polyline fill="none" stroke="${colors[i % colors.length]}" stroke-width="2" points="${ps.map((p) => x(p.day) + ',' + y(p.rate)).join(' ')}"/>`).join('')}</svg>`;
+      }
+      function timeline(c) {
+        const frames = c?.capture?.frames || [];
+        if (!frames.length) return '<p>No capture available.</p>';
+        const n = Math.max(
+            0,
+            ...frames.map((f) => (Array.isArray(f.prices) ? f.prices.length : 0)),
+          ),
+          colors = ['#087b5a', '#b15c22', '#6555a2', '#b33766', '#536f97'];
+        const data = [];
+        for (let i = 0; i < n; i++) {
+          const first = frames.find((f) => presentNumber(f.prices?.[i]) && Number(f.prices[i]) > 0);
+          if (first)
+            data.push({
+              i,
+              points: frames
+                .filter((f) => presentNumber(f.day) && presentNumber(f.prices?.[i]))
+                .map((f) => ({
+                  day: Number(f.day),
+                  value: Number(f.prices[i]) / Number(first.prices[i]),
+                  trades: f.trades || [],
+                })),
+            });
+        }
+        const points = data.flatMap((d) => d.points);
+        if (!points.length) return '<p>Price observations unavailable.</p>';
+        let xmin = Math.min(...points.map((p) => p.day)),
+          xmax = Math.max(...points.map((p) => p.day)),
+          ymin = Math.min(...points.map((p) => p.value)),
+          ymax = Math.max(...points.map((p) => p.value));
+        if (xmax === xmin) xmax++;
+        if (ymax === ymin) {
+          ymin -= 0.01;
+          ymax += 0.01;
+        }
+        const x = (v) => 60 + ((v - xmin) / (xmax - xmin)) * 820,
+          y = (v) => 20 + ((ymax - v) / (ymax - ymin)) * 200;
+        const names = c.capture.tokens || [];
+        return `<div class="legend">${data.map((d) => `<span style="color:${colors[d.i % colors.length]}">● ${esc(names[d.i] ?? d.i)}</span>`).join('')} <span>▲ buy · ▼ sell</span></div><svg viewBox="0 0 900 250" role="img" aria-label="Indexed token prices and executed trades"><path d="M60 20V220H880" fill="none" stroke="#aabbb0"/><text x="3" y="24" font-size="12">${num(ymax, 2)}×</text><text x="3" y="220" font-size="12">${num(ymin, 2)}×</text><text x="60" y="245" font-size="12">Day ${num(xmin, 0)}</text><text x="810" y="245" font-size="12">Day ${num(xmax, 0)}</text>${data.map((d) => `<polyline fill="none" stroke="${colors[d.i % colors.length]}" stroke-width="2" points="${d.points.map((p) => x(p.day) + ',' + y(p.value)).join(' ')}"/>${d.points.flatMap((p) => p.trades.filter((t) => Number(t.token) === d.i).map((t) => `<text x="${x(p.day)}" y="${y(p.value)}" font-size="13" fill="${colors[d.i % colors.length]}"><title>Day ${esc(p.day)} ${esc(t.side)} ${esc(names[d.i])} ${num(t.amount)} BUCK</title>${t.side === 'buy' ? '▲' : '▼'}</text>`)).join('')}`).join('')}</svg>`;
+      }
+      async function render() {
+        const current = ++generation;
+        controls.innerHTML = '';
+        const c = options(),
+          m = c && cells.find((x) => x.group === c.group && x.arm === 'maintenance');
+        document.querySelector('#grid').innerHTML = heatmap(c, m);
+        document.querySelectorAll('#grid button').forEach(
+          (button) =>
+            (button.onclick = () => {
+              const x = cells.find((z) => z.id === button.dataset.cell);
+              for (const [k] of fields) selected[k] = JSON.stringify(x[k] ?? null);
+              render();
+            }),
+        );
+        document.querySelector('#selection').textContent = 'Loading selected captures…';
+        document.querySelector('#metrics').innerHTML = '';
+        document.querySelector('#chart').innerHTML = '';
+        document.querySelector('#trace').innerHTML = '';
+        await Promise.all([loadCapture(c), loadCapture(m)]);
+        if (current !== generation) return;
+        if (campaign.report_mode === 'sidecar')
+          for (const cell of cells) if (cell !== c && cell !== m) delete cell.capture;
+        const a = stats(c),
+          b = stats(m),
+          mismatch = c?.price_digest && m?.price_digest && c.price_digest !== m.price_digest,
+          af = c?.capture?.frames || [],
+          bf = m?.capture?.frames || [],
+          sameWindow =
+            af.length && bf.length && af[0].day === bf[0].day && af.at(-1).day === bf.at(-1).day,
+          span = sameWindow ? Number(af.at(-1).day) - Number(af[0].day) : 0,
+          growth =
+            !mismatch &&
+            sameWindow &&
+            Number.isFinite(a.ret) &&
+            Number.isFinite(b.ret) &&
+            1 + a.ret > 0 &&
+            1 + b.ret > 0
+              ? (1 + a.ret) / (1 + b.ret)
+              : NaN;
+        document.querySelector('#status').textContent =
+          `${cells.filter((c) => c.status === 'complete' && !c.load_error).length} of ${cells.length} captures available · ${campaign.backend || 'unknown backend'} · ${campaign.days ?? '—'} days planned`;
+        document.querySelector('#selection').textContent = c
+          ? `Selected ${c.id}: ${c.status}${c.load_error ? ' (' + c.load_error + ')' : c.error ? ' (' + c.error + ')' : ''}. Matched maintenance: ${m ? m.status + (m.load_error ? ' (' + m.load_error + ')' : '') : 'not planned'}.${c.price_digest && m?.price_digest && c.price_digest !== m.price_digest ? ' Warning: price digests differ.' : ''} Settings: ${JSON.stringify(c.settings || {})}`
+          : 'No cells in this campaign.';
+        document.querySelector('#metrics').innerHTML = [
+          ['Active return', pct(a.ret)],
+          ['Maintenance return', pct(b.ret)],
+          ['Incremental growth factor', pct(growth - 1)],
+          [
+            'Incremental geometric growth / day',
+            pct(span > 0 ? Math.pow(growth, 1 / span) - 1 : NaN),
+          ],
+          ['Active max drawdown', pct(a.dd)],
+          ['Maintenance max drawdown', pct(b.dd)],
+          ['Active trades', a.trades ?? '—'],
+          ['Maintenance trades', b.trades ?? '—'],
+          ['Recorded days', a.days ?? '—'],
+        ]
+          .map(([k, v]) => `<div class="metric"><span>${k}</span><strong>${v}</strong></div>`)
+          .join('');
+        document.querySelector('#chart').innerHTML = chart(c, m);
+        document.querySelector('#trace').innerHTML = trace(c);
+        document.querySelector('#timeline').innerHTML = timeline(c) + signalTimeline(c);
+      }
+      render();
+    </script>
+  </body>
+</html>

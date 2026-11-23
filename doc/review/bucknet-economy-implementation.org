@@ -2,6 +2,354 @@
 #+DATE: 2026-11-08
 #+OPTIONS: ^:nil toc:3
 
+* Matched basket turn-signal experiment and restart, 2026-11-22
+
+** What the historical trades tell us
+
+The current controller detects slowing outward relative prices before a reversal.
+It then decides how much of an overweight or underweight TOKEN to trade. A daily
+positive pair reading alone cannot identify a signal-driven trade. A simulated
+upkeep facet now emits one =SignalDecision= per TOKEN after the book is sized
+and before it records rates or trades. Each decision includes the plan recalculated
+from the same pre-trade state with discretionary rebalancing disabled. Compare
+those two plans for immediate attribution. Compare entire matched worlds for
+the consequences of compounding, subsequent prices and household flows.
+
+On the 36-day historical withdrawal replay, the trace reproduced every daily
+share mark, passive mark, weight, target and pair reading and all 138 trade logs
+of the uninstrumented basket. Only 3 of 600 TOKEN decisions reached the urgency
+threshold. In each case the book requested a larger sale than the discretionary
+policy. On day 9 FOOD the competing sale requests were 26,739 BUCK from the
+pair and 51,663 from book sizing, with a depth cap of 24,001. On day 10 LABR
+the requests were 1,252 and 21,719. On day 10 FOOD they were 3,345 and 33,669,
+with a depth cap of 23,801. Across all 600 decisions, turning the pair
+contribution off changed zero planned amounts. The leash did not bind in
+these three cases. See =build/sim/signal-grid-validation/withdrawals-traced.json=.
+
+The new maintenance control removes both discretionary rates and accrued
+discretionary allowances. The older control turned the current rate to zero,
+which can still release previously earned allowance. The candidate arms also
+gate execution of an accrued discretionary allowance when their current rate
+is zero. Book sizing, the declared-weight leash, credit, depth and minimum
+trade rules apply in every arm. The production reference retains its live
+allowance rule. Its return difference against a candidate therefore includes
+both timing and allowance treatment.
+
+** Campaign design
+
+The full grid has five price regimes, two daily price-noise levels (0 and 1%
+log-return standard deviation) and two seeds (41404 and 41405). A single
+price tape serves every arm in each group, with a SHA-256 digest and daily
+price verification. At zero noise the two seeds share an external tape and
+can still produce different household flows. The three-phase tape has evenly
+phased constituent cycles; mixed adds constituent trends and an 11-day cycle.
+Shock combines a permanent 20% LABR markdown with a temporary 25% CNST rise.
+History uses the project's wage, construction, food, energy and gold series.
+All five have observed monthly anchors and seeded Brownian bridges between
+anchors. The source window starts on 2020-09-01. Zero added noise preserves
+the original bridge. Reverting history applies the same daily log changes
+with a 30-day exponential pull toward the starting log price. A 36-day window
+spans little more than one monthly interval. A claim about actual within-month
+commodity turns requires independently observed daily closes. The bridge uses
+the next monthly endpoint and a volatility classification fitted over history.
+The simulated trader sees only the current path, but the reference generator
+introduces information about the following observation. The 36 closes contain
+only the September 1 and October 1, 2020 source anchors. The underlying series
+supply observation-month labels without a full publication or revision history.
+The synthetic mixed case is a new stress test. For exact reproduction of
+the archived lab use its own manifest and frames in the section below.
+
+Each group contains production, strict maintenance and twelve sizing arms.
+Slack is 0.25% of the book. Standard and early eligibility use 0.020 and 0.005
+share-days of accumulated gap. At full signal strength the fast response halves
+the remaining gap in one day, and the slow response in three. The velocity law
+uses relative price closure past the observer's uncertainty and own-price-impact
+allowance, reaching full strength at 0.5% per day. Excursion reaches full
+strength at an allocation gap of 2% of the book and can act before a price turn.
+The third law multiplies the two strengths. Production can already trade during
+deceleration. The velocity and product variants wait for confirmed closure.
+Changing patience tests eligibility, a different mechanism from changing
+the observer's sensitivity to deceleration.
+
+The 8-day Mac pilot (one noisy three-phase tape, seed 41404) found these
+returns from closes 0 to 7. Changed plans count TOKEN decisions whose buy
+or sell amount differs in the pre-trade counterfactual.
+
+| Policy | Share return in BUCK | Executed trades | Changed plans / 165 |
+|--------+----------------------+-----------------+---------------------|
+| Production | +1.403% | 43 | 15 |
+| Strict maintenance | +1.560% | 30 | 0 |
+| Velocity | +1.560% | 30 | 0 |
+| Excursion | +1.285% | 45 | 21 |
+| Velocity times excursion | +1.560% | 30 | 0 |
+
+These short returns span less than one cycle. The archived 120-day clean lab
+and the current 36-day clean replay both favored active trading; the historical
+withdrawal replay illustrates why a live signal can leave orders unchanged.
+Assess the 36-day factorial and multi-year controls before changing the default.
+The mark is the TWAP share price in each world's BUCK. Household redemption
+proceeds, fees to outside keepers, external purchasing power and passive
+inventory marked on the same basis require separate accounting.
+
+** Early braking and release checks
+
+A companion crosses the production controller's outward velocity at half
+braking release (20 or 100 basis points per day) with its pre-cap braking
+amplitude (1 or 4 per day). A higher outward scale permits more release
+while the relative price is still moving away. The reference uses its adaptive
+uncertainty scale; all arms keep the same urgency, separation, confidence,
+own-impact and maximum rate settings. The six-arm three-day local check
+verified all eight sizing fields on chain. Every candidate changed pair
+readings. All six arms executed 24 trades and gained 0.989% per share.
+The 36-cell, 36-day comparison is running on two datasim workers in
+=build/sim/basket-braking-grid=; restart using =scripts/run-basket-braking-grid.py
+--preset first --jobs 2 --timeout 5400 --output build/sim/basket-braking-grid=.
+
+The production facet, observer and policy keep their public ABIs. A fresh
+browser build from the checked artifacts passed 46 Node/webevm tests and
+the Chromium Savings Web Worker exercise (deposits, redemptions, shock
+controls, pause, step and reset). Nine Python production bootstrap and
+machine tests and 58 focused Foundry tests passed. Six Python unittest
+regressions cover matching, reversion, noise and turn scoring. A matched
+browser/Python economic campaign, owner-approved parameter choices and
+a final release-doc review remain ahead. The browser Savings world has a
+smaller population and a different intra-day quote and keeper schedule.
+
+** Run locations and reproduction
+
+The live Linux work directory is =~/src/alberta-buck-signal-grid-4d5ce8bf= on
+=datasim.local=. It was staged from =a1d4deb1= with the local simulator and
+research sources. The manifest's runtime digest identifies the executed build.
+=build/sim/basket-signal-grid-cold= is the active 36-day grid. A 69-cell first
+pass precedes the complete 280-cell factorial in the same directory, with 24
+workers. =build/launch-grid-cold.sh= writes =build/logs/signal-grid-cold.log=,
+=signal-first.done= and =signal-grid.done=; on error inspect the failed cell
+and its log. Disregard the abandoned =basket-signal-grid= pilot, where two
+workers raced on a shared registration cache. The current runner creates and
+discards a private cache per capture. Two separately bootstrapped real-EVM
+control runs with fresh caches produced byte-identical three-day captures.
+A timeout regression verified worker exit and cache cleanup.
+
+The separate two-year, 730-close historical experiment uses the household-agent economy and
+the five standard/fast reference and candidate arms at seed 41404, with no added
+price noise. All five run on datasim in =build/sim/signal-history-730=. The Mac
+repeats that same experiment two workers at a time in =build/sim/signal-history-730-mac=.
+Each directory has a manifest and per-cell logs. The Mac and Linux runtime
+fingerprints can differ. Compare the actual day-indexed prices, share marks,
+trade receipts and decisions across machines. Raw files also carry local paths.
+An earlier 730-day withdrawal experiment at =a1d4deb1= and a zero-reserve run
+at =61aa2cf4= each reproduced the entire Linux daily frame file on the Mac.
+A separate audit of the earlier seeded five-year suite at =4d7497aa= confirmed
+15 completed arms, each with 1,825 closes. Across all frames the recorded
+dispatcher-fault and relief-unavailable counts were zero. The sum of daily
+household error counts was 457, even though all final daily counts were zero. The two economy reference seeds ended at K
+0.55562 and 0.55069, with +2.040% and +2.349% share returns. Those worlds
+predate the revised portfolio and exit policy. Historical progress notes below
+describe their status at the time they were written.
+
+#+begin_src sh
+export PYTHONPATH=.:core/python:core/contracts/python
+.venv/bin/python scripts/run-basket-signal-grid.py --preset full --jobs 24 \
+  --timeout 5400 --output build/sim/basket-signal-grid-cold
+.venv/bin/python scripts/run-basket-signal-grid.py --preset smoke --regime history \
+  --noise-sigma 0 --seed 41404 --days 730 --jobs 2 --timeout 86400 \
+  --output build/sim/signal-history-730-mac
+python3 scripts/render-basket-signal-grid.py build/sim/basket-signal-grid-cold \
+  --output build/sim/basket-signal-grid-cold/index.html
+#+end_src
+
+Run the 24-worker command on datasim. The local resource budget is four.
+The runner resumes valid outputs. The HTML opens directly from disk. For
+larger campaigns keep the generated adjacent sidecar directory with the HTML.
+=scripts/summarize-basket-signal-grid.py= reports paired return differences
+in percentage points against both controls, with each distinct tape weighted
+equally. =scripts/measure-basket-turns.py CAMPAIGN --output turns.csv= measures
+timing separately. It joins each executed order to its preceding transaction
+decision, selects orders whose plan the signal increased, and groups repeated
+same-day executions by TOKEN and side. For one, three and seven days ahead
+it compares the TOKEN's external log return with the equal-weight mean log
+return of the other four. A favorable sale precedes relative underperformance.
+Rows without the required future closes are excluded from that horizon's
+denominator. This uses future prices only for scoring and reports timing,
+without attributing the entire executed amount or gain to the signal.
+The trace and sizing facets require the explicit local 65,536-byte research
+code-size setting. The production facet compiles to 24,413 bytes against a
+24,576-byte deployment limit. The grid does not qualify these experimental
+facets for deployment, keeper gas economics, or Python/browser parity.
+
+* Buy and sell signals in the control lab and the current basket, 2026-11-22
+
+The archived =basket-sizing/current= campaign in the main checkout contains the real
+EVM frames behind the 120-day tilt table in the wheel paper. Use =manifest.json= to
+select the =lab= arm for each profile. Several obsolete files coexist in that
+directory. The four PDFs in =build/sim/basket-signals/lab-*.pdf= plot those measured
+frames. A triangle marks an interval with a basket buy or sale of the indicated
+TOKEN. External arbitrage, fee collection and placing previously owned TOKEN are
+excluded. The line below shows the ordered pair's measured willingness to release
+an eligible gap. Executions can also come from the other pairs, the book resizing
+or its weight and credit limits. The archive provides actual versus declared
+weights; the current replays also provide the leaned targets.
+
+| Archived profile | Basket buys | Basket sells | End book less matched maintenance, USD at external marks |
+|------------------+-------------+--------------+----------------------------------------------------------|
+| Clean cycles     |         510 |          519 |                                                  +96,241 |
+| Commodity-like   |         197 |          227 |                                                  +34,633 |
+| Historical bridge |          0 |          148 |                                                   +8,540 |
+| Two-step reprice |          54 |           96 |                                                   -7,787 |
+
+For example the clean A/B relative velocity was +396 bp/day on day 4. By day 8 it
+had slowed to +282 bp/day while the sell-A/buy-B release rate had risen from zero
+to 0.170 per day. The basket sold A and bought B in that interval. At day 12 the
+velocity was -21 bp/day and release 0.336 per day. These rates describe permission
+to work the outstanding gap. A whole-book decision also depends on weights, urgency,
+depth and available credit. =PairRebalancePolicy.desire= still computes braking and
+confident closure on the two venues, while =BasketUpkeepFacet._plan= allows book
+resizing and protective work to take a separate path.
+
+The 730-day records stored aggregate wheel trades and parity freshness. They omitted
+the per-pair rates and the TOKEN indices of individual basket trades. The short
+replays use read-only contract calls at each daily close and collect authenticated
+=Responded= sale and purchase logs across that day's receipts. Current active repo
+head =4d5ce8bf= has the same deployed economics as =a1d4deb1=. The first 36 days
+of the withdrawal replay agree exactly with the archived 730-day arm's share mark,
+passive index and cumulative purchase and sale counts on every day. The first two
+closes were warming up; both routes were ready on the remaining 34. At least one
+direction had positive pair desire on 27 closes on history and 32 on the synthetic
+cycle. All 44 Foundry tests in the observer, real-pool observer, pair policy and
+basket lean suites passed.
+
+The matched control changes only the upkeep facet's discretionary =_rate= to
+zero. The pair observer still runs; the book can resize, respect its leash and
+swap, and the wheel can still arbitrage. The following share returns use the
+first and last TWAP closes in BUCK before holder exit costs.
+
+| 36-day current economy | Active buys/sells | Maintenance buys/sells | Active share | Maintenance share | Difference (pp) |
+|------------------------+-------------------+------------------------+--------------+-------------------+-----------------|
+| Clean cycle            |            117/74 |                   53/9 |      +4.363% |           +2.096% |          +2.266 |
+| History + withdrawals  |             81/57 |                  81/57 |      +1.855% |           +1.855% |           0.000 |
+
+On the cycle the share prices first diverged at day 4. On history the full daily
+pair readings, constituent weights, leaned targets, individual recorded trade logs,
+share prices and hold indices were identical between arms at all 36 closes. Thus
+the signal was live, but it made no incremental trade in that window. The 730-day
+withdrawal record accumulated 2050 purchases and 1631 sales across all response
+motives. Its aggregate counters cannot establish how many were due to the pair
+policy. The matched long maintenance arm and decision-time recording of urgency,
+the candidate gap trade, the book-size trade and the binding execution limit
+would identify when and why the signal matters over the remainder.
+
+Reproduce from this worktree with its simulation Python. The lab inputs are relative
+to the main checkout. For the contemporary cyclic replay change the history override
+to =--set scenario.prices=three-phase=. For either matched maintenance control add
+=--set machine.upkeep=BasketUpkeepMaintenanceControl= and give it a separate output.
+The run has five TOKENs, one external price update per day, households, two ticks
+per day and 36 closes. The older lab has three TOKENs, four steps per day, 120 days
+and a maintenance benchmark at external marks.
+
+#+begin_src sh
+out=build/sim/basket-signals
+for profile in three-phase commodities historical-bridge two-step; do
+  .venv/bin/python scripts/plot-basket-signals.py \
+    --lab ../../../doc/control-lab/basket-sizing/current --profile "$profile" \
+    --output "$out/lab-$profile.pdf"
+done
+PYTHONPATH=.:core/python:core/contracts/python .venv/bin/python scripts/capture-basket-signals.py \
+  "$out/withdrawals.json" --set 'interventions=[{"day":7,"action":"set_population","exit_now":0.5}]'
+PYTHONPATH=.:core/python:core/contracts/python .venv/bin/python scripts/capture-basket-signals.py \
+  "$out/withdrawals-maintenance.json" --set 'interventions=[{"day":7,"action":"set_population","exit_now":0.5}]' \
+  --set machine.upkeep=BasketUpkeepMaintenanceControl
+.venv/bin/python scripts/plot-basket-signals.py --replay "$out/withdrawals.json" \
+  --maintenance "$out/withdrawals-maintenance.json" --output "$out/current-withdrawals.pdf"
+#+end_src
+
+* Basket policy review after the two-year runs, 2026-11-22
+
+All four datasim stress arms completed 730 daily observations at each revision.
+The six refresh arms also completed. The Mac reproduced the revised withdrawal
+arm's terminal share and passive returns. All fourteen Linux worlds recorded zero
+dispatcher faults. Results below use seed 41404. The return interval is the
+first recorded close to the last. Share price uses TWAP, the passive opening
+TOKEN weights use LOW and the reference prices in BUCK evolve within each world.
+These figures precede any individual holder's cost of exiting.
+
+| Revised policy =a1d4deb1= | Share return | Passive return | Excess (pp) | Share max drawdown | Peak absolute BVIB deviation |
+|---------------------------+--------------+----------------+-------------+--------------------+------------------------------|
+| Control                   |      +0.831% |        +2.723% |      -1.892 |             4.655% |                        2.97% |
+| K capped at 0.5           |      +1.139% |        +3.110% |      -1.972 |             4.917% |                        3.04% |
+| LABR down 20% for 30 days |      +2.718% |        +2.884% |      -0.166 |             4.926% |                        3.13% |
+| Investor withdrawals      |      +0.092% |        +1.870% |      -1.778 |             4.650% |                        3.34% |
+
+The earlier policy at =61aa2cf4= trailed its own passive holdings by 1.720,
+1.581, 0.167 and 1.634 points respectively. Both policies did relatively well
+on the markdown that expired on day 37. A permanent markdown is a distinct test.
+In the earlier base refresh band, the flow-reserve arm booked 5814 arb cycles
+and gained 0.234% per share. The zero-reserve arm booked 1330 and gained
+1.393%. Turning refresh off reversed that ordering (1.165% and 0.053%).
+The tight band and zero reserve lost 0.815%. A single path gives no universal
+ranking of bands or buffers.
+
+The revised withdrawal run booked 1320 authenticated cycles over the whole run.
+Their signed frozen-mark gains sum to 213630.580014 BUCK, composed of
+-18306.182647 cash and +231936.762661 owned LP value. The 54247.863421 of LP
+fees is included in the decomposition. These are cumulative receipt counters
+at the final frame, including day zero. The share return covers closes 0–729.
+Do not add trade gains or LP fees to the share return. Negative net issuance
+at every close in control, credit and withdrawals means the positive ceiling
+did not bind at those closes. Intraday facility room at execution is a separate
+measurement. The stress cohort's 267152 BUCK of funded entry cost was 4.04%
+of the 6.620M BUCK of marked basket equity before the withdrawal shock.
+
+Day 729 revised withdrawal financial net worth less each household's own
+counterfactual, in USD, had a median of -671 for 14 debtors (9 behind), +5692
+for 10 savers (3 behind), and +971 for 215 investors (84 behind). This includes
+the exited investors. The whole-system difference includes household financing,
+adoption, timing and portfolio decisions. The investor population itself varies
+across arms. Compare matched members, arrival windows and liabilities before
+attributing a household result to the basket. Sources are the final flat
+=frames= entries and daily =agents.jsonl= described under the restart instructions.
+
+** Next experiments in priority order
+
+1. Reconcile shareholder returns over identical cash flows and valuation marks.
+   Use three comparisons: passive TOKENs, the same starting LP inventory with
+   optional trades off, and the active basket. Attribute return to TOKEN exposure,
+   LP fees and adverse selection, discretionary rebalancing, flash cycles, carry,
+   relief and outside flows. Separate execution gains at frozen prices from what
+   can be unwound at an executable bid. Attribute gas and keeper rewards to the
+   parties that actually pay them. The Solidity-wheel simulation currently settles
+   work irrespective of the keeper's profit. Run alongside an economically
+   motivated keeper with gas, competition and periods of absence.
+2. Keep the normal zero wallet and fresh funding. Size discretionary work from
+   expected *incremental* gain after costs and from room left after pricing a
+   stressed exit at executable depth. At parity =_book= aims for zero net issuance,
+   giving roughly 1x TOKEN exposure on deployment equity. Test modest neutral
+   exposure offsets either side of that starting point separately from parity
+   gains or K. Check gas saved per batch of mints against extra carry before
+   funding any standing wallet buffer.
+3. Test a faster bounded parity response on corroborated demand. Measure the
+   BUCK premium or discount against the reference basket, executable depth across
+   routes and sustained net outside flow. Exclude internal wheel trades and
+   protocol-funded redemptions from the demand evidence. Measure time outside
+   band, overshoot and time to recovery across the basket, desk and K together.
+   For a single TOKEN cheapening across markets, test reduced incremental buying
+   as evidence for the old relative anchor weakens. Preserve published constituent
+   weights and the existing hard caps. Test temporary and permanent shifts using
+   identical initial moves and information available at the time.
+4. Stage withdrawals by funded share of outstanding equity after the economy
+   matures. Cross a withdrawal with curtailed credit and executable depth, and
+   compare payout by arrival order. Keep credit-first settlement and the in-kind
+   choice. Measure time to usable BUCK or USD, impact on remaining equity and
+   subsequent credit room. Test a marginal sale-cost charge only if a material
+   first-exiter subsidy remains after the existing charges.
+5. With common random inputs, test payroll demand, correlated expenses and a
+   persistent fall in new borrowing. Separately test unreliable quotes, concentrated
+   exits and interrupted keeper service. Compare the candidate with the current
+   policy on held-out seeds and five-year paths. Report the lower tail of realized
+   saver purchasing power, on-time household expenses and debt service, and
+   remaining-holder returns beside parity and shareholder metrics. Freeze the
+   acceptance criteria before choosing parameters. Check a short common fixture in
+   Python and in-browser JS for each adopted signal and household decision.
+
 * Current restart point — refined basket, 2026-11-21
 
 Work in =.claude/worktrees/buck-compound= on =feature/household-minimal-ecosystem=.

@@ -720,7 +720,8 @@ measured against the same basket doing no rebalancing, valued at outside prices.
 shapes are made up, and its cycles are far faster than real commodities, so read it for which
 rule matters, not for what a basket earns.
 
-*The lean does most of the work.*  Gain over 120 days, in BUCKs, on the one-million basket:
+*The lean does most of the work.* Incremental end value over matched maintenance after
+120 days, in USD at the external TOKEN prices, on the one-million-BUCK basket:
 
 | Prices                      | No lean | Tilt 1/4 | Tilt 1/2 | Tilt 1   |
 |-----------------------------+---------+----------+----------+----------|
@@ -753,6 +754,26 @@ from one simulated arbitrageur with no competitor.  Do not count on it.
 trading.  Gas does not grow with the basket and the gain does, so there is a size below which
 upkeep costs more than it earns, much smaller on a rollup than on an L1.
 
+** When a turn changes an order
+:PROPERTIES:
+:CUSTOM_ID: evidence-turn
+:END:
+
+The price observer can register a turn while an allocation gap is still too small or too
+recent to trade. Even when the gap is eligible, the basket may already have a larger order
+to reach its intended total TOKEN exposure. The executed order then tells us little about
+the contribution of the turn signal. In a replay we can price both plans on the same book
+immediately before execution and read the eventual buy or sale from the transaction receipt.
+
+Two 36-day household simulations at seed 41404 show how much this distinction matters. On
+clean cycles the active share gained 4.363%, against 2.096% when the current discretionary
+rate was set to zero. On historical prices with investor withdrawals, both shares gained
+1.855% and made the same 81 purchases and 57 sales. At least one pair gave a positive reading
+on 27 historical daily closes. Of 600 individual TOKEN decisions during upkeep, three reached
+the urgency threshold. In all three, the book already called for a larger sale. Removing
+the discretionary amount from the plan changed no order. These share returns compare the
+first and last daily TWAP in BUCK, before an individual holder's cost of exit.
+
 ** A simulated economy
 :PROPERTIES:
 :CUSTOM_ID: evidence-economy
@@ -760,7 +781,7 @@ upkeep costs more than it earns, much smaller on a rollup than on an L1.
 
 The strongest test runs the real contracts for five years on an in-process EVM
 (=alberta_buck/sim/=): five commodity TOKENs -- labour, construction, food, energy and gold -- on
-their real price histories, and on a copy made to revert; depositors who come and go; households
+historical monthly anchors with simulated prices between observations, and on a copy made to revert; depositors who come and go; households
 refinancing mortgages into BUCKs; savers; arbitrageurs; the K controller; the desk; and the wheel,
 turned twice a day.  These runs use the frozen model at =1a5afec=, with the lean against parity
 on both sides.  Share prices average the last 90 days; the gain over holding compares the end

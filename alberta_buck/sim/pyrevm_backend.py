@@ -252,13 +252,14 @@ class PyrevmAnvil:
 
     def __init__(self, port: Optional[int] = None, gas_limit: int = 0,
                  chain_id: Optional[int] = None, auto_impersonate: bool = False,
-                 timestamp: Optional[int] = None, block_seconds: Optional[int] = None):
+                 timestamp: Optional[int] = None, block_seconds: Optional[int] = None,
+                 *, code_size_limit: Optional[int] = None):
         self.port = port or 0                       # no socket; kept for parity
         self.chain_id = chain_id or 31337
         # The EVM's block.chainid must be the chain id eth_chainId reports:
         # identity proofs bind it (Fiat-Shamir), and pyrevm defaults to 1.
-        self.evm = pyrevm.EVM(env=pyrevm.Env(cfg=pyrevm.CfgEnv(chain_id=self.chain_id)),
-                              gas_limit=gas_limit or 3_000_000_000)
+        cfg = pyrevm.CfgEnv(chain_id=self.chain_id, limit_contract_code_size=code_size_limit)
+        self.evm = pyrevm.EVM(env=pyrevm.Env(cfg=cfg), gas_limit=gas_limit or 3_000_000_000)
         self.block = 0
         self.ts = timestamp or GENESIS_TS
         self.block_seconds = block_seconds if block_seconds is not None else BLOCK_SECONDS

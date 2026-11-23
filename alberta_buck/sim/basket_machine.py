@@ -30,6 +30,10 @@ DEFAULTS = {
     "slack": .0025,                 # a gap this small, as a share of the book, builds no urgency
     "patience": .02,                # share of the book times days: the urgency that releases in full
     "upkeep": "BasketUpkeepFacet",  # the facet; a trial names its own (test/harness)
+    "signal_mode": "velocity",      # BasketUpkeepSignalSizing: velocity, excursion, or both
+    "signal_rate": None,            # discretionary fraction-rate/day at full strength; None: use maxRate
+    "signal_excursion": .02,        # share of the book away from target at full excursion strength
+    "signal_velocity": .005,       # closing daily log return at full velocity strength
     "parity_gain": 5.,              # BUCKs the book aims to hold while the BUCK is cheap, per unit of parity error, of equity
     "parity_gain_dear": 5.,         # BUCKs it aims to have let out while the BUCK is dear, likewise
     # The desk beside the basket and its outer-band policy.
@@ -294,11 +298,25 @@ def activate(d, given=None, turn_seconds=0) -> None:
                             [*d.pool_buck, *d.pool_usdc], *OBSERVER)
     reference = [round(math.log(int(basket.functions.constituents(i).call()[3]) / 10**6) / LOG_TICK * 10**18)
                  for i in range(len(d.tokens))]
-    policy = chain.deploy("PairRebalancePolicy", observer.address, basket.address, reference, sizing(s))
+    policy_sizing = sizing(s)
+    policy = chain.deploy("PairRebalancePolicy", observer.address, basket.address, reference, policy_sizing)
     # A facet's constructor names what it needs; a trial may need more than the policy.
     wanted = next((e["inputs"] for e in load_artifact(s["upkeep"])[0] if e.get("type") == "constructor"), [])
     given_to = {"policy": policy.address, "parity_": signals.address, "parityGain_": round(s["parity_gain"] * 10**18),
                 "parityGainDear_": round(s["parity_gain_dear"] * 10**18)}
+    if s["upkeep"] == "BasketUpkeepSignalSizing":
+        modes = ("velocity", "excursion", "both")
+        if s["signal_mode"] not in modes:
+            raise ValueError(f"machine.signal_mode must be one of {modes}")
+        rate = policy_sizing[4] if s["signal_rate"] is None else round(s["signal_rate"] * 10**18)
+        if not 0 <= rate <= policy_sizing[4]:
+            raise ValueError("machine.signal_rate must be between zero and the rate set by machine.half_life_days")
+        excursion = round(s["signal_excursion"] * 10**18)
+        velocity = round(s["signal_velocity"] * 10**18)
+        if excursion <= 0 or velocity <= 0:
+            raise ValueError("machine.signal_excursion and machine.signal_velocity must be positive")
+        given_to.update(signalMode_=modes.index(s["signal_mode"]), signalRate_=rate,
+                        signalExcursion_=excursion, signalVelocity_=velocity)
     links = d.net_basket.libraries if getattr(d, "net_basket", None) is not None else None
     abi, bytecode = load_artifact(s["upkeep"], libraries=links)
     response = chain.deploy(s["upkeep"], *(given_to[i["name"]] for i in wanted), abi=abi, bytecode=bytecode)

@@ -169,7 +169,7 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         return (value > mark ? value - mark : mark - value) > _grainS(s);
     }
 
-    function _beyondLeash(uint256 gap, uint256 total, uint256 weight) private view returns (bool) {
+    function _beyondLeash(uint256 gap, uint256 total, uint256 weight) internal view returns (bool) {
         return gap * 10000 > total * weight * response.leashBp / 10000;
     }
 
@@ -259,7 +259,7 @@ contract BasketUpkeepFacet is BasketCreditSetup {
     /// @dev How fast constituent i may be worked: the policy's rate for it
     /// against each of the others, weighed by their declared weights. Sold,
     /// it is the pair's seller; bought, its buyer.
-    function _rate(uint256 i, bool sold, uint256 n) internal view virtual returns (uint256) {
+    function _rate(uint256 i, bool sold, uint256 n, uint256) internal view virtual returns (uint256) {
         uint256 sum;
         uint256 weights;
         for (uint256 j; j < n; ++j) {
@@ -271,10 +271,14 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         return weights == 0 ? 0 : sum / weights;
     }
 
+    function _pairShare(uint256 i, uint256 rate) internal view virtual returns (uint256) {
+        return pairPolicy.share(i, rate);
+    }
+
     /// @dev Which gaps may be worked at all: with a patient policy, those
     /// that have built their full urgency; with none, those beyond the fixed
     /// band.
-    function _eligible(Book memory b, int256[] memory gaps) private view returns (uint256 mask) {
+    function _eligible(Book memory b, int256[] memory gaps) internal view returns (uint256 mask) {
         if (pairPolicy.patience() != 0) return pairPolicy.urgent(gaps);
         uint256 band = b.total * eq.weightBandBp / 10000;
         for (uint256 i; i < gaps.length; ++i) {
@@ -289,7 +293,7 @@ contract BasketUpkeepFacet is BasketCreditSetup {
     /// each in proportion to its gap to the target at the book's new size. With none on the other side
     /// the book lands on its targets; otherwise each closes the same share of its gap. A sale leaves out
     /// what the ceiling already asks of every constituent. _plan paces it by the release law.
-    function _move(Book memory b, uint256 tokens, uint256 excess) private view returns (uint256[] memory move) {
+    function _move(Book memory b, uint256 tokens, uint256 excess) internal view returns (uint256[] memory move) {
         uint256 n = b.token.length;
         move = new uint256[](n);
         bool grow = b.total > tokens;
@@ -307,7 +311,12 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         for (uint256 i; i < n; ++i) move[i] = amount * gap[i] / sum;
     }
 
-    function _plan(Snap memory s, Book memory b) internal view returns (Plan memory p) {
+    function _plan(Snap memory s, Book memory b) internal view returns (Plan memory) {
+        return _plan(s, b, true);
+    }
+
+    /// @dev Research facets can compare plans from the identical pre-execution book.
+    function _plan(Snap memory s, Book memory b, bool usePairRate) internal view returns (Plan memory p) {
         uint256 n = s.m.length;
         require(n == pairPolicy.count() && address(this) == pairPolicy.basket(), "pair basket");
         p.gaps = new int256[](n); p.rates = new uint256[](n);
@@ -333,9 +342,9 @@ contract BasketUpkeepFacet is BasketCreditSetup {
                              constituents[i].targetWeightBp)) {
                 // The leash is the mandate: it is kept on the declared weight, and at once.
                 amount = gap;
-            } else if ((mask >> i) & 1 == 1) {
-                p.rates[i] = _rate(i, over, n);
-                amount = gap * pairPolicy.share(i, p.rates[i]) / 1e18;
+            } else if (usePairRate && (mask >> i) & 1 == 1) {
+                p.rates[i] = _rate(i, over, n, over ? uint256(p.gaps[i]) : uint256(-p.gaps[i]));
+                amount = gap * _pairShare(i, p.rates[i]) / 1e18;
             }
             // The book's own move needs no word from the policy, only its pace: the release law at
             // its fastest, half of what remains a day however often the wheel turns.
@@ -363,6 +372,9 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         if (line <= 0) { for (uint256 i; i < n; ++i) p.buys[i] = 0; }
         else if (buying > uint256(line)) { for (uint256 i; i < n; ++i) p.buys[i] = p.buys[i] * uint256(line) / buying; }
     }
+
+    /// @dev Simulation facets may record the plan at its decision point, before any trade.
+    function _afterPlan(Snap memory, Book memory, Plan memory) internal virtual {}
 
     function _execute(Snap memory s, Plan memory p, uint256 grain) private returns (uint256 moved) {
         // Each sale is in its own pool, so the opening snapshot prices them all. Wallet TOKEN goes
@@ -415,6 +427,7 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         if (moved > 0) { s = _snap(); _markS(s); }
         Book memory b = _book(s);
         Plan memory p = _plan(s, b);
+        _afterPlan(s, b, p);
         pairPolicy.recordGaps(p.gaps);
         pairPolicy.recordRates(p.rates);
         uint256 traded = _execute(s, p, b.grain);

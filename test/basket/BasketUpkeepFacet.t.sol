@@ -6,7 +6,9 @@ import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.
 import {BasketUpkeepFacet} from "../../src/basket/BasketUpkeepFacet.sol";
 import {IBuckBasketVenue} from "../../src/basket/IBuckBasketVenue.sol";
 import {BasketVenueFacet} from "../../src/basket/BasketVenueFacet.sol";
+import {PairRebalancePolicy} from "../../src/basket/PairRebalancePolicy.sol";
 import {BasketUpkeepMaintenanceControl} from "../harness/BasketUpkeepMaintenanceControl.sol";
+import {BasketUpkeepSignalTraceMaintenance} from "../harness/BasketUpkeepSignalTraceMaintenance.sol";
 import {ControlledPairIntent} from "../harness/BasketIntent.sol";
 
 /// A parity reference the test sets: the basket's cost in BUCK, and whether it is fresh.
@@ -138,6 +140,26 @@ contract BasketUpkeepFacetTest is BuckBasketEquityFixture {
         uint160[3] memory afterSpot = _spots();
         for (uint256 i; i < 3; ++i) assertEq(afterSpot[i], spot[i]);
         assertEq(intent.impacts(), 0); assertEq(intent.lastExecutionAt(), 0);
+    }
+
+    function test_upkeep_strictMaintenanceDoesNotSpendAnAccruedDiscretionaryAllowance() public {
+        _install();
+        uint128[3] memory placed = _placed3();
+        intent.setRate(0);
+        // A prior book resize can leave an allowance even when the current rate is zero.
+        vm.mockCall(address(intent), abi.encodeCall(intent.share, (0, 0)), abi.encode(0.25e18));
+        vm.mockCall(address(intent), abi.encodeWithSelector(PairRebalancePolicy.urgencyOf.selector), abi.encode(0));
+        address maintenance = address(new BasketUpkeepSignalTraceMaintenance(address(intent), address(parity), 0, 0));
+        vm.prank(GOV);
+        b.setEquityWheel(maintenance);
+        assertEq(_response(), 0);
+        assertEq(b.liquidityOf(0), placed[0]);
+
+        address production = address(new BasketUpkeepFacet(address(intent), address(parity), 0, 0));
+        vm.prank(GOV);
+        b.setEquityWheel(production);
+        assertEq(_response(), 1);
+        assertLt(b.liquidityOf(0), placed[0], "the production response can use that allowance");
     }
 
     function test_upkeep_bandThenUrgencyDecideWhichGapsMayBeWorked() public {
