@@ -2,7 +2,29 @@
 #+DATE: 2026-11-08
 #+OPTIONS: ^:nil toc:3
 
+* November 24 restart: five-year investor BUCK returns
+
+The [[file:buck-basket-findings.org][comprehensive review]] records strategy mechanics, pricing regimes, household
+exits, the completed funded 730-day and 120-day comparisons, five-year
+marks, and the literal or equivalent Make invocations for each campaign.
+For future comparisons, record the Make launch command, frozen inputs,
+measured close interval and funding source with the result.
+
+All 16 two-year pairs completed, and the Mac release-only five-year pair
+finished. On datasim all eight quiet-flow active arms have 1,825 closes,
+with maintenance still running at the November 24 22:42 UTC inspection.
+Three existing-household tests (balanced arrivals, larger working balances,
+lower discount buyback thresholds), their combined treatment, and the
+aged-ledger experiment bring the five-year datasim pool to 32 pairs.
+The primary outcome is investor BUCK return; report settled receipt gains
+separately from outstanding share marks. Use =make basket-study-refresh-long=
+in the prepared shell to update the mirrors. See the review for the
+individual study commands and the checks to perform when the controls finish.
+
 * Mature basket ownership, multi-year comparisons and dashboard restart, 2026-11-23
+
+The [[file:buck-basket-findings.org][basket research findings]] compare marked and realized investor returns,
+price-path effects and opening Jubilee capitalization.
 
 From the buck-compound worktree use =make basket-study-catalog= to select
 a study, =make nix-venv-basket-study-list= to discover saved and mirrored

@@ -59,7 +59,7 @@ def sync(args):
         if available:
             patterns = [f"--include=/{name}/" for name in available]
             subprocess.run(["rsync", "-rtz", *patterns, "--exclude=/*/", "--include=manifest.json",
-                            "--include=frames.jsonl", "--include=agents.jsonl", "--include=events.jsonl",
+                            "--include=opening.json", "--include=frames.jsonl", "--include=agents.jsonl", "--include=events.jsonl",
                             "--include=interventions.jsonl", "--exclude=*", remote + "/build/runs/",
                             str(args.runs) + "/"], check=True)
         manifest["run_root"] = str(args.runs.resolve())

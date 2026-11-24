@@ -630,6 +630,13 @@ another checkout and campaign. Use ~BASKET_SYNC_ARGS="--watch 60"~ for
 periodic pulls and automatic report updates. Give the mirror its own
 =BASKET_ID=.
 
+The [[file:doc/review/buck-basket-findings.org::*Five-year launch commands][five-year campaign launch commands]] record the actual November study
+directories and Make invocations. =make nix-venv-basket-study-refresh-long=
+updates the dashboard records for all of these datasim studies and the
+completed two-year comparison. Use ~BASKET_LONG_CAMPAIGNS=stock-5y-balanced~
+to refresh just one. Use ~BASKET_STUDY=aged~ (or the Make command in the
+review) to compare a funded ledger before and after a year of fee accrual.
+
 ** Returning to saved comparisons
 
 Run =make basket-study-links= for the dashboard URLs and

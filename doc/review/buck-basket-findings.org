@@ -1,0 +1,597 @@
+#+TITLE: BUCK basket returns, investor flows and the mature Jubilee opening
+#+DATE: 2026-11-24
+#+OPTIONS: toc:2 ^:nil
+
+* What the completed runs establish
+
+The active basket earned positive marked returns on all 24 short three-phase
+cases. On historical commodity anchors, returns depended on the daily path,
+the opening shareholder base, the horizon and the currency in which an
+investor measured wealth. Actual wallet exits give a different result from
+marked returns on an outstanding receipt. The comparisons below use the
+current household simulator and EVM contracts.
+
+The active strategy lets relative TOKEN departures develop. Once a weight
+gap persists and the outward movement slows, the available discretionary
+trade can grow. Its raw request still competes with whole-book purchases
+or sales and faces credit, size and execution limits. Strict maintenance
+retains normal issuance, parity response, deposits, withdrawals, arbitrage
+and safeguards. Comparing the two worlds on the same price tape and
+household seed measures the contribution of enabling discretionary upkeep,
+including its later effects on holdings and market prices.
+
+* How production handles a relative-price move
+
+The basket provides TOKEN/BUCK liquidity, adjusts how much TOKEN it holds
+against BUCK parity, and optionally changes the mix of TOKENs when a
+relative price move slows. These actions can occur in the same response.
+A rule that only changes discretionary timing can therefore change far fewer
+orders than the total number of basket transactions suggests.
+
+| Decision | Current household-world policy |
+|----------+--------------------------------|
+| Hold and place inventory | A response pairs idle TOKEN with fresh BUCK in its own TOKEN/BUCK pool, subject to credit, depth and a minimum amount. Daily work refreshes the credit mark. Position sync collects fees. |
+| Set exposure | Let X be the TOKEN book, N the lien less net wallet BUCK and the marked BUCK side of LPs, and E = max(0, X - N) at the sizing marks. The TOKEN target is E plus desired N. A fresh reading sets desired N/E to -5 times (basket cost in net BUCK minus one). A cheap BUCK implies a sale of TOKENs and retention of BUCK. A dear BUCK implies issuance to buy TOKENs. At parity the desired N is zero and the TOKEN target is E. A 10 bp parity move changes the desired exposure by 0.5% of equity before constraints. With a stale sample the book keeps its existing net exposure inside the ceiling. |
+| Bound exposure | The normal net-issuance ceiling is E times 0.9K/(1-0.9K). The hard collateral relationship at the LOW mark is approximately N at most K times the TOKEN value, subject to facility activation, face and other issuance limits. Unpaid Jubilee relief can enter the share mark and is excluded from this collateral. Normal exposure follows the parity aim inside the ceiling. If net issuance exceeds the ceiling, the plan calls for proportional sales before discretionary sizing. |
+| Set the mix | Start with published TOKEN weights. Multiply each weight by the square root of its opening price over its current TWAP and normalize across the book, then clip each target to ±15% of its declared allocation. A common move in all TOKEN/BUCK prices cancels in the normalized ratios. The safeguard applies when a holding falls more than 30% of its declared allocation away from it and asks for the whole gap to the working target, subject to execution limits. |
+| Decide when a gap qualifies | The gap is a share of the whole book. Default slack is 0.25 percentage points and patience is two percentage-point days. A steady one-point gap takes about 2.67 days beyond its initial observation to accumulate that much urgency. Time accrual is capped at one day per observation gap, drains below slack and restarts after a side change. |
+| Decide how fast to work it | A prospective seller must remain roughly 1% dear relative to the buyer and their accepted relative reference in the filtered reading and each live route. Both BUCK and USDC routes must be ready. The policy measures the change in filtered velocity on its own timescale. A slowing outward move releases part of the gap, confirmed closing adds to the rate, and a quiet separated pair has a small braking allowance. Estimated observation error and the basket's own recent impact temper the release. A holding averages directional pair rates against peers using the declared peer weights. It can sell or buy without an equal leg in the same response. |
+| Apply the pace and limits | Responses are spaced at least 30 minutes when work succeeds. One-day half-life is the fastest ordinary exponential release. Unspent release can accrue between fills, and execution clears the constituent's allowance. Aggregate book-size drift beyond 2% can call for the fastest pace without a pair signal. The plan takes the greater of that work and the constituent request, then applies per-step limits of 5% of current holdings or target and 1% of pool BUCK depth, credit constraints, and a minimum of two grains. The execution uses available funding and live venue protections. |
+| Repair thin Carrying balances | When placement and normal trading do no work, the responder can refresh an eligible LP slice, burning it and re-pairing the TOKEN with freshly issued BUCK. The default refresh floor and target are 99% and 99.5% net/gross. |
+| Sample parity | The price book uses the published commodity quantities, a ten-minute pool TWAP and a 5% spot/TWAP guard. It can use guarded USDC routes to improve the net BUCK bid. It attempts a sample at 30-minute intervals and treats a valid observation as fresh for an hour. Bid marks are marginal quotes. |
+
+The pair observer defaults to a 12-hour response timescale, one-day error
+memory and maximum gap, and two-day warmup. The reported error ranges are
+empirical. Separate venue reads help identify a local disturbance. Common
+inventory effects, arbitrage, a lasting relative-price move and a market
+with little outside depth can affect both readings together. Source:
+[[file:../../alberta_buck/sim/basket_machine.py::DEFAULTS = {][household deployment defaults]],
+[[file:../../src/basket/BasketUpkeepFacet.sol::_book][upkeep]],
+[[file:../../src/basket/PairRebalancePolicy.sol::function desire][pair sizing]],
+[[file:../../src/basket/PairSignals.sol][observer]],
+[[file:../../src/basket/BasketReference.sol][price book]] and
+[[file:../../src/basket/BuckBasketEquity.sol::stepBp: 500][shell defaults]].
+
+* Investor returns over the short treatment
+
+Each of the 96 pairs ran for 36 daily closes with a seven-close common
+warmup. The BUCK return uses share price at the precise policy switch and
+at the final close. The USDC mark values the same share at the sampled
+BUCK bid at each endpoint. The passive comparator holds the original
+declared TOKEN weights in fixed quantities and values them at each
+world's own venue marks in BUCK. All rows use the same household seed.
+Noise, investor arrival rates, scheduled exits and opening funding vary.
+
+| Price regime                | Cases | Median active BUCK | Median active USDC | Gained in BUCK | Gained in USDC | Beat passive in BUCK | Active vs maintenance W/T/L |
+|-----------------------------+-------+--------------------+--------------------+----------------+----------------+----------------------+-----------------------------|
+| Three-phase                 |    24 |            +2.447% |            +0.627% |             24 |             12 |                   24 | 18 / 0 / 6                  |
+| Historical bridge           |    24 |            -0.319% |            -2.605% |              9 |              5 |                   24 | 7 / 9 / 8                   |
+| History with mean reversion |    24 |            +0.232% |            -2.779% |             15 |              5 |                   23 | 6 / 14 / 4                  |
+| Reversion plus inflation    |    24 |            +0.213% |            -1.953% |             15 |              5 |                   19 | 6 / 15 / 3                  |
+| All                         |    96 |            +0.458% |            -1.137% |             63 |             27 |                   90 | 37 / 38 / 21                |
+
+The withdrawal cases let us follow invested money through actual execution.
+In each arm, all 384 scheduled investors completed their exits. Matching
+cell and member gives 160 investors who funded a basket receipt in both
+worlds. Aggregate fully redeemed receipt proceeds exceeded BUCK basis
+by 0.330% active and 0.221% maintenance. Those investors' USDC buy-and-exit
+cycles returned -2.396% and -2.457%, respectively. The sale includes each
+wallet's residual working BUCK. The records support a USDC result per
+investor cycle and a BUCK result per fully closed receipt.
+
+[[file:../../build/sim/stock-grid-36d-datasim/summary.md][Full short-study report]] ·
+[[file:../../build/sim/stock-grid-36d-datasim/investor-exits.csv][Reconciled investor exits]]
+
+* Why historical prices and three-phase prices differ
+
+The three-phase generator gives each TOKEN an evenly offset sinusoid
+with 12% amplitude and a 30-day period. The historical sources provide
+monthly wage, construction, food, energy and gold observations. The
+standard daily bridge uses the next monthly endpoint to construct
+intervening prices. The carry-forward sensitivity test releases each
+monthly observation after a fixed 61-day lag. Actual daily paths and
+first-publication vintages are unavailable for this five-series basket.
+
+Over 22 complete 15-day windows beginning at close 29, the typical
+absolute TOKEN move relative to its four peers was 22.354 log-percentage
+points for three-phase, 2.545 for history and 2.693 for reverting history.
+Three-phase reversed in 105 of 105 adjacent TOKEN/window comparisons,
+history in 68 and reverting history in 72. Fifteen days is half the
+synthetic period. This measures the size and regularity of the opportunity.
+Fill size, timing, costs and remaining inventory determine the profit.
+
+The two-year comparison using the same monthly anchors found the following
+results from close 0 to close 729. Counts are actual TOKEN decisions and
+same-transaction fills. Production and strict maintenance ran on identical
+external prices within each pair.
+
+| Daily path between monthly observations | Active BUCK | Maintenance BUCK | Active minus maintenance | Eligible | Positive asks | Altered plan with fill |
+|-----------------------------------------+-------------+------------------+--------------------------+----------+---------------+------------------------|
+| Pinned bridge                           |     +0.831% |          +0.258% |                +0.573 pp |      291 |           191 |                     54 |
+| Linear interpolation                    |     -2.567% |          -2.567% |                 0.000 pp |        0 |             0 |                      0 |
+| Carry last available observation        |     -2.602% |          -0.278% |                -2.324 pp |      164 |           139 |                     28 |
+
+On the pinned bridge, 34 of 41 filled TOKEN/side/days moved favorably
+against peers over the next three closes. Only 6 of 22 buys and 6 of 17
+sells moved favorably over the first complete monthly release interval
+after the fill. On carry-forward, active led maintenance by 0.383 points
+at the last common monthly anchor (day 699) and ended behind it. No new
+discretionary decision qualified in the final 30 days. Earlier inventory
+and the ending mark can change the ranking even without a new trade.
+
+[[file:../../build/sim/basket-multiyear/returns.md][Matched two-year returns]] ·
+[[file:../../build/sim/basket-multiyear/anchor-bottlenecks.md][Decision-to-fill evidence]] ·
+[[file:../../build/sim/basket-anchor-grid-mac/pinned-bridge-production.pdf][Actual trades and pair signals (PDF)]]
+
+* When the active policy earns its keep
+
+Active upkeep can sell a relatively rich TOKEN and buy a cheap one as the
+spread starts to close. Repeated reversals let both sides of the adjustment
+pay. A lasting change in relative value can leave the basket holding more of
+the permanently cheaper TOKEN. An allocation gap measures how far the book
+is from its target. A slowing relative price measures how quickly it is
+still moving away. Both can appear during a permanent repricing. Stronger
+target tilt increases the inventory exposed to either outcome. Parity,
+leverage, LP marks and shareholder flows can also change as the paired
+worlds evolve.
+
+** What survived replaying the archived prices
+
+The original 120-day lab used three equally weighted TOKENs, four market
+steps per day and a common prelude. Its fixed-K and all-actor stages both
+favored the lab policy on cyclical prices. The all-actor stage added a
+finite outside buyer and issuer, moving K and an open desk. The household
+replay samples the archived feeds at integer days, preserves their relative
+moves and maps A/B/C to PAXG/NRGC/LABR at current opening prices and
+rescaled mandate weights. It uses two ticks per day and current households.
+The lab columns below compare ending book values at the external TOKEN feed
+and reference BUCK cost, marked in USD. The household column compares TWAP
+BUCK share returns over closes 0–120, before individual exit costs.
+
+| Tape              | Lab excess, fixed K (USD) | Lab excess, all actors (USD) | Household active minus maintenance (pp BUCK) |
+|-------------------+---------------------------+------------------------------+----------------------------------------------|
+| Three-phase clean |                   +96,241 |                      +96,623 |                                       +2.285 |
+| Three-phase 20    |                   +98,495 |                      +99,005 |                                       +3.545 |
+| Three-phase 80    |                   +99,564 |                     +100,584 |                                       +1.289 |
+| Flat 80           |                        +6 |                           +6 |                                        0.000 |
+| Historical bridge |                    +8,540 |                       -1,860 |                                       +0.122 |
+| Two-step repricing|                    -7,787 |                       -7,534 |                                       +0.306 |
+| Commodity-like    |                   +34,633 |                      +33,263 |                                       +0.113 |
+
+All 15 household pairs completed. Active won 14 and tied on the flat tape.
+On the historical and two-step tapes only one TOKEN decision per active
+run changed the constrained trade plan. Active ended below its own passive
+TOKEN index on both, despite beating strict maintenance. In the original
+all-actor lab, changing tilt from zero to one-half to one raised clean
+three-phase excess from 55,646 to 96,623 to 131,128 USD at the reference
+mark. The same changes deepened two-step losses from 3,482 to 7,534 to
+11,257 USD. The lab and household results support the cyclical advantage.
+The historical and two-step results depend on the economy, the holdings and
+the mark, and the replay changes several of those inputs together.
+
+[[file:../../../../../doc/control-lab/basket-sizing/current/results.org][Fixed-K lab]] ·
+[[file:../../../../../doc/control-lab/basket-sizing/all-actors/results.org][All-actor lab]] ·
+[[file:../../build/sim/basket-archive-replay/datasim/matched-returns.md][All 15 household pairs]] ·
+[[file:../../build/sim/basket-archive-replay/price-pack.json][Price lineage and source checksums]]
+
+** What the completed sizing sweeps changed
+
+The 36-close signal experiment completed 280 arms across five price
+regimes, two noise levels and two household seeds. Production's BUCK share
+return beat strict maintenance in 11 of the 20 pairs, tied in four and
+lost in five. Three-phase won all four (+0.953 to +2.424 pp), as did the
+combined shock (+0.196 to +1.045 pp). Mixed ranged from -0.556 to +0.971 pp,
+history from -0.380 to 0.000 pp, and reverting history from -0.597 to
++0.432 pp. At zero noise both household seeds encounter the same price tape.
+
+All three candidate laws size the rate on an eligible allocation gap.
+Velocity uses relative closure beyond venue uncertainty and estimated own
+impact, with full strength at 0.5% closing speed per day. Excursion uses
+the current allocation gap, with full strength at 2% of the book. It can
+act before a turn. The product multiplies both strengths. The sweep crossed
+a common 0.25% gap slack with standard or early eligibility (0.020 or
+0.005 share-days) and a one- or three-day half-life at full strength. The
+candidate arms also gate accrued discretionary allowance at a zero current
+rate. Production can release part of the gap during deceleration and can
+apply banked allowance under its ordinary rules.
+
+Velocity and the product each had only four positive decision-time rates
+across 80 arms. Neither changed an order, and every share return matched
+maintenance. Excursion changed 5,842 TOKEN plans across 80 arms, with 46
+wins, five ties and 29 losses. It beat maintenance in 16 of 16 three-phase
+arms and three of 16 historical arms. On the four combined-shock pairs,
+standard patience with the three-day half-life gained 0.510–0.987 pp over
+maintenance. The one-day version ranged from -0.280 to +1.260 pp. On the
+730-close pinned historical tape, production, excursion and maintenance
+returned +0.831%, +0.768% and +0.258% in BUCK. They changed 54, 83 and zero
+plans respectively. Velocity and the product again matched maintenance.
+Production's passive TOKEN index gained +2.723% in that world.
+
+The braking experiment completed all 36 arms of its six-group preset. It
+crossed 20 and 100 bp/day outward speed at half release with rates of one
+and four per day before the common cap, preserving the other production
+gates. All 12 three-phase candidate arms beat maintenance. The 12 historical
+candidate arms produced one win, eight ties and three losses. Within the two
+noisy historical groups, the 20-bp, four-per-day version averaged +0.467 pp
+against maintenance while the other three settings averaged -0.115 to
+-0.032 pp. Narrow eligibility can explain an inactive law, and increased
+eligibility or more fills alone can leave returns worse. The small braking
+preset supports testing on withheld prices and household seeds before
+choosing a setting.
+
+[[file:../../build/sim/basket-signal-grid-datasim/matched-returns.md][Complete signal sweep]] ·
+[[file:../../build/sim/basket-braking-grid-datasim/matched-returns.md][Complete braking preset]] ·
+[[file:../../build/sim/signal-history-730-datasim/matched-returns.md][Two-year sizing replication]]
+
+** Completed 120-close funded stress tests
+
+Four pairs per regime cross 0/2M funded investment with quiet/brisk
+household profiles. Each has 14 common warmup closes and one seed.
+
+| Price regime | Median active return in BUCK | Active vs maintenance W/T/L |
+|--------------+------------------------------+-----------------------------|
+| Mixed trends and cycles | -4.272% | 4 / 0 / 0 |
+| Combined permanent and temporary shocks | +1.642% | 4 / 0 / 0 |
+| Temporary 20% LABR fall | +1.371% | 3 / 0 / 1 |
+| Permanent 20% LABR fall | +0.039% | 1 / 0 / 3 |
+| Persistent divergent commodity trends | +0.355% | 0 / 3 / 1 |
+
+The temporary and permanent shocks have an identical first leg on day 40.
+Only the temporary one recovers on day 80. Increasing the speed of buying
+an underweight TOKEN would increase exposure in both cases. The four mixed
+paths all lost BUCK despite beating maintenance. A signal can improve the
+outcome in an exposed book without making that exposure profitable.
+
+[[file:../../build/sim/basket-studies/stock-stress/summary.md][Completed stress comparisons]]
+
+* What a larger passive pool changes
+
+In 32 short comparisons matched on regime, noise and investor settings,
+funding Jubilee with 2M existing BUCK raised median opening equity
+from 6.63M to 8.96M BUCK. Median Jubilee ownership rose from 0.10% to
+23.43%. Median active gross household cash flow over the 29-day treatment
+fell from 11.96% to 1.65% of opening equity. Returns improved in 14 pairs
+and fell in 18. The median paired change was -0.054 percentage points.
+Funding came from the existing SimLP, so the seeder's remaining cash and
+subsequent household activity also changed.
+
+Across the eight historical settings at each of those endowments, active
+upkeep altered 14 TOKEN decisions in the zero-funded group and nine in
+the 2M group. Maintenance still traded even at the higher endowment.
+A larger pool demonstrably reduces the importance of household cash flows.
+These tests do not attribute individual maintenance trades or their costs
+to withdrawals, parity-driven changes in exposure, or other book work.
+
+All 16 funded two-year control pairs have now closed. The table uses the
+exact pre-switch share mark and final share mark, across 700 treatment
+closes. The quiet profile has six annual investor arrivals and no scheduled
+withdrawal. The brisk profile combines 60 arrivals/year with a 25% scheduled
+withdrawal. Both comparisons use the same household seed.
+
+| Price path | Flow | Active BUCK, 0 | Active BUCK, 2M | Maintenance BUCK, 0 | Maintenance BUCK, 2M |
+|------------+------+----------------+-----------------+---------------------+----------------------|
+| Three-phase | Quiet | +37.388% | +43.563% | +8.996% | +14.343% |
+| Three-phase | Brisk | +39.439% | +48.163% | +16.675% | +20.394% |
+| Historical bridge | Quiet | -1.334% | +3.800% | -1.564% | +3.965% |
+| Historical bridge | Brisk | -0.883% | +3.946% | -1.392% | +3.357% |
+| Reverting history | Quiet | -0.248% | +5.392% | +0.824% | +4.637% |
+| Reverting history | Brisk | +0.276% | +6.100% | -0.311% | +6.324% |
+| Plus common inflation | Quiet | -0.735% | +5.853% | -1.217% | +4.121% |
+| Plus common inflation | Brisk | +0.397% | +4.513% | +0.365% | +6.309% |
+
+Funding raised the active return in all eight comparisons. It raised the
+maintenance return in all eight as well. The strongest evidence for return
+from discretionary rebalancing is three-phase. On historical and reverting
+paths, a larger shareholder base improved returns through mechanisms shared
+by both policies. In particular, an investor in the funded historical quiet
+world gained 3.800% active and 3.965% in maintenance. Fewer forced trades,
+different LP ownership, parity exposure and changed market depth are
+plausible contributors. The endowment comparison changes them together.
+
+[[file:../../build/sim/stock-grid-730d-datasim/summary.md][Completed two-year pairs]] ·
+[[file:../../build/sim/stock-grid-730d-datasim/returns-day-365.md][Common close 365]]
+
+* Funding, stability and withdrawals
+
+
+** Fresh issuance and the cost of liquidity
+
+A funded wheel purchase reserves issuance room before trading and pays
+the authenticated pool directly from its facility for the amount the
+callback actually needs. Pairing credits the basket's BUCK side of the LP
+and raises gross principal, which is why outstanding principal, spendable
+net wallet BUCK, net issuance and pool depth belong in separate ledgers.
+An idle wallet near zero avoids carry on a standing buffer. Carrying pool
+balances still lose net value relative to nominal face. Refresh can restore
+some pooled BUCK liquidity by replacing a slice with fresh BUCK, using
+facility room and gas. Its value to the basket depends on LP ownership,
+fees, carrying cost and the price at which the released BUCK can be used.
+The 730-day comparisons changed the ranking of the zero-wallet and
+flow-reserve arms when refresh was switched off, and the tighter 99.5%/
+99.7% band with zero reserve lost 0.815% on that path. Those comparisons
+support keeping fresh on-demand funding as the baseline and measuring
+a buffer and a refresh change separately. Sources:
+[[file:../../src/basket/BuckBasketUniswapV3.sol::issueToPool][pool callback]],
+[[file:../../src/basket/BuckBasketEquityStorage.sol::function _fundCash][funding and credit]],
+[[file:../../src/basket/BasketMarketOps.sol::function refreshPosition][LP refresh]]
+and [[file:bucknet-economy-implementation.org::The earlier policy at][retained refresh comparison]].
+
+A funded flash cycle can draw against available facility room, trade
+through configured routes and repay atomically. The strategy checks the
+wallet and its own LP positions at frozen marks around a cycle. The
+withdrawal comparator's 1,320 authenticated cycles recorded 213,630.58
+BUCK of frozen-mark gain, comprising -18,306.18 cash and +231,936.76
+owned LP value. The included LP fees, frozen-mark gains and share NAV
+measure overlapping economics. Count fees once, and value the resulting
+inventory at executable depth for an exit. Keeper gas belongs to the actual
+payer even when the portfolio passes a gain guard. Sources:
+[[file:../../src/basket/BasketArb.sol][arbitrage entry point]],
+[[file:../../src/basket/BasketMarketOps.sol::function execute][execution and guard]]
+and [[file:bucknet-economy-implementation.org::The revised withdrawal run booked][cycle attribution]].
+
+** Parity, correlated shocks and feedback
+
+A relative commodity signal and a BUCK-wide demand signal can have the
+same short-run effect on a direct pool. A broad BUCK premium should push
+basket exposure toward issuance under the existing sign convention. A
+discount should move exposure toward holding BUCK. The signal enters
+alongside K, which changes the hard room, and a separately capitalized
+desk with its own outer bands, persistence and budget. LP swaps and share
+flows can also move the prices the next controller reads. A common-time
+quote and a well-behaved response to one temporary markdown give little
+information about joint behavior when credit, liquidity and demand move
+together. On a low-K day, the hard room left above the normal ceiling can
+be small in equity terms even with all the caps working. A sharp TOKEN
+markdown and a K fall can reduce room before exposure catches up.
+Step limits and reasonable impact constraints can extend the period spent
+over the soft ceiling. Source:
+[[file:../../src/basket/BasketDesk.sol::function _netOperation][desk]],
+[[file:../../src/basket/BasketUpkeepFacet.sol::function _plan][book response]]
+and [[file:bucknet-economy-implementation.org::*Next experiments in priority order][recorded parity and K questions]].
+
+A permanent relative markdown produces the same initial price and gap as
+its temporary counterpart. A slowing or quiet venue can grant release even
+while the old relative anchor overstates the value of accumulated TOKEN.
+The lab's two-step repricing demonstrates the loss can grow with tilt.
+A genuine repricing of the underlying mandate requires a governed update
+with documented evidence. Sizing can respond earlier by reducing only
+discretionary adds to an established adverse leg and preserving the
+declared weights, mandatory safeguards and settlement. A corroboration
+rule can also decline new discretionary risk while a route is stale,
+shallow or disagrees with independent observations. Track how much of a
+temporary rebound such a rule gives away. Source:
+[[file:../../../../../doc/control-lab/basket-sizing/all-actors/results.org][archived repricing and tilt]]
+and [[file:bucknet-economy-implementation.org::*Evidence on weak holder returns][held-anchor evidence]].
+
+** Exit value, order of redemptions and keeper availability
+
+A normal partial BUCK exit uses cash and eligible credit first, preserving
+LP when the facility can fund the payout. A remaining cash redemption
+can unwind and sell proportional LP/TOKEN inventory subject to execution
+and post-exit credit conditions. It can leave a receipt balance when the
+residue cannot be paid. In-kind exit delivers TOKEN while accounting for
+the share's liability and available residual cash. Quotes at LOW marks
+and transaction minimums constrain settlement. A payout that uses spare
+credit leaves less room for later holders, and an asset sale changes
+remaining depth and marks. A contract test pins a near-zero-K failure in a
+fully paired fixture where the BUCK marked in an LP exceeds the amount
+burning it actually delivers for retirement. Reproduce the exact fixture
+with current deployment flags and thin or stale markets before concluding
+how widely the failure applies. Source:
+[[file:../../src/basket/BasketExitFacet.sol::function exitShares][exit path]],
+[[file:../../src/basket/BasketMarketOps.sol::function exitAssets][cash and in-kind execution]]
+and [[file:../../test/basket/BuckCompoundBasketExit.t.sol::function test_nearZeroKExitOfAFullyPairedBasketIsShortByTheMarkedHeldBuck][recorded low-K failure]].
+
+Keeper performance is part of the availability claim. The observer samples
+one set of routes and considers every pair. Route reads grow with the
+number of constituent/venue combinations. Pair work grows quadratically
+with constituents. The archive's clean-cycle upkeep consumed about 8M
+gas per day at four market steps and excluded gas from reported return.
+A newer implementation checkpoint reported 59% lower wheel gas after
+changing keeper scheduling and caches. Neither figure prices successful
+and unsuccessful work in the current economy. Log gas for discovery and
+failed submissions, sampling-only work, marking, swaps, flash, refresh
+and exit. Convert paid transactions to the same external currency as the
+returns using realized gas price, and attribute rewards and costs to the
+holder, basket or keeper as applicable. Test absence and recovery after
+an observation gap. Sources:
+[[file:../../../../../doc/BASKET-MACHINE-RESULTS.org::*Gas][archive gas]],
+[[file:bucknet-economy-implementation.org::half the keeper transactions, 59% less wheel gas][updated checkpoint]]
+and [[file:../../alberta_buck/sim/basket_wheel_agent.py][world keeper]].
+
+* Existing agents and the demand for cheap BUCK
+
+Debtors pledge assets, draw credit and can sell BUCK for USDC. A sale
+can depress the BUCK exchange rate. Issued principal, net sell flow,
+and an increase in the BUCK cost of the commodity mandate are three
+different measurements. In the canonical configuration, six debtor and
+six saver arrivals per year are base rates. Investor arrivals, spending,
+credit use and price-sensitive entry determine the realized balance of
+flows. Thirty base investor arrivals per year is the existing policy's
+central calibration; six is a useful low-demand stress setting.
+
+Two sources of countervailing demand already operate. Households with
+liabilities and spare cash can purchase BUCK to retire principal when the
+discount covers their threshold, fees and impact. The default individual
+threshold spans 0.5–3%. Households also build BUCK working balances for
+future spending. Their spending share increases with adoption, and the
+working balance rises when BUCK is cheap, subject to a cap. Thin liquidity,
+cash needs and limited disposable income can prevent both responses.
+
+Use these mechanisms before introducing another agent. An employer with a
+contractual BUCK payroll would add a different cash-flow obligation with a
+known amount and settlement date. Household working cash approximates
+advance purchasing demand. It does not reproduce an employer paying a
+worker who then spends the received BUCK. A separate payroll agent is worth
+investigating if the response to scheduled obligations becomes the question
+or if observed bill and retirement purchases cannot explain the imbalance.
+
+Judge investor performance first in cumulative BUCK per opening share and
+BUCK proceeds versus basis for closed receipts. Also report drawdown,
+time to redeem, cash versus in-kind payouts, and remaining-holder equity.
+Use USDC as a second numeraire. Its return also depends on the change in
+the BUCK/USDC bid. These worlds have no independent M2 series or rule that
+fixes BUCK against M2. A BUCK gain therefore does not imply any particular
+USDC or purchasing-power return.
+
+[[file:../../alberta_buck/sim/experiments/economy.toml][Household population and funding calibration]] ·
+[[file:../../alberta_buck/sim/household_policy.py][Discount retirement and working-money rules]] ·
+[[file:../../core/js/src/agents/household-policy.js][JavaScript policy]]
+
+* Five-year evidence and the November 24 experiment
+
+All eight quiet-flow active arms on datasim have recorded their final
+close. The paired maintenance arms were between 382 and 781 closes at
+the 22:42 UTC inspection. The following cumulative BUCK marks run from
+close 29 to 1824. A completed control pair is required to attribute any
+advantage to discretionary trading.
+
+| External tape | Household seed | Active, 0 extra Jubilee | Active, 2M extra Jubilee |
+|---------------+----------------+-------------------------+--------------------------|
+| Historical bridge | 41404 | -5.983% | +1.343% |
+| Historical bridge | 41405 | -5.597% | +0.387% |
+| Reverting history | 41404 | -4.244% | +2.553% |
+| Reverting history | 41405 | -4.959% | +3.480% |
+
+The 2M opening raised the active five-year return in all four comparisons
+by 5.98–8.44 percentage points. Even the best gain, 3.480%, is cumulative
+over almost five years. Strong three-phase results do not establish that
+historical prices deliver a similarly large return.
+
+The Mac's separate 1,825-close monthly-release pair has completed:
+production returned -3.133% BUCK, strict maintenance -4.483%, and the
+production world's passive benchmark +1.313%. Enabling the policy improved
+the share return by 1.350 points while a holder still lost BUCK. It uses
+the last monthly observation available under a 61-day lag, a distinct
+opening, and the full first-close-to-last-close interval.
+
+| Five-year study on datasim | Pairs | What changes, relative to which control |
+|----------------------------+-------+-----------------------------------------|
+| Quiet-flow reference | 8 | Historical/reverting prices × 0/2M Jubilee × two household seeds. Six annual investors. |
+| Balanced household reference | 8 | Same design and tapes, 30 annual investors; six annual debtors and six annual savers. |
+| Working-cash sensitivity | 4 | Historical bridge, both amounts and seeds. Three months of prospective spending versus one in the balanced reference. |
+| Discount-retirement sensitivity | 4 | Same four balanced cases. Household buyback thresholds of 0.25–1.5% versus 0.5–3%. |
+| Combined household demand | 4 | Same four historical cases, both lower discount thresholds and a three-month working balance. Together with the separate changes, this tests their interaction. |
+| Aged cash and Jubilee fund | 4 | Historical bridge, one seed, six annual investors. Cross 0/365 elapsed days with 0/2M separate contributed investment. |
+
+These are 32 pairs (64 worlds) on datasim, plus the completed Mac release-only pair. Each pair compares active upkeep to strict
+maintenance on identical external prices with matched pre-switch household
+state. The five stock campaigns have 1,825 closes including 30 warmup
+closes. They have zero forced exits; normal investor exits are still allowed.
+The aged pilot has two flat warmup closes plus 1,825 measured closes. Compare
+the two ages within that pilot to isolate the effect of elapsed time.
+
+The aged pilot moves 500,000 *existing* BUCK from the Ordinary SimLP to
+four quiet Ordinary holders before advancing the EVM clock. Their combined
+balance falls by about 9,894 BUCK over a year. Across the entire outstanding
+book, the Jubilee ledger accrues 474,906 net BUCK, of which 426,982 BUCK
+of reserve excess is invested in its receipt. With no extra contribution,
+this produces 6.75% fund ownership; with a separate 2M contribution, 27.87%.
+The unaged 2M case opens at 24.66%. Gross issuance and opening principal are
+conserved. Redistributing cash between fee-paying holders did not create the
+fees. The year elapsed on the whole existing balance sheet. No wage payments,
+market trades or daily keeper observations took place during the time advance.
+
+[[file:../../build/sim/basket-studies/anchor-5y-asof/signal-attribution.md][Five-year release-only result]] ·
+[[file:../../build/sim/aged-5y-datasim/summary.md][Audited opening balances]] ·
+[[file:../../alberta_buck/sim/studies/basket-stock-5y-balanced.toml][Balanced five-year recipe]]
+
+* Recommendations for performance and stability
+
+1. Finish the funded, matched comparisons before changing the contract.
+   Rank alternatives on investor BUCK return, matched receipt payouts and
+   drawdown. Compare active with maintenance at each funding level before
+   assigning a gain to the signal. Examine the worst seed alongside the
+   median, and compare at the last common observed commodity anchor.
+2. Determine whether realized buybacks and working-money purchases absorb
+   issuer sells. Compare accepted purchases, principal retired, working
+   balances, net market flow, depth and duration of BUCK discounts. If
+   additional demand increases ROI, check whether it came from profitable
+   TOKEN trades, improved parity or a transfer of value from another cohort.
+3. Preserve the existing braking rule as the reference. If the longer runs
+   support tuning, change one of target tilt, activation threshold or
+   release speed at a time. Check both a temporary markdown and a permanent
+   repricing with the same first leg. Count eligible gaps, changes to
+   executable plans and fills. Increasing signal frequency can add churn
+   or leave the final orders identical.
+4. Keep available-credit-first redemption and near-zero idle cash as the
+   operating baseline. Test a small buffer only against measured savings in
+   mint transactions, carry and keeper gas. Cross clustered withdrawals
+   with a lower credit limit and thinner venues. Verify paid BUCK, time to
+   proceeds, depth left for the next holder and time to recover parity.
+5. Test historical candidates on independently observed prices where
+   possible, otherwise disclose the interpolation and release assumptions.
+   Select a change using several held-out windows and household seeds.
+   A candidate needs positive incremental BUCK returns after costs and
+   acceptable downside and liquidity under persistent shocks. USDC marks
+   and realized exit proceeds remain useful independent checks.
+
+* Reproducing the comparisons
+
+** Five-year launch commands
+
+Run each command from the worktree in a prepared simulation shell, or
+prefix its target with =nix-venv-=. Each line starts or resumes a separate
+campaign. On datasim the original quiet, balanced, working-cash, discount
+and aged supervisors were launched with the corresponding Python drivers;
+the following are their equivalent Make invocations. The combined-demand
+campaign was launched with the literal Make command below. A second copy
+of the same live campaign will encounter its lock. New comparative
+settings belong in a new output directory.
+
+#+begin_src sh
+make basket-study-run BASKET_OUT=build/sim/stock-grid-5y BASKET_CONFIG=alberta_buck/sim/studies/basket-stock-5y.toml BASKET_JOBS=8
+make basket-study-run BASKET_OUT=build/sim/stock-5y-balanced BASKET_CONFIG=alberta_buck/sim/studies/basket-stock-5y-balanced.toml BASKET_JOBS=8
+make basket-study-run BASKET_OUT=build/sim/stock-5y-working-cash BASKET_CONFIG=alberta_buck/sim/studies/basket-stock-5y-working-cash.toml BASKET_JOBS=4
+make basket-study-run BASKET_OUT=build/sim/stock-5y-discount BASKET_CONFIG=alberta_buck/sim/studies/basket-stock-5y-discount.toml BASKET_JOBS=4
+make basket-study-run BASKET_OUT=build/sim/stock-5y-combined BASKET_CONFIG=alberta_buck/sim/studies/basket-stock-5y-combined.toml BASKET_JOBS=2
+make basket-study-run BASKET_STUDY=aged BASKET_OUT=build/sim/aged-5y BASKET_JOBS=4
+make basket-study-run BASKET_STUDY=anchors BASKET_ID=anchor-5y-asof BASKET_ARGS="--days 1825 --treatment carry-forward --timeout 432000" BASKET_JOBS=2
+#+end_src
+
+The stock jobs use =datasim.local:src/alberta-buck-stock-multiyear-5bb86e77=.
+The aged jobs use =datasim.local:src/alberta-buck-aged-3969952b=. Both use
+the existing Linux simulator virtualenv and the Nix GCC runtime for the
+five-year PDF preflight. The release-only job ran on the Mac. Each campaign
+manifest records code and price digests. A clean checkout of a later
+revision warrants a new campaign ID.
+
+** Reproducing the shorter comparisons
+
+The following are Make equivalents for the saved designs. On the Mac set
+=BASKET_JOBS= to at most four across all concurrent jobs. The archived suite
+requires the original control-lab files or the saved portable price pack.
+
+#+begin_src sh
+make basket-study-run BASKET_ID=stock-36d BASKET_CONFIG=alberta_buck/sim/studies/basket-stock-36d.toml
+make basket-study-run BASKET_ID=stock-730d BASKET_CONFIG=alberta_buck/sim/studies/basket-stock-730d.toml
+make basket-study-run BASKET_ID=stock-stress BASKET_CONFIG=alberta_buck/sim/studies/basket-stock-stress.toml
+make basket-study-run BASKET_STUDY=signals BASKET_ID=signal-36d BASKET_SIGNAL_PRESET=full BASKET_ARGS="--days 36"
+make basket-study-run BASKET_STUDY=braking BASKET_ID=braking-36d BASKET_SIGNAL_PRESET=first BASKET_ARGS="--days 36"
+make basket-study-run BASKET_STUDY=anchors BASKET_ID=anchor-730d BASKET_ARGS="--days 730 --timeout 86400"
+make basket-archive-pack BASKET_ARCHIVE_ROOT=../../../doc/control-lab
+make basket-study-run BASKET_STUDY=archive BASKET_ID=archive-121 BASKET_ARGS="--days 121"
+#+end_src
+
+** Inspecting work in progress
+
+On datasim, each five-year stock campaign has a companion waiter. It watches
+the existing manifest and publishes =summary.md=, including failed cells,
+on completion. For example, the balanced campaign uses the following command
+from its launch checkout. From the Mac, refresh the mirrors to read the
+result in the dashboard.
+
+#+begin_src sh
+make basket-study-wait BASKET_OUT=build/sim/stock-5y-balanced BASKET_WAIT_SECONDS=600
+#+end_src
+
+#+begin_src sh
+make basket-study-catalog basket-study-links
+make nix-venv-basket-study-list
+make nix-venv-basket-study-refresh-long
+make nix-venv-basket-study-status BASKET_OUT=build/sim/stock-5y-balanced-datasim
+make nix-venv-basket-study-marks BASKET_OUT=build/sim/stock-grid-5y-datasim BASKET_DAY=1824
+#+end_src
+
+[[file:../../README-simulations.org][Make targets, input settings and dashboard restart]] ·
+[[file:bucknet-economy-implementation.org][Implementation plan]]

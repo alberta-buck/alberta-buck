@@ -171,6 +171,38 @@ def regime_summary(groups):
     return result + ['']
 
 
+def aged_openings(root, manifest):
+    if 'aged_study' not in manifest:
+        return []
+    rows = ['## Verified opening balances', '',
+            'The fee column is the increase in net Jubilee demurrage over the elapsed interval. The governed investment of reserve excess precedes the separate contribution. Each row uses the first available arm of a fresh matched pair.', '',
+            '| Ledger age (days) | Contribution (BUCK) | Net fee accrued (BUCK) | Excess invested (BUCK) | Opening fund share | Opening fund cash (BUCK) | Passive wallet balance (BUCK) |',
+            '|---:|---:|---:|---:|---:|---:|---:|']
+    for cell in manifest['cells']:
+        for arm, ident in (cell.get('run_ids') or {}).items():
+            if not re.fullmatch(re.escape(cell['id']) + r'(?:-try[0-9]+)?-' + re.escape(arm), ident):
+                raise ValueError('unexpected aged arm ID')
+            path = root / ident / 'opening.json'
+            if not path.exists():
+                continue
+            proof = load_json(path)
+            if (proof['fingerprint'] != cell['fingerprint'] or proof['id'] != ident
+                    or proof['arm'] != arm or proof['aged_study']['age_days'] != cell['age_days']):
+                raise ValueError('aged opening differs from the manifest')
+            audit = proof['bootstrap_audit']
+            start, finish, after = audit['distributed'], audit['aged'], audit['after']
+            if finish['timestamp'] - start['timestamp'] != cell['age_days'] * 86400:
+                raise ValueError('opening clock differs from the planned age')
+            scale = 10**42  # 10**36 fractional units per raw 6-decimal BUCK
+            fee = (finish['net_demurrage_scaled'] - start['net_demurrage_scaled']) / scale
+            invested = (audit['aged_investment'] or {}).get('credited_raw', 0) / 10**6
+            fraction = int(after['jubilee_shares']) / int(after['total_shares'])
+            wallets = sum(after['passive_cash_scaled']) / scale
+            rows.append(f"| {cell['age_days']} | {cell['endowment_buck']:,} | {fee:,.2f} | {invested:,.2f} | {fraction:.2%} | {after['jubilee_cash_scaled'] / scale:,.2f} | {wallets:,.2f} |")
+            break
+    return rows + ['']
+
+
 def summary(campaign, manifest, root):
     sections, groups, good, errors = {}, {}, [], []
     for cell in manifest['cells']:
@@ -215,6 +247,7 @@ def summary(campaign, manifest, root):
            'Opening ownership uses the recorded preceding close only when its total shares and equity exactly match the pre-switch observation; otherwise it is unavailable. Receipt shares approximate TWAP equity ownership before exit costs.', '',
            'Non-Jubilee gross shares sum minted and retired other plus unattributed shares across treatment days; these are raw share units, not BUCK cash. Household gross BUCK is the confirmed cash deposit and redemption subset from run events; missing files, conflicting transactions, or in-kind redemptions are unavailable. Other non-Jubilee owners may be omitted.', '']
     out += ['The USDC share mark multiplies the BUCK share price by the sampled bid for one full-value BUCK at each endpoint. The passive TOKEN benchmark uses the active world’s venue marks in BUCK. Both require a prior close matching the pre-switch block and share price. Actual holder withdrawals can incur additional costs.', '']
+    out += aged_openings(root, manifest)
     out += regime_summary(groups)
     for regime, rows in sections.items():
         out += [f'## {regime}', '', '| Cell | Seed | Endowment BUCK | Jubilee at opening | Household at opening | Active ROI | Maintenance ROI | Δ pp | Changed plans A / M | Non-Jubilee gross shares A / M | Household gross BUCK A / M | Active passive ROI (BUCK) | Active ROI (USDC) | Maintenance ROI (USDC) |',
@@ -237,9 +270,21 @@ def write_comparison(root, name, manifest, good):
                   ('investor rate', 'investor_rate'), ('exit fraction', 'exit_fraction'),
                   ('noise σ', 'noise'), ('seed', 'seed'), ('exit day', 'exit_day'),
                   ('warmup days', 'warmup_days'), ('days', 'days')]
+    aged = 'aged_study' in manifest
+    if aged:
+        dimensions.insert(1, ('Opening ledger age (days)', 'age_days'))
+
     def coordinates(cell):
-        return {label: (str(int(cell[key])) if isinstance(cell[key], (int, float)) and float(cell[key]).is_integer() else str(cell[key]))
-                for label, key in dimensions}
+        values = {}
+        for label, key in dimensions:
+            value = cell[key]
+            if aged and key == 'regime':
+                value = 'history'
+            if isinstance(value, (int, float)) and float(value).is_integer():
+                value = int(value)
+            values[label] = str(value)
+        return values
+
     combinations = [tuple(coordinates(c).values()) for c in manifest['cells']]
     if len(set(combinations)) != len(combinations):
         dimensions.append(('cell', 'id'))

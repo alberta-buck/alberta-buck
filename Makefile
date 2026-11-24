@@ -1048,7 +1048,7 @@ dashboard-compare-check:
 # Real-EVM basket research, separate from the household acceptance campaign.
 # Prepare artifacts once with sim-build and core-build-py. Re-running a study
 # reuses valid captures. Give changed settings or code a new BASKET_ID.
-BASKET_STUDIES          = stock signals braking anchors archive
+BASKET_STUDIES          = stock aged signals braking anchors archive
 BASKET_STUDY           ?= stock
 BASKET_ID              ?= $(BASKET_STUDY)
 BASKET_OUT             ?= build/sim/basket-studies/$(BASKET_ID)
@@ -1068,6 +1068,7 @@ BASKET_REMOTE_CAMPAIGN ?= stock-grid-36d
 BASKET_SYNC_ARGS       ?=
 
 BASKET_DRIVER_stock   = scripts/run-basket-stock-grid.py "$(BASKET_OUT)" --config "$(BASKET_CONFIG)" --runs "$(BASKET_RUNS)"
+BASKET_DRIVER_aged    = scripts/run-basket-aged-study.py "$(BASKET_OUT)" --runs "$(BASKET_RUNS)"
 BASKET_DRIVER_signals = scripts/run-basket-signal-grid.py --output "$(BASKET_OUT)" --preset "$(BASKET_SIGNAL_PRESET)"
 BASKET_DRIVER_braking = scripts/run-basket-braking-grid.py --output "$(BASKET_OUT)" --preset "$(BASKET_SIGNAL_PRESET)"
 BASKET_DRIVER_anchors = scripts/run-basket-anchor-grid.py --output "$(BASKET_OUT)"
@@ -1079,6 +1080,7 @@ basket-study-catalog:
 	@printf '%s\n' \
 	  'Basket research suites (set BASKET_STUDY):' \
 	  '  stock    Jubilee opening allocation and household flows; 96 pairs by default, with two-year, five-year, stress and smoke TOMLs' \
+	  '  aged     5-year historical pairs at 0/365 days of fee accrual and 0/2M contributed Jubilee capital' \
 	  '  signals  velocity, excursion and product sizing against production and maintenance' \
 	  '  braking  production outward braking scale and release rate' \
 	  '  anchors  production and maintenance on three tapes from the same monthly anchors, 730 days' \
@@ -1095,6 +1097,8 @@ basket-study-catalog:
 	  '  basket-study-marks         compare stock arms at the same close (BASKET_DAY=365)' \
 	  '  basket-study-import        add selected trace captures to the dashboard as partial records' \
 	  '  basket-study-dashboard     serve BASKET_RUNS on loopback, read-only (DASHBOARD_PORT=8890)' \
+	  '  basket-study-wait          wait for the named local campaign and publish its final report' \
+	  '  basket-study-refresh-long  update all November two-year and five-year datasim comparisons once' \
 	  '  basket-study-sync          pull a datasim stock study into BASKET_OUT and BASKET_RUNS' \
 	  '  basket-archive-pack        prepare the transferable archive price pack from BASKET_ARCHIVE_ROOT' \
 	  'Campaigns use build/sim/basket-studies/<BASKET_ID> by default. Repeat the ID and settings to resume.' \
@@ -1125,7 +1129,7 @@ basket-study-marks:
 	python scripts/basket-study-progress-returns.py "$(BASKET_OUT)" --runs "$(BASKET_RUNS)" --day $(BASKET_DAY) --output "$(BASKET_OUT)/returns-day-$(BASKET_DAY).md"
 
 basket-study-report: basket-study-kind
-ifeq ($(BASKET_STUDY),stock)
+ifneq ($(filter $(BASKET_STUDY),stock aged),)
 	python scripts/summarize-basket-stock-grid.py "$(BASKET_OUT)" --runs "$(BASKET_RUNS)" \
 	  --output "$(BASKET_OUT)/summary.md" $(BASKET_REPORT_ARGS)
 else
@@ -1137,7 +1141,7 @@ endif
 endif
 
 basket-study-import: basket-study-kind
-	@test "$(BASKET_STUDY)" != stock || { echo 'Stock runs already write dashboard records' >&2; exit 2; }
+	@test -z "$(filter $(BASKET_STUDY),stock aged)" || { echo 'Stock runs already write dashboard records' >&2; exit 2; }
 	python scripts/import-basket-research.py --campaign "$(BASKET_OUT)" --runs "$(BASKET_RUNS)" $(BASKET_IMPORT_ARGS)
 
 .PHONY: basket-study-multiyear basket-study-links
@@ -1152,15 +1156,37 @@ basket-study-links:
 	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-grid-36d-datasim-stock' \
 	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-grid-730d-datasim-stock' \
 	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-stress-stock' \
-	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-grid-5y-datasim-stock'
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-grid-5y-datasim-stock' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=aged-5y-datasim-stock' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-5y-balanced-datasim-stock' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-5y-working-cash-datasim-stock' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-5y-discount-datasim-stock' \
+	  'http://127.0.0.1:$(DASHBOARD_PORT)/?tab=compare&comparison=stock-5y-combined-datasim-stock'
 
 basket-study-dashboard:
 	python -m alberta_buck.sim.dashboard --host 127.0.0.1 --port $(DASHBOARD_PORT) --runs "$(BASKET_RUNS)" --no-live
 
 basket-study-sync: basket-study-kind
-	@test "$(BASKET_STUDY)" = stock || { echo 'basket-study-sync pulls stock studies' >&2; exit 2; }
+	@test -n "$(filter $(BASKET_STUDY),stock aged)" || { echo 'basket-study-sync pulls stock studies' >&2; exit 2; }
 	python scripts/sync-basket-stock-study.py "$(BASKET_OUT)" --remote "$(BASKET_REMOTE)" \
 	  --remote-root "$(BASKET_REMOTE_ROOT)" --campaign "$(BASKET_REMOTE_CAMPAIGN)" --runs "$(BASKET_RUNS)" $(BASKET_SYNC_ARGS)
+
+BASKET_WAIT_SECONDS ?= 600
+.PHONY: basket-study-wait
+basket-study-wait:
+	python scripts/wait-basket-study.py "$(BASKET_OUT)" --runs "$(BASKET_RUNS)" --interval $(BASKET_WAIT_SECONDS)
+
+# One-shot refresh of the launched November campaigns, preserving the frozen origins.
+BASKET_LONG_ROOT ?= src/alberta-buck-stock-multiyear-5bb86e77
+BASKET_AGED_ROOT ?= src/alberta-buck-aged-3969952b
+BASKET_LONG_CAMPAIGNS ?= stock-grid-730d stock-grid-5y stock-5y-balanced stock-5y-working-cash stock-5y-discount stock-5y-combined aged-5y
+.PHONY: basket-study-refresh-long
+basket-study-refresh-long:
+	@set -e; for campaign in $(BASKET_LONG_CAMPAIGNS); do \
+	  origin="$(BASKET_LONG_ROOT)"; if test "$$campaign" = aged-5y; then origin="$(BASKET_AGED_ROOT)"; fi; \
+	  $(MAKE) basket-study-sync BASKET_REMOTE_ROOT="$$origin" BASKET_REMOTE_CAMPAIGN="$$campaign" \
+	    BASKET_OUT="build/sim/$$campaign-datasim" BASKET_SYNC_ARGS=; \
+	done
 
 basket-archive-pack:
 	python scripts/run-basket-archive-grid.py --archive-root "$(BASKET_ARCHIVE_ROOT)" --prepare-pack "$(BASKET_ARCHIVE_PACK)"

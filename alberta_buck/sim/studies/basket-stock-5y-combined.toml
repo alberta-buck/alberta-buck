@@ -1,0 +1,19 @@
+# Five years on the existing observed monthly anchors and their simulated daily bridge.
+# The second treatment adds the simulator's 30-day reversion. Zero extra noise
+# keeps each regime's external prices identical across household seeds and balances.
+[study]
+experiment = "../experiments/economy.toml"
+design = "full"
+days = 1825
+warmup_days = 30
+regime = ["history"]
+noise = [0.0]
+endowment = [0, 2000000]
+opening_cash = 0
+investor_rate = [30.0]
+exit_fraction = [0.0]
+seed = [41404, 41405]
+
+[settings.agents.HouseholdPopulationAgent]
+money_months = 3.0
+retire_disc = [0.0025, 0.015]
