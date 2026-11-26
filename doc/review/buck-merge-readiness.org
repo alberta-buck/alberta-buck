@@ -224,9 +224,10 @@ realized receipt returns, drawdown, parity and gross execution costs.
   decisions were below eligibility and the trace matched 14 pool
   swaps per arm.
 - [ ] Reproduce the historical no-ask and changed-plan decisions. Start
-  with seed 41404, zero extra Jubilee and days 845–847, then check the
-  CNST gap around day 342 with both seeds. Reuse the frozen tape, opening
-  state and warmup. At each wheel response trace held and target exposure,
+  with the CNST gap around day 342, where the tape shows a clear
+  reversal, then use the NRGC window around days 845–847 to check the
+  later change in direction. Reuse the frozen tape, opening state and
+  warmup. At each wheel response trace held and target exposure,
   declared-weight leash, urgency, observation freshness, route
   readiness and spread, braking or closing, pair ask, maintenance plan,
   final sizing, and any confirmed swap or refusal. Attribute each large
@@ -257,7 +258,8 @@ realized receipt returns, drawdown, parity and gross execution costs.
   reversals, vary patience alone at each opening size before changing
   the directional model. Include a sustained relative trend as a
   control for premature trades and compare net returns against
-  maintenance on a separate tape.
+  maintenance on a separate tape. Use positive patience values.
+  A zero setting switches eligibility to the fixed allocation band.
 
 [[file:buck-basket-findings.org::*When the quiet-flow runs rebalanced (November 26 UTC)][Observed gaps and replay windows]]
 
