@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { departures, divergence, flatten, headline, merge, rows, selection, settingsDiff, signed, specs } from "../dashboard/src/compare.js";
+import { departures, divergence, flatten, headline, merge, rows, selection, settingsDiff, signed, specs, treatmentText } from "../dashboard/src/compare.js";
 
 const index = {
   name: "leak", axes: [
@@ -39,6 +39,17 @@ test("the settings two runs differ in come from their manifests", () => {
   assert.deepEqual(settingsDiff(other, base), [{ key: "deploy.leak_days", a: "0", b: "365" }]);
   assert.deepEqual(settingsDiff(base, base), [], "where it was read from is not a setting");
   assert.equal(flatten({ a: { b: [1, 2] } })["a.b"], "[1,2]");
+});
+
+test("recorded upkeep treatments and runtimes show up in direct comparisons", () => {
+  const active = { engine: "pyrevm", settings: { arm: "active", warmup_days: 2 } };
+  const maintenance = { engine: "pyrevm", settings: { arm: "maintenance", warmup_days: 2 } };
+  assert.deepEqual(settingsDiff(active, maintenance), [{ key: "upkeep", a: "\"active\"", b: "\"maintenance\"" }]);
+  assert.deepEqual(settingsDiff({ engine: "webevm" }, { engine: "pyrevm" }),
+    [{ key: "runtime", a: "\"webevm\"", b: "\"pyrevm\"" }]);
+  assert.equal(treatmentText("maintenance", 2), "Strict maintenance from day 2");
+  assert.equal(treatmentText("active", 0), "Active upkeep from day 0");
+  assert.equal(treatmentText("active", undefined), null);
 });
 
 test("divergence: the first day two runs part, on the watched observables and anywhere", () => {

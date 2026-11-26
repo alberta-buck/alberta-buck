@@ -46,6 +46,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 from alberta_buck.sim import runrecord
+from alberta_buck.sim.workbench import LIVE_RECIPES
 
 STATIC                          = Path(__file__).resolve().parents[2] / "core" / "js" / "dashboard"
 EXPERIMENTS                     = Path(__file__).resolve().parent / "experiments"
@@ -64,6 +65,8 @@ class LiveSessions:
         self.lock = threading.Lock()
 
     def names(self) -> list[str]:
+        if self.experiments == EXPERIMENTS:
+            return list(LIVE_RECIPES)
         return sorted(p.stem for p in self.experiments.glob("*.toml"))
 
     def start(self, body: dict) -> dict:

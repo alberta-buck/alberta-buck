@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -28,7 +29,7 @@ def replay_inputs(days, seed):
     scenario = experiment.build(exp)
     prices = scenario.prices.series
     dp = experiment.deploy_params(exp)
-    return scenario, {
+    spec = {
         "days": scenario.days,
         "opening_fields": OPENING_FIELDS,
         "sets": {"scenario.seed": scenario.seed, "scenario.ticks_per_day": scenario.ticks_per_day,
@@ -47,6 +48,8 @@ def replay_inputs(days, seed):
             "series": {"history": [series[:scenario.days + 1] for series in prices]},
         },
     }
+    spec["price_digest"] = hashlib.sha256(json.dumps(spec["prices"], sort_keys=True).encode()).hexdigest()
+    return scenario, spec
 
 
 def python_opening(deployment):
@@ -92,10 +95,14 @@ def capture_first_deposit(deployment, evidence):
 def python_boot_actions(deployment, journal):
     from web3.logs import DISCARD
 
-    deposits, wheel = [], []
+    deposits, wheel, samples = [], [], []
     tokens = {contract.address: i for i, contract in enumerate(deployment.tokens)}
+    signals = deployment.signals
+    decoders = [signals.events.Observed(), deployment.kctrl.events.BuckKUpdated(),
+                deployment.basket.events.WheelWork(), deployment.basket.events.BasketArbitrage(),
+                deployment.wheel.events.JubileeAttempted()]
     for entry in journal:
-        if entry["fn"] not in ("depositToken", "tick"):
+        if entry["fn"] not in ("depositToken", "tick", "observe"):
             continue
         receipt = deployment.w3.eth.get_transaction_receipt(entry["tx"])
         time = deployment.w3.eth.get_block(entry["block"])["timestamp"]
@@ -106,10 +113,26 @@ def python_boot_actions(deployment, journal):
                 deposits.append({"token": tokens[args["token"]], "amount": str(args["tokenAmount"]),
                                  "basis": str(holding[1]), "credit_mark": str(args["buckMinted"]),
                                  "timestamp": time})
-        else:
+        elif entry["fn"] == "tick":
+            events = sorted((event for decoder in decoders for event in decoder.process_receipt(receipt, errors=DISCARD)),
+                            key=lambda event: event["logIndex"])
             for event in deployment.wheel.events.Ticked().process_receipt(receipt, errors=DISCARD):
-                wheel.append({"work": str(event["args"]["work"]), "timestamp": time})
-    return {"deposits": deposits, "wheel": wheel}
+                wheel.append({"work": str(event["args"]["work"]), "timestamp": time,
+                              "events": [boot_event(e) for e in events]})
+        else:
+            samples.extend(boot_event(e) for e in signals.events.Observed().process_receipt(receipt, errors=DISCARD))
+    source = deployment.wheel.functions.sampleSource().call()
+    origins = {signals.address: "price book"}
+    if deployment.monetary_policy is not None:
+        origins[deployment.monetary_policy.address] = "desk policy"
+    return {"deposits": deposits, "wheel": wheel, "samples": samples,
+            "sample_source": origins.get(source, "unknown")}
+
+
+def boot_event(event):
+    return {"name": event["event"], "args": {k: str(v) for k, v in event["args"].items()
+                                              if k in ("at", "raw", "newBuckK", "kind", "i", "job", "work",
+                                                       "route", "direction", "amount")}}
 
 
 def python_frame(frame):
@@ -158,11 +181,13 @@ def compare(python, javascript):
     return status
 
 
-def compare_boot_actions(python, javascript):
+def compare_boot_actions(python, javascript, phases=("deposits", "wheel")):
     status = 0
-    for phase in ("deposits", "wheel"):
+    for phase in phases:
         left, right = python[phase], javascript[phase]
         for i, (a, b) in enumerate(zip(left, right), start=1):
+            if phase == "wheel":
+                a, b = wheel_shape(a), wheel_shape(b)
             difference = first_difference({k: v for k, v in a.items() if k != "timestamp"},
                                           {k: v for k, v in b.items() if k != "timestamp"})
             if difference is not None:
@@ -177,28 +202,51 @@ def compare_boot_actions(python, javascript):
     return status
 
 
+def wheel_shape(turn):
+    fields = ("kind", "i", "job", "work", "route", "direction")
+    return {"work": turn["work"], "jobs": [
+        (row["name"], {key: row["args"][key] for key in fields if key in row["args"]})
+        for row in turn["events"]]}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=2)
     parser.add_argument("--seed", type=int, default=41404)
     parser.add_argument("--output", type=Path, help="optional JSON evidence with opening actions and close frames")
+    parser.add_argument("--check-opening-wheel", action="store_true",
+                        help="require matching bootstrap wheel work, separate from exact ledger parity")
+    parser.add_argument("--records", type=Path, help="write dashboard records for both runtimes")
+    parser.add_argument("--record-prefix", default="economy-parity", help="prefix for the two run IDs")
     args = parser.parse_args(argv)
     if not 1 <= args.days <= 30:
         parser.error("--days must be between 1 and 30")
     if not 1 <= args.seed <= 2**53 - 1:
         parser.error("--seed must be a positive JavaScript-safe integer")
+    if args.records is not None and not args.record_prefix.replace("-", "").isalnum():
+        parser.error("--record-prefix must contain letters, digits or hyphens")
 
     from alberta_buck.sim.loop import run
     from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
     from alberta_buck.sim.chain import Journal
 
     scenario, spec = replay_inputs(args.days, args.seed)
+    recorder = None
+    js_id = f"{args.record_prefix}-webevm"
+    if args.records is not None:
+        from alberta_buck.sim.runrecord import RunRecorder, verified_complete
+        py_id = f"{args.record_prefix}-pyrevm"
+        if not verified_complete(args.records, py_id, scenario, spec["price_digest"], "pyrevm"):
+            recorder = RunRecorder(args.records, "Economy · pyrevm", run_id=py_id)
+        spec["record"] = not verified_complete(args.records, js_id, scenario, spec["price_digest"], "webevm")
     python = {"opening": None, "frames": [], "first_deposit_mark": {}}
 
     with tempfile.TemporaryDirectory(prefix="buck-savings-parity-") as directory:
         journal = Journal(Path(directory) / "pyrevm.jsonl")
 
         def capture_opening(deployment):
+            if recorder is not None:
+                recorder.manifest["source"] = {"driver": "loop.run", "price_digest": spec["price_digest"]}
             python["opening"] = python_opening(deployment)
             spec["clock"]["first_tick_timestamp"] = deployment.household_epoch
             actions = python_boot_actions(deployment, Journal.load(journal.path))
@@ -210,17 +258,44 @@ def main(argv=None):
             with PyrevmAnvil() as backend:
                 spec["clock"] = {"genesis_timestamp": backend.ts, "block_seconds": backend.block_seconds}
                 run(scenario, backend, verbose=False, on_boot=capture_opening, journal=journal,
+                    recorder=recorder,
                     on_bootstrap=lambda d: capture_first_deposit(d, python["first_deposit_mark"]),
                     on_frame=lambda frame: python["frames"].append(python_frame(frame)))
+        except BaseException as exc:
+            if recorder is not None and recorder.manifest:
+                recorder.close("failed", error=exc)
+            raise
         finally:
             journal.close()
         output = Path(directory) / "webevm.json"
-        subprocess.run(["node", str(ROOT / "core/js/bin/savings-parity.mjs"), str(output)],
-                       input=json.dumps(spec), text=True, check=True, cwd=ROOT)
-        javascript = json.loads(output.read_text())
+        try:
+            subprocess.run(["node", str(ROOT / "core/js/bin/savings-parity.mjs"), str(output)],
+                           input=json.dumps(spec), text=True, check=True, cwd=ROOT)
+            javascript = json.loads(output.read_text())
+            if spec.get("record"):
+                from alberta_buck.sim.savings_records import write_record
+                write_record(args.records, js_id, scenario, spec, javascript)
+                del javascript["record_frames"]
+                del javascript["record_meta"]
+        except BaseException as exc:
+            if recorder is not None:
+                recorder.close("failed", error=exc)
+            raise
+    if recorder is not None:
+        recorder.close()
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps({"inputs": spec, "pyrevm": python, "webevm": javascript}, indent=2) + "\n")
+    if args.check_opening_wheel:
+        left, right = python["boot_actions"], javascript["boot_actions"]
+        if any(actions["sample_source"] != "desk policy" or not actions["samples"]
+               or not any(int(row["work"]) for row in actions["wheel"]) for actions in (left, right)):
+            print("Opening wheel must do work after the canonical desk publishes an initial sample.")
+            return 1
+        status = compare_boot_actions(left, right, phases=("wheel",))
+        if not status:
+            print(f"Opening wheel work agrees across {len(left['wheel'])} transactions.")
+        return status
     status = compare_boot_actions(python["boot_actions"], javascript["boot_actions"])
     for runtime, result in (("pyrevm", python), ("WebEVM", javascript)):
         mark = result["first_deposit_mark"]

@@ -201,7 +201,7 @@ export class SavingsWorld {
     const w = this.world = await buildEquilibriumWorld(this.session, this.artifacts, {
       identity: this.identity, urArtifact: this.urArtifact, rng: this.rng, basket: "machine",
       feedSeed: this.seed, bootstrapDeposits: this.bootstrapDeposits, beforeFirstDeposit,
-      turnSeconds: Math.floor(DAY / this.ticksPerDay), ...deployment, ...given });
+      turnSeconds: Math.floor(DAY / this.ticksPerDay), withDesk: true, ...deployment, ...given });
     if (firstTickTimestamp !== undefined) w.householdEpoch = firstTickTimestamp;
     const T = this.ticksPerDay;
     const arb = new ParityArb({ everyTick: true });

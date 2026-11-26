@@ -52,6 +52,8 @@ export const NEEDED = [
   "PairSignals",
   "PairRebalancePolicy",
   "BasketReference",
+  "BasketDesk",
+  "OuterBandDeskPolicy",
   "BasketMachineWheel",
 ];
 

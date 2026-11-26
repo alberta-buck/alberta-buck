@@ -88,7 +88,7 @@ def install_treatment(d, arm):
                    active.parityGain().call(), active.parityGainDear().call())
     facets = {}
     for name, contract in FACETS.items():
-        abi, code = load_artifact(contract, libraries=d.net_basket.libraries)
+        abi, code = load_artifact(contract, libraries=d.upkeep_libraries)
         facets[name] = d.chain.deploy(contract, *constructor, abi=abi, bytecode=code)
     chosen = facets[arm]
     receipt = d.chain.send(d.basket.functions.setEquityWheel(chosen.address),

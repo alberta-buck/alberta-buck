@@ -571,6 +571,30 @@ targets then use that build on each launch.
 | =anchors= | Production and maintenance with pinned interpolation, straight interpolation and carry-forward from the same monthly anchors | Six 730-day runs; the manifest records the price availability convention |
 | =archive= | Production and maintenance on normalized daily closes from the archived three-TOKEN lab | All distinct tapes in the prepared pack, 121 closes each |
 
+** Supported dashboard runs
+
+The workbench uses the existing run directory and comparison format.
+The economy recipe writes a small matched-input Python and WebEVM
+replay. The lifecycle recipe writes a Python run. The stock recipe
+writes one matched historical pair with active upkeep and strict
+maintenance after two warmup closes.
+
+#+begin_src sh
+make nix-venv-sim-workbench SIM_WORKBENCH_ARGS=--list
+make nix-venv-sim-workbench SIM_WORKBENCH_ARGS=economy
+make nix-venv-sim-workbench SIM_WORKBENCH_ARGS=economy-lifecycle
+make nix-venv-sim-workbench SIM_WORKBENCH_ARGS=basket-stock
+make nix-venv-basket-study-dashboard
+#+end_src
+
+The launcher prints the dashboard comparison or run ID. Repeat the
+same command to reuse completed records and retry incomplete work.
+Use =--id= for a new comparison and =--runs= to use a different record
+directory. Serve that same directory with =BASKET_RUNS=. The Compare
+tab shows the upkeep arm and start day for the stock runs. The economy
+comparison preserves observed runtime differences and writes the strict
+parity evidence to =build/sim/workbench/<id>/parity.json=.
+
 ** Stock matrix and dashboard
 
 #+begin_src sh

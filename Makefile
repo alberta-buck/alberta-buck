@@ -24,6 +24,7 @@ help:
 	  '  make nix-venv-core-net-math-test   # canonical uint256 math: Solidity, Rust, Python and JS' \
 	  '  make nix-core-equilibrium-bootstrap-test  # canonical JS bootstrap, portfolios and guarded market' \
 	  '  make nix-venv-savings-parity         # compare a small pyrevm / WebEVM Savings world' \
+	  '  make nix-venv-sim-workbench         # launch dashboard recipes with SIM_WORKBENCH_ARGS' \
 	  '  make nix-venv-economy-bootstrap-test  # canonical Python + JS deployment and pool bootstrap' \
 	  '  make nix-venv-economy-accounting-test # bootstrap, household phases, portfolios and JSON/PDF' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
@@ -253,6 +254,7 @@ test-smoke: sim-build core-build-py
 	SIM_RUNS=build/test/smoke-runs python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy-lifecycle.toml \
 		--backend pyrevm --days 30 --out build/test/smoke-lifecycle.json
 	cd core/js && node bin/eqsim.mjs --days 30
+	$(MAKE) savings-parity SAVINGS_PARITY_ARGS="--days 1 --check-opening-wheel"
 	$(MAKE) compare-null
 WORLD_DAYS	?= 1825
 WORLDS		?=
@@ -2186,6 +2188,12 @@ SAVINGS_PARITY_ARGS ?=
 savings-parity: sim-build core-build-py core-build-wasm
 	$(MAKE) core-js-check-worktree
 	python -m alberta_buck.sim.savings_parity $(SAVINGS_PARITY_ARGS)
+
+SIM_WORKBENCH_ARGS ?= --list
+.PHONY: sim-workbench
+sim-workbench: sim-build core-build-py core-build-wasm
+	$(MAKE) core-js-check-worktree
+	python -m alberta_buck.sim.workbench $(SIM_WORKBENCH_ARGS)
 
 # Browser-only canonical Buck acceptance. The browser check owns its temporary
 # static server; the Python savings backend and five-year economy are separate.

@@ -7,10 +7,11 @@
 The paired replay shares resolved controller settings, both pool depth
 inputs and the first-tick timestamp. The first LABR basis difference
 is reproduced by each runtime's low mark at adjacent V3 ticks from
-opposite token order. The next divergence to trace is the boot wheel's
-first job sequence and sample source. The [[file:buck-merge-readiness.org::*Python/WebEVM alignment checkpoint][merge-readiness checkpoint]]
-also records which older knobs still have distinct coverage and the
-retired director selector removed from the current launch path.
+opposite token order. The opening wheel now runs the same job sequence
+using the funded desk. The dashboard workbench can compare the economy
+replay and launch lifecycle and stock cases. Continue with the first
+daily market forcing and actor order divergence. See the
+[[file:buck-merge-readiness.org::*Opening wheel and dashboard workbench][merge-readiness checkpoint]] for the regression and launch commands.
 
 * November 26 restart: merge gates and sparse pair signals
 

@@ -128,6 +128,7 @@ function isqrt(n) {
  * @param opts.targetBuckLp BUCK/USDC pool depth, 6-dec (defaults to targetBuck)
  * @param opts.turnSeconds scheduled time between wheel turns for the controller horizon
  * @param opts.controllerHorizon explicit cap on the controller integrator step
+ * @param opts.withDesk use the household economy's funded desk and opening
  * @param opts.bootstrapDeposits ordered [{token, amount}] seed deposits in TOKEN base units
  * @param opts.beforeFirstDeposit optional read-only callback for a bootstrap diagnostic
  * @param opts.feedSeed / opts.stepBp / opts.feedDays  the reference walks
@@ -381,7 +382,6 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     await session.send(basket, "setEquityParams", [params], { tag: "eq:zeroWalletReserve" });
   }
   await session.send(basket, "setWheel", [wheel.address], { tag: "eq:setWheel" });
-  await session.send(wheel, "setSample", [parity.address], { tag: "eq:wheel.setSample" });
   if (opts.controllerHorizon !== undefined || opts.turnSeconds !== undefined) {
     const dt = Number(await session.call(kctrl, "dT"));
     const horizon = opts.controllerHorizon ?? BigInt(Math.max(2 * MACHINE.interval, dt, opts.turnSeconds));
@@ -399,10 +399,51 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     deferredBurnCap: targetBuck / 100n, retirementMinimum: 1_000_000n,
     retirementCap: 1_000_000n * 1_000_000n };      // burn the basket's idle BUCK, $1M a job (owner, 2026-11-21)
   await session.send(wheel, "setJubilee", [fund.address, jubileePolicy], { tag: "eq:wheel.setJubilee" });
+  let desk = null, sample = parity;
+  if (opts.withDesk) {
+    desk = await session.deploy(linkArtifact(artifacts("BasketDesk"), {
+      "src/basket/BasketJubileeMath.sol:BasketJubileeMath": world.net.basketValuationLibrary.address,
+      "src/basket/BasketMarketOps.sol:BasketMarketOps": world.net.basketMarketLibrary.address,
+    }), [buck.address, kctrl.address, basket.address, me], { name: "BasketDesk", gas });
+    await bind(desk.address, false, "eq:bind:desk");
+    await session.send(desk, "enableNetAccounting", [], { tag: "eq:desk.net" });
+    await session.send(desk, "openCredit", [credit.address, MACHINE.creditFace], { tag: "eq:desk.credit" });
+    await session.send(desk, "mirrorConstituents", [], { tag: "eq:desk.mirror" });
+    const capital = 400_000n * 1_000_000n;
+    for (const [i, t] of tokens.entries()) {
+      const amount = capital * 10n ** BigInt(t.dec) / t.p0;
+      await session.send(t.erc20, "mint", [me, amount], { tag: "eq:desk.fund" });
+      await session.send(t.erc20, "approve", [desk.address, amount], { tag: "eq:desk.approve" });
+      await session.send(desk, "capitalizeMonetary", [BigInt(i), amount], { tag: "eq:desk.capitalize" });
+    }
+    await session.send(desk, "setOpsParams", [[40, 1000, 1000, true]], { tag: "eq:desk.ops" });
+    const budget = capital * BigInt(tokens.length);
+    await session.send(desk, "setRiskBudget", [budget, budget / 4n, 500n], { tag: "eq:desk.risk" });
+    sample = await session.deploy(artifacts("OuterBandDeskPolicy"),
+      [parity.address, 300, 200, 2500, 40, 30], { name: "OuterBandDeskPolicy", gas });
+    await session.send(desk, "setVenue", [machineVenue.address], { tag: "eq:desk.venue" });
+    await session.send(desk, "setMonetaryDirector", [sample.address], { tag: "eq:desk.policy" });
+    await session.send(desk, "setExecutionGuard", [sample.address], { tag: "eq:desk.guard" });
+    await session.send(wheel, "setOps", [desk.address, sample.address], { tag: "eq:wheel.setOps" });
+  }
+  await session.send(wheel, "setSample", [sample.address], { tag: "eq:wheel.setSample" });
+  if (desk) {
+    await session.send(sample, "observe", [], { tag: "eq:bootstrap-sample" });
+    if (!await session.call(parity, "fresh")) throw new Error("the wheel has no opening sample");
+  }
   world.net.wheel = wheel;
   world.net.upkeep = upkeep;
   world.net.venue = machineVenue;
-  parts = { observer, policy, parity, upkeep, wheel };
+  parts = { observer, policy, parity, upkeep, wheel, desk, sample };
+  const configureArb = async () => {
+    await session.send(wheel, "setArb", [poolUB.address, basket.address,
+      opts.arbCapBp ?? (desk ? 200 : 500), opts.arbMinEdgeBp ?? (desk ? 1 : 0)], { tag: "eq:arb.configure" });
+    if (opts.arbFlash ?? true) await session.send(wheel, "setArbFlash", [true], { tag: "eq:arb.flash" });
+    for (const [i, t] of tokens.entries()) await session.send(wheel, "setTriangle",
+      [BigInt(i), [t.erc20.address, t.poolBuck.address, t.poolUsdc.address, BigInt(i)]],
+      { tag: `eq:arb.register:${t.sym}` });
+  };
+  if (desk && opts.wheelArb !== false) await configureArb();
   // A keeper pays up to the block for a tick (recommendation 77): a tick near K = 0 needs 13.9M gas,
   // and a 12M limit stopped five-year worlds in that regime instead of recording it.
   const TICK_GAS = 25_000_000n;
@@ -478,24 +519,28 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     await session.send(basket, "depositToken", [t.erc20.address, amount, 0n],
                        { tag: `eq:bootstrap-deposit:${t.sym}`, gas: 3_000_000n });
   }
-  for (let turn = 0; turn < 8; turn++) {
-    await advanceTime(world, MACHINE.interval + 1);
+  if (desk) {
+    const sampled = await session.call(sample, "lastSampleAt");
+    const now = (await session.client.getBlock()).timestamp;
+    const due = sampled + BigInt(MACHINE.interval);
+    if (due > now) await advanceTime(world, due - now);
+  }
+  for (let turn = 0, turns = desk ? 2 : 8; turn < turns; turn++) {
+    if (!desk) await advanceTime(world, MACHINE.interval + 1);
     await world.turnWheel({ tag: `eq:bootstrap-wheel:${turn}` });
+    if (desk) {
+      const didWork = world.lastWheelReceipts.some((receipt) =>
+        parseEventLogs({ abi: wheel.abi, logs: receipt.logs, eventName: "Ticked" }).some(({ args }) => args.work > 0n));
+      if (!didWork) break;
+      continue;
+    }
     const placed = await Promise.all(tokens.map((_, i) =>
       session.call(basket, "liquidityOf", [BigInt(i)])));
     if (placed.every((l) => l > 0n)) break;
     if (turn === 7) throw new Error("the wheel did not pair the bootstrap deposits");
   }
   if (opts.wheelArb !== false) {
-    // A cycle is at most 5% of its first pool's reserve, the machine wheel's limit (owner, 2026-11-20).
-    await session.send(wheel, "setArb", [poolUB.address, basket.address,
-      opts.arbCapBp ?? 500, opts.arbMinEdgeBp ?? 0], { tag: "eq:arb.configure" });
-    // Flash arbitrage (owner, 2026-11-20): each cycle's BUCK leg borrowed fresh from the basket's line.
-    // On by default (owner, 2026-11-21); opts.arbFlash false funds the legs from the wallet.
-    if (opts.arbFlash ?? true) await session.send(wheel, "setArbFlash", [true], { tag: "eq:arb.flash" });
-    for (const [i, t] of tokens.entries()) await session.send(wheel, "setTriangle",
-      [BigInt(i), [t.erc20.address, t.poolBuck.address, t.poolUsdc.address, BigInt(i)]],
-      { tag: `eq:arb.register:${t.sym}` });
+    if (!desk) await configureArb();
     // The book reads these routes' TWAPs: their pools keep the basket's observations.
     await session.send(parity, "widen", [], { tag: "eq:book.widen", gas: 30_000_000n });
   }

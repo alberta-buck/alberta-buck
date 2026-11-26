@@ -63,12 +63,19 @@ export function flatten(obj, prefix = "", out = {}) {
 
 // The settings that differ between two runs: [{ key, a, b }], from their manifests.
 export function settingsDiff(a, b) {
-  const fa = flatten(a?.experiment), fb = flatten(b?.experiment);
+  const fields = (m) => ({ ...flatten(m?.experiment),
+    ...flatten({ runtime: m?.engine, upkeep: m?.settings?.arm, treatment_day: m?.settings?.warmup_days }) });
+  const fa = fields(a), fb = fields(b);
   const keys = [...new Set([...Object.keys(fa), ...Object.keys(fb)])].sort();
   const out = keys.filter((k) => fa[k] !== fb[k]).map((key) => ({ key, a: fa[key] ?? "(unset)", b: fb[key] ?? "(unset)" }));
   const sa = a?.scenario?.seed, sb = b?.scenario?.seed;
   if (sa !== sb && !out.some((d) => d.key === "scenario.seed")) out.push({ key: "scenario.seed", a: String(sa), b: String(sb) });
   return out;
+}
+
+export function treatmentText(arm, day) {
+  const label = { active: "Active upkeep", maintenance: "Strict maintenance" }[arm];
+  return label && Number.isInteger(day) ? `${label} from day ${day}` : null;
 }
 
 // The first day two runs differ: on the watched observables, and anywhere in the frame (null: never
@@ -297,7 +304,7 @@ export class CompareTab {
     const controls = [this.select("Compare", modes, st.mode, (v) => { st.mode = v; this.draw(); })];
     let runs = [], index = null;
     if (st.mode === "comparison") {
-      if (!this.list.length) return this.fail("No comparisons yet: make nix-venv-compare COMPARE=<name> (alberta_buck/sim/comparisons/).");
+      if (!this.list.length) return this.fail("No comparisons yet. Run an economy replay or matched basket study with sim-workbench.");
       controls.push(this.select("Comparison", this.list.map((c) => [c.name, c.name]), st.name, (v) => {
         Object.assign(st, { name: v, vary: null, held: {} }); const url = new URL(location.href); url.searchParams.set("comparison", v); history.replaceState(null, "", url); this.draw();
       }));
@@ -373,12 +380,18 @@ export class CompareTab {
       for (const r of runs) {
         const v = axis.values.find((x) => x.label === r.label);
         const sets = Object.entries(v?.set ?? {}).map(([k, x]) => `${k} = ${JSON.stringify(x)}`).join(", ");
-        list.append(html("li", {}, `${r.label}${r.label === axis.reference ? " (reference)" : ""}: ${sets || "the experiment's own settings"}`));
+        const treatment = treatmentText(r.values?.arm, r.treatment_day);
+        const detail = [treatment, sets].filter(Boolean).join(" · ");
+        list.append(html("li", {}, `${r.label}${r.label === axis.reference ? " (reference)" : ""}${detail ? ` · ${detail}` : ""}`));
       }
     } else if (runs.length === 2) {
       const [ma, mb] = await Promise.all(runs.map((r) => this.source.manifest(r.id).catch(() => null)));
       const diff = settingsDiff(mb, ma);
-      if (!diff.length) list.append(html("li", {}, "No setting differs: the runs should be the same."));
+      for (const [run, manifest] of [[runs[0], ma], [runs[1], mb]]) {
+        const treatment = treatmentText(manifest?.settings?.arm, manifest?.settings?.warmup_days);
+        if (treatment) list.append(html("li", {}, `${run.label} · ${treatment}`));
+      }
+      if (!diff.length) list.append(html("li", {}, "Recorded settings agree."));
       for (const d of diff) list.append(html("li", {}, `${d.key}: ${d.a} (run) against ${d.b} (reference)`));
     }
     box.append(list);

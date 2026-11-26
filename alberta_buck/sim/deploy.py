@@ -148,6 +148,7 @@ class Deployment:
     net_basket: Any = None        # the same basket plus its shared valuation library
     v3_factory: Any = None
     equity_upkeep: Any = None
+    upkeep_libraries: dict[str, str] = field(default_factory=dict)
     bootstrap_pool_meta: list = field(default_factory=list)  # independent SimLP seed positions
     net_credit_ops: Any = None    # actual selected-NFT operations through simulation proxies
     net_market_ops: Any = None    # guarded buys and bounded user-paid sales, through the same proxies

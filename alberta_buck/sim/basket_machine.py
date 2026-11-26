@@ -317,9 +317,12 @@ def activate(d, given=None, turn_seconds=0) -> None:
             raise ValueError("machine.signal_excursion and machine.signal_velocity must be positive")
         given_to.update(signalMode_=modes.index(s["signal_mode"]), signalRate_=rate,
                         signalExcursion_=excursion, signalVelocity_=velocity)
-    links = dict(d.net_basket.libraries) if getattr(d, "net_basket", None) is not None else {}
+    # Study treatments replace the upkeep facet after warmup. Keep the
+    # activated world's link addresses available for those deployments too.
+    links = d.net_basket.libraries if getattr(d, "net_basket", None) is not None else {}
     rebalance_math = chain.deploy("BasketRebalanceMath")
     links["src/basket/BasketRebalanceMath.sol:BasketRebalanceMath"] = rebalance_math.address
+    d.upkeep_libraries = links
     abi, bytecode = load_artifact(s["upkeep"], libraries=links)
     response = chain.deploy(s["upkeep"], *(given_to[i["name"]] for i in wanted), abi=abi, bytecode=bytecode)
     # Preserve an explicitly configured integration horizon. The otherwise

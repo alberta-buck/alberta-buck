@@ -206,6 +206,21 @@ def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-")[:80] or "run"
 
 
+def verified_complete(root, run_id, scenario, price_digest, engine):
+    """Reuse a finished workbench run only on the same resolved input tape."""
+    path = root / run_id / "manifest.json"
+    if not path.is_file():
+        return False
+    manifest = json.loads(path.read_text())
+    if manifest["status"] != "complete":
+        return False
+    if (manifest["engine"] != engine or manifest["frames"] != scenario.days
+            or manifest["scenario"]["seed"] != scenario.seed
+            or (manifest.get("source") or {}).get("price_digest") != price_digest):
+        raise ValueError(f"completed run {run_id} has different inputs")
+    return True
+
+
 class RunRecorder:
     """Writes one run's directory as the run goes.
 

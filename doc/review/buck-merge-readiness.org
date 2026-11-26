@@ -15,12 +15,12 @@ local =master= tip is =9351961d= and the branch before this review is
 
 | Work | Next change | Acceptance for the merge |
 |------+-------------+--------------------------|
-| Python/WebEVM agents | Compare pool marks and logical transactions at the first LABR opening deposit, then align clock, scheduling and cast one divergence at a time. Reconcile Python's funded desk and observation source with the WebEVM equivalents. | One shared resolved input. Exact integer ledger and intent comparisons, explicit tolerances for marks, and 30 matched days each of economy and lifecycle. Add deterministic cases for rare lifecycle transitions. Standalone smoke tests continue to check each transport. |
-| Simulation catalogue and dashboard | Inventory current Make launchers, recipes, comparison specs, archived evidence and fixture consumers. Use one manifest-backed entry point to start, resume and compare the supported experiments and studies. Make the Node Savings recorder produce the existing run format. | Run a short economy, a lifecycle case, and a paired basket study through the entry point. Python and JS produce compatible =buck-run/1= records. The dashboard opens them and the =buck-comparison/1= index. Each published comparison carries input and tape identity, seed, implementation, warmup and completion state. |
+| Python/WebEVM agents | The opening wheel regression passes. Align day-one forcing, actor order and clock phases. Control pool address order for exact ledger comparisons. | One shared resolved input. Exact integer ledger and intent comparisons, explicit tolerances for marks, and 30 matched days each of economy and lifecycle. Add deterministic cases for rare lifecycle transitions. |
+| Simulation catalogue and dashboard | The workbench launches the three supported recipes. Migrate the remaining supported stress arms and their fixtures as they are qualified. | Reuse compatible =buck-run/1= records and =buck-comparison/1= indexes, with input and tape identity, seed, implementation, warmup and completion state. |
 | Contracts and fixtures | Land a fork-free canonical deployment smoke and align the artifact list. Port tests and live consumers away from each older family before removing it. | Deploy the canonical V3 world through the supported path, validate public artifacts, EIP-170 margins and storage layout, and keep executable papers and fixtures reproducible. Keep explicit owners and migration steps for legacy paths with remaining callers. |
 | Browser and release checks | Keep the static and Python-backed browser cases runnable from Make. Wire paired replay into the merge tier and check docs from the candidate. | Full =test-all=, paired replay and affected docs pass. Account for missing fixture or platform skips. |
 
-The live experiment selector currently lists all 54 top-level TOMLs,
+The live experiment selector previously listed all 54 top-level TOMLs,
 including =catalogue-*= and =rebalancing-*= recipes. The study Make
 catalogue has six driver families. Stock and aged write run records
 directly, while signal, braking, anchors and archive have offline
@@ -29,11 +29,8 @@ captures and a partial import step. Start the supported list with
 older cases with provenance and migrate any still-required stress arm or
 fixture before removing its launcher.
 
-The Compare tab labels the two stock arms and draws the metrics. Its
-settings summary still says both use the experiment's own settings,
-because the upkeep switch is recorded as a post-warmup intervention.
-Show the actual treatment and start close in both indexed and direct
-comparisons.
+The Compare tab now shows the arm and treatment day for both indexed
+and direct stock comparisons.
 
 The deployment script still imports signed =BuckLinear= and the older
 USD controller. Port the facade quote tests and signed-Buck basket
@@ -69,6 +66,8 @@ verifier and A2 proof fixtures. Under the
 Makefile's existing fixture conditions, =test-all= excludes
 =RegressionTest.sol= and four proof-fixture suites (=MintVerifierTest=,
 =MintVerifierA2Test=, =NotesA2TieTest= and =SpendVerifierTest=).
+That full invocation later stopped when the server-backed Savings
+browser test could not bind its existing RPC port.
 
 ** Reproduce the quiet-flow rebalancing evidence
 
@@ -81,6 +80,48 @@ make nix-venv-basket-study-report BASKET_OUT="$stock/sim/stock-grid-5y" \
   BASKET_RUNS="$stock/runs" \
   BASKET_REPORT_ARGS="--rebalancing --no-comparison --output build/research-results/stock-grid-5y-rebalancing.md"
 #+end_src
+
+* Opening wheel and dashboard workbench
+
+The opening trace found that Python registers the arbitrage routes
+before the first pairings. Its wheel therefore scans at most four
+slots and can complete one job per transaction. WebEVM registered
+routes after pairing and grouped four jobs into its first transaction.
+Savings now deploys and funds the existing canonical desk and outer-band
+policy, observes the price book through that policy, registers the
+routes before pairing and uses two opening rotations.
+
+The matched opening performed 10 jobs in 21 confirmed wheel
+transactions per runtime, in the same per-transaction order. The
+strict replay continues to surface differences in on-chain marks,
+deposits, issuance and later agent behavior. The next parity step is to
+compare day-one forcing and actor order, with pool address order
+controlled where exact ledger comparison requires it.
+
+#+begin_src sh
+make nix-venv-savings-parity SAVINGS_PARITY_ARGS="--days 1 --check-opening-wheel"
+#+end_src
+
+The existing smoke tier now runs that opening regression. The
+[[file:../../build/research-results/savings-parity-wheel-before.json][old wheel trace]] and
+[[file:../../build/research-results/savings-parity-wheel-aligned.json][matched wheel trace]] record raw samples and timings too.
+
+The =sim-workbench= Make target launches =economy=,
+=economy-lifecycle= and =basket-stock=. Economy records comparable
+Python and WebEVM closes, household marks and observed events.
+Lifecycle currently records Python. The stock recipe reuses the
+validated active-versus-maintenance writer and its comparison index.
+Both indexed and direct Compare show the arm and treatment start. The
+live selector now lists only the two supported live worlds. Existing
+archived run records and their comparison indexes remain readable.
+The [[file:../../README-simulations.org::*Supported dashboard runs][workbench commands]] preserve the recipe, tape identity and output
+paths for handoff.
+
+The focused run-record, comparison and live-dashboard tests passed
+all 20 Python cases. The Wallet and Savings Chromium target passed
+all 18 tests. Chromium also rendered the indexed economy pair and
+read its WebEVM frames, household marks and event stream through the
+dashboard API.
 
 * Python/WebEVM alignment checkpoint
 
@@ -102,13 +143,11 @@ same deposit amount and flooring to raw units reproduces each receipt
 basis exactly. The replay records both raw ticks, pool carry balances
 and the computed basis and continues to fail on unequal ledger values.
 
-Opening wheel work still differs on the first tick (one job in Python
-and four in WebEVM). Trace the slot IDs, sample source and times before
-aligning the boot turns. Python funds a =BasketDesk= and uses its
-=OuterBandDeskPolicy= as the wheel's sample source. Its dedicated
-contract suite covers actual trade, credit and risk behavior. Port
-the supported path and then align market forcing and the household
-cast. Include pool token order and age in any exact-ledger fixture.
+At this checkpoint the first wheel tick had one job in Python and
+four in WebEVM. The opening wheel regression above covers the change
+that aligned those turns. The separate =BasketDesk= contract suite
+covers trade, credit and risk behavior. Include pool token order and
+age in any exact-ledger fixture.
 
 | Setting or artifact | Current use and disposition |
 |---------------------+-----------------------------|
@@ -133,8 +172,8 @@ make nix-venv-savings-parity SAVINGS_PARITY_ARGS="--days 1 --output build/resear
 
 ** TODO Align Python and WebEVM agents
 
-The checkpoint above accounts for the first LABR receipt basis gap.
-Align opening wheel jobs and sample sources, then market forcing and
+The checkpoints above account for the first LABR receipt basis gap
+and verify the opening wheel sequence. Align market forcing and
 agent order. Use the same resolved inputs and keyed decisions on both
 runtimes. Done when the matched economy and lifecycle replays pass
 30 days each, with exact integer accounting and documented tolerances
@@ -143,13 +182,11 @@ cases. [[*1. Establish parity and clean up the agents][Parity details]]
 
 ** TODO Consolidate the simulation catalogue and dashboard
 
-Start with economy, lifecycle and the matched stock study. Give them
-one manifest-backed launch, resume and compare path. Emit
-=buck-run/1= from WebEVM and show the actual treatment and warmup
-boundary in the dashboard's indexed and direct comparisons. Migrate
-required stress arms and fixture callers before removing old launchers.
-Done when a fresh checkout can run and compare all three supported
-cases with their inputs, runtime, provenance and completion state.
+The workbench now covers economy, Python lifecycle and the matched
+stock study, including WebEVM economy records and the treatment start.
+Migrate required stress arms and fixture callers before removing old
+launchers. Preserve their inputs, runtime, provenance and completion
+state when adding each recipe.
 [[*3. Finish merge-facing consolidation and documentation][Consolidation details]]
 
 ** TODO Qualify canonical V3 deployment and retire legacy contract paths
@@ -233,10 +270,10 @@ nix develop --command forge test --skip test/RegressionTest.sol \
 #+end_src
 
 Whole-economy parity, lifecycle and release qualification remain in sections
-1 and 3. The [[file:../../build/research-results/savings-parity-live-prices.json][latest paired replay]] booted both worlds with the new library and
+1 and 3. The [[file:../../build/research-results/savings-parity-live-prices.json][paired replay from this checkpoint]] booted both worlds with the new library and
 reproduced the first LABR deposit basis mismatch of 30.846092 BUCK for the
-same TOKEN amount. The next parity task is to compare those pool marks at
-deposit time before aligning the two market schedules.
+same TOKEN amount. The opening alignment sections above account for
+that mark and the different opening wheel turns.
 
 * Local mortgage scenarios, November 26
 
@@ -280,8 +317,8 @@ Savings model, link, household policy and calendar suites passed all 89 tests.
   deposit. The TOKEN amount agrees and the receipt basis differs by
   30.846092 BUCK. The first wheel ticks also differ in work completed.
   Python funds the desk with TOKEN and uses its policy as the wheel's
-  sample source. WebEVM uses the price book directly. Compare the first
-  deposit's pool marks and the wheel slots before aligning day-one casts.
+  sample source. WebEVM at that revision used the price book directly.
+  The opening wheel checkpoint above describes the alignment.
 - The static Savings browser test now checks actual demand and supply
   settlements at the next close. Supply draws the spendable shortfall
   against a credit face sized for K. The Wallet and static Savings target

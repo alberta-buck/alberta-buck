@@ -301,6 +301,7 @@ def write_comparison(root, name, manifest, good):
             records, pair = verified[ident]
             for arm in ('maintenance', 'active'):
                 runs.append({'id': records[arm][0], 'values': {**coords, 'arm': arm},
+                             'price_digest': cell['price_digest'], 'seed': cell['seed'],
                              'baseline_share_price': int(pair['arms'][arm]['opening']['share_price']) / 1e18,
                              'treatment_day': cell['warmup_days'], 'provisional': False})
         else:
