@@ -254,6 +254,37 @@ director to operate on the canonical machine.
   The Python-backed acceptance passed locally. Lifecycle coverage and a
   run of the updated Pages job in CI remain open.
 
+** Follow-up tasks for interactive price and rebalancing views
+
+- [ ] Extend the price regime settings and preview the active price tape.
+  - Keep historical prices as the default. Add a sine-wave regime with
+    configurable periods for individual commodities and a shared annual USD
+    inflation trend. Retain the current reverting and commodity-cycle presets.
+  - Offer optional seeded noise on every price regime. Zero noise preserves
+    the selected tape. The same prices, settings and seed produce the same
+    tape on reset. Use the existing commodity generator and experiment tape
+    resolution where applicable.
+  - Plot upcoming reference prices from the exact tape supplied to the
+    simulation. Show a playhead for the current simulated time that moves
+    as the world runs in real time. Keep it aligned with confirmed progress
+    through pause, step, pace changes and reset. Verify that forecast points
+    match the reference prices published by the worker when they are reached.
+- [ ] Plot confirmed basket rebalancing executions on commodity price charts.
+  - Reuse the buy and sell markers from the
+    [[file:../control-lab/signal-grid/template.html][control-lab timeline]] and the receipt capture approach in
+    [[file:../../scripts/capture-basket-signals.py][the signal capture script]]. Draw a small up-triangle for each confirmed
+    buy and down-triangle for each confirmed sell. Connect the legs of each
+    paired rebalance, including legs confirmed in separate transactions.
+  - Correlate fills and decision telemetry by an execution identifier or
+    confirmed receipt evidence. Keep a partially executed leg visible while
+    its counterpart is pending, and show unavailable decision details as
+    such. Retain separate events when multiple legs execute on the same day.
+  - On hover or keyboard focus, show the commodity, side, simulated day and
+    tick, executed TOKEN and BUCK amounts, execution price, urgency at decision
+    time, and the planned amount and binding cap when available. Verify a
+    paired execution, a one-sided fill and multiple executions in one close
+    against the recorded receipts.
+
 #+begin_src sh
 make nix-sandbox-local SANDBOX_LOCAL_PORT=8985
 make nix-venv-wallet-sandbox-test
