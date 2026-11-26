@@ -121,7 +121,10 @@ The focused run-record, comparison and live-dashboard tests passed
 all 20 Python cases. The Wallet and Savings Chromium target passed
 all 18 tests. Chromium also rendered the indexed economy pair and
 read its WebEVM frames, household marks and event stream through the
-dashboard API.
+dashboard API. The four-close historical stock smoke validated both
+arms after linking the replacement facets to the existing world
+library. Chromium showed active upkeep and strict maintenance from
+day 2 in both indexed and direct comparisons.
 
 * Python/WebEVM alignment checkpoint
 
