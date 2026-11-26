@@ -359,7 +359,7 @@ export function mountSavings(ctx) {
     if (!S.link) return undefined;
     if (!confirm("Reset this world to its first day?  Everyone watching its link sees it start over, "
       + "and savings in it are gone.")) return undefined;
-    if (S.link.state === "done") return connect();
+    if (S.link.state === "done") return connect(S.sets);
     return op("Resetting the world", { op: "reset" });
   }
 
@@ -384,7 +384,7 @@ export function mountSavings(ctx) {
     return op(paused ? "Running the world" : "Pausing the world", { op: paused ? "resume" : "pause" });
   }
 
-  function connect() {
+  function connect(worldSettings) {
     S.link?.close();
     S.rows = [];
     S.info = null;
@@ -406,7 +406,12 @@ export function mountSavings(ctx) {
     serverIn.value = S.local ? "" : S.base;
     S.sid = q.get("world") || prefs.get("savings:sid", "") || newSid();
     prefs.set("savings:sid", S.sid);
-    S.sets = jsonPref("savings:sets", {});
+    S.sets = { ...(worldSettings ?? jsonPref("savings:sets", {})) };
+    if (S.local && !worldSettings) {
+      // Opening the tab starts with the historical tape even after a previous experiment.
+      delete S.sets["scenario.prices"];
+      delete S.sets["scenario.price_noise_pct"];
+    }
     borrowerField.hidden = !S.local;
     cycleOption.hidden = cycleOption.disabled = !S.local;
     sineOption.hidden = sineOption.disabled = !S.local;
@@ -623,7 +628,7 @@ export function mountSavings(ctx) {
       q.delete("world");
       history.replaceState(null, "", `${location.pathname}?${q}`);
     }
-    connect();
+    connect(sets);
   }
 
   function buildCommodities() {

@@ -46,6 +46,9 @@ test("the Savings tab runs its world in the tab: watch, save, pause and step, sh
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    await page.addInitScript(() => localStorage.setItem("sandbox:savings:sets", JSON.stringify({
+      "scenario.prices": "sine", "scenario.price_noise_pct": "5",
+    })));
     await page.goto(`http://127.0.0.1:${server.address().port}/?tab=savings`);
 
     const idle = () => page.waitForFunction(
@@ -62,6 +65,9 @@ test("the Savings tab runs its world in the tab: watch, save, pause and step, sh
     await page.waitForSelector("#panel-savings .kpis .stat", { timeout: WORLD_MS });
     await page.waitForFunction(() => globalThis.savings?.info?.local && globalThis.savings?.holdings, null,
       { timeout: WORLD_MS });
+    assert.equal(await page.evaluate(() => globalThis.savings.priceMode), "history");
+    assert.equal(await page.getByLabel("prices", { exact: true }).inputValue(), "history");
+    assert.equal(await page.getByLabel("Price noise (%)", { exact: true }).inputValue(), "0");
     assert.match(await page.textContent("#panel-savings"), /shares of the basket's equity/);
     await nextDay();
     await nextDay();

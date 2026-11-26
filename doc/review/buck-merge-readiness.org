@@ -11,6 +11,9 @@ the preceding day. The new regime and noise affect returns after that
 anchor. The worker sends the revised tape and the first affected day to the
 preview. The world's seed, household state, wallet and market state carry
 forward. Reset rebuilds the starting tape from the world's original settings.
+A fresh local tab or reload starts with the historical tape and zero noise,
+including when browser storage contains a previously selected sine regime.
+An explicit =New world= still starts with the price settings in the form.
 
 The upkeep facet now logs the actual sized plan, identifying step size,
 pool depth and portfolio ceiling limits that reduced each leg. It logs the

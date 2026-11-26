@@ -109,6 +109,7 @@ per day. World settings control the seed, price tape, ticks per day and
 household setup. Choose historical prices, a reverting tape with historical
 volatility, simulated 30-day commodity cycles, or sine waves with a
 separate period for each commodity and shared annual USD inflation.
+Opening or reloading the local tab starts with the historical tape and zero noise.
 Price noise adds a reproducible daily variation of up to the selected
 percentage in any regime. =Upcoming commodity reference prices= shows the
 active tape indexed to day zero. Its vertical line follows the simulated
