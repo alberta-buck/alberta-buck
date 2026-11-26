@@ -107,10 +107,22 @@ Open =http://127.0.0.1:8985/?tab=savings=. With =sim-server.json= set to
 starts with two debtors, two savers and six investors and uses four ticks
 per day. World settings control the seed, price tape, ticks per day and
 household setup. Choose historical prices, a reverting tape with historical
-volatility, or simulated 30-day commodity cycles. Pause the world to step one
+volatility, simulated 30-day commodity cycles, or sine waves with a
+separate period for each commodity and shared annual USD inflation.
+Price noise adds a reproducible daily variation of up to the selected
+percentage in any regime. =Upcoming commodity reference prices= shows the
+active tape indexed to day zero. Its vertical line follows the simulated
+tick while the world runs. Pause the world to step one
 day at a time. Demand and supply shocks trade against BUCK/USDC as the
 world advances. Allow subsequent closes for the basket and households to
 respond. The local run ends at the last close on its price tape.
+
+=Basket rebalancing executions= shows the most recent 120 closes. Up and
+down triangles mark confirmed buys and sells, and connected markers belong
+to the same wheel response. Hover or focus a marker to see its actual pool
+amounts and execution price, decision urgency and allocation gap. The
+current facet exposes the planned sale amount. The chart labels the planned
+buy amount and binding cap unavailable.
 
 To serve the same build on the LAN, bind to the host's specific LAN address
 or bind to all IPv4 interfaces with =0.0.0.0=.

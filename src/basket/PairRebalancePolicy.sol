@@ -62,6 +62,7 @@ contract PairRebalancePolicy is IRebalancePolicy {
     mapping(uint256 => uint256) public allowance;
     uint64 public ratesAt;
     event OwnImpact(uint256 indexed token, int256 tickChange);
+    event RebalanceGaps(int256[] gaps, uint256[] urgency);
 
     constructor(address signals_, address basket_, int128[] memory reference_, Sizing memory sizing_) {
         signals = IPairSignals(signals_); basket = basket_;
@@ -204,11 +205,14 @@ contract PairRebalancePolicy is IRebalancePolicy {
     function recordGaps(int256[] calldata gaps) external {
         require(msg.sender == basket && gaps.length == count, "basket only");
         if (patience == 0) return;
+        uint256[] memory accrued = new uint256[](count);
         for (uint256 i; i < count; ++i) {
             (uint256 sum, int8 side) = _grown(i, gaps[i]);
             urgency[i] = Urgency(uint128(sum), side);
+            accrued[i] = sum;
         }
         gapsAt = uint64(block.timestamp);
+        emit RebalanceGaps(gaps, accrued);
     }
 
     function _liveLevel(uint256 q, uint256 i) private view returns (int256) {

@@ -134,22 +134,31 @@ test("the Savings tab runs its world in the tab: watch, save, pause and step, sh
     await idle();
     await page.waitForFunction(() => globalThis.savings?.status?.pace === 0, null, { timeout: DAY_MS });
 
-    // A new world with a farm borrower and simulated commodity cycles.
+    // A new world with a farm borrower, independent cycles and noise.
     assert.equal(await page.evaluate(() => globalThis.savings.info.ticks_per_day), 4, "four ticks a day by default");
     const oldReference = await page.evaluate(() => globalThis.savings.rows[0].ref);
     await page.getByText("World settings", { exact: true }).click();
     await page.getByLabel("ticks per day", { exact: true }).selectOption("2");
     await page.getByLabel("borrower scenario").selectOption("farm");
-    await page.getByLabel("prices", { exact: true }).selectOption("three-phase");
+    await page.getByLabel("prices", { exact: true }).selectOption("sine");
+    await page.getByLabel("LABR period (days)", { exact: true }).fill("9");
+    await page.getByLabel("Annual USD inflation (%)", { exact: true }).fill("4");
+    await page.getByLabel("Price noise (%)", { exact: true }).fill("1.5");
     page.once("dialog", (dlg) => dlg.accept());
     await page.getByRole("button", { name: "New world", exact: true }).click();
     await page.waitForFunction(() => globalThis.savings?.info?.borrower === "farm"
-      && globalThis.savings.rows[1]?.borrower, null, { timeout: WORLD_MS });
+      && globalThis.savings.rows[1]?.borrower && globalThis.savings.priceTape, null, { timeout: WORLD_MS });
     const { info, rows } = await page.evaluate(() => ({ info: globalThis.savings.info, rows: globalThis.savings.rows.slice(0, 2) }));
     assert.equal(info.ticks_per_day, 2);
-    assert.equal(info.prices[0], "three-phase");
+    assert.equal(info.prices[0], "sine");
     assert.notDeepEqual(rows[0].ref, oldReference, "the worker applies the selected tape");
     assert.notDeepEqual(rows[0].ref, rows[1].ref, "the commodity reference prices move");
+    const tape = await page.evaluate(() => globalThis.savings.priceTape);
+    for (const r of rows) assert.deepEqual(r.ref, tape.map((feed) => feed[r.day]), "the preview is the worker's tape");
+    const forecast = page.locator("figure", { hasText: "Upcoming commodity reference prices" });
+    await forecast.locator(".price-playhead").waitFor();
+    const playhead = parseFloat(await forecast.locator(".price-playhead").evaluate((el) => el.style.left));
+    assert.ok(playhead > 0, "the playhead follows simulated time");
     assert.equal(rows[0].borrower.baseline, 3_000_000);
     assert.ok(rows[1].borrower.paid > rows[0].borrower.paid, "the farmer pays the mortgage lender on the first payday");
     assert.ok(rows[1].borrower.mortgage < rows[0].borrower.mortgage, "the confirmed mortgage principal falls");

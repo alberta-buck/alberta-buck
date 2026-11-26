@@ -13,6 +13,7 @@ import { fill, h, prefs } from "./dom.js";
 import { SimLink } from "../savings/link.js";
 import { LocalLink } from "../savings/local-link.js";
 import { SAVINGS_BORROWERS } from "../../../src/scenarios/savings-presets.js";
+import { cyclePeriod } from "../../../src/scenarios/savings-prices.js";
 import { MAX_DEVIATION_BP, Saver } from "../savings/wallet.js";
 import { annualizedSavings, channels, chooseIndex, compact, dateOf, deviationBp, equityWorth, newSid, prices,
          row, serverBase, tokenFor, usd } from "../savings/model.js";
@@ -21,6 +22,7 @@ const S1 = "var(--s1)";
 const S2 = "var(--s2)";
 const S3 = "var(--s3)";
 const S4 = "var(--s4)";
+const COMMODITY_COLORS = [S1, S2, S3, S4, "var(--opaque)"];
 const STATES = {
   idle: "not connected", connecting: "connecting…", building: "building the world (about a minute)…",
   live: "live", reconnecting: "reconnecting…", refused: "the server is full", failed: "the world failed",
@@ -103,9 +105,25 @@ export function mountSavings(ctx) {
   const serverIn = h("input", { type: "text", "aria-label": "sim server", dataset: { key: "savings:server-in" },
                                 size: 30 });
   const cycleOption = h("option", { value: "three-phase" }, "Commodity cycles (simulated)");
-  const pricesSel = h("select", { "aria-label": "prices" },
+  const sineOption = h("option", { value: "sine" }, "Sine waves with USD inflation");
+  const pricesSel = h("select", { "aria-label": "prices", onchange: () => drawPriceOptions() },
     h("option", { value: "history" }, "History (five years of real prices)"),
-    h("option", { value: "revert" }, "Reverting (historical volatility, trend removed)"), cycleOption);
+    h("option", { value: "revert" }, "Reverting (historical volatility, trend removed)"), cycleOption, sineOption);
+  const priceSetting = (label, min, max, value) => h("input", { type: "number", "aria-label": label,
+    min, max, step: "any", value, class: "narrow" });
+  const priceField = (label, input) => h("label", { class: "field" }, h("span", { class: "field-label" }, label), input);
+  const noise = priceSetting("Price noise (%)", 0, 50, 0);
+  const amplitude = priceSetting("Sine amplitude (%)", 0, 50, 12);
+  const inflation = priceSetting("Annual USD inflation (%)", -30, 50, 2);
+  const noiseField = priceField("Price noise (±%)", noise);
+  const periodFields = h("div", { class: "row" });
+  const sineFields = h("div", {}, h("div", { class: "row" }, priceField("Sine amplitude (%)", amplitude),
+    priceField("Annual USD inflation (%)", inflation)), periodFields);
+  let periodInputs = {};
+  function drawPriceOptions() {
+    noiseField.hidden = !S.local;
+    sineFields.hidden = !S.local || pricesSel.value !== "sine";
+  }
   const borrowerSel = h("select", { "aria-label": "borrower scenario" },
     h("option", { value: "" }, "Mixed households"),
     ...Object.entries(SAVINGS_BORROWERS).map(([key, preset]) => h("option", { value: key }, preset.label)));
@@ -163,6 +181,7 @@ export function mountSavings(ctx) {
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Seed"), seedIn),
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Ticks / day"), ticksSel), borrowerField),
         h("div", { class: "row" }, ...householdFields),
+        h("div", { class: "row" }, noiseField), sineFields,
         h("div", { class: "row" },
           h("button", { type: "button", class: "danger", onclick: () => newWorld() }, "New world")),
         newWorldHint, worldLink)));
@@ -192,6 +211,8 @@ export function mountSavings(ctx) {
   ] });
   const borrowerCard = h("div", { class: "card", hidden: true }, borrowerTitle, borrowerDetails,
     borrowerChart.el, h("p", { class: "hint" }, "Income and collateral value are fixed in this model. Commodity prices move the markets used for refinancing and BUCK paydown."));
+  const forecastBox = h("div", { class: "card", hidden: true });
+  const rebalancesBox = h("div", { class: "card", hidden: true });
   // How a saving works on the world's basket (the equity basket; the pro-rata one is retired).
   const HOW = {
     equity: ["Saving mints the TOKEN at its market price (the world's TOKENs are faucets), ",
@@ -303,6 +324,7 @@ export function mountSavings(ctx) {
     h("div", { class: "cols savings-cols" },
       h("div", { class: "stack" }, worldCard, borrowerCard, walletCard, householdCard),
       h("div", { class: "stack" },
+        forecastBox, rebalancesBox,
         h("div", { class: "chart-grid" }, charts.buck.el, charts.index.el, charts.wheel.el, charts.k.el),
         h("h3", { class: "grid-title" }, "Households: refinancing and investing"),
         h("div", { class: "chart-grid" }, charts.householdNet.el, charts.householdMortgage.el,
@@ -345,6 +367,7 @@ export function mountSavings(ctx) {
     S.info = null;
     S.saver = null;
     S.holdings = null;
+    clearPriceViews();
     keepReceipts([]);
     S.commodity = [];
     commodityGrid.replaceChildren();
@@ -364,6 +387,7 @@ export function mountSavings(ctx) {
     S.info = null;
     S.saver = null;
     S.holdings = null;
+    clearPriceViews();
     S.commodity = [];
     commodityGrid.replaceChildren();
     S.lean = [];
@@ -382,15 +406,25 @@ export function mountSavings(ctx) {
     S.sets = jsonPref("savings:sets", {});
     borrowerField.hidden = !S.local;
     cycleOption.hidden = cycleOption.disabled = !S.local;
+    sineOption.hidden = sineOption.disabled = !S.local;
+    noise.value = S.sets["scenario.price_noise_pct"] ?? 0;
+    amplitude.value = S.sets["scenario.sine_amplitude_pct"] ?? 12;
+    inflation.value = S.sets["scenario.usd_inflation_pct"] ?? 2;
+    periodInputs = {};
+    fill(periodFields);
     borrowerSel.value = S.local ? S.sets["scenario.borrower"] ?? "" : "";
     if (!S.local) {
       delete S.sets["scenario.borrower"];
-      if (S.sets["scenario.prices"] === "three-phase") delete S.sets["scenario.prices"];
+      if (["three-phase", "sine"].includes(S.sets["scenario.prices"])) delete S.sets["scenario.prices"];
+      for (const key of Object.keys(S.sets)) {
+        if (/^scenario\.(price_noise_pct|usd_inflation_pct|sine_)/.test(key)) delete S.sets[key];
+      }
     }
     for (const [key, select] of Object.entries(householdSelects)) {
       select.value = String(S.sets[`agents.HouseholdPopulationAgent.${key}`] ?? householdDefaults[key]);
     }
     pricesSel.value = S.sets["scenario.prices"] || "history";
+    drawPriceOptions();
     seedIn.value = S.sets["scenario.seed"] ?? "";
     const u = new URL(location.href);
     u.search = "";
@@ -420,6 +454,10 @@ export function mountSavings(ctx) {
         if (state === "live" && !S.info) loadInfo();
       },
       onReset: () => forgetWorld(),
+      onProgress: (time) => {
+        S.priceTime = time;
+        drawForecast();
+      },
       onFrame: (f) => {
         S.rows.push(row(f));
         queueDraw();
@@ -433,9 +471,11 @@ export function mountSavings(ctx) {
   }
 
   async function loadInfo() {
-    for (let i = 0; i < 60 && S.link; i++) {
+    const link = S.link;
+    for (let i = 0; i < 60 && S.link === link; i++) {
       try {
-        const info = await S.link.call("sim_info");
+        const info = await link.call("sim_info");
+        if (S.link !== link) return;
         if (info && info.basket) {
           S.info = info;
           const key = prefs.get("savings:key", "");
@@ -448,6 +488,16 @@ export function mountSavings(ctx) {
           if (prefs.get("savings:seconds", "") !== "") setPace();
           prefs.set("savings:key", S.saver.key);
           buildCommodities();
+          if (S.local) {
+            buildPriceViews();
+            link.call("sim_price_tape").then((tape) => {
+              if (S.link !== link || S.info !== info) return;
+              S.priceTape = tape;
+              drawForecast();
+            }).catch((err) => {
+              if (S.link === link && S.info === info) ctx.say(`Price preview: ${err.message}`, "error");
+            });
+          }
           draw();
           readHoldings();
           return;
@@ -539,11 +589,21 @@ export function mountSavings(ctx) {
   }
 
   function newWorld() {
+    const priceInputs = pricesSel.value === "sine" ? [noise, amplitude, inflation, ...Object.values(periodInputs)] : [noise];
+    if (S.local && priceInputs.some((input) => !input.reportValidity())) return;
     if (!confirm(S.local ? "Start a new world? The current world's balance and receipts will be cleared."
       : "Start a new world? This one keeps running until it is idle, but this tab leaves it.")) return;
     const sets = {};
     for (const [key, select] of Object.entries(householdSelects)) sets[`agents.HouseholdPopulationAgent.${key}`] = select.value;
     if (pricesSel.value !== "history") sets["scenario.prices"] = pricesSel.value;
+    if (S.local) {
+      if (noise.value) sets["scenario.price_noise_pct"] = noise.value;
+      if (pricesSel.value === "sine") {
+        sets["scenario.sine_amplitude_pct"] = amplitude.value;
+        sets["scenario.usd_inflation_pct"] = inflation.value;
+        for (const [symbol, input] of Object.entries(periodInputs)) sets[`scenario.sine_period.${symbol}`] = input.value;
+      }
+    }
     if (S.local && borrowerSel.value) sets["scenario.borrower"] = borrowerSel.value;
     if (seedIn.value.trim()) sets["scenario.seed"] = seedIn.value.trim();
     sets["scenario.ticks_per_day"] = ticksSel.value;
@@ -567,6 +627,65 @@ export function mountSavings(ctx) {
     leanGrid.replaceChildren(...S.lean.map((c) => c.el));
     fill(tokenSel, h("option", { value: "hint" }, "the basket's choice"),
       S.info.tokens.map((t, i) => h("option", { value: String(i) }, t.symbol)));
+  }
+
+  function clearPriceViews() {
+    Object.assign(S, { priceTape: null, priceTime: null, forecastStart: null, forecast: null, rebalances: null });
+    forecastBox.hidden = rebalancesBox.hidden = true;
+    fill(forecastBox);
+    fill(rebalancesBox);
+  }
+
+  function buildPriceViews() {
+    const series = S.info.tokens.map(({ symbol }, i) => ({ label: symbol, color: COMMODITY_COLORS[i % COMMODITY_COLORS.length] }));
+    periodInputs = Object.fromEntries(series.map(({ label }, i) => [label, priceSetting(`${label} period (days)`, 2, 1827,
+      S.sets[`scenario.sine_period.${label}`] ?? cyclePeriod(i))]));
+    fill(periodFields, Object.entries(periodInputs).map(([symbol, input]) => priceField(`${symbol} period (days)`, input)));
+    S.forecast = lineChart({ title: "Upcoming commodity reference prices", fmt: (n) => `${n.toFixed(3)}×`, series,
+      note: "USD prices indexed to day 0. The vertical line follows the current simulated tick." });
+    fill(forecastBox, S.forecast.el);
+    S.rebalances = lineChart({ title: "Basket rebalancing executions", fmt: (n) => `${n.toFixed(3)}×`, series,
+      note: "▲ Buy · ▼ Sell. Lines connect fills from the same wheel response. BUCK prices are indexed to day 0." });
+    fill(rebalancesBox, S.rebalances.el);
+    rebalancesBox.hidden = false;
+  }
+
+  function drawForecast() {
+    const tape = S.priceTape;
+    if (!S.forecast || !tape?.[0]?.length) return;
+    forecastBox.hidden = false;
+    const now = S.priceTime ?? S.rows.at(-1)?.day ?? 0;
+    const start = Math.max(0, Math.floor(now / 30) * 30 - 7);
+    if (S.forecastStart !== start) {
+      const lines = tape.map((feed) => feed.slice(start, start + 97).map((price) => price / feed[0]));
+      S.forecast.update(lines[0].map((_, i) => start + i), lines);
+      S.forecastStart = start;
+    }
+    S.forecast.setPlayhead(Math.min(now, tape[0].length - 1));
+  }
+
+  function drawRebalances(rows) {
+    if (!S.rebalances || !rows.length) return;
+    const shown = rows.slice(-120);
+    const tokens = S.info.tokens, base = rows[0].sb;
+    const markers = shown.flatMap((r) => r.rebalanceFills.flatMap((fill) => {
+      const i = fill.token;
+      if (!base[i] || !tokens[i]) return [];
+      const { symbol, decimals } = tokens[i];
+      const amount = Number(fill.token_amount) / 10 ** decimals;
+      const buck = Number(fill.buck_amount) / 1e6;
+      const price = buck / amount;
+      const urgency = fill.urgency === null ? "unavailable" : `${(Number(fill.urgency) / 86400e18).toPrecision(4)} share-days`;
+      const gap = fill.gap === null ? "unavailable" : pct2(Number(fill.gap) / 1e16);
+      const planned = fill.planned_sell === null ? "unavailable" : `${bucks(Number(fill.planned_sell) / 1e6)} BUCK`;
+      return [{ x: r.day + fill.tick / S.info.ticks_per_day, y: price * 1e6 / base[i], group: fill.group,
+        color: COMMODITY_COLORS[i % COMMODITY_COLORS.length], side: fill.side,
+        detail: `Day ${r.day}, tick ${fill.tick + 1} · ${fill.side} ${compact(amount)} ${symbol} for ${bucks(buck)} nominal BUCK. `
+          + `Execution price ${priceFmt(price)} BUCK per ${symbol}. Urgency ${urgency}. Gap ${gap}. `
+          + `Planned amount ${planned}. Binding cap unavailable.` }];
+    }));
+    S.rebalances.update(shown.map((r) => r.day), tokens.map((_, i) =>
+      shown.map((r) => r.sb[i] && base[i] ? r.sb[i] / base[i] : null)), markers);
   }
 
   function drawHouseholdPosition(last) {
@@ -628,7 +747,9 @@ export function mountSavings(ctx) {
     ] : [h("span", { class: "hint" }, S.link ? STATES[S.link.state] : "")]);
     drawControls();
     drawBorrower(rows, last);
+    drawForecast();
     if (rows.length === 0) return;
+    drawRebalances(rows);
     const xs = rows.map((r) => r.day);
     charts.buck.update(xs, [rows.map((r) => r.bu || null), rows.map((r) => r.bv || null)]);
     charts.k.update(xs, [rows.map((r) => r.k || null)]);

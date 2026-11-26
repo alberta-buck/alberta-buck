@@ -11,8 +11,8 @@ export class LocalLink {
   /** sets: the world's settings (as SimLink's channels() carry them); onFrame(frame);
    *  onState(state, detail); onReset() when the world starts over. `worker` makes the worker (a
    *  test injects one); by default the bundled savings-world.js beside the page. */
-  constructor({ sets = {}, onFrame, onState, onReset, worker } = {}) {
-    Object.assign(this, { sets, onFrame, onState, onReset });
+  constructor({ sets = {}, onFrame, onState, onReset, onProgress, worker } = {}) {
+    Object.assign(this, { sets, onFrame, onState, onReset, onProgress });
     this.makeWorker = worker ?? (() => new Worker(new URL("./savings-world.js", globalThis.location?.href),
                                                   { type: "module" }));
     this.state = "idle";
@@ -43,6 +43,8 @@ export class LocalLink {
       if (this.closed) return;
       if (this.state !== "live") this._set("live");
       this.onFrame?.(m.frame);
+    } else if (m.type === "progress") {
+      if (!this.closed) this.onProgress?.(m.time);
     } else if (m.type === "state") {
       if (!this.closed || m.state === "failed") this._set(m.state, m.detail);
     } else if (m.type === "reset") {

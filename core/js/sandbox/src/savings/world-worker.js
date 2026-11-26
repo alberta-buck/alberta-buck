@@ -107,7 +107,7 @@ async function run() {
     const t0 = performance.now();
     let frame;
     try {
-      frame = await host.world.step();
+      frame = await host.world.step((time) => post({ type: "progress", time }));
     } catch (e) {
       host.error = e?.message ?? String(e);
       post({ type: "state", state: "failed", detail: host.error });

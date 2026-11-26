@@ -31,28 +31,33 @@ function niceStep(lo, hi, n = 3) {
 export function lineChart({ title, series, fmt = (v) => v.toPrecision(3), ref = null, height = 130,
                             note }) {
   const legend = h("div", { class: "legend" });
+  const markerDetail = h("p", { class: "hint", hidden: true });
   const plot = h("div", { class: "plot", style: `height:${height}px` });
   const box = svg("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", "aria-hidden": "true" });
   plot.append(box);
   const el = h("figure", { class: "chart" },
     h("figcaption", {}, h("span", { class: "chart-title" }, title), legend), plot,
-    note ? h("div", { class: "hint" }, note) : null);
+    note ? h("div", { class: "hint" }, note) : null, markerDetail);
   const guide = h("div", { class: "guide", hidden: true });
   plot.append(guide);
+  const playhead = h("div", { class: "price-playhead", hidden: true });
+  plot.append(playhead);
   let shown = { xs: [], ys: [] };
+  let bounds = null, progress = null;
   let hover = null;                     // the hovered index, or null: the latest
 
   plot.addEventListener("pointermove", (e) => {
     const { xs } = shown;
     if (xs.length < 2) return;
     const r = plot.getBoundingClientRect();
-    const x = xs[0] + ((e.clientX - r.left) / (r.width || 1)) * (xs[xs.length - 1] - xs[0]);
+    const [start, end] = bounds;
+    const x = start + ((e.clientX - r.left) / (r.width || 1)) * (end - start);
     let lo = 0;
     let hi = xs.length - 1;
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (xs[m] < x) lo = m; else hi = m; }
     hover = Math.abs(xs[lo] - x) <= Math.abs(xs[hi] - x) ? lo : hi;
     guide.hidden = false;
-    guide.style.left = `${((xs[hover] - xs[0]) / (xs[xs.length - 1] - xs[0] || 1)) * 100}%`;
+    guide.style.left = `${((xs[hover] - start) / (end - start)) * 100}%`;
     fillLegend(shown.ys);
   });
   plot.addEventListener("pointerleave", () => {
@@ -61,13 +66,22 @@ export function lineChart({ title, series, fmt = (v) => v.toPrecision(3), ref = 
     fillLegend(shown.ys);
   });
 
-  function update(xs, ys) {
+  function setPlayhead(time) {
+    progress = time;
+    playhead.hidden = !bounds || progress === null || progress < bounds[0] || progress > bounds[1];
+    if (!playhead.hidden) playhead.style.left = `${100 * (progress - bounds[0]) / (bounds[1] - bounds[0])}%`;
+  }
+
+  function update(xs, ys, markers = []) {
     shown = { xs, ys };
     if (hover !== null && hover >= xs.length) hover = null;
     box.replaceChildren();
+    markerDetail.hidden = true;
     for (const lab of plot.querySelectorAll(".ylab, .xlab, .nodata")) lab.remove();
-    const vals = ys.flat().filter((v) => v !== null && Number.isFinite(v));
+    const vals = [...ys.flat(), ...markers.map((m) => m.y)].filter((v) => v !== null && Number.isFinite(v));
     if (xs.length < 2 || vals.length === 0) {
+      bounds = null;
+      setPlayhead(progress);
       plot.append(h("span", { class: "nodata" }, "waiting for the world…"));
       fillLegend(ys);
       return;
@@ -83,7 +97,9 @@ export function lineChart({ title, series, fmt = (v) => v.toPrecision(3), ref = 
     lo -= padY;
     hi += padY;
     const x0 = xs[0];
-    const x1 = xs[xs.length - 1];
+    const x1 = markers.reduce((last, marker) => Math.max(last, marker.x), xs.at(-1));
+    bounds = [x0, x1];
+    setPlayhead(progress);
     const X = (x) => ((x - x0) / (x1 - x0 || 1)) * W;
     const Y = (y) => H - ((y - lo) / (hi - lo)) * H;
 
@@ -121,6 +137,32 @@ export function lineChart({ title, series, fmt = (v) => v.toPrecision(3), ref = 
                                  "vector-effect": "non-scaling-stroke" }));
       }
     });
+    const groups = new Map();
+    for (const marker of markers) {
+      if (!groups.has(marker.group)) groups.set(marker.group, []);
+      groups.get(marker.group).push(marker);
+    }
+    for (const group of groups.values()) {
+      if (!group.some((m) => m.side === "buy") || !group.some((m) => m.side === "sell")) continue;
+      const x = group.reduce((sum, m) => sum + X(m.x), 0) / group.length;
+      const y = group.reduce((sum, m) => sum + Y(m.y), 0) / group.length;
+      for (const m of group) box.append(svg("line", { x1: x, y1: y, x2: X(m.x), y2: Y(m.y),
+        class: "rebalance-connection", "vector-effect": "non-scaling-stroke" }));
+    }
+    for (const m of markers) {
+      const x = X(m.x), y = Y(m.y), direction = m.side === "buy" ? -1 : 1;
+      const marker = svg("path", { d: `M${x} ${y + 2.8 * direction}L${x - 6} ${y - 2.8 * direction}L${x + 6} ${y - 2.8 * direction}Z`,
+        class: "rebalance-marker", fill: m.color, tabindex: 0, "aria-label": m.detail });
+      const title = svg("title");
+      title.textContent = m.detail;
+      marker.append(title);
+      const describe = () => { markerDetail.textContent = m.detail; markerDetail.hidden = false; };
+      marker.addEventListener("pointerenter", describe);
+      marker.addEventListener("focus", describe);
+      box.append(marker);
+    }
+    if (markers.length) box.removeAttribute("aria-hidden");
+    else box.setAttribute("aria-hidden", "true");
     fillLegend(ys);
   }
 
@@ -140,5 +182,5 @@ export function lineChart({ title, series, fmt = (v) => v.toPrecision(3), ref = 
   }
 
   update([], series.map(() => []));
-  return { el, update };
+  return { el, update, setPlayhead };
 }

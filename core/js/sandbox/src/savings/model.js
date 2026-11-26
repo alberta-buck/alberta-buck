@@ -114,6 +114,7 @@ export function row(f) {
     shockActive: f.shk_active ?? 0,
     pace: f.pace ?? 0,
     paused: !!f.paused,
+    rebalanceFills: f.rebalance_fills ?? [],
     borrower: f.borrower ? { mortgage: bk(f.borrower.mortgage), baseline: bk(f.borrower.baseline),
       buckPrincipal: bk(f.borrower.buck_principal), paid: bk(f.borrower.mortgage_paid),
       error: f.borrower.error, stale: f.borrower.stale } : null,

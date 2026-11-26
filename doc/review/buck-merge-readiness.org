@@ -256,7 +256,7 @@ director to operate on the canonical machine.
 
 ** Follow-up tasks for interactive price and rebalancing views
 
-- [ ] Extend the price regime settings and preview the active price tape.
+- [X] Extend the price regime settings and preview the active price tape.
   - Keep historical prices as the default. Add a sine-wave regime with
     configurable periods for individual commodities and a shared annual USD
     inflation trend. Retain the current reverting and commodity-cycle presets.
@@ -269,12 +269,12 @@ director to operate on the canonical machine.
     as the world runs in real time. Keep it aligned with confirmed progress
     through pause, step, pace changes and reset. Verify that forecast points
     match the reference prices published by the worker when they are reached.
-- [ ] Plot confirmed basket rebalancing executions on commodity price charts.
+- [X] Plot confirmed basket rebalancing executions on commodity price charts.
   - Reuse the buy and sell markers from the
     [[file:../control-lab/signal-grid/template.html][control-lab timeline]] and the receipt capture approach in
     [[file:../../scripts/capture-basket-signals.py][the signal capture script]]. Draw a small up-triangle for each confirmed
     buy and down-triangle for each confirmed sell. Connect the legs of each
-    paired rebalance, including legs confirmed in separate transactions.
+    paired response.
   - Correlate fills and decision telemetry by an execution identifier or
     confirmed receipt evidence. Keep a partially executed leg visible while
     its counterpart is pending, and show unavailable decision details as
@@ -284,6 +284,21 @@ director to operate on the canonical machine.
     time, and the planned amount and binding cap when available. Verify a
     paired execution, a one-sided fill and multiple executions in one close
     against the recorded receipts.
+
+- [ ] Extend execution telemetry to planned buy sizes and binding caps.
+  Give staged rebalances an execution identifier if the wheel begins
+  executing their legs in separate transactions. The current wheel
+  completes each response inside one transaction, and the chart groups
+  its confirmed pool swaps by that response. The policy exposes urgency
+  and allocation gap, while the facet reports the planned sale amount.
+
+The Wallet and Savings suite passed all 17 tests with zero skips. The
+focused browser check verified keyboard fill details, a paused single-day
+step and reset to the same seeded preview tape. The Node WebEVM test with
+unequal opening deposits and a narrow leash reconciled 25 fills across five
+paired wheel responses to confirmed pool logs. Receipt fixtures exercised
+one-sided fills and several distinct responses in one transaction. All 26
+focused Solidity pair-policy tests passed.
 
 #+begin_src sh
 make nix-sandbox-local SANDBOX_LOCAL_PORT=8985

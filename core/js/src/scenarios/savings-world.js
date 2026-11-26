@@ -20,6 +20,8 @@ import { PinWhale } from "../agents/whale.js";
 import { ParityArb } from "../agents/arb.js";
 import { HouseholdPopulationAgent } from "../agents/credit-household.js";
 import { SAVINGS_BORROWERS } from "./savings-presets.js";
+import { savingsPriceTape } from "./savings-prices.js";
+import { rebalanceFills } from "./savings-rebalances.js";
 
 const E6 = 10n ** 6n;
 const E18 = 10n ** 18n;
@@ -162,15 +164,17 @@ export class SavingsWorld {
   constructor({ session, identity, artifacts, urArtifact, sets = {}, rng, prices = null, days = 3650, bootstrapDeposits }) {
     Object.assign(this, { session, identity, artifacts, urArtifact, rng, prices, days, bootstrapDeposits });
     this.priceMode = sets["scenario.prices"] ?? (prices ? "history" : "walk");
-    if (prices ? !Object.hasOwn(prices.series, this.priceMode) : this.priceMode !== "walk") {
+    if ((prices && this.priceMode !== "sine" && !Object.hasOwn(prices.series, this.priceMode))
+        || (!prices && this.priceMode !== "walk")) {
       throw new Error(`Price tape unavailable: ${this.priceMode}`);
     }
     const borrower = sets["scenario.borrower"] ?? "";
     if (borrower && !Object.hasOwn(SAVINGS_BORROWERS, borrower)) throw new Error(`Unknown borrower preset: ${borrower}`);
     this.borrower = borrower;
-    this.priceDays = prices ? Math.min(...prices.series[this.priceMode].map((feed) => feed.length)) : null;
     this.day = 0;
     this.seed = Number(sets["scenario.seed"] ?? 41404) || 41404;
+    this.priceTape = prices ? savingsPriceTape(prices, this.priceMode, sets, this.seed) : null;
+    this.priceDays = this.priceTape?.[0].length ?? null;
     const ticks = Math.floor(Number(sets["scenario.ticks_per_day"] ?? TICKS_PER_DAY));
     this.ticksPerDay = Number.isSafeInteger(ticks) && ticks >= 1 && ticks <= 48 ? ticks : TICKS_PER_DAY;
     this.population = { ...POPULATION };
@@ -189,7 +193,7 @@ export class SavingsWorld {
     this.actAs = installActAs(this.session);
     let given = {};
     if (this.prices) {
-      const feeds = this.prices.series[this.priceMode].map((row) => row.map((p) => BigInt(p)));
+      const feeds = this.priceTape.map((row) => row.map((p) => BigInt(p)));
       given = { feeds, tokens: this.prices.tokens.map((t, i) => ({ ...t, p0: feeds[i][0] })) };
     }
     const w = this.world = await buildEquilibriumWorld(this.session, this.artifacts, {
@@ -222,12 +226,16 @@ export class SavingsWorld {
 
   /** One simulated day: its ticks, every agent in cast order at each (the households decide and
    *  record their marks at the day's first), then the frame. */
-  async step() {
+  async step(onTick) {
     const w = this.world, d = this.day;
+    const fills = [];
     for (let k = 0; k < this.ticksPerDay; k++) {
       for (const a of this.cast) await a.act(w, d, k);
+      fills.push(...rebalanceFills(w, d, k));
+      onTick?.(d + k / this.ticksPerDay);
     }
     const frame = await this.frame(d);
+    frame.rebalance_fills = fills;
     this.frames.push(frame);
     this.day += 1;
     return frame;
@@ -376,6 +384,7 @@ export class SavingsWorld {
       try {
         const result = r.method === "sim_info" ? await this.info()
           : r.method === "sim_enroll" ? await this.enroll(r.params?.[0])
+          : r.method === "sim_price_tape" ? this.priceTape
           : await this.session.webevm.request({ method: r.method, params: r.params ?? [] });
         out.push({ jsonrpc: "2.0", id: r.id, result });
       } catch (e) {
@@ -399,7 +408,7 @@ export class SavingsWorld {
       basket: w.basket.address, receipt, kctrl: w.kctrl.address, pool_ub: w.poolUB.address,
       router: w.router?.address ?? null, wheel: w.wheel?.address ?? null, director: null,
       basket_kind: "equity", machine: true, tokens, prices: [this.priceMode],
-      start_date: this.priceMode === "three-phase" ? null : this.prices?.start ?? null,
+      start_date: ["three-phase", "sine"].includes(this.priceMode) ? null : this.prices?.start ?? null,
       borrower: this.borrower,
       households: { ...this.population, ...this.settings }, local: true, ticks_per_day: this.ticksPerDay,
     };
