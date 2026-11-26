@@ -702,6 +702,10 @@ confirmed swaps. Give it the same frozen TOKEN CSVs and experiment
 settings to compare a historical window. Starting a new world on a
 slice of the tape changes the opening state and price anchors.
 =--opening-jubilee= uses the existing audited SimLP-funded investment.
+Build =test/harness/BasketUpkeepPeerTrace.sol= with Foundry and add
+=--trace-peers= to include quote readiness, filtered and live spread
+gates, and the directional rate for each eligible constituent's peers.
+The gate index follows =Gate= in the harness source.
 
 =study.endowment= sets the initial investment in Jubilee's basket receipt.
 =study.opening_cash= separately assigns liquid BUCK to the fund before its

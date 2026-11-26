@@ -626,8 +626,8 @@ The patient-holder replay can emit decision-time eligibility, urgency,
 pair amounts, maintenance and final plans, and confirmed pool swaps.
 The trace distinguishes a zero directional rate, an ask that leaves
 the sized plan unchanged, and a changed plan with or without a
-same-response swap. Peer-level readiness, spread and motion telemetry
-are still needed to explain zero rates. A same-response swap establishes
+same-response swap. The optional peer trace records readiness, spread
+and motion to explain zero rates in a new replay. A same-response swap establishes
 execution on that side. Estimating the policy's incremental fill size
 requires the matched maintenance arm.
 
@@ -648,12 +648,16 @@ bp-days of urgency. The fourth reached 200 bp-days with a 246 bp
 underweight allocation, but the directional rate was zero. A confirmed
 23,063 BUCK purchase on that response was already in the maintenance
 plan. The price gap persisted long enough to observe both gates.
+On the external tape, CNST had fallen 11.25–15.32 log-percent against
+each peer from the slice opening by that close, and the spread had
+been widening. The external separation does not establish readiness
+or live spread on either on-chain quote route.
 
 On source day 343 the active plan called for confirmed CNST buys
 worth 15,564 and 14,808 BUCK. The same-state plans with the pair rate
 disabled called for zero on those two decisions. Two other positive
 asks that day, 681 and 831 BUCK, were below the minimum trade size
-of about 1,209 BUCK. This sequence exposes three limits separately.
+of about 2,418 BUCK (two grains). This sequence exposes three limits separately.
 Urgency delayed eligibility, the directional rate still held when
 urgency first qualified, and minimum size absorbed small asks.
 

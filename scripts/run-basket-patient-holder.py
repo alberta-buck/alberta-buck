@@ -80,7 +80,7 @@ def terminal_sleeve(opening, closing):
     return by_member
 
 
-def install_treatment(d, arm):
+def install_treatment(d, arm, peer_window=None):
     # Both arms deploy the same two facets in the same order, then send one
     # governance transaction. Only the chosen facet's address differs.
     active = d.equity_upkeep.functions
@@ -88,8 +88,13 @@ def install_treatment(d, arm):
                    active.parityGain().call(), active.parityGainDear().call())
     facets = {}
     for name, contract in FACETS.items():
+        args = constructor
+        if name == "active" and peer_window is not None:
+            contract = "BasketUpkeepPeerTrace"
+            first, last = peer_window
+            args = (*constructor, d.household_epoch + first * 86400, d.household_epoch + (last + 1) * 86400)
         abi, code = load_artifact(contract, libraries=d.upkeep_libraries)
-        facets[name] = d.chain.deploy(contract, *constructor, abi=abi, bytecode=code)
+        facets[name] = d.chain.deploy(contract, *args, abi=abi, bytecode=code)
     chosen = facets[arm]
     receipt = d.chain.send(d.basket.functions.setEquityWheel(chosen.address),
                            sender=d.basket.functions.governance().call())
@@ -124,7 +129,7 @@ def decision_stage(decision, arm):
 
 
 def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on_day_start, on_frame, recorder,
-           trace_days=None):
+           trace_days=None, trace_peers=False):
     exp = experiment.load(experiment_path, sets=settings)
     if exp.cfg.get("machine", {}).get("upkeep", "BasketUpkeepFacet") != "BasketUpkeepFacet":
         raise ValueError("the shared prefix requires ordinary BasketUpkeepFacet upkeep")
@@ -165,7 +170,7 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
         result["opening"] = read_cohort(d, cohort)
         if not any(m["positions"] for m in result["opening"]["members"].values()):
             raise ValueError("the treatment starts before any tracked investor obtained a receipt")
-        result["switch"] = install_treatment(d, arm)
+        result["switch"] = install_treatment(d, arm, trace_days if trace_peers else None)
         if recorder is not None:
             recorder.intervene(day, "set_upkeep_facet", {"arm": arm, **result["switch"]},
                               source="experiment", replay=False)
@@ -181,16 +186,22 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
             work = d.basket.events.WheelWork()
             response_topic, work_topic = (d.w3.keccak(text=e.signature) for e in (responded, work))
             swap_topic = d.w3.keccak(text=next(iter(pools.values()))[1].signature)
+            peer_event = d.equity_upkeep.events.SignalPeer() if trace_peers and arm == "active" else None
+            peer_topic = d.w3.keccak(text=peer_event.signature) if peer_event is not None else None
 
         def record_trace(receipt):
-            group, swaps = [], {}
+            group, swaps, timestamp = [], {}, None
 
             def flush(response_log):
+                nonlocal timestamp
                 if group:
+                    if timestamp is None:
+                        timestamp = d.w3.eth.get_block(receipt["blockNumber"])["timestamp"]
                     for decision in group:
                         decision["stage"] = decision_stage(decision, arm)
                     result["decision_trace"].append(dict(day=day_now, tick=d.chain.sim_tick,
-                        tx=receipt["transactionHash"].hex(), response_log=response_log, decisions=group))
+                        block=receipt["blockNumber"], timestamp=timestamp, tx=receipt["transactionHash"].hex(),
+                        response_log=response_log, decisions=group))
 
             for log in receipt["logs"]:
                 if not log["topics"]:
@@ -207,6 +218,11 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
                 if sig == topic:
                     args = decoder.process_log(log)["args"]
                     group.append({"token": args["token"], "detail": dict(args["detail"]), "fills": []})
+                elif sig == peer_topic:
+                    peer = dict(peer_event.process_log(log)["args"])
+                    for decision in group:
+                        if decision["token"] == peer["constituent"]:
+                            decision.setdefault("peers", []).append(peer)
                 elif sig == response_topic:
                     values = responded.process_log(log)["args"]
                     if values["action"] in (1, 2):
@@ -277,7 +293,7 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
 
 
 def run_pair(*, experiment_path=DEFAULT_EXPERIMENT, days, warmup_days, settings=(), price_files=(),
-             on_day_start=None, on_frame=None, record_root=None, run_id=None, trace_days=None):
+             on_day_start=None, on_frame=None, record_root=None, run_id=None, trace_days=None, trace_peers=False):
     """Run sequential arms. Hooks are called on the normal sim clock in each arm."""
     if not 1 <= warmup_days < days:
         raise ValueError("need at least one warmup day and one treatment day")
@@ -285,9 +301,11 @@ def run_pair(*, experiment_path=DEFAULT_EXPERIMENT, days, warmup_days, settings=
         raise ValueError("run_id requires record_root")
     if trace_days is not None and not warmup_days <= trace_days[0] <= trace_days[1] < days:
         raise ValueError("trace days must fall inside treatment")
+    if trace_peers and trace_days is None:
+        raise ValueError("peer traces require a decision trace window")
     run_arm = partial(replay, experiment_path=experiment_path, days=days, warmup_days=warmup_days,
                       settings=settings, price_files=price_files, on_day_start=on_day_start, on_frame=on_frame,
-                      trace_days=trace_days)
+                      trace_days=trace_days, trace_peers=trace_peers)
     recorders = {}
     try:
         arms = {}
@@ -331,6 +349,7 @@ def main():
     parser.add_argument("--run-id", help="Base dashboard ID, suffixed with each arm")
     parser.add_argument("--trace-days", type=int, nargs=2, metavar=("FIRST", "LAST"),
                         help="capture decision-time plans and confirmed pool swaps for these treatment closes")
+    parser.add_argument("--trace-peers", action="store_true", help="include ordered peer gates for eligible decisions")
     parser.add_argument("--opening-jubilee", type=int, default=0,
                         help="existing SimLP BUCK invested in the Jubilee receipt before day zero trades")
     args = parser.parse_args()
@@ -345,7 +364,8 @@ def main():
 
     data = run_pair(experiment_path=args.experiment, days=args.days, warmup_days=args.warmup_days,
                     settings=args.settings, price_files=args.price_file, record_root=args.record_root, run_id=args.run_id,
-                    trace_days=args.trace_days, on_day_start=opening if args.opening_jubilee else None)
+                    trace_days=args.trace_days, trace_peers=args.trace_peers,
+                    on_day_start=opening if args.opening_jubilee else None)
     if args.opening_jubilee:
         if len(endowment) != 2 or endowment[0] != endowment[1]:
             raise ValueError("opening Jubilee funding differed between arms")

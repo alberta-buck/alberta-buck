@@ -230,6 +230,12 @@ realized receipt returns, drawdown, parity and gross execution costs.
   pair-driven plan changes with confirmed CNST swaps and two asks
   below trade grain. This establishes separate gates in the short
   replay. Its reset price anchors differ from the frozen long run.
+- [X] Verify the optional per-peer gate capture. A deliberately low-
+  patience four-close control recorded all five peer statuses across
+  128 peer decisions. It reconciled 55 constituent decisions per arm
+  with the daily counters. Use the richer trace at the historical
+  CNST zero-rate response to distinguish an unready quote, failed
+  separation and a ready pair that is still moving outward.
 - [ ] Reproduce the historical no-ask and changed-plan decisions. Start
   with the CNST gap around day 342, where the tape shows a clear
   reversal, then use the NRGC window around days 845–847 to check the

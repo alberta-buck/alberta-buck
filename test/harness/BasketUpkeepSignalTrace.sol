@@ -31,7 +31,7 @@ contract BasketUpkeepSignalTrace is BasketUpkeepFacet {
     }
     event SignalDecision(uint256 indexed token, Decision detail);
 
-    function _afterPlan(Snap memory s, Book memory b, Plan memory p) internal override {
+    function _afterPlan(Snap memory s, Book memory b, Plan memory p) internal virtual override {
         Plan memory control = _plan(s, b, false);
         uint256 held;
         for (uint256 i; i < b.token.length; ++i) held += b.token[i];
