@@ -11,6 +11,8 @@ points and canonical deploy/manifests are qualified. At this review the
 local =master= tip is =9351961d= and the branch before this review is
 593 commits ahead. Run the merge checks on the full candidate.
 
+[[*Open implementation tasks][Open implementation tasks]]
+
 | Work | Next change | Acceptance for the merge |
 |------+-------------+--------------------------|
 | Python/WebEVM agents | Compare pool marks and logical transactions at the first LABR opening deposit, then align clock, scheduling and cast one divergence at a time. Reconcile Python's funded desk and observation source with the WebEVM equivalents. | One shared resolved input. Exact integer ledger and intent comparisons, explicit tolerances for marks, and 30 matched days each of economy and lifecycle. Add deterministic cases for rare lifecycle transitions. Standalone smoke tests continue to check each transport. |
@@ -78,6 +80,74 @@ make nix-venv-basket-study-report BASKET_OUT="$stock/sim/stock-grid-5y" \
   BASKET_RUNS="$stock/runs" \
   BASKET_REPORT_ARGS="--rebalancing --no-comparison --output build/research-results/stock-grid-5y-rebalancing.md"
 #+end_src
+
+* Open implementation tasks
+
+** TODO Align Python and WebEVM agents
+
+Start at the first LABR deposit. Record both pool marks and reconcile
+the receipt basis before aligning clocks, market forcing and agent
+order. Use the same resolved inputs and keyed decisions on both
+runtimes. Done when the matched economy and lifecycle replays pass
+30 days each, with exact integer accounting and documented tolerances
+for numeric marks. Exercise rare lifecycle transitions in focused
+cases. [[*1. Establish parity and clean up the agents][Parity details]]
+
+** TODO Consolidate the simulation catalogue and dashboard
+
+Start with economy, lifecycle and the matched stock study. Give them
+one manifest-backed launch, resume and compare path. Emit
+=buck-run/1= from WebEVM and show the actual treatment and warmup
+boundary in the dashboard's indexed and direct comparisons. Migrate
+required stress arms and fixture callers before removing old launchers.
+Done when a fresh checkout can run and compare all three supported
+cases with their inputs, runtime, provenance and completion state.
+[[*3. Finish merge-facing consolidation and documentation][Consolidation details]]
+
+** TODO Qualify canonical V3 deployment and retire legacy contract paths
+
+Add a fork-free deployment smoke for the current Buck, credit, Jubilee
+and basket stack. Reconcile the distribution with deployment. Port the
+remaining BuckNet, signed Buck, old USD controller and V2 callers and
+fixtures, including executable Notes dependencies, before removing each
+family. Done when the supported deployment, artifact list, size and
+layout checks pass and the migrated tests retain their coverage.
+[[file:consolidation-plan.org][Legacy dependency plan]]
+
+** TODO Diagnose missed rebalancing with a mature Jubilee-funded basket
+
+- [ ] Reproduce the historical no-ask and changed-plan decisions. Start
+  with seed 41404, zero extra Jubilee and days 845–847, then check the
+  CNST gap around day 342 with both seeds. Reuse the frozen tape, opening
+  state and warmup. At each wheel response trace held and target exposure,
+  declared-weight leash, urgency, observation freshness, route
+  readiness and spread, braking or closing, pair ask, maintenance plan,
+  final sizing, and any confirmed swap or refusal. Attribute each large
+  gap to the gate or limit that held and include a positive control
+  with an attributed pair-driven fill. Distinguish a large closing gap
+  from the gap available to the policy at decision time.
+- [ ] Add a reproducible mature opening that can make invested Jubilee
+  capital and total basket equity large relative to household cash
+  flows. The current endowment helper reallocates finite existing SimLP
+  BUCK and reduces the seeder's remaining cash. The aged study is a
+  separate fee-accrual control. Add an explicit, backed source if the
+  existing bootstrap cannot fund the larger opening independently of
+  trading capital. Book Jubilee funding through the ordinary receipt
+  path and audit the funding source, opening Jubilee shares, total
+  basket equity, idle cash, pool depth, issuance and principal.
+- [ ] Cross baseline and mature openings with the same historical tape,
+  seed, warmup and exogenous flow schedule. Compare active and
+  maintenance under each opening. Add a no-flow or controlled-flow
+  replay to isolate the effect of flows from changes in depth, market
+  marks or upkeep. Record actual subscriptions and withdrawals,
+  including natural exits, as gross flow divided by prior-close basket
+  equity on daily and rolling windows. Compare gap persistence,
+  urgency accrual, asks, changed plans and attributed fills. Done when
+  the high-stock/low-flow regime is verified from the measured ratio
+  and the traces show whether flows quench the weight gap or another
+  part of the policy prevents trades.
+
+[[file:buck-basket-findings.org::*When the quiet-flow runs rebalanced (November 26 UTC)][Observed gaps and replay windows]]
 
 * Live Savings prices and execution sizing
 

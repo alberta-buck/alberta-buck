@@ -11,6 +11,10 @@ quiet-flow five-year pairs have since completed. The
 from aggregate wheel activity and gives the first historical windows
 to replay. The captured daily data establishes how often plans changed.
 Capturing the intraday gates and fills is the next basket measurement.
+The [[file:buck-merge-readiness.org::*Open implementation tasks][open tasks]] also cover a mature Jubilee-funded opening with basket
+equity large relative to flows. Use matched openings and measured flow
+ratios to determine how much subscriptions or withdrawals shorten weight
+imbalances before changing the rebalancing policy.
 
 * November 24 restart: five-year investor BUCK returns
 
