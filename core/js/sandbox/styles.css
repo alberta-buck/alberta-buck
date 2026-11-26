@@ -189,6 +189,7 @@ form, .form { display: flex; flex-direction: column; gap: .55rem; }
 .row { display: flex; gap: .4rem; flex-wrap: wrap; align-items: flex-end; }
 .row > .field { flex: 1; min-width: 7rem; }
 .field { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; }
+.field[hidden] { display: none; }
 .field-label { color: var(--muted); }
 input, select, textarea {
   font: .92rem var(--sans); color: var(--ink); background: var(--bg);

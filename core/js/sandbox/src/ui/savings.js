@@ -12,6 +12,7 @@ import { lineChart } from "./chart.js";
 import { fill, h, prefs } from "./dom.js";
 import { SimLink } from "../savings/link.js";
 import { LocalLink } from "../savings/local-link.js";
+import { SAVINGS_BORROWERS } from "../../../src/scenarios/savings-presets.js";
 import { MAX_DEVIATION_BP, Saver } from "../savings/wallet.js";
 import { annualizedSavings, channels, chooseIndex, compact, dateOf, deviationBp, equityWorth, newSid, prices,
          row, serverBase, tokenFor, usd } from "../savings/model.js";
@@ -101,9 +102,14 @@ export function mountSavings(ctx) {
   // World settings: where, and what a new world is made of.
   const serverIn = h("input", { type: "text", "aria-label": "sim server", dataset: { key: "savings:server-in" },
                                 size: 30 });
+  const cycleOption = h("option", { value: "three-phase" }, "Commodity cycles (simulated)");
   const pricesSel = h("select", { "aria-label": "prices" },
     h("option", { value: "history" }, "History (five years of real prices)"),
-    h("option", { value: "revert" }, "Reverting (cycles about a mean)"));
+    h("option", { value: "revert" }, "Reverting (historical volatility, trend removed)"), cycleOption);
+  const borrowerSel = h("select", { "aria-label": "borrower scenario" },
+    h("option", { value: "" }, "Mixed households"),
+    ...Object.entries(SAVINGS_BORROWERS).map(([key, preset]) => h("option", { value: key }, preset.label)));
+  const borrowerField = h("label", { class: "field" }, h("span", { class: "field-label" }, "Borrower scenario"), borrowerSel);
   const seedIn = h("input", { type: "text", "aria-label": "seed", placeholder: "default", size: 8,
                               dataset: { key: "savings:seed" } });
   // Ticks a simulated day: the whales re-pin the TOKEN/USDC pools and the arbitrageurs and the wheel
@@ -125,6 +131,7 @@ export function mountSavings(ctx) {
   const householdFields = Object.entries(householdChoices).map(([key, [label]]) =>
     h("label", { class: "field" }, h("span", { class: "field-label" }, label), householdSelects[key]));
   const worldLink = h("code", { class: "wrap" });
+  const newWorldHint = h("p", { class: "hint" });
 
   const noServer = h("div", { class: "notice", hidden: true });
   const worldCard = h("div", { class: "card" },
@@ -154,13 +161,11 @@ export function mountSavings(ctx) {
         h("div", { class: "row" },
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Prices"), pricesSel),
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Seed"), seedIn),
-          h("label", { class: "field" }, h("span", { class: "field-label" }, "Ticks / day"), ticksSel)),
+          h("label", { class: "field" }, h("span", { class: "field-label" }, "Ticks / day"), ticksSel), borrowerField),
         h("div", { class: "row" }, ...householdFields),
         h("div", { class: "row" },
           h("button", { type: "button", class: "danger", onclick: () => newWorld() }, "New world")),
-        h("p", { class: "hint" }, "A new world runs from its first day with these prices, seed and household settings; ",
-          "this one keeps running on the server until it is idle for ten minutes.  ",
-          "The link to this world (anyone holding it can watch and steer it): "), worldLink)));
+        newWorldHint, worldLink)));
 
   // ---- the saver's card --------------------------------------------------
   const saveUsd = h("input", { type: "number", min: "1", step: "any", value: "10000", "aria-label": "dollars to save",
@@ -179,6 +184,14 @@ export function mountSavings(ctx) {
     householdPosition, h("p", { class: "hint" }, "Open receipts only, in BUCK. The mark uses the basket's "
       + "share price before exit costs. Return is mark divided by remaining deposit basis, less one; "
       + "closed positions and realized gains are not included."));
+  const borrowerTitle = h("h3", {});
+  const borrowerDetails = h("div", {});
+  const borrowerChart = lineChart({ title: "Debt remaining (USD)", fmt: dollars, series: [
+    { label: "Mortgage", color: S1 }, { label: "Mortgage + BUCK at spot", color: S2 },
+    { label: "Conventional mortgage", color: S4, dash: true },
+  ] });
+  const borrowerCard = h("div", { class: "card", hidden: true }, borrowerTitle, borrowerDetails,
+    borrowerChart.el, h("p", { class: "hint" }, "Income and collateral value are fixed in this model. Commodity prices move the markets used for refinancing and BUCK paydown."));
   // How a saving works on the world's basket (the equity basket; the pro-rata one is retired).
   const HOW = {
     equity: ["Saving mints the TOKEN at its market price (the world's TOKENs are faucets), ",
@@ -270,12 +283,9 @@ export function mountSavings(ctx) {
   // Where the world runs decides the intro: a sim server's economy, or this tab's (connect()).
   const intro = h("p", { class: "intro" });
   const describe = (local) => fill(intro, local
-    ? ["A whole Alberta Buck economy runs in this tab, in a background worker: five years of real commodity ",
-       "prices (or their reverting twins: the same commodities cycling, trend removed), the BuckBasket and its ",
-       "work wheel, K, arbitrageurs pinning every TOKEN to its commodity, and households refinancing, saving ",
-       "and investing.  Watch it day by day, shock it, and save in it: the basket harvests the commodities' ",
-       "cycles and the gaps between BUCK, USDC and the TOKENs for its depositors.  ",
-       "Nothing leaves your browser; a reload starts a new world.",
+    ? ["The Alberta Buck economy runs in this tab. Set the borrower, commodity prices and population under ",
+       "World settings. Watch households refinance, save and invest as TOKEN, BUCK and USDC prices move. ",
+       "Use the shock controls or save with the simulated wallet. A reload starts a new world.",
        ctx.savingsOnly ? "" : "  It is a separate world from the other tabs', on a clock of its own."]
     : ["A whole Alberta Buck economy runs on a server: five years of real commodity ",
        "prices (or their reverting twins: the same commodities cycling, trend removed), the BuckBasket and ",
@@ -291,7 +301,7 @@ export function mountSavings(ctx) {
       "world of their own: ", h("a", { href: "https://sandbox.albertabuck.ca/" }, "sandbox.albertabuck.ca"), ".")
       : null,
     h("div", { class: "cols savings-cols" },
-      h("div", { class: "stack" }, worldCard, walletCard, householdCard),
+      h("div", { class: "stack" }, worldCard, borrowerCard, walletCard, householdCard),
       h("div", { class: "stack" },
         h("div", { class: "chart-grid" }, charts.buck.el, charts.index.el, charts.wheel.el, charts.k.el),
         h("h3", { class: "grid-title" }, "Households: refinancing and investing"),
@@ -304,7 +314,7 @@ export function mountSavings(ctx) {
         h("h3", { class: "grid-title" }, "The desks: what they did, and what it earned"),
         h("div", { class: "chart-grid" }, charts.machineSignal.el, charts.deskOps.el, charts.earned.el,
           charts.deskInv.el, charts.ops.el),
-        h("h3", { class: "grid-title" }, "Commodities: the real price, the TOKEN/USDC pool, and via BUCK"),
+        h("h3", { class: "grid-title" }, "Commodity prices: reference, TOKEN/USDC and via BUCK"),
         commodityGrid)));
 
   // ---- behaviour ---------------------------------------------------------
@@ -370,6 +380,13 @@ export function mountSavings(ctx) {
     S.sid = q.get("world") || prefs.get("savings:sid", "") || newSid();
     prefs.set("savings:sid", S.sid);
     S.sets = jsonPref("savings:sets", {});
+    borrowerField.hidden = !S.local;
+    cycleOption.hidden = cycleOption.disabled = !S.local;
+    borrowerSel.value = S.local ? S.sets["scenario.borrower"] ?? "" : "";
+    if (!S.local) {
+      delete S.sets["scenario.borrower"];
+      if (S.sets["scenario.prices"] === "three-phase") delete S.sets["scenario.prices"];
+    }
     for (const [key, select] of Object.entries(householdSelects)) {
       select.value = String(S.sets[`agents.HouseholdPopulationAgent.${key}`] ?? householdDefaults[key]);
     }
@@ -380,7 +397,10 @@ export function mountSavings(ctx) {
     u.searchParams.set("tab", "savings");
     if (!ctx.sameOrigin) u.searchParams.set("sim", S.base);
     u.searchParams.set("world", S.sid);
-    worldLink.textContent = S.local ? "this world runs in this tab: it has no address to share" : u.toString();
+    fill(newWorldHint, S.local ? "A borrower preset adds one household to the selected population. Start a new world to apply these settings."
+      : "Start a new world to apply these settings. Anyone with the current world’s link can watch and steer it.");
+    worldLink.hidden = S.local;
+    worldLink.textContent = S.local ? "" : u.toString();
     const Link = S.local ? LocalLink : SimLink;
     S.link = new Link({
       urls: S.local ? undefined : channels(S.base, S.sid, S.sets),
@@ -519,10 +539,12 @@ export function mountSavings(ctx) {
   }
 
   function newWorld() {
-    if (!confirm("Start a new world?  This one keeps running until it is idle, but this tab leaves it.")) return;
+    if (!confirm(S.local ? "Start a new world? The current world's balance and receipts will be cleared."
+      : "Start a new world? This one keeps running until it is idle, but this tab leaves it.")) return;
     const sets = {};
     for (const [key, select] of Object.entries(householdSelects)) sets[`agents.HouseholdPopulationAgent.${key}`] = select.value;
     if (pricesSel.value !== "history") sets["scenario.prices"] = pricesSel.value;
+    if (S.local && borrowerSel.value) sets["scenario.borrower"] = borrowerSel.value;
     if (seedIn.value.trim()) sets["scenario.seed"] = seedIn.value.trim();
     sets["scenario.ticks_per_day"] = ticksSel.value;
     const chain = S.status?.chain;
@@ -538,7 +560,7 @@ export function mountSavings(ctx) {
 
   function buildCommodities() {
     S.commodity = S.info.tokens.map((t) => lineChart({ title: t.symbol, fmt: priceFmt, height: 100, series: [
-      { label: "real", color: S4, dash: true }, { label: "TOKEN/USDC", color: S1 }, { label: "via BUCK", color: S2 }] }));
+      { label: "reference", color: S4, dash: true }, { label: "TOKEN/USDC", color: S1 }, { label: "via BUCK", color: S2 }] }));
     commodityGrid.replaceChildren(...S.commodity.map((c) => c.el));
     S.lean = S.info.tokens.map((t) => lineChart({ title: t.symbol, fmt: pct1, height: 90, series: [
       { label: "actual", color: S1 }, { label: "leaned", color: S2 }, { label: "declared", color: S4, dash: true }] }));
@@ -600,11 +622,12 @@ export function mountSavings(ctx) {
         "Whether BUCK has stayed cheap or dear beyond the desk's band, and for how many days"),
       stat("To depositors", dollars(last.credited), "The work wheel's harvest, credited to the depositors"),
       stat("Pace", last.pace > 0 ? `${(1 / last.pace).toFixed(1)} s/day` : "–"),
-      stat("Prices", !S.info ? "–" : S.info.local ? ({ revert: "reverting" }[S.info.prices?.[0]] ?? S.info.prices?.[0] ?? "–")
+      stat("Prices", !S.info ? "–" : S.info.local ? ({ revert: "reverting", "three-phase": "commodity cycles" }[S.info.prices?.[0]] ?? S.info.prices?.[0] ?? "–")
         : String(S.info.prices?.[0] ?? "").startsWith("rev-") ? "reverting" : "history",
         "Set when the world is made (World settings)"),
     ] : [h("span", { class: "hint" }, S.link ? STATES[S.link.state] : "")]);
     drawControls();
+    drawBorrower(rows, last);
     if (rows.length === 0) return;
     const xs = rows.map((r) => r.day);
     charts.buck.update(xs, [rows.map((r) => r.bu || null), rows.map((r) => r.bv || null)]);
@@ -633,6 +656,29 @@ export function mountSavings(ctx) {
       c.update(xs, [p.map((v) => v.ref || null), p.map((v) => v.usdc || null), p.map((v) => v.viaBuck || null)]);
     });
     drawWallet();
+  }
+
+  function drawBorrower(rows, last) {
+    const preset = SAVINGS_BORROWERS[S.info?.borrower];
+    const b = last?.borrower;
+    borrowerCard.hidden = !preset || !b;
+    if (!preset || !b) return;
+    borrowerTitle.textContent = preset.label;
+    const { home_k, ltv, income_frac, apr } = preset.settings;
+    fill(borrowerDetails, h("p", { class: "hint" },
+      `${dollars(home_k * ltv * 1000)} opening mortgage at ${pct1(apr * 100)}, `
+      + `${dollars(home_k * 1000)} collateral, ${dollars(home_k * income_frac * 1000)} annual income.`),
+    h("dl", { class: "kv" },
+      h("dt", {}, "External mortgage remaining"), h("dd", {}, usd(b.mortgage)),
+      h("dt", {}, "BUCK principal outstanding"), h("dd", {}, `${bucks(b.buckPrincipal)} BUCK`),
+      h("dt", {}, "Paid to the mortgage lender"), h("dd", {}, usd(b.paid))),
+    b.error ? h("p", { class: "hint" }, b.error) : null,
+    b.stale ? h("p", { class: "hint" }, "BUCK principal is from the last household mark.") : null);
+    borrowerChart.update(rows.map((r) => r.day), [
+      rows.map((r) => r.borrower?.mortgage ?? null),
+      rows.map((r) => r.borrower && !r.borrower.stale && r.bu ? r.borrower.mortgage + r.borrower.buckPrincipal * r.bu : null),
+      rows.map((r) => r.borrower?.baseline ?? null),
+    ]);
   }
 
   function drawControls() {

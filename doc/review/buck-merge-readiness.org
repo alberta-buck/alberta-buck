@@ -1,0 +1,362 @@
+#+TITLE: Merge plan for the interactive BUCK economy
+#+DATE: 2026-11-25
+#+OPTIONS: toc:2 ^:nil
+
+* Local mortgage scenarios, November 26
+
+The WebEVM Savings settings offer a farm land mortgage and a home
+mortgage. Each adds a featured borrower to the normal household cast.
+The user chooses historical, reverting or simulated 30-day commodity
+cycles. The borrower view tracks confirmed payments, the external
+mortgage and BUCK principal, with a conventional mortgage baseline.
+
+A Node WebEVM run confirmed the first farm payment under all three tapes
+and the first home payment under the cycle tape. A one-tick, single-farm
+cycle run reached day 31. The farmer paid USD 18,422.62 on days 1 and 31
+and refinanced part of the mortgage between those dates. At close 31 the
+external mortgage was USD 2,413,725.88 and the latest confirmed BUCK
+principal was 733,185.81 BUCK. The baseline mortgage was USD 2,977,116.71.
+The ordinary paired diagnostic reproduced its existing first-deposit
+valuation discrepancy after these changes.
+
+The rebuilt Wallet and local Savings suite passed all 17 tests with zero
+skips. Chromium selected the farm and cycle presets, verified that its first
+mortgage payment reduced principal and drew the borrower chart. The focused
+Savings model, link, household policy and calendar suites passed all 89 tests.
+
+* Continuation on datasim, November 26 UTC
+
+- The one-day replay completed on the flake's toolchain. The reference
+  prices and all three opening household records agreed at close zero.
+  The first difference was already present before the ticks, at roughly
+  24 million BUCK issued on pyrevm and 68 million on WebEVM. The latter
+  used the interactive deposit budget. See
+  [[file:../../build/research-results/savings-parity-first.json][initial replay evidence]].
+- The replay now passes Python's 24 resolved TOKEN deposits, in deposit
+  order and base units, to the existing WebEVM builder. Both chains start
+  at the same genesis timestamp with a 12-second block interval. With
+  those inputs, opening supply is 23,999,838.224045 BUCK on pyrevm and
+  24,000,000.000000 on WebEVM. The opening basket lien accounts for the
+  remaining 161.775955 BUCK difference. The first close still differs in
+  K and other market fields. See
+  [[file:../../build/research-results/savings-parity-matched-deposits.json][replay with matched deposits]].
+- The [[file:../../build/research-results/savings-parity-opening-actions.json][opening action trace]] places the first difference at the first LABR
+  deposit. The TOKEN amount agrees and the receipt basis differs by
+  30.846092 BUCK. The first wheel ticks also differ in work completed.
+  Python funds the desk with TOKEN and uses its policy as the wheel's
+  sample source. WebEVM uses the price book directly. Compare the first
+  deposit's pool marks and the wheel slots before aligning day-one casts.
+- The static Savings browser test now checks actual demand and supply
+  settlements at the next close. Supply draws the spendable shortfall
+  against a credit face sized for K. The Wallet and static Savings target
+  reported 17 tests passed and zero skipped. The standalone JS calendar,
+  policy and repayment fixtures passed. The corresponding Python run
+  passed 144 tests. The rebuilt static Savings bundle passed its Chromium
+  acceptance after the replay's bootstrap change. The real Python-backed
+  Chromium acceptance passed in 606 seconds with zero skips, including
+  reload, reset and rebuilding with changed household settings. The
+  focused Python server and run-record checks passed 27 tests with the
+  dashboard HTTP test deselected. Pull requests to =master= are now
+  configured to run Pages browser acceptance with deployment disabled.
+
+* Restart on datasim, November 25 evening
+
+Start the next local Codex session in =~/src/alberta-buck= and use the
+existing =feature/household-minimal-ecosystem= checkout at =e08a630b=.
+This plan, the two replay files and the tracked changes below are already
+on disk there as uncommitted work. Begin with =git status --short --branch=.
+The PDF and older untracked vectors predate this pass.
+
+The previous session was attached to the nested
+=.claude/worktrees/basket-research-20261125= checkout. The main checkout
+was readable but ordinary writes there failed, including the historical
+price generator opening its cache lock. Use the main checkout as the
+workspace for the new session. For local CLI with outbound shell access,
+where permitted by the host's policy:
+
+#+begin_src sh
+codex -C "$HOME/src/alberta-buck" --sandbox workspace-write --ask-for-approval on-request -c 'sandbox_workspace_write.network_access=true'
+#+end_src
+
+** Changes on disk
+
+- [[file:../../alberta_buck/sim/savings_parity.py][Python replay driver]] resolves a historical =economy.toml= tape once
+  and creates a small fixture with one opening debtor, saver and investor.
+  It gives the tape, seed, tick rate, household settings and run horizon
+  to the [[file:../../core/js/bin/savings-parity.mjs][Node WebEVM runner]], which uses the browser's
+  [[file:../../core/js/src/scenarios/savings-world.js][SavingsWorld]]. The injected population horizon preserves the
+  interactive default when the widget supplies none.
+- The diagnostic compares close indices, reference prices, role and
+  arrival day, household principal and receipt basis, and selected
+  supply, K, parity and share fields. It keeps integer money fields as
+  strings and reports the first difference in each group. The optional
+  JSON keeps both frame streams. This is the initial diagnostic for the
+  plain economy. Shared deployment, scheduling, intervention and
+  lifecycle behavior, plus operation-level comparison, remain open.
+- The [[file:../../.github/workflows/sandbox-pages.yml][Pages workflow]] now checks for the Savings worker bundle and runs
+  static Savings Chromium acceptance alongside the Wallet test. The
+  change has not yet run in CI. The static test currently checks that
+  demand-shock submission is queued. Checking confirmed execution from
+  the frame's purchase/sale counters is still an acceptance item.
+
+** Validation and first commands
+
+- The locked JavaScript install completed in =core/js=, and Node loaded
+  the WebEVM revm backend. JavaScript syntax checks, Python compilation
+  and CLI help, comparator checks (including a one-unit difference in
+  a fixed-point string), and =git diff --check= passed.
+- The plain shell selected Cargo and rustc =1.32.0-nightly=. The WASM
+  build failed at the Cargo manifest's =version.workspace= entry.
+  Use the flake wrappers for current Rust, Node 22 and build tools.
+  The main checkout has older generated WASM and lacked the
+  =BasketExitFacet= Foundry artifact at this checkpoint.
+- The replay attempt stopped at the read-only historical-price lock and
+  its retry was interrupted. There is no paired JSON capture yet. The
+  replay has not established a runtime parity result. The main checkout
+  has no =.venv= yet. The =nix-venv-= wrapper prepares it and builds the
+  Python kernel. The prior Linux simulator venv at
+  =~/src/alberta-buck-refresh-61aa2cf4/.venv= remains useful for reading
+  saved research data.
+
+#+begin_src sh
+cd "$HOME/src/alberta-buck"
+git status --short --branch
+make nix-venv-savings-parity SAVINGS_PARITY_ARGS='--days 1 --output build/research-results/savings-parity-first.json'
+make nix-venv-wallet-sandbox-test
+make nix-venv-sandbox-savings-test SAVINGS_TEST_PORT=8987
+#+end_src
+
+Start with the one-day replay. If it completes with a mismatch, retain
+the JSON and find the first difference in opening funding, clock or cast
+order before changing household policy. Python currently runs the
+population's morning hook before market ticks. The WebEVM world runs its
+population from the end of the tick cast and forces reference markets
+and turns the wheel every tick. Those are known scheduling differences
+to isolate. Continue with the lifecycle replay and explicit lifecycle
+cases once the ordinary replay has a matched baseline. Run Chromium
+against fresh bundles and record any skipped tests.
+
+At 02:16 UTC on November 26, the live datasim manifests showed
+7/32 five-year pairs complete, 23 running, two planned and zero failed.
+All completions were quiet-flow. The four-pair realized-receipt snapshot
+is in the nested [[file:../../.claude/worktrees/basket-research-20261125/doc/review/buck-basket-findings.org][research worktree findings]].
+No new basket conclusion was measured on this pass. The status commands
+in section 4 read the live manifests.
+
+* Target and current baseline
+
+Merge =feature/household-minimal-ecosystem= into =master= when a visitor
+can open the static Savings tab, run a small economy with autonomous
+households, inspect what the agents are doing, and participate through
+a simulated wallet. The Python simulator and JavaScript WebEVM world
+must implement the same policies, market actions and accounting when run
+with the same inputs. The browser may choose a smaller default population
+and a different tick rate for responsiveness.
+
+This plan is based on the main checkout at =e08a630b=. The canonical
+basket is the current machine, with available-credit-first redemption
+and near-zero idle cash. Use it for the prototype. The existing worker,
+=LocalLink=, wallet and shared Savings page are the starting point. The
+implementation history records passing Chromium tests for the static
+Wallet and Savings tabs. Existing shared household fixtures cover parts of
+policy and calendar behavior. Whole-economy parity and the full acceptance
+suite on the merge candidate still require evidence.
+
+Background and prior decisions are in the [[file:bucknet-economy-implementation.org][implementation plan]],
+[[file:consolidation-plan.org][consolidation plan]] and [[file:buck-basket-findings.org][basket findings]].
+
+* 1. Establish parity and clean up the agents
+
+- [X] Use the existing S1 inventory and shared fixtures to map the live
+  Python and JS paths. Cover the household decision and execution layers,
+  calendar, population, market forcing, arbitrage, PID and basket keeper.
+  Mark paths used only by older demos or fixtures before editing them.
+- [ ] Build a single short paired replay on pyrevm and Node WebEVM. Resolve
+  the experiment once, including the TOKEN tape, initial funding, seed,
+  member profiles, keyed streams, clock, tick and cast order, market
+  settings and interventions. Reuse the JS world builder used by the tab,
+  and give the tab's settings explicit precedence over its local preset.
+  Check that unsupported inputs fail clearly. Today =SavingsWorld=
+  carries its own partial settings, population and tick defaults, and
+  can fall back to seeded walks without the packaged tape.
+- [ ] Compare at the first divergent member, day and operation. Require
+  equal keyed arrivals, decision intents, selected accounts and assets,
+  operation outcomes and integer ledger transitions in matched cases.
+  Reconcile receipt shares and basis, wallet balances, principal, coverage,
+  net issuance and Jubilee accounting. Compare K, basket parity, share
+  marks and market telemetry with documented field-specific tolerances
+  where numeric representation calls for one. Normalize addresses and
+  transaction hashes to logical identities for comparisons.
+- [ ] Fix discrepancies on the existing canonical paths, with a matched
+  regression for each material fix. Include household opening and arrival
+  funding, payroll and spending, working cash, refinance, discount
+  buybacks, deposits and top-ups, natural exits and partial redemption,
+  and retry and refusal handling. Recheck the old population clock issue
+  against the current world. Exercise lifecycle paths explicitly, including
+  retirement, external fund and pension cash flows, and drawdown.
+- [ ] Pass 30 matched days of =economy.toml= and
+  =economy-lifecycle.toml=, plus short deterministic fixtures that force
+  decisions a 30-day run might never reach. Use the existing run-record
+  format for comparable JS frames, per-agent state and confirmed actions
+  so diagnostics can be read by the dashboard and parity harness. Keep
+  the Savings tab's lightweight live view.
+
+** Paths exercised by the paired replay
+
+The [[file:bucknet-economy-implementation.org::*S1. Parity inventory (2026-11-14)][S1 inventory]] covers the individual methods and fixtures. The
+current replay uses =loop.run= with =economy.toml= on Python and the
+browser worker's =SavingsWorld.boot= and =step= on JavaScript.
+
+| Area | pyrevm | WebEVM Savings |
+|------+--------+----------------|
+| Opening capital | =deploy.deploy= and 24 =BootstrapDMAgent= tickets at $250k each | =buildEquilibriumWorld= uses the resolved 24 deposits for the replay and a $50M weighted deposit budget in the interactive preset |
+| Population | =HouseholdPopulationAgent.day_start= registers members before the ticks and adds them to the keyed acting order | =HouseholdPopulationAgent.morning= runs at the end of the first tick's cast, then members act in registration order |
+| Household policy and execution | =household_policy=, =net_household= and =credit_households= through =net_*_ops= | the matching policy and state machine modules and =credit-household.js= through =household-ops.js= |
+| Clock and calendar | =timeline.tick_timestamp=, =household_epoch= and =household_calendar= | =DayClock= and =household-calendar.js=, with a different first tick offset |
+| Reference forcing | one keyed =MarketMakerWhale= tick per day in keyed TOKEN order | =PinWhale= each tick in TOKEN order, with inter-tick interpolation |
+| Arbitrage and basket keepers | =BasketWheelAgent= settles after forcing; standalone =AnonymousArbAgent= and =TokenAccumulatorAgent= run in the keyed cast; =MonetaryKeeperAgent= advances the desk | =ParityArb= and =WheelKeeper= run each tick in fixed order |
+| PID | =PidKeeperAgent= in the keyed tick cast and =loop.run= at close | =PidKeeper= follows the wheel each tick |
+
+=eqsim.mjs= drives the older equilibrium demo. It shares the deployment
+builder with Savings and its cast is independent. The =legacy= household
+tests cover the earlier pro-rata execution and are outside this replay.
+The =DirectorKeeperAgent= remains in the Python family cast and has no
+director to operate on the canonical machine.
+
+* 2. Qualify the interactive browser worlds
+
+- [ ] Finish the static WebEVM path from boot to an interactive run.
+  Verify the production build with =sim-server.json= set to null and
+  the revm and identity WASM served with the bundle. Exercise fresh and
+  reset worlds, seed and price presets, population and pace controls,
+  pause and exact stepping, and actual applied demand and supply shocks.
+  Confirm a queued shock through the resulting event and balance or market
+  change. Review failure status through the current worker protocol.
+- [ ] Complete a visitor's wallet cycle while autonomous agents run.
+  Cover enrollment, acquiring or contributing assets, confirming a deposit,
+  seeing basis and receipt shares, and redeeming to a spendable balance.
+  Reconcile wallet, receipt and displayed values, including a refused
+  quote and a partial or delayed payout. Check serialization of wallet
+  actions around stepping/reset, and document what a tab reload preserves.
+- [ ] Expose the agent activity needed to understand the world. Show which
+  households are active, what they hold, what they did and what happened
+  after a user action or intervention. Keep realized BUCK and marked share
+  returns distinguishable. Provide representative presets over the same
+  canonical engine. Keep the existing Python-backed Savings connection
+  and standalone Wallet tab green.
+- [ ] Measure boot and day latency in Node and Chromium for the default
+  population and the 30/100/150-household cases from S5. Check worker
+  responsiveness and memory over a longer browser session. Use the
+  measurements to bound the interactive preset and display reported errors.
+- [ ] Qualify both browser paths on the merge candidate. The Pages workflow
+  runs the static Savings and Wallet Chromium acceptance together. Static
+  coverage includes completed demand and supply shocks and wallet settlement.
+  The Python-backed acceptance passed locally. Lifecycle coverage and a
+  run of the updated Pages job in CI remain open.
+
+#+begin_src sh
+make nix-sandbox-local SANDBOX_LOCAL_PORT=8985
+make nix-venv-wallet-sandbox-test
+make nix-venv-sandbox-savings-test SAVINGS_TEST_PORT=8987
+#+end_src
+
+* 3. Finish merge-facing consolidation and documentation
+
+- [ ] Keep =make nix-venv-test-all= as the merge check. Wire the paired
+  replay into an existing tier, reuse the wallet/savings acceptance targets,
+  and review skips for missing dependencies or browser setup. Record the
+  first all-tier run and any explicitly supported platform exceptions.
+- [ ] Reconcile current Make help, README guides and the affected Alberta
+  BUCK Org papers with the machine basket, compounded cash, receipts and
+  the two Savings transports. Document user actions, the simulation and
+  pricing assumptions, and reproducible runs. Execute the affected Org
+  examples through their normal Make targets.
+- [ ] Keep one documented path for current experiments and diagnostics.
+  Review stale launchers, presets, vectors and duplicate agent paths against
+  live callers and reproducible evidence. The earlier basket family
+  retirements and test tiers are already in place. Track the remaining
+  catalogue port, signed Buck, BuckNet facade, USD controller and V2
+  fixture migrations in the consolidation plan. Pull a migration into this
+  merge only where it blocks the supported prototype, validation or docs.
+- [ ] Before publication, reconcile the distribution against the canonical
+  deploy path. The current list still omits =BuckBasketReceipt= and
+  =UniswapV3BindingAdapter= and includes =SimLP= and =MockERC20= with
+  simulation labels. Verify the wanted artifacts, deployment smoke and
+  storage/size checks. The JS package already uses the WebEVM npm alias.
+  Keep package publication, hosted rollout and tunnel retirement as
+  release steps after the merge candidate is qualified.
+
+#+begin_src sh
+make nix-venv-test-all
+make nix-venv-docs
+#+end_src
+
+* 4. Read the five-year results alongside this work
+
+All eight quiet-flow pairs completed during this continuation. Active
+share marks beat maintenance in five pairs, and were above zero in four.
+The eight-pair median active BUCK share mark return was -1.928%.
+
+| Arm and holding period | Cash closes | Above zero | Above idle Ordinary |
+|------------------------+-------------+------------+---------------------|
+| Active, under 365 days | 1 | 0 | 0 |
+| Active, 365–729 days | 5 | 1 | 4 |
+| Active, 730+ days | 62 | 13 | 61 |
+| Active, all | 68 | 14 | 65 |
+| Maintenance, 365–729 days | 4 | 2 | 4 |
+| Maintenance, 730+ days | 65 | 10 | 63 |
+| Maintenance, all | 69 | 12 | 67 |
+
+The [[file:../../build/research-results/stock-grid-5y-holder-cash-nov25.md][saved eight-pair reconciliation]] has the per-cell funded and unfunded
+marks, receipt cohorts, medians and exit lags. Cash returns include
+confirmed receipt settlements. Wallet conversion and separately paid gas
+are outside the measure. At the latest status check, 22 pairs were running,
+two were planned and zero had failed. The balanced treatments and Mac
+release-only tape are separate comparisons.
+
+The table shows active / maintenance. Drawdown is peak to trough in the
+BUCK share mark from the pre-switch close 29 through close 1824. Parity
+uses the nearest-rank P95 of =abs(BVIB - 1)= over treatment closes in
+basis points. Idle cash and credit headroom are measured in BUCK from
+the same closes. Headroom measures the credit line and does not measure
+the payout that a particular receipt can execute.
+
+| Tape | Seed | Jubilee BUCK | Max drawdown | P95 parity gap (bp) | Median idle cash | Min credit headroom |
+|------+------+--------------+--------------+---------------------+------------------+---------------------|
+| History | 41404 | 0 | -7.39% / -7.61% | 280.6 / 271.4 | 0.041 / 0.029 | 4,954,399 / 4,973,793 |
+| History | 41404 | 2,000,000 | -4.14% / -4.73% | 295.7 / 298.8 | 0.105 / 0.061 | 5,437,464 / 5,369,919 |
+| History | 41405 | 0 | -7.93% / -7.88% | 276.8 / 278.4 | 0.035 / 0.056 | 5,033,230 / 5,035,835 |
+| History | 41405 | 2,000,000 | -4.48% / -5.08% | 290.2 / 288.9 | 0.089 / 0.085 | 5,205,043 / 5,132,925 |
+| Reverting | 41404 | 0 | -6.74% / -6.86% | 263.4 / 250.5 | 0.063 / 0.070 | 5,266,829 / 5,264,826 |
+| Reverting | 41404 | 2,000,000 | -3.98% / -3.78% | 281.8 / 263.0 | 0.079 / 0.105 | 5,416,463 / 5,511,884 |
+| Reverting | 41405 | 0 | -6.60% / -7.29% | 257.0 / 261.3 | 0.046 / 0.041 | 5,234,118 / 5,212,654 |
+| Reverting | 41405 | 2,000,000 | -3.86% / -4.07% | 272.2 / 278.7 | 0.099 / 0.059 | 5,593,164 / 5,618,971 |
+
+The live datasim status check around 00:14 UTC on November 26 showed
+6/32 pairs complete, 24 running and 2 planned. Only quiet-flow pairs had
+completed. The handoff worktree has the November 25 four-pair receipt
+reconciliation. The next basket review should use the validated complete
+pairs and report realized BUCK proceeds by holding period, against both
+zero and idle Ordinary wallet carry. Keep the matched active/maintenance
+and funded/unfunded marks, drawdowns, and liquidity measures visible.
+The balanced, working-cash, discount and combined treatments can then
+isolate each demand effect and its interaction at the same seed and
+funding level. The Mac release-only tape is a separate price treatment.
+
+Reopen basket behavior before merge if the validated data show an
+accounting or solvency failure, persistent loss of executable liquidity
+or parity, or repeatable materially poor realized BUCK outcomes versus
+idle under the intended prototype conditions. Mixed marks or modest
+returns belong in the prototype documentation. If a material issue
+appears, reproduce the smallest failing case and decide the fix before
+changing defaults. Let the frozen supervisors finish on their existing
+inputs.
+
+#+begin_src sh
+stock_dir="$HOME/src/alberta-buck-stock-multiyear-5bb86e77"
+aged_dir="$HOME/src/alberta-buck-aged-3969952b"
+for name in stock-grid-5y stock-5y-balanced stock-5y-working-cash stock-5y-discount stock-5y-combined; do
+  make basket-study-status BASKET_OUT="$stock_dir/build/sim/$name" BASKET_RUNS="$stock_dir/build/runs"
+done
+make basket-study-status BASKET_OUT="$aged_dir/build/sim/aged-5y" BASKET_RUNS="$aged_dir/build/runs"
+#+end_src

@@ -114,6 +114,7 @@ async function run() {
       return;
     }
     host.day = host.world.day;
+    if (host.world.priceDays !== null && host.day >= host.world.priceDays) host.done = true;
     const took = performance.now() - t0;
     frame = { ...frame, pace: Math.round(100000 / Math.max(took, 1)) / 100, paused: host.paused };
     host.frames.push(frame);

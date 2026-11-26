@@ -2,7 +2,7 @@
 // savings world in the tab"): the STATIC page (no sim server: sim-server.json says null) opens the
 // Savings tab, builds the savings world in a Web Worker on webevm, watches it run, saves $10,000 in
 // the basket with a key of its own (faucet, approve, deposit: one batch, between days), pauses and
-// steps the world, arms a shock and redeems in BUCK (the key enrolled at its first exit). No console
+// steps the world, executes demand and supply shocks and redeems in BUCK. No console
 // errors. The page is served from build output on an ephemeral port.
 //
 //   make nix-sandbox-build && cd core/js && node --test test/savings-local.browser.test.js
@@ -97,14 +97,32 @@ test("the Savings tab runs its world in the tab: watch, save, pause and step, sh
     await page.waitForFunction((d) => (globalThis.savings?.rows.at(-1)?.day ?? -1) === d + 1, d0, { timeout: DAY_MS });
     assert.equal(await day(), d0 + 1, "a step runs exactly one day");
 
-    // A shock, armed; then redeem (the world is paused: it lands at once), in BUCK to the enrolled key.
-    await page.click("#panel-savings button:text-is('BUCK demand')");
-    await idle();
-    assert.match(await status(), /Queued/);
+    // Redeem while paused, in BUCK to the enrolled key.
     await receiptRow.locator("button", { hasText: "Redeem" }).click();
     await idle();
     assert.match(await status(), /^Redeemed #\d+: paid \$[\d,]+\.\d\d in BUCK/);
     assert.match(await page.textContent("#panel-savings dl.wallet"), /\(\$[\d,]+\.\d\d\)/, "the wallet holds the payout");
+
+    // Each shock must trade in the next close after submission.
+    await page.getByLabel("shock size, $ millions").fill("0.1");
+    await page.getByLabel("shock days").fill("1");
+    for (const [button, field] of [["BUCK supply", "shockSold"], ["BUCK demand", "shockBought"]]) {
+      const before = await page.evaluate((key) => globalThis.savings.rows.at(-1)[key], field);
+      const scheduledDay = (await day()) + 1;
+      await page.getByRole("button", { name: button, exact: true }).click();
+      await idle();
+      assert.match(await status(), /Queued/);
+      await page.getByRole("button", { name: "1 day", exact: true }).click();
+      await idle();
+      await page.waitForFunction((d) => globalThis.savings.rows.at(-1).day === d,
+        scheduledDay, { timeout: DAY_MS });
+      const after = await page.evaluate((key) => globalThis.savings.rows.at(-1)[key], field);
+      if (field === "shockBought") {
+        assert.equal(after - before, 100_000, `${button} spent the requested USDC at close ${scheduledDay}`);
+      } else {
+        assert.ok(after > before, `${button} received USDC by close ${scheduledDay}`);
+      }
+    }
 
     await page.click("#panel-savings button:text-is('Run')");
     await idle();
@@ -116,13 +134,27 @@ test("the Savings tab runs its world in the tab: watch, save, pause and step, sh
     await idle();
     await page.waitForFunction(() => globalThis.savings?.status?.pace === 0, null, { timeout: DAY_MS });
 
-    // A new world at eight ticks a day.
+    // A new world with a farm borrower and simulated commodity cycles.
     assert.equal(await page.evaluate(() => globalThis.savings.info.ticks_per_day), 4, "four ticks a day by default");
+    const oldReference = await page.evaluate(() => globalThis.savings.rows[0].ref);
     await page.getByText("World settings", { exact: true }).click();
-    await page.getByLabel("ticks per day", { exact: true }).selectOption("8");
+    await page.getByLabel("ticks per day", { exact: true }).selectOption("2");
+    await page.getByLabel("borrower scenario").selectOption("farm");
+    await page.getByLabel("prices", { exact: true }).selectOption("three-phase");
     page.once("dialog", (dlg) => dlg.accept());
     await page.getByRole("button", { name: "New world", exact: true }).click();
-    await page.waitForFunction(() => globalThis.savings?.info?.ticks_per_day === 8
-      && (globalThis.savings.rows.at(-1)?.day ?? -1) >= 1, null, { timeout: WORLD_MS });
+    await page.waitForFunction(() => globalThis.savings?.info?.borrower === "farm"
+      && globalThis.savings.rows[1]?.borrower, null, { timeout: WORLD_MS });
+    const { info, rows } = await page.evaluate(() => ({ info: globalThis.savings.info, rows: globalThis.savings.rows.slice(0, 2) }));
+    assert.equal(info.ticks_per_day, 2);
+    assert.equal(info.prices[0], "three-phase");
+    assert.notDeepEqual(rows[0].ref, oldReference, "the worker applies the selected tape");
+    assert.notDeepEqual(rows[0].ref, rows[1].ref, "the commodity reference prices move");
+    assert.equal(rows[0].borrower.baseline, 3_000_000);
+    assert.ok(rows[1].borrower.paid > rows[0].borrower.paid, "the farmer pays the mortgage lender on the first payday");
+    assert.ok(rows[1].borrower.mortgage < rows[0].borrower.mortgage, "the confirmed mortgage principal falls");
+    await page.getByRole("heading", { name: "Farm land mortgage" }).waitFor();
+    await page.getByText("BUCK principal outstanding", { exact: true }).waitFor();
+    assert.ok(await page.locator("figure", { hasText: "Debt remaining (USD)" }).locator("path.line").count() >= 2);
     assert.deepEqual(errors, []);
   });

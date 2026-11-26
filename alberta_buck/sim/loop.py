@@ -69,19 +69,21 @@ def settle_wheel(d, ctr=None) -> bool:
 
 def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machine",
         director_impl="pairs", on_day_start=None, on_frame=None,
-        controller_impl="direct", recorder=None) -> dict:
-    """on_day_start(day, d, agents, ctr): a mutation window before the
+        controller_impl="direct", recorder=None, on_boot=None, journal=None) -> dict:
+    """on_boot(d): read the bootstrapped world before any daily activity.
+    on_day_start(day, d, agents, ctr): a mutation window before the
     day's ticks (the sim server applies population/knob controls here).
     on_frame(frame): called with each just-captured snapshot frame (the
     sim server streams these to its clients).
     recorder: a runrecord.RunRecorder, opened here and fed every captured
-    day; the caller closes it (complete or failed)."""
+    day; the caller closes it (complete or failed).
+    journal: optional chain transaction journal, owned by the caller."""
     from alberta_buck.sim import report
     out_path = report.output_path(out_path, scenario.days)
     if out_path and scenario.days >= report.FIVE_YEARS:
         report.preflight()
     w3 = anvil.w3
-    chain = Chain(w3, w3.eth.accounts[0])
+    chain = Chain(w3, w3.eth.accounts[0], journal=journal)
     rng = idmod.seeded_rng(scenario.seed)
     prng = random.Random(scenario.seed)
     # Agent RNG mode for this run ("" = historical Mersenne; "keyed" = the
@@ -209,6 +211,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     timeline_epoch = ts + tick_secs
     tick_timestamp(timeline_epoch, 0, 0, scenario.ticks_per_day, step)
     d.household_epoch = timeline_epoch
+    if on_boot is not None:
+        on_boot(d)
 
     n_tok = len(d.tokens)
     # WP-1: the markout ledger (alberta_buck/sim/markout.py).  Every act

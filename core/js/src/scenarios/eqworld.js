@@ -125,6 +125,7 @@ function isqrt(n) {
  * @param opts.tokens     [{sym, name, dec, p0, weightBp?}] basket constituents (the
  *                        machine needs two or more; weights must be supplied for all or none)
  * @param opts.targetBuck common pool depth, 6-dec (default $10M)
+ * @param opts.bootstrapDeposits ordered [{token, amount}] seed deposits in TOKEN base units
  * @param opts.feedSeed / opts.stepBp / opts.feedDays  the reference walks
  * @param opts.feeds      given reference paths instead: [constituent][day] -> USDC base units
  *                        per whole TOKEN (BigInt)
@@ -151,6 +152,18 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const weights = toks.map((t) => BigInt(hasWeights ? t.weightBp : 1));
   const totalWeight = weights.reduce((a, b) => a + b, 0n);
   const targetBuck = opts.targetBuck ?? 10n ** 13n;
+  const bootstrapDeposits = opts.bootstrapDeposits ?? toks.map((t, token) => ({
+    token,
+    amount: targetBuck * BigInt(toks.length) * weights[token] / totalWeight * 10n ** BigInt(t.dec) / t.p0,
+  }));
+  const seedAmounts = toks.map(() => 0n);
+  for (const { token, amount } of bootstrapDeposits) {
+    if (!Number.isSafeInteger(token) || token < 0 || token >= toks.length || typeof amount !== "bigint" || amount <= 0n) {
+      throw new Error("each bootstrap deposit requires a valid TOKEN index and a positive amount");
+    }
+    seedAmounts[token] += amount;
+  }
+  if (seedAmounts.includes(0n)) throw new Error("bootstrap deposits must fund every TOKEN");
 
   const world = await buildBuckWorld(session, artifacts,
     { identity: opts.identity, rng: opts.rng, params: opts.params,
@@ -238,15 +251,8 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
       [erc20.address, buck.address, FEES.buck]);
     await bind(pb, true, `eq:bind:pool-${t.sym}-buck`);
 
-    // Bootstrap the basket pool to real depth (the Python sim's pre-tick
-    // DM bootstrap phase): a targetBuck-sized deposit from the deployer,
-    // so agent-scale trades and the arb's daily corrections move the
-    // pool by basis points, not percent -- the redeem path's spot/TWAP
-    // guard (defaultMaxDeviationBp) assumes exactly this.
-    // The pro-rata basket pairs the deposit itself, here.  The equity basket
-    // takes it once its machine is wired, below, and the wheel pairs it.
-    const seedValue = targetBuck * BigInt(toks.length) * weights[i] / totalWeight;
-    const seedTok = (seedValue * unit) / t.p0;
+    // Stock the bootstrap inventory for the ordered deposits after the machine is wired.
+    const seedTok = seedAmounts[i];
     await session.send(erc20, "mint", [me, seedTok],
                        { tag: `eq:bootstrap-stock:${t.sym}` });
     await session.send(erc20, "approve", [basket.address, seedTok],
@@ -450,11 +456,10 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     return { receipts, settled: !due };
   };
 
-  // Bootstrap the basket's pools to real depth: a targetBuck-sized
-  // deposit of each TOKEN from the deployer, which the wheel pairs with
-  // BUCKs the basket issues.
-  for (const t of tokens) {
-    await session.send(basket, "depositToken", [t.erc20.address, t.seedTok, 0n],
+  // The wheel pairs the opening deposits with BUCKs the basket issues.
+  for (const { token, amount } of bootstrapDeposits) {
+    const t = tokens[token];
+    await session.send(basket, "depositToken", [t.erc20.address, amount, 0n],
                        { tag: `eq:bootstrap-deposit:${t.sym}`, gas: 3_000_000n });
   }
   for (let turn = 0; turn < 8; turn++) {
@@ -501,7 +506,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   Object.assign(world, {
     v3f, basket, usdc, simlp, tokens, poolUB, router, weth, permit2, swapGuard, feeds,
     fees: FEES, series: [], _proxies: new Map(),
-    receipts: tokens.length,        // the bootstrap deposits' receipts
+    receipts: bootstrapDeposits.length,
     basketKind: kind,
     machine: parts,
     wheel: parts?.wheel ?? null,
@@ -559,16 +564,15 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
     return p;
   };
 
-  /** Pledge insured assets: BuckCredit to the holder's proxy + activate
-   *  the face as headroom (zero premium: the ff gate is inapplicable). */
-  world.pledge = async (account, face, { tag } = {}) => {
+  /** Pledge zero-premium credit and mint the requested spendable BUCK. */
+  world.pledge = async (account, face, { tag, spendable = face } = {}) => {
     const p = await world.proxyFor(account);
     const ts = (await session.client.getBlock()).timestamp;
     await session.send(credit, "createCredit",
       [p.address, 0, face, 0n, 0, 0, ts, 0], { tag: `${tag}:credit`, account: insurer });
     await session.send(p, "exec",
       [buck.address, encodeFunctionData(
-        { abi: buck.abi, functionName: "mint", args: [face] })],
+        { abi: buck.abi, functionName: "mint", args: [spendable] })],
       { tag: `${tag}:activate`, gas: 3_000_000n });
     return p;
   };

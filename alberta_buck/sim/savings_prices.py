@@ -1,8 +1,8 @@
 """The savings sandbox's prices, for its world in the browser (core/js/src/scenarios/savings-world.js).
 
 An experiment's TOKENs -- symbols, decimals, declared weights, day-0 prices -- and its daily reference
-prices, the history window and its reverting twin, as the Python world resolves them
-(experiment.build: gen_historical's window, scenario.keep_tokens, gen_prices.revert_like), written as
+prices, the history window, its reverting twin and synthetic commodity cycles, as the Python world
+resolves them (experiment.build), written as
 JSON. Standard library only (no web3, no kernels), so the sandbox's build runs it anywhere, the Pages
 runner included:
 
@@ -13,17 +13,31 @@ Prices are USDC micro (6-dec) per whole TOKEN, as Prices.ref gives them.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import tomllib
 from pathlib import Path
 
 from alberta_buck.sim.gen_historical import gen
-from alberta_buck.sim.gen_prices import revert_like
-from alberta_buck.sim.prices import Prices
+from alberta_buck.sim.gen_prices import gen_three_phase, revert_like
+from alberta_buck.sim.prices import CSV_DIR, PRICE_SCALE, Prices
 from alberta_buck.sim.scenario import EQUILIBRIUM_TOKENS, Scenario, keep_tokens
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPERIMENT = ROOT / "alberta_buck/sim/experiments/economy.toml"
+
+
+def commodity_cycles(files: list[str], days: int) -> list[list[int]]:
+    """Use the experiment's cycle generator without writing intermediate CSVs."""
+    series = []
+    for index, file in enumerate(files):
+        with (CSV_DIR / file).open() as stream:
+            rows = csv.reader(stream)
+            next(rows)
+            start = int(next(rows)[1])
+        prices = gen_three_phase(start, index, len(files), days)
+        series.append([round(price) // PRICE_SCALE for price in prices])
+    return series
 
 
 def resolve(path: str | Path = EXPERIMENT) -> dict:
@@ -45,7 +59,8 @@ def resolve(path: str | Path = EXPERIMENT) -> dict:
         "tokens": [{"sym": t[0], "name": t[1], "dec": t[2], "weightBp": t[3], "p0": history.day0(i)}
                    for i, t in enumerate(sc.tokens)],
         "series": {"history": [row[:history.days] for row in history.series],
-                   "revert": [row[:history.days] for row in revert.series]},
+                   "revert": [row[:history.days] for row in revert.series],
+                   "three-phase": commodity_cycles(sc.csv_files, history.days)},
     }
 
 

@@ -73,7 +73,8 @@ an explicit identity harness; they do not establish production basket binding.
 | Interface | Execution | Start | What to inspect |
 |-----------+-----------+-------+-----------------|
 | Wallet sandbox | JavaScript in the browser (webevm + revm) | =make nix-sandbox SANDBOX_PORT=8980= | Identities, credit quotes, payments, market transactions and observer view |
-| Savings sandbox | Python/pyrevm economy, browser controls and wallet | =make nix-venv-sim-savings SIM_SAVINGS_PORT=8981= | Page/server available; household stepping still gated |
+| Savings sandbox, local | WebEVM in the browser worker | =make nix-sandbox-local SANDBOX_LOCAL_PORT=8985= | Household economy, market shocks and personal receipts |
+| Savings sandbox, server | Python/pyrevm economy, browser controls and wallet | =make nix-venv-sim-savings SIM_SAVINGS_PORT=8981= | Household economy, market shocks and a resumable session |
 | Equilibrium demo | JavaScript household loop in the browser | =make nix-core-demo-eqworld-serve EQWORLD_PORT=8983= | Bootstrap/portfolios available; household decisions still gated |
 | Vector viewer | Saved Python JSON, no live EVM | =make nix-venv-viewer VIEWER_PORT=8982= | One run's accounts, trades and time series |
 | Campaign index/PDFs | Saved results, no EVM | =make nix-venv-economy-report CAMPAIGN=NAME= | Cross-run acceptance and portable figures |
@@ -84,9 +85,10 @@ an explicit identity harness; they do not establish production basket binding.
 make nix-sandbox SANDBOX_PORT=8980
 #+end_src
 
-Open =http://127.0.0.1:8980/=. This builds =core/js/sandbox/dist/= and serves it. The EVM runs
-inside the tab. It is not a five-year economy; a page with no simulation server does not show
-the Savings tab. Its browser test exercises identity, payment, credit and reload behavior.
+Open =http://127.0.0.1:8980/=. This builds and serves =core/js/sandbox/dist/=.
+The Wallet tab runs its own EVM and exercises identity, payment, credit and
+reload behavior. The Savings tab runs a separate economy.
+Set =SANDBOX_HOST= to an interface address to change the default loopback bind.
 Use the documented acceptance target to build and run the Node controller and
 real Chromium page together; it owns its temporary static server:
 
@@ -94,23 +96,54 @@ real Chromium page together; it owns its temporary static server:
 make nix-wallet-sandbox-test
 #+end_src
 
-* Savings sandbox (accounting migration pending)
+* Savings sandbox
 
-This page uses a Python economy behind JavaScript controls and wallet views.
-The server and page can start, but normal household stepping still reaches
-the explicit issuance/exit migration gate. Its end-to-end savings acceptance
-is not yet restored. =make nix-venv-economy-accounting-test= checks the
-available role setup, portfolio, market and short reporting components;
-=make nix-wallet-sandbox-test= checks the runnable browser-only wallet.
+#+begin_src sh
+make nix-sandbox-local SANDBOX_LOCAL_PORT=8985
+#+end_src
 
-Saving, basket redemption and discounted retirement now run on canonical
-accounting as tested components; working money, saver credit investment and
-asset exits still hold the gate. Three things to expect when it opens, from
-[[file:doc/review/bucknet-economy-implementation.org::*Observations and recommendations for the five-year runs and sandboxes][the plan's observations]]: the stress buttons lean on BUCK/USDC only, so
-households answer after arbitrage carries the move into the basket's price,
-not at once; the page should show the dollar price beside the basket-relative
-cost/fair ratio; and a lost reply stops that household, wages included, until
-its transaction is reconciled, so the page needs that status and action.
+Open =http://127.0.0.1:8985/?tab=savings=. With =sim-server.json= set to
+=null=, Savings starts a WebEVM worker in the tab. Its default population
+starts with two debtors, two savers and six investors and uses four ticks
+per day. World settings control the seed, price tape, ticks per day and
+household setup. Choose historical prices, a reverting tape with historical
+volatility, or simulated 30-day commodity cycles. Pause the world to step one
+day at a time. Demand and supply shocks trade against BUCK/USDC as the
+world advances. Allow subsequent closes for the basket and households to
+respond. The local run ends at the last close on its price tape.
+
+To serve the same build on the LAN, bind to the host's specific LAN address
+or bind to all IPv4 interfaces with =0.0.0.0=.
+
+#+begin_src sh
+make nix-sandbox-local SANDBOX_LOCAL_HOST=0.0.0.0 SANDBOX_LOCAL_PORT=8985
+#+end_src
+
+Open =http://<host-LAN-IP>:8985/?tab=savings&sim=local= from the other
+machine. =SANDBOX_LOCAL_HOST= inherits =SANDBOX_HOST=, which defaults to
+=127.0.0.1=.
+
+Under =World settings=, choose =Farm land mortgage= or =Home mortgage= in
+=Borrower scenario=, select your price tape and click =New world=. The
+farm starts with a USD 3 million mortgage at 5.5%, USD 4 million of land
+and USD 500,000 annual income. The home starts with a USD 600,000 mortgage
+at 5%, USD 800,000 of collateral and USD 160,000 annual income. Each preset
+adds one borrower to the chosen population and schedules its first payment
+on day 1. The profiles use fixed income and collateral value. Commodity
+prices affect the markets for refinancing and buying back BUCK. The chart
+shows external mortgage debt, total debt with BUCK marked at spot and the
+same borrower's conventional mortgage baseline. Use the same seed, borrower
+and population settings when comparing price tapes.
+
+Save creates a basket receipt using simulated dollars. Inspect its BUCK
+basis and share mark, then redeem into the simulated wallet. The wallet
+key and settings are stored in the browser. Reloading the local tab starts
+a fresh chain, so its simulated balances and receipts start over.
+
+=make nix-venv-wallet-sandbox-test= builds and tests the Wallet and local
+Savings pages in Chromium. The paired replay uses the same world builder
+with Python's price tape and opening deposits. Its current comparison is
+recorded in the [[file:doc/review/buck-merge-readiness.org][merge-readiness review]].
 
 The household-position selector shows each arrived household's remaining open basket basis,
 its current BUCK share mark and marked ROI. The return is the mark divided by remaining basis
@@ -130,6 +163,9 @@ the same household economy used by the five-year runner; the dormant shock actor
 interactive stress buttons without adding a standing stabilizer. Opening counts and arrival rates
 are controlled separately for mortgage debtors, insured savers and cash investors. The Make
 target adds =--set scenario.agents.ShockAgent=1= to the common =economy.toml= preset.
+Reloading reconnects to the same session while it exists on the server.
+=make nix-venv-sandbox-savings-test= exercises this transport against a
+temporary Python server.
 
 For a previously built deployment, =sim-savings-serve= starts only the server. Building and
 starting are separate operations; updating source files does not reload a running process.

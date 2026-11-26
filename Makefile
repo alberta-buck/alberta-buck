@@ -23,6 +23,7 @@ help:
 	  '  make nix-venv-core-build-py        # compiled Python kernels' \
 	  '  make nix-venv-core-net-math-test   # canonical uint256 math: Solidity, Rust, Python and JS' \
 	  '  make nix-core-equilibrium-bootstrap-test  # canonical JS bootstrap, portfolios and guarded market' \
+	  '  make nix-venv-savings-parity         # compare a small pyrevm / WebEVM Savings world' \
 	  '  make nix-venv-economy-bootstrap-test  # canonical Python + JS deployment and pool bootstrap' \
 	  '  make nix-venv-economy-accounting-test # bootstrap, household phases, portfolios and JSON/PDF' \
 	  '  make nix-sim-build                 # simulation contracts and venue artifacts' \
@@ -150,7 +151,7 @@ help-runs:
 #      make nix-core-eqsim [JS_EQ_ARGS="--days 14 --policy adaptive"]   charts in build/sim/js-eqsim.svg
 #      Directly, inside make nix-venv: cd core/js && node bin/eqsim.mjs --days 30 (or bin/farmsim.mjs)
 #   f  Interactive worlds
-#      make nix-sandbox-local [SANDBOX_LOCAL_PORT=8988]   the sandbox, its Savings world running in the tab
+#      make nix-sandbox-local [SANDBOX_LOCAL_HOST=0.0.0.0] [SANDBOX_LOCAL_PORT=8988]
 #      make nix-venv-sim-savings SIM_SAVINGS_PORT=8981    the Savings world on a Python server (on this
 #                                                         machine never 8000, 8797 or 8798: tunnel origins)
 #      The dashboard (5) starts live sessions too: New live session, on its page.
@@ -2182,6 +2183,12 @@ sandbox-build:	sandbox-artifacts core-build-wasm-web
 	python3 scripts/third_party_notices.py sandbox core/js/artifacts/sandbox-meta.json \
 		> $(SANDBOX_DIST)/THIRD-PARTY-NOTICES.txt
 
+SAVINGS_PARITY_ARGS ?=
+.PHONY: savings-parity
+savings-parity: sim-build core-build-py core-build-wasm
+	$(MAKE) core-js-check-worktree
+	python -m alberta_buck.sim.savings_parity $(SAVINGS_PARITY_ARGS)
+
 # Browser-only canonical Buck acceptance. The browser check owns its temporary
 # static server; the Python savings backend and five-year economy are separate.
 .PHONY: wallet-sandbox-test
@@ -2226,21 +2233,23 @@ third-party-notices-check:
 	done
 	@echo "licence texts and third-party notices are current"
 
+SANDBOX_HOST ?= 127.0.0.1
 SANDBOX_PORT ?= 8000
 sandbox:	sandbox-build
-	@echo "sandbox: http://localhost:$(SANDBOX_PORT)/   (Ctrl-C stops it)"
-	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 $(SANDBOX_PORT)
+	@echo "sandbox: listening on $(SANDBOX_HOST), port $(SANDBOX_PORT) (Ctrl-C stops it)"
+	python3 -m http.server -d $(SANDBOX_DIST) --bind "$(SANDBOX_HOST)" $(SANDBOX_PORT)
 
 # The sandbox with the Savings tab's world in the tab (no sim server: a Web Worker on webevm), built
-# and served on 127.0.0.1:$(SANDBOX_LOCAL_PORT), the Savings tab open (Ctrl-C stops it). Not 8000,
-# 8797 or 8798: the tunnels' origins.
-#   make nix-sandbox-local                          # then open the URL it prints
-#   make nix-sandbox-local SANDBOX_LOCAL_PORT=9000
+# and served on loopback by default. Open /?tab=savings&sim=local in the browser.
+#   make nix-sandbox-local
+#   make nix-sandbox-local SANDBOX_LOCAL_HOST=0.0.0.0 SANDBOX_LOCAL_PORT=9000
+SANDBOX_LOCAL_HOST ?= $(SANDBOX_HOST)
 SANDBOX_LOCAL_PORT ?= 8988
 .PHONY: sandbox-local
 sandbox-local:	sandbox-build
-	@echo "sandbox: http://127.0.0.1:$(SANDBOX_LOCAL_PORT)/?tab=savings   (the Savings world runs in the tab; Ctrl-C stops it)"
-	python3 -m http.server -d $(SANDBOX_DIST) --bind 127.0.0.1 $(SANDBOX_LOCAL_PORT)
+	@echo "Savings sandbox: listening on $(SANDBOX_LOCAL_HOST), port $(SANDBOX_LOCAL_PORT) (Ctrl-C stops it)"
+	@echo 'Open /?tab=savings&sim=local on the serving host.'
+	python3 -m http.server -d $(SANDBOX_DIST) --bind "$(SANDBOX_LOCAL_HOST)" $(SANDBOX_LOCAL_PORT)
 
 # The HOSTED savings sandbox (https://savings-sandbox.albertabuck.ca/), served
 # from its OWN worktree on the savings-sandbox branch, so work in any other

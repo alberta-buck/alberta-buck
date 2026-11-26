@@ -19,6 +19,7 @@ import { buildEquilibriumWorld, DayClock, PidKeeper, WheelKeeper } from "./eqwor
 import { PinWhale } from "../agents/whale.js";
 import { ParityArb } from "../agents/arb.js";
 import { HouseholdPopulationAgent } from "../agents/credit-household.js";
+import { SAVINGS_BORROWERS } from "./savings-presets.js";
 
 const E6 = 10n ** 6n;
 const E18 = 10n ** 18n;
@@ -49,9 +50,10 @@ export const TICKS_PER_DAY = 4;
 
 /** A reference walk's price at day d and tick k of `ticks`: geometric between its days. */
 function priceAt(feed, d, k, ticks) {
-  const p0 = feed[d % feed.length];
+  const index = d % feed.length;
+  const p0 = feed[index];
   if (!k) return p0;
-  const p1 = feed[(d + 1) % feed.length];
+  const p1 = feed[Math.min(index + 1, feed.length - 1)];
   return BigInt(Math.round(Number(p0) * (Number(p1) / Number(p0)) ** (k / ticks)));
 }
 
@@ -88,18 +90,24 @@ export class ShockAgent {
       s.daysLeft -= 1;
       const amount = BigInt(Math.round(s.perDay * 1e6));
       try {
+        const holder = await world.proxyFor(this.account);
         if (s.side === "buy") {
           await world.fiatIn(this.account, amount, { tag: "shock:usdc" });
-          await world.buyBuck(amount, this.account, { tag: `shock:buy:d${day}` });
-          this.boughtUsd += s.perDay;
+          const received = await world.buyBuck(amount, this.account, { tag: `shock:buy:d${day}` });
+          if (received > 0n) this.boughtUsd += Number(amount) / 1e6;
         } else {
-          // BUCK at about a dollar: a credit line a little larger than the sale, drawn once.
-          const held = await world.session.call(world.buck, "balanceOf", [world.holderAddress(this.account)]);
-          if (held < amount) await world.pledge(this.account, (amount - held) * 2n, { tag: `shock:pledge:d${day}` });
-          await world.sellBuck(amount, this.account, { tag: `shock:sell:d${day}` });
-          this.soldUsd += s.perDay;
+          const held = await world.session.call(world.buck, "balanceOf", [holder.address]);
+          if (held < amount) {
+            const spendable = (amount - held) * 105n / 100n + 1n;
+            const k = await world.K();
+            // K scales the credit face. Allow headroom for a refreshed K at mint time.
+            const face = spendable * 2n * E18 / k;
+            await world.pledge(this.account, face, { spendable, tag: `shock:pledge:d${day}` });
+          }
+          const received = await world.sellBuck(amount, this.account, { tag: `shock:sell:d${day}` });
+          if (received > 0n) this.soldUsd += Number(received) / 1e6;
         }
-      } catch { /* a refused leg leaves the pressure for the next day's turn */ }
+      } catch { /* a refused leg records no volume for this day */ }
     }
   }
 }
@@ -144,14 +152,23 @@ export class SavingsWorld {
    * @param deps.artifacts  (name) => {abi, bytecode}
    * @param deps.urArtifact the UniversalRouter artifact
    * @param deps.sets       the page's settings: agents.HouseholdPopulationAgent.<key>,
-   *                        scenario.seed, scenario.ticks_per_day, scenario.prices (history | revert)
+   *                        scenario.seed, scenario.ticks_per_day, scenario.prices, scenario.borrower
+   * @param deps.days      population scheduling horizon, 3650 for an interactive world
+   * @param deps.bootstrapDeposits ordered TOKEN endowments supplied by a paired replay
    * @param deps.prices     the economy's TOKENs and price paths (alberta_buck.sim.savings_prices:
    *                        {tokens, series: {history, revert}, start}); without them, eqworld's
    *                        own TOKENs on seeded walks
    */
-  constructor({ session, identity, artifacts, urArtifact, sets = {}, rng, prices = null }) {
-    Object.assign(this, { session, identity, artifacts, urArtifact, rng, prices });
-    this.priceMode = prices ? (sets["scenario.prices"] === "revert" ? "revert" : "history") : "walk";
+  constructor({ session, identity, artifacts, urArtifact, sets = {}, rng, prices = null, days = 3650, bootstrapDeposits }) {
+    Object.assign(this, { session, identity, artifacts, urArtifact, rng, prices, days, bootstrapDeposits });
+    this.priceMode = sets["scenario.prices"] ?? (prices ? "history" : "walk");
+    if (prices ? !Object.hasOwn(prices.series, this.priceMode) : this.priceMode !== "walk") {
+      throw new Error(`Price tape unavailable: ${this.priceMode}`);
+    }
+    const borrower = sets["scenario.borrower"] ?? "";
+    if (borrower && !Object.hasOwn(SAVINGS_BORROWERS, borrower)) throw new Error(`Unknown borrower preset: ${borrower}`);
+    this.borrower = borrower;
+    this.priceDays = prices ? Math.min(...prices.series[this.priceMode].map((feed) => feed.length)) : null;
     this.day = 0;
     this.seed = Number(sets["scenario.seed"] ?? 41404) || 41404;
     const ticks = Math.floor(Number(sets["scenario.ticks_per_day"] ?? TICKS_PER_DAY));
@@ -170,19 +187,20 @@ export class SavingsWorld {
 
   async boot() {
     this.actAs = installActAs(this.session);
-    const given = this.prices && {
-      tokens: this.prices.tokens.map((t) => ({ sym: t.sym, name: t.name, dec: t.dec, p0: BigInt(t.p0),
-                                                weightBp: t.weightBp })),
-      feeds: this.prices.series[this.priceMode].map((row) => row.map((p) => BigInt(p))),
-    };
+    let given = {};
+    if (this.prices) {
+      const feeds = this.prices.series[this.priceMode].map((row) => row.map((p) => BigInt(p)));
+      given = { feeds, tokens: this.prices.tokens.map((t, i) => ({ ...t, p0: feeds[i][0] })) };
+    }
     const w = this.world = await buildEquilibriumWorld(this.session, this.artifacts, {
       identity: this.identity, urArtifact: this.urArtifact, rng: this.rng, basket: "machine",
-      feedSeed: this.seed, ...(given ?? {}) });
+      feedSeed: this.seed, bootstrapDeposits: this.bootstrapDeposits, ...given });
     const T = this.ticksPerDay;
     const arb = new ParityArb({ everyTick: true });
     this.shock = new ShockAgent();
     this.pop = new HouseholdPopulationAgent({ makeAccount: () => privateKeyToAccount(generatePrivateKey()),
-      seed: this.seed, days: 3650, settings: this.settings, ...this.population });
+      seed: this.seed, days: this.days, settings: this.settings, ...this.population,
+      openingDebtor: this.borrower ? { ...SAVINGS_BORROWERS[this.borrower].settings, pay_day: 1, divest_rate: 0 } : null });
     this.cast = [
       new DayClock({ ticksPerDay: T }),
       ...w.tokens.map((t, i) => new PinWhale({ simlp: w.simlp, pool: t.poolUsdc, token: t.erc20.address,
@@ -269,6 +287,15 @@ export class SavingsWorld {
       frame[key] = typeof value === "bigint" ? String(value) : value;
     }
     Object.assign(frame, this.households());
+    const featured = this.pop.featured;
+    const ledger = featured?.ledger.at(-1);
+    if (ledger) frame.borrower = {
+      // The bank book can confirm a calendar payment on a day when the
+      // dispatcher skips its full on-chain household mark.
+      mortgage: String(featured.mortgage), baseline: String(featured.hypoMortgage),
+      buck_principal: String(ledger.drawn), mortgage_paid: String(featured.externalPaid),
+      error: featured.lastError, stale: ledger.day !== day,
+    };
     return frame;
   }
 
@@ -372,7 +399,8 @@ export class SavingsWorld {
       basket: w.basket.address, receipt, kctrl: w.kctrl.address, pool_ub: w.poolUB.address,
       router: w.router?.address ?? null, wheel: w.wheel?.address ?? null, director: null,
       basket_kind: "equity", machine: true, tokens, prices: [this.priceMode],
-      start_date: this.prices?.start ?? null,
+      start_date: this.priceMode === "three-phase" ? null : this.prices?.start ?? null,
+      borrower: this.borrower,
       households: { ...this.population, ...this.settings }, local: true, ticks_per_day: this.ticksPerDay,
     };
   }

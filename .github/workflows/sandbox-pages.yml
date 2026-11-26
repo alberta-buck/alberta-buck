@@ -25,6 +25,8 @@ on:
       - package.json
       - package-lock.json
       - .github/workflows/sandbox-pages.yml
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 concurrency:
@@ -71,15 +73,17 @@ jobs:
       - name: Build the sandbox
         run: make sandbox-build
 
-      - name: The built page passes its browser test
+      - name: Wallet and static Savings pass browser acceptance
         working-directory: core/js
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright
         run: |
           npx playwright-core install --with-deps chromium-headless-shell
-          node --test test/sandbox.browser.test.js
+          test -s sandbox/dist/savings-world.js
+          node --test test/sandbox.browser.test.js test/savings-local.browser.test.js
 
       - name: Deploy to Cloudflare Pages
+        if: github.event_name != 'pull_request'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

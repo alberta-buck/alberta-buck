@@ -1385,25 +1385,30 @@ const ROLE_CLASSES = { debtor: CreditHouseholdAgent, saver: CreditSaverAgent, in
 // Population settings (POPULATION, or the older initial / arrival_rate / saver_share) are top-level
 // options; `settings` go to every member. Members are named <population>/<role>/<k>.
 export class HouseholdPopulationAgent {
-  constructor({ makeAccount, seed = 0xA1BC, population: pop = 0, days = 1827, settings = {}, ...given }) {
-    Object.assign(this, { makeAccount, seed, name: String(pop), days, settings });
+  constructor({ makeAccount, seed = 0xA1BC, population: pop = 0, days = 1827, settings = {}, openingDebtor, ...given }) {
+    Object.assign(this, { makeAccount, seed, name: String(pop), days, settings, openingDebtor });
     this.pop = population(given);
     this.state = arrivalState(seed, this.name);
     this.members = [];
     this.opened = false;
   }
   async setup(world) { this.world = world; }
-  async arrive(world, role, k, day) {
+  async arrive(world, role, k, day, settings = this.settings) {
     if (this.members.length >= this.pop.max_members) throw new Error("household arrivals exceed max_members; raise the bound or lower the rates");
     const member = `${this.name}/${role}/${k}`;
     const agent = new ROLE_CLASSES[role]({ account: this.makeAccount(member), seed: this.seed, member,
-      arrive_day: day, settings: this.settings });
+      arrive_day: day, settings });
     await agent.setup(world);
     this.members.push(agent);
+    return agent;
   }
   async morning(world, day) {
     if (!this.opened) {
       this.opened = true;
+      if (this.openingDebtor) {
+        this.featured = await this.arrive(world, "debtor", "featured", day,
+          { ...this.settings, ...this.openingDebtor, role: "debtor" });
+      }
       for (const role of ROLES) for (let k = 0; k < this.pop[`initial_${role}s`]; k++) await this.arrive(world, role, k, day);
     }
     // An unreadable price leaves the average where it was; an unreadable K leaves the issuers' pace at
