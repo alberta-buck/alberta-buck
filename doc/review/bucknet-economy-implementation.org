@@ -2,6 +2,16 @@
 #+DATE: 2026-11-08
 #+OPTIONS: ^:nil toc:3
 
+* November 26 restart: merge gates and sparse pair signals
+
+Start with the [[file:buck-merge-readiness.org::*Resume here (November 26 UTC)][merge-readiness review]] for the paired runtime, experiment
+entry point, dashboard records and canonical deployment. All eight
+quiet-flow five-year pairs have since completed. The
+[[file:buck-basket-findings.org::*When the quiet-flow runs rebalanced (November 26 UTC)][rebalancing review]] separates daily changes to the pair-policy plan
+from aggregate wheel activity and gives the first historical windows
+to replay. The captured daily data establishes how often plans changed.
+Capturing the intraday gates and fills is the next basket measurement.
+
 * November 24 restart: five-year investor BUCK returns
 
 The [[file:buck-basket-findings.org][comprehensive review]] records strategy mechanics, pricing regimes, household

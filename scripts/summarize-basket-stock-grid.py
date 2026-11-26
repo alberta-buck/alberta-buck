@@ -10,6 +10,8 @@ from statistics import median
 import time
 from pathlib import Path
 
+from basket_rebalancing_report import rebalance_summary
+
 
 def load_json(path):
     return json.loads(path.read_text())
@@ -348,6 +350,7 @@ def main():
     p.add_argument('--output', type=Path, help='Markdown output (default: stdout)')
     p.add_argument('--comparison', help='dashboard comparison name (default: campaign directory name + -stock)')
     p.add_argument('--no-comparison', action='store_true')
+    p.add_argument('--rebalancing', action='store_true', help='report allocation drift and rebalancing activity')
     p.add_argument('--watch', type=float, metavar='SECONDS', help='refresh summary and index repeatedly (minimum 5 seconds)')
     args = p.parse_args()
     if args.watch is not None and args.watch < 5:
@@ -358,7 +361,8 @@ def main():
             if manifest.get('schema') != 1:
                 p.error('unsupported campaign schema')
             root = args.runs or Path(manifest['run_root'])
-            report, good = summary(args.campaign, manifest, root)
+            report, good = (rebalance_summary(args.campaign, manifest, root, validated) if args.rebalancing
+                            else summary(args.campaign, manifest, root))
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 temporary = args.output.with_name(args.output.name + '.tmp')

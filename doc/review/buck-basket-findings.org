@@ -1,5 +1,5 @@
 #+TITLE: BUCK basket returns, investor flows and the mature Jubilee opening
-#+DATE: 2026-11-24
+#+DATE: 2026-11-26
 #+OPTIONS: toc:2 ^:nil
 
 * What the completed runs establish
@@ -495,6 +495,78 @@ market trades or daily keeper observations took place during the time advance.
 [[file:../../build/sim/basket-studies/anchor-5y-asof/signal-attribution.md][Five-year release-only result]] ·
 [[file:../../build/sim/aged-5y-datasim/summary.md][Audited opening balances]] ·
 [[file:../../alberta_buck/sim/studies/basket-stock-5y-balanced.toml][Balanced five-year recipe]]
+
+** When the quiet-flow runs rebalanced (November 26 UTC)
+
+The completed quiet-flow matrix has four matched historical-bridge pairs
+and four matched reverting-history pairs. Each arm has 1,795 treatment
+closes. The historical active arms recorded 106,765 constituent decisions,
+1,095 positive pair asks (1.03%) and 270 changes to the final sized plan
+relative to the same-decision zero-rate counterfactual (0.253%). A changed
+plan appeared on 201 of 7,180 active arm-days (2.80%). The reverting active
+arms had 393 changed plans on 283 arm-days.
+
+| History seed | Extra Jubilee BUCK | Pair asks | Changed plans | Closes with changes | Largest closing gap with no pair ask |
+|--------------+--------------------+-----------+---------------+---------------------+---------------------------------------|
+| 41404 | 0 | 206 | 58 | 44 | 845, NRGC +152 bp, 0 wheel buys / 5 sells |
+| 41404 | 2,000,000 | 389 | 87 | 60 | 342, CNST -154 bp, 5 wheel buys / 0 sells |
+| 41405 | 0 | 285 | 64 | 50 | 342, CNST -144 bp, 6 wheel buys / 5 sells |
+| 41405 | 2,000,000 | 215 | 61 | 47 | 416, CNST -163 bp, 5 wheel buys / 0 sells |
+
+The historical active arms recorded 49,359 wheel buy/sell responses. The
+same maintenance arms recorded 49,733. These =Responded= counters include
+book sizing and safeguards in both arms. A sell response can also succeed
+with a liquidity burn alone. The stock capture retained daily decision
+counts and aggregate wheel activity. Transaction-level attribution of
+confirmed fills, zero asks and refusals needs a new capture.
+
+From the treatment opening, the widest relative USD spread was 99.1%,
+measured as the ratio of the fastest to slowest cumulative TOKEN return
+factors minus one. Starting at the declared weights, fixed TOKEN quantities
+would have produced a maximum 43.6% relative departure from a declared
+weight. A stylized full-range LP, whose TOKEN-side value scales with the
+square root of price, reduces the benchmark to 20.1%. Observed closing
+departures were 18.9–20.9% across the four active arms, inside the 30%
+relative declared-weight leash on that daily measure. The benchmark omits
+funding, idle inventory and actual market execution. The close alone
+cannot establish whether an intraday response reached the leash.
+
+The working target tilts against relative price strength, so a gap to that
+target can still be substantial. P95 of the largest daily held-minus-target
+gap was 73–84 bp across the four historical active arms. On 83 of the 135
+arm-days closing at 100 bp or more, no constituent registered a pair ask.
+These closing gaps approximate imbalance. The policy measures the intraday
+exposure gap against target book size, then requires persistent urgency,
+fresh quotes, sufficient relative separation and evidence of braking or
+closing. Only 270 of the 1,095 positive asks changed the final sized plan.
+The earlier two-year anchor ablation used the same monthly inputs and
+recorded 54 same-transaction fills with a changed plan on the pinned
+bridge, zero on the linear bridge and 28 with monthly carry-forward.
+The default historical bridge is a daily path constructed from monthly
+observations, so test path sensitivity before changing eligibility.
+
+The report lists every historical close with a changed plan. Replay
+41404 with no extra Jubilee contribution around days 845–847 first.
+NRGC's declared weight was 2,129 bp on all three closes. It was overweight
+relative to its working target on each close and underweight relative to
+its declared weight.
+
+| Close | NRGC held / target (bp) | NRGC gap to target | All constituent decisions | Pair asks | Changed plans | Wheel buys / sells |
+|-------+-------------------------+--------------------+---------------------------+-----------+---------------+--------------------|
+| 845   | 2,019 / 1,867           | +152 bp            |                        10 |         0 |             0 |              0 / 5 |
+| 846   | 1,958 / 1,891           | +67 bp             |                        10 |         1 |             0 |              4 / 2 |
+| 847   | 1,959 / 1,877           | +82 bp             |                        10 |         1 |             1 |              0 / 1 |
+
+The ask and change counts cover all five constituents. Replay around
+day 342 with both seeds to contrast the recurring CNST gap. Extend the
+existing research signal capture and reuse the frozen tape, seed and
+warmup. Trace the decision-time gap, urgency, observation age, route
+spread, braking rate, final size limits and confirmed execution per
+response. Compare filled active and maintenance amounts and holder
+outcomes before using the signal count to tune the policy.
+
+[[file:../../build/research-results/stock-grid-5y-rebalancing.md][Detailed five-year rebalancing report]] ·
+[[file:../../README-simulations.org::*Stock matrix and dashboard][Report command]]
 
 * Recommendations for performance and stability
 

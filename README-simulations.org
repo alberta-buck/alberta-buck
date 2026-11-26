@@ -591,6 +591,17 @@ registers the comparison in the dashboard's /Compare/ tab as
 locations, and pass the same values to status, report and dashboard. The
 dashboard binds to loopback in read-only mode. Its port is =DASHBOARD_PORT=.
 
+Use the rebalancing report for daily held/target drift, pair asks,
+changed plans and aggregate wheel activity. It uses completed, validated
+pairs and lists the historical simulation closes with changed plans. The
+example writes a separate report and leaves the dashboard comparison
+index untouched.
+
+#+begin_src sh
+make nix-venv-basket-study-report BASKET_ID=stock-36d \
+  BASKET_REPORT_ARGS="--rebalancing --no-comparison --output build/research-results/stock-36d-rebalancing.md"
+#+end_src
+
 Select the [[file:alberta_buck/sim/studies/basket-stock-730d.toml][730-day matrix]]
 or [[file:alberta_buck/sim/studies/basket-stock-smoke.toml][short smoke matrix]] with
 =BASKET_CONFIG=. The 36-day matrix crosses four tapes, two daily noise

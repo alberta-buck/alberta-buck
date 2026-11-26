@@ -1,8 +1,59 @@
 #+TITLE: Merge plan for the interactive BUCK economy
-#+DATE: 2026-11-25
+#+DATE: 2026-11-26
 #+OPTIONS: toc:2 ^:nil
 
-* Resume here: live Savings prices and execution sizing
+* Resume here (November 26 UTC)
+
+The static Savings prototype passed targeted browser acceptance for
+mortgages, live future-price changes and confirmed execution charts.
+Hold the merge until the paired runtime, supported simulation entry
+points and canonical deploy/manifests are qualified. At this review the
+local =master= tip is =9351961d= and the branch before this review is
+593 commits ahead. Run the merge checks on the full candidate.
+
+| Work | Next change | Acceptance for the merge |
+|------+-------------+--------------------------|
+| Python/WebEVM agents | Compare pool marks and logical transactions at the first LABR opening deposit, then align clock, scheduling and cast one divergence at a time. Reconcile Python's funded desk and observation source with the WebEVM equivalents. | One shared resolved input. Exact integer ledger and intent comparisons, explicit tolerances for marks, and 30 matched days each of economy and lifecycle. Add deterministic cases for rare lifecycle transitions. Standalone smoke tests continue to check each transport. |
+| Simulation catalogue and dashboard | Inventory current Make launchers, recipes, comparison specs, archived evidence and fixture consumers. Use one manifest-backed entry point to start, resume and compare the supported experiments and studies. Make the Node Savings recorder produce the existing run format. | Run a short economy, a lifecycle case, and a paired basket study through the entry point. Python and JS produce compatible =buck-run/1= records. The dashboard opens them and the =buck-comparison/1= index. Each published comparison carries input and tape identity, seed, implementation, warmup and completion state. |
+| Contracts and fixtures | Land a fork-free canonical deployment smoke and align the artifact list. Port tests and live consumers away from each older family before removing it. | Deploy the canonical V3 world through the supported path, validate public artifacts, EIP-170 margins and storage layout, and keep executable papers and fixtures reproducible. Keep explicit owners and migration steps for legacy paths with remaining callers. |
+| Browser and release checks | Keep the static and Python-backed browser cases runnable from Make. Wire paired replay into the merge tier and check docs from the candidate. | Full =test-all=, paired replay and affected docs pass. Account for missing fixture or platform skips. |
+
+The five-year quiet-flow comparison is already readable through the
+dashboard's =buck-comparison/1= endpoint with all 16 run IDs. The same
+read-only check loaded a completed run manifest and its final close.
+The five-year status snapshot had eight of 32 matched pairs complete,
+all quiet-flow, with 22 running and two planned. The remaining campaigns
+provide funded and household-demand evidence. Replay the completed
+historical windows around closes 342 and 845–847 to measure pair-policy
+eligibility, zero-ask causes, clipping and confirmed fills. A matched
+trace is needed before tuning policy. The stock runs' daily counters and
+allocation findings are in the linked report and notes.
+The Savings chart displays confirmed pool swaps from the last 120
+closes and links legs of the same wheel response. Add the decision
+source and full-run drill-down to the dashboard with the new trace.
+
+[[file:buck-basket-findings.org::*When the quiet-flow runs rebalanced (November 26 UTC)][Five-year observations and replay starting points]] ·
+[[file:consolidation-plan.org::*Order of work (from 2026-11-21), with the recommended approach for each][Remaining legacy dependency migrations]]
+
+The dashboard record and comparison tests passed (16). This checkout
+lacks the generated regression verifier and A2 proof fixtures. Under
+the Makefile's existing fixture conditions, =test-all= excludes
+=RegressionTest.sol= and four proof-fixture suites (=MintVerifierTest=,
+=MintVerifierA2Test=, =NotesA2TieTest= and =SpendVerifierTest=).
+
+** Reproduce the quiet-flow rebalancing evidence
+
+On the machine holding the study records, point =stock= to the build
+directory of the frozen checkout or its local mirror.
+
+#+begin_src sh
+stock="${HOME}/src/alberta-buck-stock-multiyear-5bb86e77/build"
+make nix-venv-basket-study-report BASKET_OUT="$stock/sim/stock-grid-5y" \
+  BASKET_RUNS="$stock/runs" \
+  BASKET_REPORT_ARGS="--rebalancing --no-comparison --output build/research-results/stock-grid-5y-rebalancing.md"
+#+end_src
+
+* Live Savings prices and execution sizing
 
 The local Savings tab can replace future returns with =Apply to future
 prices=, using the same between-days worker queue as demand and supply
