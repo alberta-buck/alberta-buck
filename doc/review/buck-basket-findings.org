@@ -633,6 +633,38 @@ requires the matched maintenance arm.
 
 [[file:../../build/research-results/stock-grid-5y-flow-diagnostic.md][Receipt flow and relative-price windows]]
 
+** CNST reversal on a short historical slice
+
+The matched replay used the five historical columns from closes 335
+through 346, with five warmup closes, seed 41404, one starting debtor,
+one saver, six investors and zero scheduled arrival rates. The price
+anchors and household stocks were established at the start of the
+slice. It is a fresh-world reproduction of the price move.
+
+In the world with zero extra Jubilee funding, there was no non-Jubilee
+receipt flow on source day 342 and Jubilee minted about 1.9 bp of
+prior-close supply. The first three CNST decisions reached 114–120
+bp-days of urgency. The fourth reached 200 bp-days with a 246 bp
+underweight allocation, but the directional rate was zero. A confirmed
+23,063 BUCK purchase on that response was already in the maintenance
+plan. The price gap persisted long enough to observe both gates.
+
+On source day 343 the active plan called for confirmed CNST buys
+worth 15,564 and 14,808 BUCK. The same-state plans with the pair rate
+disabled called for zero on those two decisions. Two other positive
+asks that day, 681 and 831 BUCK, were below the minimum trade size
+of about 1,209 BUCK. This sequence exposes three limits separately.
+Urgency delayed eligibility, the directional rate still held when
+urgency first qualified, and minimum size absorbed small asks.
+
+From matched opening equity of 6.06M BUCK, the active share mark
+gained 0.363% and maintenance gained 0.348% over treatment, a
+0.014 percentage-point difference. This is one short tape and one
+seed. Replay the historical full state and log the per-peer readiness,
+separation and motion to explain the zero directional rate.
+
+[[file:../../build/research-results/cnst-window-j0.json][Matched short-slice decision trace]]
+
 * Recommendations for performance and stability
 
 1. Finish the funded, matched comparisons before changing the contract.

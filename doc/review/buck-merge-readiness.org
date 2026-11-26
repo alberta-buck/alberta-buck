@@ -223,6 +223,13 @@ realized receipt returns, drawdown, parity and gross execution costs.
   constituent decisions per arm with the daily counters. All active
   decisions were below eligibility and the trace matched 14 pool
   swaps per arm.
+- [X] Check a fresh world on historical closes 335–346. With zero extra
+  Jubilee, CNST remained underweight while no non-Jubilee receipt flow
+  occurred on source close 342. Urgency held the first three decisions,
+  then the directional rate was zero. The following day had two
+  pair-driven plan changes with confirmed CNST swaps and two asks
+  below trade grain. This establishes separate gates in the short
+  replay. Its reset price anchors differ from the frozen long run.
 - [ ] Reproduce the historical no-ask and changed-plan decisions. Start
   with the CNST gap around day 342, where the tape shows a clear
   reversal, then use the NRGC window around days 845–847 to check the
