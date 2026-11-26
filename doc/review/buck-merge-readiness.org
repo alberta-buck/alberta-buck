@@ -18,6 +18,27 @@ local =master= tip is =9351961d= and the branch before this review is
 | Contracts and fixtures | Land a fork-free canonical deployment smoke and align the artifact list. Port tests and live consumers away from each older family before removing it. | Deploy the canonical V3 world through the supported path, validate public artifacts, EIP-170 margins and storage layout, and keep executable papers and fixtures reproducible. Keep explicit owners and migration steps for legacy paths with remaining callers. |
 | Browser and release checks | Keep the static and Python-backed browser cases runnable from Make. Wire paired replay into the merge tier and check docs from the candidate. | Full =test-all=, paired replay and affected docs pass. Account for missing fixture or platform skips. |
 
+The live experiment selector currently lists all 54 top-level TOMLs,
+including =catalogue-*= and =rebalancing-*= recipes. The study Make
+catalogue has six driver families. Stock and aged write run records
+directly, while signal, braking, anchors and archive have offline
+captures and a partial import step. Start the supported list with
+=economy=, =economy-lifecycle= and the matched stock study. Preserve the
+older cases with provenance and migrate any still-required stress arm or
+fixture before removing its launcher.
+
+The Compare tab labels the two stock arms and draws the metrics. Its
+settings summary still says both use the experiment's own settings,
+because the upkeep switch is recorded as a post-warmup intervention.
+Show the actual treatment and start close in both indexed and direct
+comparisons.
+
+The deployment script still imports signed =BuckLinear= and the older
+USD controller. Port the facade quote tests and signed-Buck basket
+fixtures to canonical Buck, and move the V2 identity and swap cases to
+V3. Keep the paper Notes callers and published =WETH9= accounted for
+during those migrations.
+
 The five-year quiet-flow comparison is already readable through the
 dashboard's =buck-comparison/1= endpoint with all 16 run IDs. The same
 read-only check loaded a completed run manifest and its final close.
@@ -35,9 +56,14 @@ source and full-run drill-down to the dashboard with the new trace.
 [[file:buck-basket-findings.org::*When the quiet-flow runs rebalanced (November 26 UTC)][Five-year observations and replay starting points]] ·
 [[file:consolidation-plan.org::*Order of work (from 2026-11-21), with the recommended approach for each][Remaining legacy dependency migrations]]
 
-The dashboard record and comparison tests passed (16). This checkout
-lacks the generated regression verifier and A2 proof fixtures. Under
-the Makefile's existing fixture conditions, =test-all= excludes
+Both stock report modes reproduced the eight matched pairs. The
+dashboard record and comparison tests passed (16 Python and 14 JS).
+Chromium drew 15 comparison charts for the active and maintenance arms.
+The =make nix-venv-test-all= run from this review logs to
+=/tmp/buck-merge-assessment-test-all.log= on this machine and was in the
+Foundry compilation at the time of the review. This checkout lacks the
+generated regression verifier and A2 proof fixtures. Under the
+Makefile's existing fixture conditions, =test-all= excludes
 =RegressionTest.sol= and four proof-fixture suites (=MintVerifierTest=,
 =MintVerifierA2Test=, =NotesA2TieTest= and =SpendVerifierTest=).
 
