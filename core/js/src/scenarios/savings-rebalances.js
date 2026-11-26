@@ -9,7 +9,8 @@ export function rebalanceFills(world, day, tick) {
   for (const receipt of world.lastWheelReceipts ?? []) {
     if (receipt.status !== "success") continue;
     const logs = [
-      ...parseEventLogs({ abi: world.net.upkeep.abi, logs: receipt.logs, eventName: ["Responded", "WheelWork"] })
+      ...parseEventLogs({ abi: world.net.upkeep.abi, logs: receipt.logs,
+        eventName: ["Responded", "WheelWork", "RebalancePlan", "RebalanceBuyBudget"] })
         .filter((event) => event.address.toLowerCase() === basket),
       ...parseEventLogs({ abi: policy.abi, logs: receipt.logs, eventName: "RebalanceGaps" })
         .filter((event) => event.address.toLowerCase() === policy.address.toLowerCase()),
@@ -17,14 +18,19 @@ export function rebalanceFills(world, day, tick) {
         .filter(({ address, args }) => pools.has(address.toLowerCase())
           && args.sender.toLowerCase() === basket && args.recipient.toLowerCase() === basket),
     ].sort((a, b) => a.logIndex - b.logIndex);
-    let decision = null;
-    const swaps = new Map(), legs = [];
+    let decision = null, plan = null;
+    const swaps = new Map(), budgets = new Map(), legs = [];
     for (const { eventName, args, address, logIndex } of logs) {
       if (eventName === "Swap") {
         swaps.set(pools.get(address.toLowerCase()), { args, logIndex });
       } else if (eventName === "RebalanceGaps") {
         decision = args;
         swaps.clear();
+      } else if (eventName === "RebalancePlan") {
+        plan = args;
+        swaps.clear();
+      } else if (eventName === "RebalanceBuyBudget") {
+        budgets.set(Number(args.token), String(args.budget));
       } else if (eventName === "Responded" && (args.action === 1 || args.action === 2)) {
         const buy = args.action === 2, token = Number(buy ? args.buy : args.sell);
         const swap = swaps.get(token);
@@ -34,9 +40,12 @@ export function rebalanceFills(world, day, tick) {
         const tokenFirst = world.tokens[token].erc20.address.toLowerCase() < world.buck.address.toLowerCase();
         const [asset, buck] = tokenFirst ? [amount0, amount1] : [amount1, amount0];
         if (buy ? asset >= 0n || buck <= 0n : asset <= 0n || buck >= 0n) continue;
+        const amount = plan?.[buy ? "buys" : "sells"][token] ?? (buy ? null : args.proceeds);
         legs.push({ day, tick, token, side: buy ? "buy" : "sell",
           token_amount: String(buy ? -asset : asset), buck_amount: String(buy ? buck : -buck),
-          planned_sell: buy ? null : String(args.proceeds),
+          planned_amount: amount === null ? null : String(amount),
+          limits: plan?.[buy ? "buyLimits" : "sellLimits"][token] ?? null,
+          buy_budget: buy ? budgets.get(token) ?? null : null,
           urgency: decision ? String(decision.urgency[token]) : null,
           gap: decision ? String(decision.gaps[token]) : null,
           transaction: receipt.transactionHash, log_index: swap.logIndex });
@@ -45,7 +54,9 @@ export function rebalanceFills(world, day, tick) {
         fills.push(...legs.map((leg) => ({ ...leg, group })));
         legs.length = 0;
         swaps.clear();
+        budgets.clear();
         decision = null;
+        plan = null;
       }
     }
   }

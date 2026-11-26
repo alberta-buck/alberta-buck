@@ -117,12 +117,20 @@ day at a time. Demand and supply shocks trade against BUCK/USDC as the
 world advances. Allow subsequent closes for the basket and households to
 respond. The local run ends at the last close on its price tape.
 
+Use =Apply to future prices= to switch regimes or change noise in the
+current world. The worker applies the change between days using the
+current world's seed. Past closes and the next reference close are
+preserved. Subsequent prices follow the new returns from that anchor.
+The preview shows the first affected day. =Reset= restores the tape
+selected when the world was created.
+
 =Basket rebalancing executions= shows the most recent 120 closes. Up and
 down triangles mark confirmed buys and sells, and connected markers belong
 to the same wheel response. Hover or focus a marker to see its actual pool
 amounts and execution price, decision urgency and allocation gap. The
-current facet exposes the planned sale amount. The chart labels the planned
-buy amount and binding cap unavailable.
+chart also shows the planned TOKEN value in BUCK and which sizing limits
+reduced the plan. If available cash further reduced a buy at execution,
+the cash budget shown covers both its swap and its liquidity pairing.
 
 To serve the same build on the LAN, bind to the host's specific LAN address
 or bind to all IPv4 interfaces with =0.0.0.0=.

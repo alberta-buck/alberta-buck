@@ -334,7 +334,9 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const policy = await session.deploy(artifacts("PairRebalancePolicy"),
     [observer.address, basket.address, reference, MACHINE.sizing],
     { name: "PairRebalancePolicy", gas });
+  const rebalanceMath = await session.deploy(artifacts("BasketRebalanceMath"), [], { name: "BasketRebalanceMath", gas });
   const upkeep = await session.deploy(linkArtifact(artifacts("BasketUpkeepFacet"), {
+    "src/basket/BasketRebalanceMath.sol:BasketRebalanceMath": rebalanceMath.address,
     "src/basket/BasketJubileeMath.sol:BasketJubileeMath": world.net.basketValuationLibrary.address,
     "src/basket/BasketMarketOps.sol:BasketMarketOps": world.net.basketMarketLibrary.address }),
     [policy.address, parity.address, MACHINE.parityGain, MACHINE.parityGainDear],

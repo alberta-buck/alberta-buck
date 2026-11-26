@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { parseEventLogs } from "viem";
 import { loadAnyArtifact, artifactsAvailable, repoRoot, nodeWebevmSession } from "../src/nodefs.js";
 import { SavingsWorld, SAVINGS_NODE_OPTIONS } from "../src/scenarios/savings-world.js";
 import { row } from "../sandbox/src/savings/model.js";
@@ -15,12 +16,12 @@ import { Saver } from "../sandbox/src/savings/wallet.js";
 let identity;
 try { identity = (await import("../src/identity.js")).default; } catch { /* kernel unavailable */ }
 const urPath = join(repoRoot(), "alberta_buck/sim/artifacts/UniversalRouter.json");
+const pricesPath = join(repoRoot(), "core/js/artifacts/savings-prices.json");
 const skip = !identity || !artifactsAvailable() || !existsSync(urPath) ? "build kernels and contract artifacts first" : false;
 
 test("the savings world runs days, frames them for the page, and serves the page's wallet", { skip }, async () => {
   const session = await nodeWebevmSession({ nodeOptions: SAVINGS_NODE_OPTIONS });
   // The economy's TOKENs and price paths (make sandbox-artifacts writes them).
-  const pricesPath = join(repoRoot(), "core/js/artifacts/savings-prices.json");
   const prices = existsSync(pricesPath) ? JSON.parse(readFileSync(pricesPath, "utf8")) : null;
   const world = new SavingsWorld({ session, identity, artifacts: loadAnyArtifact, prices,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")),
@@ -103,4 +104,38 @@ test("the savings world runs days, frames them for the page, and serves the page
   assert.ok(mint.ok && approve.ok, `${mint.reason} ${approve.reason}`);
   assert.ok(deposit.ok, `the deposit: ${deposit.reason}`);
   assert.equal(session.mismatches.length, 0);
+});
+
+test("confirmed paired fills include their authoritative sizing limits", {
+  skip: skip || (!existsSync(pricesPath) && "build the sandbox price tape first"),
+}, async () => {
+  const session = await nodeWebevmSession({ nodeOptions: SAVINGS_NODE_OPTIONS });
+  const prices = JSON.parse(readFileSync(pricesPath, "utf8"));
+  const sets = { "scenario.prices": "sine", "scenario.ticks_per_day": 1 };
+  for (const role of ["debtor", "saver", "investor"]) {
+    sets[`agents.HouseholdPopulationAgent.initial_${role}s`] = 0;
+    sets[`agents.HouseholdPopulationAgent.${role}_rate`] = 0;
+  }
+  const budgets = [13n, 5n, 10n, 10n, 10n];
+  const bootstrapDeposits = prices.tokens.map((t, token) => ({
+    token, amount: budgets[token] * 10n ** (12n + BigInt(t.dec)) / BigInt(t.p0),
+  }));
+  const world = new SavingsWorld({ session, identity, prices, artifacts: loadAnyArtifact, sets, bootstrapDeposits,
+    urArtifact: JSON.parse(readFileSync(urPath, "utf8")) });
+  await world.boot();
+  await session.send(world.world.basket, "setResponse", [{ leashBp: 25, interval: 1800, tiltBp: 0, leanCapBp: 0 }]);
+  const { rebalance_fills: fills } = await world.step();
+  assert.ok(fills.some((fill) => fill.side === "buy") && fills.some((fill) => fill.side === "sell"));
+  assert.equal(new Set(fills.map((fill) => fill.group)).size, 1);
+  const receipt = await session.client.getTransactionReceipt({ hash: fills[0].transaction });
+  assert.equal(receipt.status, "success");
+  const [plan] = parseEventLogs({ abi: world.world.net.upkeep.abi, logs: receipt.logs, eventName: "RebalancePlan" });
+  for (const fill of fills) {
+    const buy = fill.side === "buy";
+    assert.equal(fill.planned_amount, String(plan.args[buy ? "buys" : "sells"][fill.token]));
+    assert.equal(fill.limits, plan.args[buy ? "buyLimits" : "sellLimits"][fill.token]);
+    assert.ok(BigInt(fill.planned_amount) > 0n);
+    assert.notEqual(fill.urgency, null);
+  }
+  assert.ok(fills.some((fill) => fill.limits !== 0), "at least one sizing cap constrained the response");
 });

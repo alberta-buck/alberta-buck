@@ -116,12 +116,15 @@ export function mountSavings(ctx) {
   const amplitude = priceSetting("Sine amplitude (%)", 0, 50, 12);
   const inflation = priceSetting("Annual USD inflation (%)", -30, 50, 2);
   const noiseField = priceField("Price noise (±%)", noise);
+  const applyPrices = h("button", { type: "button", onclick: () => applyFuturePrices() }, "Apply to future prices");
+  const priceAction = h("div", { class: "row" }, applyPrices);
   const periodFields = h("div", { class: "row" });
   const sineFields = h("div", {}, h("div", { class: "row" }, priceField("Sine amplitude (%)", amplitude),
     priceField("Annual USD inflation (%)", inflation)), periodFields);
   let periodInputs = {};
   function drawPriceOptions() {
     noiseField.hidden = !S.local;
+    priceAction.hidden = !S.local;
     sineFields.hidden = !S.local || pricesSel.value !== "sine";
   }
   const borrowerSel = h("select", { "aria-label": "borrower scenario" },
@@ -181,7 +184,7 @@ export function mountSavings(ctx) {
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Seed"), seedIn),
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Ticks / day"), ticksSel), borrowerField),
         h("div", { class: "row" }, ...householdFields),
-        h("div", { class: "row" }, noiseField), sineFields,
+        h("div", { class: "row" }, noiseField), sineFields, priceAction,
         h("div", { class: "row" },
           h("button", { type: "button", class: "danger", onclick: () => newWorld() }, "New world")),
         newWorldHint, worldLink)));
@@ -458,6 +461,10 @@ export function mountSavings(ctx) {
         S.priceTime = time;
         drawForecast();
       },
+      onPriceTape: ({ tape, mode, effectiveDay }) => {
+        Object.assign(S, { priceTape: tape, priceMode: mode, priceChangeDay: effectiveDay, forecastStart: null });
+        queueDraw();
+      },
       onFrame: (f) => {
         S.rows.push(row(f));
         queueDraw();
@@ -488,16 +495,7 @@ export function mountSavings(ctx) {
           if (prefs.get("savings:seconds", "") !== "") setPace();
           prefs.set("savings:key", S.saver.key);
           buildCommodities();
-          if (S.local) {
-            buildPriceViews();
-            link.call("sim_price_tape").then((tape) => {
-              if (S.link !== link || S.info !== info) return;
-              S.priceTape = tape;
-              drawForecast();
-            }).catch((err) => {
-              if (S.link === link && S.info === info) ctx.say(`Price preview: ${err.message}`, "error");
-            });
-          }
+          if (S.local) buildPriceViews();
           draw();
           readHoldings();
           return;
@@ -588,13 +586,10 @@ export function mountSavings(ctx) {
     return [buck && "BUCK", toks && "TOKENs"].filter(Boolean).join(" and ");
   }
 
-  function newWorld() {
+  function priceSettings() {
     const priceInputs = pricesSel.value === "sine" ? [noise, amplitude, inflation, ...Object.values(periodInputs)] : [noise];
-    if (S.local && priceInputs.some((input) => !input.reportValidity())) return;
-    if (!confirm(S.local ? "Start a new world? The current world's balance and receipts will be cleared."
-      : "Start a new world? This one keeps running until it is idle, but this tab leaves it.")) return;
+    if (S.local && priceInputs.some((input) => !input.reportValidity())) return null;
     const sets = {};
-    for (const [key, select] of Object.entries(householdSelects)) sets[`agents.HouseholdPopulationAgent.${key}`] = select.value;
     if (pricesSel.value !== "history") sets["scenario.prices"] = pricesSel.value;
     if (S.local) {
       if (noise.value) sets["scenario.price_noise_pct"] = noise.value;
@@ -604,6 +599,19 @@ export function mountSavings(ctx) {
         for (const [symbol, input] of Object.entries(periodInputs)) sets[`scenario.sine_period.${symbol}`] = input.value;
       }
     }
+    return sets;
+  }
+
+  function applyFuturePrices() {
+    const sets = priceSettings();
+    if (sets && S.local) return op("Changing future commodity prices", { op: "price-regime", sets });
+  }
+
+  function newWorld() {
+    const sets = priceSettings();
+    if (!sets || !confirm(S.local ? "Start a new world? The current world's balance and receipts will be cleared."
+      : "Start a new world? This one keeps running until it is idle, but this tab leaves it.")) return;
+    for (const [key, select] of Object.entries(householdSelects)) sets[`agents.HouseholdPopulationAgent.${key}`] = select.value;
     if (S.local && borrowerSel.value) sets["scenario.borrower"] = borrowerSel.value;
     if (seedIn.value.trim()) sets["scenario.seed"] = seedIn.value.trim();
     sets["scenario.ticks_per_day"] = ticksSel.value;
@@ -630,7 +638,8 @@ export function mountSavings(ctx) {
   }
 
   function clearPriceViews() {
-    Object.assign(S, { priceTape: null, priceTime: null, forecastStart: null, forecast: null, rebalances: null });
+    Object.assign(S, { priceTape: null, priceTime: null, priceMode: null, priceChangeDay: null,
+      forecastStart: null, forecast: null, forecastChange: null, rebalances: null });
     forecastBox.hidden = rebalancesBox.hidden = true;
     fill(forecastBox);
     fill(rebalancesBox);
@@ -643,7 +652,8 @@ export function mountSavings(ctx) {
     fill(periodFields, Object.entries(periodInputs).map(([symbol, input]) => priceField(`${symbol} period (days)`, input)));
     S.forecast = lineChart({ title: "Upcoming commodity reference prices", fmt: (n) => `${n.toFixed(3)}×`, series,
       note: "USD prices indexed to day 0. The vertical line follows the current simulated tick." });
-    fill(forecastBox, S.forecast.el);
+    S.forecastChange = h("p", { class: "hint", hidden: true });
+    fill(forecastBox, S.forecast.el, S.forecastChange);
     S.rebalances = lineChart({ title: "Basket rebalancing executions", fmt: (n) => `${n.toFixed(3)}×`, series,
       note: "▲ Buy · ▼ Sell. Lines connect fills from the same wheel response. BUCK prices are indexed to day 0." });
     fill(rebalancesBox, S.rebalances.el);
@@ -654,6 +664,8 @@ export function mountSavings(ctx) {
     const tape = S.priceTape;
     if (!S.forecast || !tape?.[0]?.length) return;
     forecastBox.hidden = false;
+    S.forecastChange.hidden = S.priceChangeDay === null;
+    if (S.priceChangeDay !== null) S.forecastChange.textContent = `The new settings apply from day ${S.priceChangeDay}.`;
     const now = S.priceTime ?? S.rows.at(-1)?.day ?? 0;
     const start = Math.max(0, Math.floor(now / 30) * 30 - 7);
     if (S.forecastStart !== start) {
@@ -677,12 +689,15 @@ export function mountSavings(ctx) {
       const price = buck / amount;
       const urgency = fill.urgency === null ? "unavailable" : `${(Number(fill.urgency) / 86400e18).toPrecision(4)} share-days`;
       const gap = fill.gap === null ? "unavailable" : pct2(Number(fill.gap) / 1e16);
-      const planned = fill.planned_sell === null ? "unavailable" : `${bucks(Number(fill.planned_sell) / 1e6)} BUCK`;
+      const planned = fill.planned_amount === null ? "unavailable" : `${bucks(Number(fill.planned_amount) / 1e6)} BUCK`;
+      const limits = ["step size", "pool depth", "portfolio ceiling"].filter((_, i) => fill.limits & (1 << i));
+      if (fill.buy_budget !== null) limits.push(`available cash (${bucks(Number(fill.buy_budget) / 1e6)} BUCK for swap and pairing)`);
+      const binding = limits.join(", ") || (fill.limits === null ? "unavailable" : "none applied");
       return [{ x: r.day + fill.tick / S.info.ticks_per_day, y: price * 1e6 / base[i], group: fill.group,
         color: COMMODITY_COLORS[i % COMMODITY_COLORS.length], side: fill.side,
         detail: `Day ${r.day}, tick ${fill.tick + 1} · ${fill.side} ${compact(amount)} ${symbol} for ${bucks(buck)} nominal BUCK. `
           + `Execution price ${priceFmt(price)} BUCK per ${symbol}. Urgency ${urgency}. Gap ${gap}. `
-          + `Planned amount ${planned}. Binding cap unavailable.` }];
+          + `Planned amount ${planned}. Limits applied: ${binding}.` }];
     }));
     S.rebalances.update(shown.map((r) => r.day), tokens.map((_, i) =>
       shown.map((r) => r.sb[i] && base[i] ? r.sb[i] / base[i] : null)), markers);
@@ -741,7 +756,7 @@ export function mountSavings(ctx) {
         "Whether BUCK has stayed cheap or dear beyond the desk's band, and for how many days"),
       stat("To depositors", dollars(last.credited), "The work wheel's harvest, credited to the depositors"),
       stat("Pace", last.pace > 0 ? `${(1 / last.pace).toFixed(1)} s/day` : "–"),
-      stat("Prices", !S.info ? "–" : S.info.local ? ({ revert: "reverting", "three-phase": "commodity cycles" }[S.info.prices?.[0]] ?? S.info.prices?.[0] ?? "–")
+      stat("Prices", !S.info ? "–" : S.info.local ? ({ revert: "reverting", "three-phase": "commodity cycles", sine: "sine waves" }[S.priceMode] ?? S.priceMode ?? "–")
         : String(S.info.prices?.[0] ?? "").startsWith("rev-") ? "reverting" : "history",
         "Set when the world is made (World settings)"),
     ] : [h("span", { class: "hint" }, S.link ? STATES[S.link.state] : "")]);
@@ -805,6 +820,7 @@ export function mountSavings(ctx) {
   function drawControls() {
     const st = S.status;
     const live = S.link?.state === "live";
+    applyPrices.disabled = !live || !S.priceTape;
     runBtn.disabled = !live;
     resetBtn.disabled = !(live || S.link?.state === "done");
     runBtn.textContent = st?.paused ? "Run" : "Pause";

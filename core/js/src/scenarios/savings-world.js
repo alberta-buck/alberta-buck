@@ -175,6 +175,8 @@ export class SavingsWorld {
     this.seed = Number(sets["scenario.seed"] ?? 41404) || 41404;
     this.priceTape = prices ? savingsPriceTape(prices, this.priceMode, sets, this.seed) : null;
     this.priceDays = this.priceTape?.[0].length ?? null;
+    this.startDate = ["three-phase", "sine"].includes(this.priceMode) ? null : prices?.start ?? null;
+    this.priceChangeDay = null;
     const ticks = Math.floor(Number(sets["scenario.ticks_per_day"] ?? TICKS_PER_DAY));
     this.ticksPerDay = Number.isSafeInteger(ticks) && ticks >= 1 && ticks <= 48 ? ticks : TICKS_PER_DAY;
     this.population = { ...POPULATION };
@@ -239,6 +241,27 @@ export class SavingsWorld {
     this.frames.push(frame);
     this.day += 1;
     return frame;
+  }
+
+  /** Replace future returns at a day boundary. The first unwritten close was
+   *  already the endpoint of the previous day's interpolation, so keep it. */
+  changePriceRegime(sets) {
+    const anchor = this.day;
+    if (!this.priceTape || anchor + 1 >= this.priceDays) throw new Error("There are no remaining prices to replace");
+    const mode = sets?.["scenario.prices"] ?? "history";
+    const candidate = savingsPriceTape(this.prices, mode, sets ?? {}, this.seed, anchor + 1);
+    if (candidate[0].length !== this.priceDays) throw new Error("The new regime must cover the remaining price horizon");
+    const tape = this.priceTape.map((feed, i) => {
+      const next = candidate[i];
+      const scale = feed[anchor] / next[anchor];
+      return feed.slice(0, anchor + 1).concat(next.slice(anchor + 1, this.priceDays)
+        .map((price) => Math.max(1, Math.round(price * scale))));
+    });
+    // The world's market helpers retain the feed array from deployment.
+    this.world.feeds.splice(0, tape.length, ...tape.map((feed) => feed.map((price) => BigInt(price))));
+    this.priceTape = tape;
+    this.priceMode = mode;
+    this.priceChangeDay = anchor + 1;
   }
 
   /** The day's frame, in the snapshot's units (alberta_buck/sim/snapshot.py). */
@@ -408,7 +431,7 @@ export class SavingsWorld {
       basket: w.basket.address, receipt, kctrl: w.kctrl.address, pool_ub: w.poolUB.address,
       router: w.router?.address ?? null, wheel: w.wheel?.address ?? null, director: null,
       basket_kind: "equity", machine: true, tokens, prices: [this.priceMode],
-      start_date: ["three-phase", "sine"].includes(this.priceMode) ? null : this.prices?.start ?? null,
+      start_date: this.startDate,
       borrower: this.borrower,
       households: { ...this.population, ...this.settings }, local: true, ticks_per_day: this.ticksPerDay,
     };

@@ -7,10 +7,11 @@
 // from its own state.
 //
 // Messages in:  {type: "start", sets}        build the world (once; "reset" rebuilds it)
-//               {type: "op", id, op}          {op: pause|resume|step|pace|shock|reset|stop, ...}
+//               {type: "op", id, op}          {op: pause|resume|step|pace|shock|price-regime|reset|stop, ...}
 //               {type: "rpc", id, reqs}       a JSON-RPC batch
 // Messages out: {type: "state", state, detail}    building | live | done | failed
 //               {type: "frame", frame}             one day (and, on start, every day so far)
+//               {type: "price-tape", tape, mode, effectiveDay}  initial tape or a future-price update
 //               {type: "reset"}                    the world starts over from its first day
 //               {type: "op", id, reply} / {type: "rpc", id, reply}
 
@@ -30,6 +31,8 @@ const host = {
 let identity = null;
 
 const post = (m) => self.postMessage(m);
+const postPriceTape = () => post({ type: "price-tape", tape: host.world.priceTape,
+  mode: host.world.priceMode, effectiveDay: host.world.priceChangeDay });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitForWork = () => new Promise((r) => { host.wake = r; });
 const wake = () => { const w = host.wake; host.wake = null; w?.(); };
@@ -57,6 +60,11 @@ function apply({ op, ...args }) {
   else if (op === "resume") { host.paused = false; host.stepLeft = 0; }
   else if (op === "step") { host.stepLeft = Math.max(1, Math.floor(Number(args.days ?? 1))); host.paused = false; }
   else if (op === "shock") host.world?.shock.arm(args.side, Number(args.usd ?? 0), Number(args.days ?? 1));
+  else if (op === "price-regime") {
+    if (host.done) return "The world has finished its price tape";
+    try { host.world.changePriceRegime(args.sets); } catch (e) { return e.message; }
+    postPriceTape();
+  }
   else if (op === "stop") host.done = true;
   else if (op === "reset") return "reset";
   else return `${op} is not available in a world in this tab`;
@@ -95,6 +103,7 @@ async function run() {
     post({ type: "state", state: "failed", detail: host.error });
     return;
   }
+  postPriceTape();
   post({ type: "state", state: "live" });
   while (generation === host.generation) {
     if (await serve() === "reset") {
@@ -129,6 +138,7 @@ self.onmessage = (ev) => {
   const m = ev.data ?? {};
   if (m.type === "start") {
     if (host.world || host.generation) {                 // a reconnecting page: replay, then live
+      if (host.world) postPriceTape();
       for (const frame of host.frames) post({ type: "frame", frame });
       post({ type: "state", state: host.error ? "failed" : host.done ? "done" : "live", detail: host.error });
       return;

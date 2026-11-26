@@ -124,9 +124,29 @@ test("the Savings tab runs its world in the tab: watch, save, pause and step, sh
       }
     }
 
+    await page.getByText("World settings", { exact: true }).click();
+    const previous = await page.evaluate(() => ({ rows: globalThis.savings.rows.map((r) => r.ref),
+      tape: globalThis.savings.priceTape, sid: globalThis.savings.sid }));
+    await page.getByLabel("prices", { exact: true }).selectOption("revert");
+    await page.getByLabel("Price noise (%)", { exact: true }).fill("1");
+    await page.getByRole("button", { name: "Apply to future prices" }).click();
+    await idle();
+    await page.waitForFunction(() => globalThis.savings.priceMode === "revert", null, { timeout: DAY_MS });
+    const revised = await page.evaluate(() => ({ rows: globalThis.savings.rows.map((r) => r.ref),
+      tape: globalThis.savings.priceTape, sid: globalThis.savings.sid, day: globalThis.savings.priceChangeDay }));
+    assert.equal(revised.sid, previous.sid);
+    assert.deepEqual(revised.rows, previous.rows);
+    assert.equal(revised.day, previous.rows.length + 1);
+    for (const [i, feed] of revised.tape.entries()) {
+      assert.deepEqual(feed.slice(0, revised.day), previous.tape[i].slice(0, revised.day), "completed prices and the anchor stay fixed");
+    }
+    assert.notDeepEqual(revised.tape, previous.tape);
+    await page.getByText("World settings", { exact: true }).click();
     await page.click("#panel-savings button:text-is('Run')");
     await idle();
-    await nextDay();
+    await page.waitForFunction((d) => globalThis.savings.rows.at(-1).day >= d, revised.day, { timeout: WORLD_MS });
+    const switched = await page.evaluate((d) => globalThis.savings.rows.find((r) => r.day === d).ref, revised.day);
+    assert.deepEqual(switched, revised.tape.map((feed) => feed[revised.day]), "the worker trades on the revised tape");
 
     // The pace, live: 0 s a day runs the world as fast as it goes.
     await page.fill("#panel-savings input[aria-label='seconds per day']", "0");

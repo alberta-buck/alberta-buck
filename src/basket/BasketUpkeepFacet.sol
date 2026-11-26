@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {BuckBasketEquityStorage} from "./BuckBasketEquityStorage.sol";
 import {IBuckNetView} from "../IBuckNetView.sol";
 import {BasketMarketOps} from "./BasketMarketOps.sol";
+import {BasketRebalanceMath} from "./BasketRebalanceMath.sol";
 import {BasketCreditSetup} from "./BasketCreditSetup.sol";
 import {IBuckBasketVenue} from "./IBuckBasketVenue.sol";
 import {IBasketUpkeep} from "./IBasketUpkeep.sol";
@@ -70,9 +71,13 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         uint256[] rates;   // the rate each is worked at, per day, 1e18
         uint256[] sells;   // TOKEN to sell, in BUCK
         uint256[] buys;    // TOKEN to buy, in BUCK
+        uint8[] sellLimits; // limits applied while sizing each sale
+        uint8[] buyLimits;  // limits applied while sizing each purchase
     }
     // action: 0 a mark alone, 1 sold, 2 bought, 4 placed. proceeds: the TOKEN sold; buySpent: BUCKs paired or TOKEN bought.
     event Responded(uint8 indexed action, uint256 sell, uint256 buy, uint256 proceeds, uint256 buySpent);
+    event RebalancePlan(uint256[] sells, uint256[] buys, uint8[] sellLimits, uint8[] buyLimits);
+    event RebalanceBuyBudget(uint256 indexed token, uint256 budget);
 
     constructor(address policy, address parity_, uint256 parityGain_, uint256 parityGainDear_) {
         pairPolicy = IRebalancePolicy(policy);
@@ -179,26 +184,21 @@ contract BasketUpkeepFacet is BasketCreditSetup {
     /// one price against another matters: a move in the BUCK itself cancels.
     function _targets(Snap memory s, uint256 total) internal view returns (uint256[] memory target) {
         uint256 n = s.m.length;
-        target = new uint256[](n);
         uint256 tilt = response.tiltBp;
         if (tilt == 0) {
+            target = new uint256[](n);
             for (uint256 i; i < n; ++i) target[i] = total * constituents[i].targetWeightBp / 10000;
             return target;
         }
-        uint256 sum;
+        uint256[] memory weights = new uint256[](n);
+        uint256[] memory prices = new uint256[](n);
+        uint256[] memory anchors = new uint256[](n);
         for (uint256 i; i < n; ++i) {
-            uint256 price = s.m[i].pTwap;
-            uint256 anchor = referencePrice[i] == 0 ? constituents[i].initialPriceInBuck : referencePrice[i];
-            int256 above = price == 0 || anchor == 0 ? int256(0) : PM.lnWad(price * 1e18 / anchor);
-            target[i] = constituents[i].targetWeightBp * PM.expWad(-above * int256(tilt) / 10000);
-            sum += target[i];
+            prices[i] = s.m[i].pTwap;
+            anchors[i] = referencePrice[i] == 0 ? constituents[i].initialPriceInBuck : referencePrice[i];
+            weights[i] = constituents[i].targetWeightBp;
         }
-        for (uint256 i; i < n; ++i) {
-            uint256 declared = total * constituents[i].targetWeightBp / 10000;
-            uint256 most = declared * response.leanCapBp / 10000;
-            uint256 leaned = total * target[i] / sum;
-            target[i] = leaned > declared + most ? declared + most : leaned + most < declared ? declared - most : leaned;
-        }
+        return BasketRebalanceMath.rebalanceTargets(weights, prices, anchors, total, tilt, response.leanCapBp);
     }
 
     /// @dev Pair every waiting TOKEN with issued BUCKs. The BUCKs are still
@@ -293,22 +293,8 @@ contract BasketUpkeepFacet is BasketCreditSetup {
     /// each in proportion to its gap to the target at the book's new size. With none on the other side
     /// the book lands on its targets; otherwise each closes the same share of its gap. A sale leaves out
     /// what the ceiling already asks of every constituent. _plan paces it by the release law.
-    function _move(Book memory b, uint256 tokens, uint256 excess) internal view returns (uint256[] memory move) {
-        uint256 n = b.token.length;
-        move = new uint256[](n);
-        bool grow = b.total > tokens;
-        uint256 amount = grow ? b.total - tokens : tokens - b.total;
-        if (amount * 10000 <= b.total * eq.weightBandBp) return move;
-        if (!grow) amount = amount > excess ? amount - excess : 0;
-        uint256[] memory gap = new uint256[](n);
-        uint256 sum;
-        for (uint256 i; i < n; ++i) {
-            if (grow ? b.target[i] > b.token[i] : b.token[i] > b.target[i])
-                gap[i] = grow ? b.target[i] - b.token[i] : b.token[i] - b.target[i];
-            sum += gap[i];
-        }
-        if (sum == 0) return move;
-        for (uint256 i; i < n; ++i) move[i] = amount * gap[i] / sum;
+    function _move(Book memory b, uint256 tokens, uint256 excess) internal view returns (uint256[] memory) {
+        return BasketRebalanceMath.rebalanceMove(b.token, b.target, b.total, tokens, excess, eq.weightBandBp);
     }
 
     function _plan(Snap memory s, Book memory b) internal view returns (Plan memory) {
@@ -356,21 +342,12 @@ contract BasketUpkeepFacet is BasketCreditSetup {
             }
             if (over) p.sells[i] += amount; else p.buys[i] = amount;
         }
-        uint256 selling;
-        uint256 buying;
+        uint256[] memory depth = new uint256[](n);
         for (uint256 i; i < n; ++i) {
-            uint256 cap = _swapCap(s.m[i]);
-            p.sells[i] = PM.min(p.sells[i], PM.min(b.token[i] * eq.stepBp / 10000, cap));
-            p.buys[i] = PM.min(p.buys[i], PM.min(b.target[i] * eq.stepBp / 10000, cap));
-            // Leave uneconomic dust unrequested rather than forcing a leg.
-            if (p.sells[i] <= 2 * b.grain) p.sells[i] = 0;
-            if (p.buys[i] <= 2 * b.grain) p.buys[i] = 0;
-            selling += p.sells[i]; buying += p.buys[i];
+            depth[i] = _swapCap(s.m[i]);
         }
-        // Purchases may not take the issue past the ceiling.
-        int256 line = int256(b.ceiling) - b.issued + int256(selling);
-        if (line <= 0) { for (uint256 i; i < n; ++i) p.buys[i] = 0; }
-        else if (buying > uint256(line)) { for (uint256 i; i < n; ++i) p.buys[i] = p.buys[i] * uint256(line) / buying; }
+        (p.sells, p.buys, p.sellLimits, p.buyLimits) = BasketRebalanceMath.limitRebalance(p.sells, p.buys,
+            b.token, b.target, depth, eq.stepBp, b.grain, int256(b.ceiling) - b.issued);
     }
 
     /// @dev Simulation facets may record the plan at its decision point, before any trade.
@@ -397,6 +374,7 @@ contract BasketUpkeepFacet is BasketCreditSetup {
             if (used == 0) continue;
             _markS(_snap());
             pairPolicy.recordExecution(j);
+            if (budget < 2 * p.buys[j]) emit RebalanceBuyBudget(j, budget);
             emit Responded(2, NONE, j, 0, used / 2);
             moved += used / 2;
         }
@@ -428,6 +406,7 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         Book memory b = _book(s);
         Plan memory p = _plan(s, b);
         _afterPlan(s, b, p);
+        emit RebalancePlan(p.sells, p.buys, p.sellLimits, p.buyLimits);
         pairPolicy.recordGaps(p.gaps);
         pairPolicy.recordRates(p.rates);
         uint256 traded = _execute(s, p, b.grain);

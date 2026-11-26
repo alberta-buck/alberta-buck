@@ -89,6 +89,7 @@ CONTRACTS = [
     # marked net, a policy it asks, and the wheel that turns them.
     "BasketExitFacet",         # immutable redemption execution deployed by the equity shell
     "BasketUpkeepFacet",       # the upkeep facet
+    "BasketRebalanceMath",     # shared allocation and sizing linked into upkeep
     "BasketVenueFacet",        # the venue facet with the marks the upkeep reads
     "PairSignals",             # the pair observer
     "PairRebalancePolicy",     # the policy: which constituent to work, and how fast

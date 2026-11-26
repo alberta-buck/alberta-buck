@@ -2,6 +2,44 @@
 #+DATE: 2026-11-25
 #+OPTIONS: toc:2 ^:nil
 
+* Resume here: live Savings prices and execution sizing
+
+The local Savings tab can replace future returns with =Apply to future
+prices=, using the same between-days worker queue as demand and supply
+shocks. It keeps the completed prices and the next close used to interpolate
+the preceding day. The new regime and noise affect returns after that
+anchor. The worker sends the revised tape and the first affected day to the
+preview. The world's seed, household state, wallet and market state carry
+forward. Reset rebuilds the starting tape from the world's original settings.
+
+The upkeep facet now logs the actual sized plan, identifying step size,
+pool depth and portfolio ceiling limits that reduced each leg. It logs the
+swap-and-pairing budget separately when available cash reduced a buy.
+The existing pure allocation and sizing arithmetic is linked from
+=BasketRebalanceMath= in Python and WebEVM. The chart joins its plan to
+the confirmed swap and decision-time urgency by receipt and wheel response.
+
+The three focused JS tests and all 46 Solidity sizing, upkeep and policy
+tests passed. Contract package and pinned storage-layout checks passed for
+the linked build. The upkeep runtime is 23,828 bytes. A fresh Chromium
+worker preserved the anchor, ran on the revised tape and restored the
+starting tape on reset. The Wallet and Savings suite passed all 18 tests
+with zero skips, including the live regime switch and a WebEVM check that
+matched paired fills to their sizing events.
+
+#+begin_src sh
+make nix-venv-wallet-sandbox-test
+(cd core/js && node --test test/savings-scenarios.test.js)
+nix develop --command forge test --skip test/RegressionTest.sol \
+  --match-path 'test/basket/{BasketRebalanceLimits,BasketUpkeepFacet,PairRebalancePolicy}.t.sol'
+#+end_src
+
+Whole-economy parity, lifecycle and release qualification remain in sections
+1 and 3. The [[file:../../build/research-results/savings-parity-live-prices.json][latest paired replay]] booted both worlds with the new library and
+reproduced the first LABR deposit basis mismatch of 30.846092 BUCK for the
+same TOKEN amount. The next parity task is to compare those pool marks at
+deposit time before aligning the two market schedules.
+
 * Local mortgage scenarios, November 26
 
 The WebEVM Savings settings offer a farm land mortgage and a home
@@ -285,12 +323,12 @@ director to operate on the canonical machine.
     paired execution, a one-sided fill and multiple executions in one close
     against the recorded receipts.
 
-- [ ] Extend execution telemetry to planned buy sizes and binding caps.
-  Give staged rebalances an execution identifier if the wheel begins
-  executing their legs in separate transactions. The current wheel
-  completes each response inside one transaction, and the chart groups
-  its confirmed pool swaps by that response. The policy exposes urgency
-  and allocation gap, while the facet reports the planned sale amount.
+- [X] Extend execution telemetry to planned buy sizes and binding caps.
+- [X] Apply price regime and noise changes to a running local world.
+- [ ] Give staged rebalances an execution identifier if the wheel begins
+  executing their legs in separate transactions. The current wheel completes
+  each response inside one transaction, and the chart groups its confirmed
+  pool swaps by that response.
 
 The Wallet and Savings suite passed all 17 tests with zero skips. The
 focused browser check verified keyboard fill details, a paused single-day

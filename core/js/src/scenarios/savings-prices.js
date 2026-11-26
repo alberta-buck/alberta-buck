@@ -9,7 +9,7 @@ function setting(value, fallback, min, max, label) {
 }
 
 /** Resolve the once-per-world tape in USDC micro per whole commodity. */
-export function savingsPriceTape(prices, mode, sets, seed) {
+export function savingsPriceTape(prices, mode, sets, seed, noiseFrom = 0) {
   const base = prices.series[mode === "sine" ? "history" : mode];
   if (!base?.length || base.length !== prices.tokens.length) throw new Error(`Price tape unavailable: ${mode}`);
   const noise = setting(sets["scenario.price_noise_pct"], 0, 0, 50, "Price noise (%)") / 100;
@@ -23,7 +23,7 @@ export function savingsPriceTape(prices, mode, sets, seed) {
     return feed.slice(0, days).map((price, day) => {
       const reference = mode === "sine" ? feed[0] * (1 + amplitude * Math.sin(2 * Math.PI * day / period))
         * (1 + inflation) ** (day / 365.25) : price;
-      const jitter = noise ? 1 + noise * (2 * uniform(seed, `savings-price/${symbol}`, day) - 1) : 1;
+      const jitter = noise && day >= noiseFrom ? 1 + noise * (2 * uniform(seed, `savings-price/${symbol}`, day) - 1) : 1;
       return Math.max(1, Math.round(reference * jitter));
     });
   });

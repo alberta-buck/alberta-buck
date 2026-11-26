@@ -45,6 +45,7 @@ export const NEEDED = [
   "BuckBasketEquity",
   "BasketJubileeMath",         // shared bounded claim valuation
   "BasketMarketOps",          // shared net cash/LP operations and funded ROI arb
+  "BasketRebalanceMath",      // linked allocation and sizing for upkeep
   "BuckBasketUniswapV3",       // the venue the shell registers its pools on
   "BasketVenueFacet",          // the machine's venue, once they are seeded
   "BasketUpkeepFacet",

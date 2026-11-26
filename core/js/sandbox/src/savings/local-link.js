@@ -11,8 +11,8 @@ export class LocalLink {
   /** sets: the world's settings (as SimLink's channels() carry them); onFrame(frame);
    *  onState(state, detail); onReset() when the world starts over. `worker` makes the worker (a
    *  test injects one); by default the bundled savings-world.js beside the page. */
-  constructor({ sets = {}, onFrame, onState, onReset, onProgress, worker } = {}) {
-    Object.assign(this, { sets, onFrame, onState, onReset, onProgress });
+  constructor({ sets = {}, onFrame, onState, onReset, onProgress, onPriceTape, worker } = {}) {
+    Object.assign(this, { sets, onFrame, onState, onReset, onProgress, onPriceTape });
     this.makeWorker = worker ?? (() => new Worker(new URL("./savings-world.js", globalThis.location?.href),
                                                   { type: "module" }));
     this.state = "idle";
@@ -45,6 +45,8 @@ export class LocalLink {
       this.onFrame?.(m.frame);
     } else if (m.type === "progress") {
       if (!this.closed) this.onProgress?.(m.time);
+    } else if (m.type === "price-tape") {
+      if (!this.closed) this.onPriceTape?.(m);
     } else if (m.type === "state") {
       if (!this.closed || m.state === "failed") this._set(m.state, m.detail);
     } else if (m.type === "reset") {
@@ -90,7 +92,7 @@ export class LocalLink {
 
   /** A control op; resolves on the world's acknowledgement (applied at the next day boundary). */
   async op(msg) {
-    const r = await this._ask("op", { op: msg }, 30_000);
+    const r = await this._ask("op", { op: msg }, msg.op === "price-regime" ? RPC_TIMEOUT_MS : 30_000);
     if (!r.ok) throw new Error(r.err ?? "the world refused that");
     return r;
   }
