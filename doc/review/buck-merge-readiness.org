@@ -61,10 +61,11 @@ source and full-run drill-down to the dashboard with the new trace.
 Both stock report modes reproduced the eight matched pairs. The
 dashboard record and comparison tests passed (16 Python and 14 JS).
 Chromium drew 15 comparison charts for the active and maintenance arms.
-The =make nix-venv-test-all= run from this review logs to
-=/tmp/buck-merge-assessment-test-all.log= on this machine and was in the
-Foundry compilation at the time of the review. This checkout lacks the
-generated regression verifier and A2 proof fixtures. Under the
+The earlier =make nix-venv-test-all= run logs to
+=/tmp/buck-merge-assessment-test-all.log=. Foundry recorded 1,237
+passes and one skip, and the Python application suite recorded 1,314
+passes and four skips. This checkout lacks the generated regression
+verifier and A2 proof fixtures. Under the
 Makefile's existing fixture conditions, =test-all= excludes
 =RegressionTest.sol= and four proof-fixture suites (=MintVerifierTest=,
 =MintVerifierA2Test=, =NotesA2TieTest= and =SpendVerifierTest=).
@@ -81,13 +82,60 @@ make nix-venv-basket-study-report BASKET_OUT="$stock/sim/stock-grid-5y" \
   BASKET_REPORT_ARGS="--rebalancing --no-comparison --output build/research-results/stock-grid-5y-rebalancing.md"
 #+end_src
 
+* Python/WebEVM alignment checkpoint
+
+The paired replay passes the resolved Python controller parameters,
+TOKEN and BUCK/USDC depths, opening deposits and absolute first-tick
+timestamp to Node. The Savings world now derives the controller's
+maximum integration step from the wheel interval and tick length as
+Python does. In the one-day replay both controllers use 43,200 seconds
+for the integration cap and 31,536,000 seconds for the leak. The three
+day-zero household records and reference closes agree.
+
+The first LABR deposit basis differs by 30.846092 BUCK. The two
+deployments sort BUCK and LABR in opposite orders in the V3 pool. The
+same requested price quantizes to adjacent ticks when expressed as
+TOKEN-to-BUCK. Spot and TWAP are -290260 in Python and -290259 in
+WebEVM in that direction. After the pools' carry conversion, the low
+marks are 248197 and 248222 raw BUCK per TOKEN. Multiplying each by the
+same deposit amount and flooring to raw units reproduces each receipt
+basis exactly. The replay records both raw ticks, pool carry balances
+and the computed basis and continues to fail on unequal ledger values.
+
+Opening wheel work still differs on the first tick (one job in Python
+and four in WebEVM). Trace the slot IDs, sample source and times before
+aligning the boot turns. Python funds a =BasketDesk= and uses its
+=OuterBandDeskPolicy= as the wheel's sample source. Its dedicated
+contract suite covers actual trade, credit and risk behavior. Port
+the supported path and then align market forcing and the household
+cast. Include pool token order and age in any exact-ledger fixture.
+
+| Setting or artifact | Current use and disposition |
+|---------------------+-----------------------------|
+| =--director pairs= / =SIM_DIRECTOR= | The catalogue, star and Make launchers all selected a retired director. There is no alternative or distinct coverage. Removed it from those launchers and the sim call chain. The hidden CLI option still accepts saved commands. |
+| Retired Director and Monetary keeper slots | The no-op test documents their runtime behavior. The slots preserve saved agent indices and random streams. Director setup also affects the historical transaction sequence. Keep those slots until the saved runs can be replayed independently of the retired cast. |
+| Separate TOKEN and BUCK/USDC depths | The Python economy explicitly controls BUCK/USDC depth to avoid masking household flows. Keep the independent input in the parity replay and WebEVM builder. |
+| Wheel arbitrage disabled / wallet-funded vs. flash | WebEVM household fault and receipt tests need quiet pools. The funded and flash arb tests verify different event and issuance paths. Retain those controls in their tests. |
+| Book routes, nominal mark, refresh and idle reserve controls | The Python =book=, =carry= and =refresh= studies isolate best-route pricing, demurrage valuation and pool refresh effects. Keep them as research controls while aligning the supported defaults. |
+
+[[file:../../build/research-results/savings-parity-aligned-settings.json][One-day settings and first-deposit trace]]
+
+The focused WebEVM bootstrap, Savings, scenario and arbitrage tests
+passed all 48 cases. The rerun with explicit split-depth and integration
+cap assertions passed all four integration cases. The Python retired
+keeper and comparison tests passed all nine cases.
+
+#+begin_src sh
+make nix-venv-savings-parity SAVINGS_PARITY_ARGS="--days 1 --output build/research-results/savings-parity-aligned-settings.json"
+#+end_src
+
 * Open implementation tasks
 
 ** TODO Align Python and WebEVM agents
 
-Start at the first LABR deposit. Record both pool marks and reconcile
-the receipt basis before aligning clocks, market forcing and agent
-order. Use the same resolved inputs and keyed decisions on both
+The checkpoint above accounts for the first LABR receipt basis gap.
+Align opening wheel jobs and sample sources, then market forcing and
+agent order. Use the same resolved inputs and keyed decisions on both
 runtimes. Done when the matched economy and lifecycle replays pass
 30 days each, with exact integer accounting and documented tolerances
 for numeric marks. Exercise rare lifecycle transitions in focused

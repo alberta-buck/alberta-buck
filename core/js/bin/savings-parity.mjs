@@ -9,7 +9,7 @@ import { SAVINGS_NODE_OPTIONS, SavingsWorld } from "../src/scenarios/savings-wor
 
 const output = process.argv[2];
 if (!output) throw new Error("savings-parity requires an output path");
-const { days, sets, prices, clock, opening_fields, bootstrap_deposits } = JSON.parse(readFileSync(0, "utf8"));
+const { days, sets, prices, clock, opening_fields, bootstrap_deposits, deployment } = JSON.parse(readFileSync(0, "utf8"));
 const urPath = join(repoRoot(), "alberta_buck/sim/artifacts/UniversalRouter.json");
 const bootJournal = [];
 const session = await nodeWebevmSession({ blockSeconds: clock.block_seconds,
@@ -18,7 +18,36 @@ const session = await nodeWebevmSession({ blockSeconds: clock.block_seconds,
 const world = new SavingsWorld({ session, identity, artifacts: loadAnyArtifact,
   urArtifact: JSON.parse(readFileSync(urPath, "utf8")), prices, sets, days,
   bootstrapDeposits: bootstrap_deposits.map(({ token, amount }) => ({ token, amount: BigInt(amount) })) });
-await world.boot();
+let firstDepositMark;
+await world.boot({
+  firstTickTimestamp: BigInt(clock.first_tick_timestamp),
+  deployment: {
+    targetBuck: BigInt(deployment.targetBuck),
+    targetBuckLp: BigInt(deployment.targetBuckLp),
+    controllerHorizon: deployment.controllerHorizon === null ? undefined : BigInt(deployment.controllerHorizon),
+    params: Object.fromEntries(Object.entries(deployment.params).map(([key, value]) => [key, BigInt(value)])),
+  },
+  async beforeFirstDeposit({ basket, buck, token, amount, market }) {
+    const { poolBuck, dec } = market;
+    const [slot, token0, window, balances, marks] = await Promise.all([
+      session.call(poolBuck, "slot0"), session.call(poolBuck, "token0"),
+      session.call(basket, "twapWindow"),
+      session.call(buck, "accountBalancesScaled", [poolBuck.address]),
+      session.call(basket, "marks", [BigInt(token), 0n]),
+    ]);
+    const [cumulative] = await session.call(poolBuck, "observe", [[window, 0]]);
+    const elapsed = BigInt(window), delta = cumulative[1] - cumulative[0];
+    const twapTick = delta / elapsed - (delta < 0n && delta % elapsed !== 0n ? 1n : 0n);
+    firstDepositMark = { token, amount: String(amount), buck_is_token0: token0.toLowerCase() === buck.address.toLowerCase(),
+      sqrt_price_x96: String(slot[0]), tick: slot[1], twap_tick: Number(twapTick),
+      carry_gross: String(balances[0]), carry_net: String(balances[1]),
+      price_low: String(marks.pLow), price_twap: String(marks.pTwap), price_high: String(marks.pHigh),
+      basis_at_sample: String(amount * marks.pLow / 10n ** BigInt(dec)) };
+  },
+});
+if ((await session.client.getBlock()).timestamp > world.world.householdEpoch) {
+  throw new Error("WebEVM bootstrap ran past the replay's first tick");
+}
 session.journal = null;
 
 const opening = {};
@@ -64,4 +93,5 @@ for (let i = 0; i < days; i++) {
       share_price: f.sv.sp, basket_lien: f.sv.L } });
 }
 if (session.mismatches.length) throw new Error("WebEVM transaction expectations failed during replay");
-writeFileSync(output, JSON.stringify({ opening, boot_actions: bootActions, frames: rows }) + "\n");
+writeFileSync(output, JSON.stringify({ opening, boot_actions: bootActions, frames: rows,
+  first_deposit_mark: firstDepositMark }) + "\n");

@@ -156,7 +156,6 @@ class Deployment:
     swap_guard: Any = None
     venue: Any = None             # currently installed venue facet
     director: Any = None          # always None: the pairs director is retired (2026-11-20)
-    director_impl: str = "pairs"  # the CLI's no-op --director, until the catalogue's arms are ported
     controller_impl: str = "direct"   # BuckKControllerDirect, the one left
     desk: Any = None              # BasketDesk ("equity-ops": the desk, its own credit holder)
     desk_grant: Any = None        # the desk's founding grant, TOKEN base units per constituent
@@ -176,7 +175,7 @@ def _erc20_abi() -> list:
 
 
 def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
-           basket_impl="equity-ops", director_impl="pairs",
+           basket_impl="equity-ops",
            controller_impl="direct", equity_machine=None) -> Deployment:
     # The equity basket on the basket machine is the only basket (owner, 2026-11-20: the pro-rata
     # and ops shells, the earlier upkeep, the pairs director and the shadow controller are retired).
@@ -557,10 +556,6 @@ def deploy(chain: Chain, anvil, scenario, rng, verbose=True,
         + [(d.pool_ub, simlp.address, lob_ub, hib_ub, "ub")]
     )
 
-    # The director slot is a no-op since the pairs director's retirement (2026-11-20); the flag stays
-    # until the catalogue's stress arms are ported.
-    if director_impl != "pairs":
-        raise ValueError(f"unknown director: {director_impl!r} (pairs)")
     # --- The basket machine's wheel ----------------------------------- #
     # The wheel is not optional -- without it nothing a deposit brings is
     # ever placed -- so it is deployed here, beside the basket, and every

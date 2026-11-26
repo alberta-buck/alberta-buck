@@ -124,8 +124,12 @@ function isqrt(n) {
  *                        basket machine; the pro-rata basket is retired, 2026-11-20)
  * @param opts.tokens     [{sym, name, dec, p0, weightBp?}] basket constituents (the
  *                        machine needs two or more; weights must be supplied for all or none)
- * @param opts.targetBuck common pool depth, 6-dec (default $10M)
+ * @param opts.targetBuck TOKEN pool depth, 6-dec (default $10M)
+ * @param opts.targetBuckLp BUCK/USDC pool depth, 6-dec (defaults to targetBuck)
+ * @param opts.turnSeconds scheduled time between wheel turns for the controller horizon
+ * @param opts.controllerHorizon explicit cap on the controller integrator step
  * @param opts.bootstrapDeposits ordered [{token, amount}] seed deposits in TOKEN base units
+ * @param opts.beforeFirstDeposit optional read-only callback for a bootstrap diagnostic
  * @param opts.feedSeed / opts.stepBp / opts.feedDays  the reference walks
  * @param opts.feeds      given reference paths instead: [constituent][day] -> USDC base units
  *                        per whole TOKEN (BigInt)
@@ -152,6 +156,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const weights = toks.map((t) => BigInt(hasWeights ? t.weightBp : 1));
   const totalWeight = weights.reduce((a, b) => a + b, 0n);
   const targetBuck = opts.targetBuck ?? 10n ** 13n;
+  const targetBuckLp = opts.targetBuckLp ?? targetBuck;
   const bootstrapDeposits = opts.bootstrapDeposits ?? toks.map((t, token) => ({
     token,
     amount: targetBuck * BigInt(toks.length) * weights[token] / totalWeight * 10n ** BigInt(t.dec) / t.p0,
@@ -262,14 +267,14 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   }
 
   // --- floating BUCK/USDC pool: SimLP is the BUCK-backed LP ------------
-  // Mint targetBuck with a 20% margin, on a face that covers it at the
+  // Mint funding with a 20% margin, on a face that covers it at the
   // resting K with a further 20%.
   const k0 = await session.call(kctrl, "buckK");
   // On the machine SimLP also seeds each TOKEN/BUCK pool, a tenth as deep.
   const seedBuck = targetBuck / 10n;
-  const mintAmt = ((targetBuck + seedBuck * BigInt(tokens.length)) * 12n) / 10n;
+  const depth = targetBuckLp + seedBuck * BigInt(tokens.length);
+  const mintAmt = depth * 12n / 10n;
   const face2 = (((mintAmt * E18) / k0) * 12n) / 10n;
-  const depth = targetBuck + seedBuck * BigInt(tokens.length);
   const FACE = 2n * depth > face2 ? 2n * depth : face2;
   const now = (await session.client.getBlock()).timestamp;
   const insurer = world.operator.account;
@@ -292,7 +297,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const b0 = await session.call(poolUB, "token0");
   const b1 = await session.call(poolUB, "token1");
   const Lub = usdc.address.toLowerCase() === b0.toLowerCase()
-    ? (targetBuck * spU) / Q96 : (targetBuck * Q96) / spU;
+    ? (targetBuckLp * spU) / Q96 : (targetBuckLp * Q96) / spU;
   const [loU, hiU] = fullRangeTicks(SPACING[FEES.ub]);
   await session.send(simlp, "mint", [pub, loU, hiU, Lub, b0, b1],
                      { tag: "eq:seed:buck-usdc" });
@@ -377,6 +382,11 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   }
   await session.send(basket, "setWheel", [wheel.address], { tag: "eq:setWheel" });
   await session.send(wheel, "setSample", [parity.address], { tag: "eq:wheel.setSample" });
+  if (opts.controllerHorizon !== undefined || opts.turnSeconds !== undefined) {
+    const dt = Number(await session.call(kctrl, "dT"));
+    const horizon = opts.controllerHorizon ?? BigInt(Math.max(2 * MACHINE.interval, dt, opts.turnSeconds));
+    await session.send(kctrl, "setDTMax", [horizon], { tag: "eq:kctrl.setDTMax" });
+  }
   await session.send(wheel, "setController", [kctrl.address], { tag: "eq:wheel.setController" });
   await session.send(wheel, "setEquity", [basket.address], { tag: "eq:wheel.setEquity" });
   const fund = world.net.fund;
@@ -459,6 +469,10 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   };
 
   // The wheel pairs the opening deposits with BUCKs the basket issues.
+  if (opts.beforeFirstDeposit) {
+    const { token, amount } = bootstrapDeposits[0];
+    await opts.beforeFirstDeposit({ basket, buck, token, amount, market: tokens[token] });
+  }
   for (const { token, amount } of bootstrapDeposits) {
     const t = tokens[token];
     await session.send(basket, "depositToken", [t.erc20.address, amount, 0n],

@@ -164,7 +164,7 @@ def _run_one(spec: dict) -> dict:
         return {"label": spec["label"], "skipped": True}
     cmd = [sys.executable, "-m", "alberta_buck.sim",
            "--experiment", spec["toml"], "--backend", "pyrevm",
-           "--director", "pairs", "--out", spec["out"]]
+           "--out", spec["out"]]
     if spec.get("days"):
         cmd += ["--days", str(spec["days"])]
     for kv in spec["sets"]:

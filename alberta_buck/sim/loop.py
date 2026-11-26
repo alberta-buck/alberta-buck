@@ -68,8 +68,8 @@ def settle_wheel(d, ctr=None) -> bool:
 
 
 def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machine",
-        director_impl="pairs", on_day_start=None, on_frame=None,
-        controller_impl="direct", recorder=None, on_boot=None, journal=None) -> dict:
+        on_day_start=None, on_frame=None,
+        controller_impl="direct", recorder=None, on_boot=None, journal=None, on_bootstrap=None) -> dict:
     """on_boot(d): read the bootstrapped world before any daily activity.
     on_day_start(day, d, agents, ctr): a mutation window before the
     day's ticks (the sim server applies population/knob controls here).
@@ -77,7 +77,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     sim server streams these to its clients).
     recorder: a runrecord.RunRecorder, opened here and fed every captured
     day; the caller closes it (complete or failed).
-    journal: optional chain transaction journal, owned by the caller."""
+    journal: optional chain transaction journal, owned by the caller.
+    on_bootstrap(d): called after agent setup, before the opening deposits."""
     from alberta_buck.sim import report
     out_path = report.output_path(out_path, scenario.days)
     if out_path and scenario.days >= report.FIVE_YEARS:
@@ -100,7 +101,7 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     # basket runs on the basket machine (deploy activates it once the pools are seeded).
     machine = basket_impl == "equity-machine"
     d = deploy(chain, anvil, scenario, rng, basket_impl="equity-ops" if machine else basket_impl,
-               director_impl=director_impl, controller_impl=controller_impl)
+               controller_impl=controller_impl)
 
     # --- build + register the agent population ----------------------- #
     # Reset per-class counters defensively so back-to-back sim runs in
@@ -137,6 +138,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     # (DM agents seeding empty BuckBasket pools) run their bootstrap()
     # here, so every pool has live liquidity by tick 0.
     ctr = {"directTrades": 0, "cycleTrades": 0, "ubTrades": 0}
+    if on_bootstrap is not None:
+        on_bootstrap(d)
     for a in agents:
         a.bootstrap(d, scenario, ctr)
     # The equity basket places nothing itself: its wheel does, and the pools

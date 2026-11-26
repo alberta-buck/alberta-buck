@@ -32,6 +32,7 @@ test("the savings world runs days, frames them for the page, and serves the page
   const bootMs = performance.now() - t;
   assert.equal(world.population.initial_investors, 2, "the page's settings reach the population");
   assert.equal(world.ticksPerDay, 4, "ticks a day, from the page's settings");
+  assert.equal(await session.call(world.world.kctrl, "dTMax"), 21_600n);
 
   t = performance.now();
   const frames = [];

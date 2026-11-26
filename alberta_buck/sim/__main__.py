@@ -22,8 +22,8 @@ def main(argv=None) -> int:
                     help="EVM backend: in-process pyrevm (default; ~1000x "
                          "faster, see pyrevm_backend) or the anvil subprocess "
                          "(RPC-faithful; needs anvil on PATH -- fork tests)")
-    ap.add_argument("--director", default="pairs", choices=["pairs"],
-                    help="rebalance-director signal engine: the pairs director is the one left")
+    # Saved catalogue and star commands can still include the retired selector.
+    ap.add_argument("--director", choices=["pairs"], help=argparse.SUPPRESS)
     ap.add_argument("--controller", default=os.environ.get("SIM_CONTROLLER", "direct"),
                     choices=["direct"],
                     help="BUCK_K controller: BuckKControllerDirect, the one left (the shadow "
@@ -146,7 +146,7 @@ def main(argv=None) -> int:
     try:
         with Backend(port=a.port) as anvil:
             summary = run(sc, anvil, out_path=a.out, basket_impl=basket_impl,
-                          director_impl=a.director, controller_impl=a.controller, recorder=recorder)
+                          controller_impl=a.controller, recorder=recorder)
     except BaseException as e:
         if recorder is not None and recorder.manifest:
             recorder.close("failed", error=repr(e))

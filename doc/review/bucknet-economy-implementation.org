@@ -2,6 +2,16 @@
 #+DATE: 2026-11-08
 #+OPTIONS: ^:nil toc:3
 
+* Python/WebEVM opening alignment
+
+The paired replay shares resolved controller settings, both pool depth
+inputs and the first-tick timestamp. The first LABR basis difference
+is reproduced by each runtime's low mark at adjacent V3 ticks from
+opposite token order. The next divergence to trace is the boot wheel's
+first job sequence and sample source. The [[file:buck-merge-readiness.org::*Python/WebEVM alignment checkpoint][merge-readiness checkpoint]]
+also records which older knobs still have distinct coverage and the
+retired director selector removed from the current launch path.
+
 * November 26 restart: merge gates and sparse pair signals
 
 Start with the [[file:buck-merge-readiness.org::*Resume here (November 26 UTC)][merge-readiness review]] for the paired runtime, experiment

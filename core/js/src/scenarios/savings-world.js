@@ -191,7 +191,7 @@ export class SavingsWorld {
     this.enrolled = new Map();
   }
 
-  async boot() {
+  async boot({ beforeFirstDeposit, deployment, firstTickTimestamp } = {}) {
     this.actAs = installActAs(this.session);
     let given = {};
     if (this.prices) {
@@ -200,7 +200,9 @@ export class SavingsWorld {
     }
     const w = this.world = await buildEquilibriumWorld(this.session, this.artifacts, {
       identity: this.identity, urArtifact: this.urArtifact, rng: this.rng, basket: "machine",
-      feedSeed: this.seed, bootstrapDeposits: this.bootstrapDeposits, ...given });
+      feedSeed: this.seed, bootstrapDeposits: this.bootstrapDeposits, beforeFirstDeposit,
+      turnSeconds: Math.floor(DAY / this.ticksPerDay), ...deployment, ...given });
+    if (firstTickTimestamp !== undefined) w.householdEpoch = firstTickTimestamp;
     const T = this.ticksPerDay;
     const arb = new ParityArb({ everyTick: true });
     this.shock = new ShockAgent();

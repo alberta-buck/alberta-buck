@@ -945,12 +945,10 @@ SIM_BASKET	?= equity-machine  # equity-machine (default) | equity-ops | equity
 #                | equity (the basket without the desk).  The pro-rata and
 #                  ops baskets, the earlier upkeep, the pairs director and
 #                  the shadow controller are retired (2026-11-20).
-#   SIM_DIRECTOR = pairs (a no-op flag until the catalogue's arms are ported)
 #
 #   e.g.  make nix-sim-rebalancing SIM_BACKEND=pyrevm
 #         SIM_BACKEND=pyrevm make nix-sim-historical SIM_YEARS=5
 SIM_BACKEND	?= pyrevm        # pyrevm (default: in-process, fast) | anvil
-SIM_DIRECTOR	?= pairs         # pairs: the one signal engine left
 SIM_SCENARIO	?= rebalancing   # routing | rebalancing (see scenario.py)
 SIM_PKG		= alberta_buck.sim
 SIM_TEST	= alberta_buck/test/legacy/test_routing_sim_web3.py
@@ -1230,7 +1228,7 @@ sim-build:	$(ROUTING_ARTIFACT) $(PERMIT2_ARTIFACT) $(ROUTING_PRICES) stage-unisw
 
 sim-run:	sim-build
 	python -m $(SIM_PKG) --scenario routing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
-		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) --director $(SIM_DIRECTOR)
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND)
 
 sim-test:	sim-build
 	python -m pytest $(SIM_TEST) -v -s
@@ -1258,7 +1256,7 @@ SIM_REB_PLOT         = alberta_buck/sim/plot_rebalancing.py
 
 sim-run-rebalancing:	sim-build
 	python -m $(SIM_PKG) --scenario rebalancing --days $(SIM_DAYS) --ticks-per-day $(SIM_TICKS) \
-		--basket $(SIM_BASKET) --backend $(SIM_BACKEND) --director $(SIM_DIRECTOR)
+		--basket $(SIM_BASKET) --backend $(SIM_BACKEND)
 
 sim-plot-rebalancing:	$(REBALANCING_VECTOR)
 	python -m pytest $(SIM_REB_PLOT) -v -s
@@ -1293,7 +1291,7 @@ sim-gen-prices-revert:
 sim-run-rebalancing-revert:	sim-build
 	python -m $(SIM_PKG) --scenario rebalancing-revert --days $(SIM_DAYS) \
 		--ticks-per-day $(SIM_TICKS) --basket $(SIM_BASKET) \
-		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--backend $(SIM_BACKEND) \
 		--out $(REBALANCING_VECTOR_REVERT)
 
 sim-plot-rebalancing-revert:	$(REBALANCING_VECTOR_REVERT)
@@ -1428,7 +1426,7 @@ sim-gen-historical:
 sim-run-historical:	sim-build
 	python -m $(SIM_PKG) --scenario historical --years $(SIM_YEARS) \
 		--ticks-per-day $(HIST_TICKS) --basket $(SIM_BASKET) \
-		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--backend $(SIM_BACKEND) \
 		--out $(HISTORICAL_VECTOR)
 
 sim-plot-historical:	$(HISTORICAL_VECTOR)
@@ -1531,7 +1529,7 @@ REBALANCING_EQ_DAYS	?=
 sim-run-rebalancing-eq:	sim-build
 	python -m $(SIM_PKG) --experiment $(REBALANCING_EQ_TOML) \
 		$(if $(REBALANCING_EQ_DAYS),--days $(REBALANCING_EQ_DAYS)) \
-		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--backend $(SIM_BACKEND) \
 		--out $(REBALANCING_EQ_VECTOR)
 
 sim-plot-rebalancing-eq:	$(REBALANCING_EQ_VECTOR)
@@ -1553,7 +1551,7 @@ sim-run-rebalancing-eq-%:	sim-build
 	python -m $(SIM_PKG) \
 		--experiment alberta_buck/sim/experiments/rebalancing-eq-5yr-$*.toml \
 		$(if $(REBALANCING_EQ_DAYS),--days $(REBALANCING_EQ_DAYS)) \
-		--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+		--backend $(SIM_BACKEND) \
 		--out test/vectors/rebalancing-sim-eq-$*.json
 
 sim-plot-rebalancing-eq-%:
@@ -1613,7 +1611,7 @@ sim-rebalancing-eq-matrix:	sim-prepare-matrix
 		ext=$$(basename {} .toml); ext=$${ext#rebalancing-eq-5yr}; \
 		echo "=== arm $${ext:-base}: {}"; \
 		python -m $(SIM_PKG) --experiment {} \
-			--backend $(SIM_BACKEND) --director $(SIM_DIRECTOR) \
+			--backend $(SIM_BACKEND) \
 			--out test/vectors/rebalancing-sim-eq$$ext.json \
 			> test/vectors/rebalancing-sim-eq$$ext.log 2>&1'
 	$(MAKE) sim-compare-rebalancing-eq

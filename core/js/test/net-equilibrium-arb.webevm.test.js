@@ -16,10 +16,12 @@ for (const arbFlash of [false, true]) test(`canonical JS wheel repairs a USDC wi
   const s = await nodeWebevmSession();
   const world = await buildEquilibriumWorld(s, artifact, { identity, arbFlash,
     targetBuck: 1_000_000n * RAW,
+    targetBuckLp: 1_200_000n * RAW,
     urArtifact: JSON.parse(readFileSync(new URL("../../../alberta_buck/sim/artifacts/UniversalRouter.json", import.meta.url))),
   });
   assert.equal(await s.call(world.wheel, "arbFlash"), arbFlash);
   const { buck, basket, wheel, simlp, poolUB, tokens } = world;
+  assert.equal(await s.call(world.usdc, "balanceOf", [poolUB.address]), 1_200_000n * RAW);
   assert.equal(await s.call(world.reg, "isCarrying", [basket.address]), true);
   assert.equal(await s.call(buck, "approvedCarryingIssuer", [basket.address]), true);
   assert.equal(await s.call(wheel, "triangleCount"), BigInt(tokens.length));
