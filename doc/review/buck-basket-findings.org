@@ -568,6 +568,71 @@ outcomes before using the signal count to tune the policy.
 [[file:../../build/research-results/stock-grid-5y-rebalancing.md][Detailed five-year rebalancing report]] ·
 [[file:../../README-simulations.org::*Stock matrix and dashboard][Report command]]
 
+** Did flows erase the gap?
+
+In the matched five-year quiet-flow records, 55 of the 83 historical
+active-arm closes at least 100 bp from target with no pair ask had
+total receipt flow of at most 10 bp that day. Twenty-five met that
+threshold across the close and its previous two closes combined. The
+flow denominator is prior-close outstanding shares. Flow is gross
+issuance plus retirement, including Jubilee. Confirmed household cash
+is measured separately against prior-close equity.
+
+| Historical close, seed 41404, zero extra Jubilee | Held minus target | Gross household cash | Gross receipt flow | Pair asks / changed plans | TOKEN vs peers over next three closes |
+|--------------------------------------------------+-------------------+----------------------+--------------------+---------------------------+--------------------------------------|
+| CNST day 342 | -137 bp | 5.30 bp | 6.04 bp | 0 / 0 | +10.31 log-% |
+| NRGC day 845 | +152 bp | 0.32 bp | 1.49 bp | 0 / 0 | +0.07 log-% |
+| NRGC day 846 | +67 bp | 28.00 bp | 28.13 bp | 1 / 0 | +1.25 log-% |
+| NRGC day 847 | +82 bp | 0.00 bp | 1.09 bp | 1 / 1 | -4.18 log-% |
+
+CNST's gap reached -137 to -154 bp on day 342 across the four
+historical active worlds. None recorded a pair ask. In the two funded
+worlds a plan changed by the following close. The saved counters cover
+all five constituents and cannot identify that change as a CNST fill.
+The forward three-close move is measured on the external tape.
+Executable prices, timing and costs can change the attainable return.
+
+The 2M transfer added only 6–12% to median equity in the historical
+active worlds. Their 95th-percentile non-Jubilee receipt flow remained
+about 31–32 bp a day. The quiet large-gap closes make receipt flows
+alone an inadequate explanation for all misses. Direct receipt flows
+also omit household market trades that move prices without changing
+share ownership. The high-equity comparison remains open.
+
+Measured from each pair's matched treatment opening, the active-minus-
+maintenance BUCK share returns for seed 41404 were -0.595 and +0.187
+percentage points at 0 and 2M, respectively. Seed 41405 returned
++0.501 and -0.418 points. The modest opening capital increase
+did not produce a consistent gain from enabling pair rebalancing.
+
+For the 55 quiet no-ask closes, the external price move favored buying
+the most underweight TOKEN or selling the most overweight TOKEN in 48
+of the next three-close windows. The median directional markout was
++4.18 log-percent. The next 15 closes favored that direction in 44
+windows, with a +5.46 log-percent median. The windows overlap and all
+four active arms share one historical tape. These marks measure the
+directional opportunity before spreads, fees and funding costs.
+
+The close-only urgency proxy puts all four active worlds below the
+200 bp-day threshold at CNST close 342 (130–172 bp-days) and NRGC
+close 845 (127–195 bp-days). In the unfunded seed 41404 arm the
+proxy reaches 200 at the following close in both windows, when the
+daily counters first show an ask. The proxy applies the patience
+rule once per close to the published weight gap. The actual policy
+uses response-time gaps against target book size and can be on a
+different side of the threshold. Check urgency first in the trace.
+
+The patient-holder replay can emit decision-time eligibility, urgency,
+pair amounts, maintenance and final plans, and confirmed pool swaps.
+The trace distinguishes a zero directional rate, an ask that leaves
+the sized plan unchanged, and a changed plan with or without a
+same-response swap. Peer-level readiness, spread and motion telemetry
+are still needed to explain zero rates. A same-response swap establishes
+execution on that side. Estimating the policy's incremental fill size
+requires the matched maintenance arm.
+
+[[file:../../build/research-results/stock-grid-5y-flow-diagnostic.md][Receipt flow and relative-price windows]]
+
 * Recommendations for performance and stability
 
 1. Finish the funded, matched comparisons before changing the contract.

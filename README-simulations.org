@@ -684,6 +684,25 @@ anchor. The older five-year seed references are grouped separately when
 their extraction bundle is available. =make nix-venv-basket-study-dashboard=
 serves the run root on loopback; use the URLs directly if already running.
 
+To measure whether receipt flows were large around historical gaps that
+received no pair ask, run the flow diagnostic on a completed stock
+campaign. It verifies the saved pairs and leaves the dashboard index
+unchanged.
+
+#+begin_src sh
+make nix-venv-basket-study-report BASKET_OUT="$stock/sim/stock-grid-5y" \
+  BASKET_RUNS="$stock/runs" \
+  BASKET_REPORT_ARGS="--flow-diagnostic --output build/research-results/stock-grid-5y-flow-diagnostic.md"
+#+end_src
+
+Set =stock= to the build directory holding the frozen study or its mirror.
+For a new matched research replay, =scripts/run-basket-patient-holder.py=
+accepts =--trace-days FIRST LAST= to retain per-response decisions and
+confirmed swaps. Give it the same frozen TOKEN CSVs and experiment
+settings to compare a historical window. Starting a new world on a
+slice of the tape changes the opening state and price anchors.
+=--opening-jubilee= uses the existing audited SimLP-funded investment.
+
 =study.endowment= sets the initial investment in Jubilee's basket receipt.
 =study.opening_cash= separately assigns liquid BUCK to the fund before its
 ordinary reserve and investment work. Both come from the simulated funding

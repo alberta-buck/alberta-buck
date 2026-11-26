@@ -1,6 +1,8 @@
 """Read allocation drift and rebalancing activity from matched stock-study closes."""
 
-from math import ceil, sqrt
+import json
+from math import ceil, log, sqrt
+from statistics import median
 
 
 def _p95(values):
@@ -15,6 +17,153 @@ def _ranges(days):
         else:
             ranges.append([day, day])
     return ', '.join(str(lo) if lo == hi else f'{lo}–{hi}' for lo, hi in ranges) or '—'
+
+
+def _gross_share_bp(observation):
+    opening = int(observation['opening']['total_shares'])
+    return {owner: sum(int(leg[owner]) for leg in observation['flows'].values()) * 10_000 / opening
+            for owner in ('other', 'jubilee', 'unattributed')}
+
+
+def _cash_windows(directory, days):
+    """Deduplicate confirmed household settlements by transaction and member."""
+    found, incomplete = {}, set()
+    with (directory / 'events.jsonl').open('rb') as stream:
+        for line in stream:
+            if b'"operation":"deposit"' not in line and b'"operation":"redeem"' not in line:
+                continue
+            event = json.loads(line)
+            day, operation = event['day'], event['operation']
+            if day not in days or operation not in ('deposit', 'redeem') or event.get('status') != 'confirmed':
+                continue
+            amounts = event['amounts']
+            if amounts.get('in_kind') or not event.get('transaction_hash'):
+                incomplete.add(day)
+                continue
+            key = event['transaction_hash'], event['member'], operation, amounts.get('token_id')
+            value = day, int(amounts['buck'])
+            if key in found and found[key] != value:
+                raise ValueError(f'conflicting settlement event for {key}')
+            found[key] = value
+    return {day: None if day in incomplete else sum(amount for d, amount in found.values() if d == day)
+            for day in days}
+
+
+def _relative_return(frames, day, horizon, symbol):
+    if day + horizon >= len(frames):
+        return None
+    before, after = ({t['symbol']: t['ref_usd'] for t in frames[d]['market']['tokens']}
+                     for d in (day, day + horizon))
+    weights = {w['symbol']: w['declared_bp'] for w in frames[day]['basket']['weights'] if w['symbol'] != symbol}
+    peer_return = sum(weight * log(after[s] / before[s]) for s, weight in weights.items()) / sum(weights.values())
+    return 100 * (log(after[symbol] / before[symbol]) - peer_return)
+
+
+def _close_urgency(frames, slack, patience):
+    """Apply the patience rule once per close to the recorded weight gap."""
+    state, closes = {}, {}
+    previous_day = frames[0]['day']
+    for frame in frames:
+        day = frame['day']
+        elapsed = min(1, day - previous_day)
+        current = {}
+        for w in frame['basket']['weights'] or ():
+            symbol = w['symbol']
+            gap = w['held_bp'] - w['target_bp']
+            side = (gap > 0) - (gap < 0)
+            old_side, prior = state.get(symbol, (0, 0))
+            if side != old_side:
+                prior = 0
+            current[symbol] = side, min(patience, max(0, prior + elapsed * (abs(gap) - slack)))
+        closes[day] = {symbol: urgency for symbol, (_, urgency) in current.items()}
+        previous_day, state = day, current
+    return closes
+
+
+def flow_summary(campaign, manifest, root, validate):
+    out = ['# Historical basket flows and missed rebalances', '',
+           'Gross share flow is shares minted plus shares retired divided by prior-close shares, '
+           'equivalent to marking both at the prior-close share price. Non-Jubilee includes all other '
+           'identified receipt holders. Confirmed household cash is a separate measured subset. '
+           'These measures exclude market activity that leaves receipt ownership unchanged.', '',
+           '| Seed | Extra Jubilee | Arm | Median equity, BUCK | Daily non-Jubilee gross flow P50 / P95, bp | '
+           'Large-gap days / without an ask | Of those without an ask, ≤10 bp gross share flow today / last 3 closes |',
+           '|---:|---:|---|---:|---:|---:|---:|']
+    window_rows, good = [], []
+    markouts = {label: {3: [], 15: []} for label in ('No ask, ≤10 bp flow', 'No ask, >10 bp flow', 'At least one ask')}
+    machine = manifest['effective_machine']
+    slack, patience = (round(10_000 * machine[key]) for key in ('slack', 'patience'))
+    for cell in manifest['cells']:
+        if cell.get('status') != 'complete' or cell['regime'] != 'history':
+            continue
+        pair, records = validate(campaign, cell, root, manifest['tokens'])
+        good.append((cell, records, pair))
+        for arm, (_, directory, frames) in records.items():
+            data = pair['arms'][arm]
+            warm = cell['warmup_days']
+            rows = _days(frames, data['daily'], warm)
+            ownership = data['ownership']
+            gross = {d['day']: _gross_share_bp(d) for d in ownership[warm:]}
+            non_jubilee = [value['other'] for value in gross.values()]
+            large = [r for r in rows if abs(r['gap']) >= 100]
+            no_ask = [r['day'] for r in large if not r['asks']]
+            equity = median(int(o['opening']['equity_buck']) for o in ownership[warm:]) / 1e6
+            quiet_day = sum(sum(gross[day].values()) <= 10 for day in no_ask)
+            quiet_three = sum(gross.get(day - 2) is not None and
+                              sum(sum(gross[d].values()) for d in range(day - 2, day + 1)) <= 10 for day in no_ask)
+            label = f"| {cell['seed']} | {cell['endowment_buck']:,} | {arm}"
+            out.append(f'{label} | {equity:,.0f} | {median(non_jubilee):.2f} / {_p95(non_jubilee):.2f} | '
+                       f'{len(large)} / {len(no_ask)} | {quiet_day} / {quiet_three} |')
+            if arm == 'active':
+                for row in large:
+                    day = row['day']
+                    group = 'At least one ask'
+                    if not row['asks']:
+                        group = 'No ask, ≤10 bp flow' if sum(gross[day].values()) <= 10 else 'No ask, >10 bp flow'
+                    for horizon, values in markouts[group].items():
+                        relative = _relative_return(frames, day, horizon, row['token'])
+                        if relative is not None:
+                            values.append(relative if row['gap'] < 0 else -relative)
+            windows = {day: symbol for first, last, symbol in ((339, 344, 'CNST'), (842, 847, 'NRGC'))
+                       for day in range(first, last + 1) if day in gross}
+            if arm != 'active' or not windows:
+                continue
+            cash = _cash_windows(directory, windows)
+            urgency = _close_urgency(frames, slack, patience)
+            for day, symbol in windows.items():
+                obs = ownership[day]
+                weight = next(w for w in frames[day]['basket']['weights'] if w['symbol'] == symbol)
+                gap = weight['held_bp'] - weight['target_bp']
+                cash_bp = None if cash[day] is None else cash[day] * 10_000 / int(obs['opening']['equity_buck'])
+                ratio = '—' if cash_bp is None else f'{cash_bp:.2f}'
+                ahead = _relative_return(frames, day, 3, symbol)
+                relative = '—' if ahead is None else f'{ahead:+.2f}%'
+                signal = data['daily'][day]
+                window_rows.append(f'{label} | {day} | {symbol} | {gap:+d} | {urgency[day][symbol]} | {ratio} | '
+                                   f"{gross[day]['other']:.2f} / {gross[day]['jubilee']:.2f} / {gross[day]['unattributed']:.2f} | "
+                                   f"{signal['pair_asks']} / {signal['pair_changes']} | {relative} |")
+    out += ['', '## External-tape markout for the largest gap at each active close', '',
+            'A positive markout favors buying an underweight TOKEN or selling an overweight TOKEN '
+            'at the close. An ask can concern a different TOKEN. The arms share a tape and the '
+            'windows can overlap. These are descriptive marks before any trading costs.', '',
+            '| Large-gap group | Favorable by 3 / observations | Median 3-close markout | '
+            'Favorable by 15 / observations | Median 15-close markout |', '|---|---:|---:|---:|---:|']
+    for label, horizons in markouts.items():
+        stats = [f'{sum(x > 0 for x in values)} / {len(values)} | {median(values):+.2f} log-%' if values
+                 else '— | —' for values in horizons.values()]
+        out.append(f"| {label} | {' | '.join(stats)} |")
+    out += ['', '## Replay windows in the active arms', '',
+            f'The urgency proxy uses one reported weight gap per day, {slack} bp slack and a '
+            f'{patience} bp-day threshold. The actual policy uses intraday observations and gaps '
+            'measured against its target book, so this proxy cannot establish eligibility.', '',
+            'The last column is the TOKEN’s three-close forward log return minus the declared-weight '
+            'average of its peers on the same external tape. These are historical-tape moves. The '
+            'saved record has no full decision-time trace or realized round-trip attribution.', '',
+            '| Seed | Extra Jubilee | Arm | Close | TOKEN | Held minus target, bp | Close urgency proxy, bp-days | '
+            'Gross household cash, bp of equity | '
+            'Gross shares non-Jubilee / Jubilee / unattributed, bp | All asks / changed plans | TOKEN vs peers, next 3 |',
+            '|---:|---:|---|---:|---|---:|---:|---:|---:|---:|---:|', *window_rows]
+    return '\n'.join(out) + '\n', good
 
 
 def _drift(weights, factors):

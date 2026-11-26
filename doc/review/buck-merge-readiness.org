@@ -204,6 +204,25 @@ layout checks pass and the migrated tests retain their coverage.
 
 ** TODO Diagnose missed rebalancing with a mature Jubilee-funded basket
 
+The decision is whether to scale the simulated opening stock, revisit
+signal detection, or investigate execution. A larger Jubilee holding
+alone is useful only if it increases total equity relative to the
+flows and preserves comparable market depth. An increase in trade count
+alone is insufficient. Compare matched active/maintenance share and
+realized receipt returns, drawdown, parity and gross execution costs.
+
+- [X] Reconcile recorded receipt flow around the candidate windows.
+  In the quiet five-year historical active arms, 55 of 83 large-gap
+  no-ask closes had at most 10 bp of gross share flow that day,
+  including Jubilee. CNST was underweight in every active arm on
+  day 342 and recovered against peers over the next three closes.
+  The saved daily evidence narrows the hypotheses without identifying
+  the policy gate.
+- [X] Add opt-in decision and swap capture to the matched patient-holder
+  replay. A four-close historical smoke reconciled all 55 traced
+  constituent decisions per arm with the daily counters. All active
+  decisions were below eligibility and the trace matched 14 pool
+  swaps per arm.
 - [ ] Reproduce the historical no-ask and changed-plan decisions. Start
   with seed 41404, zero extra Jubilee and days 845–847, then check the
   CNST gap around day 342 with both seeds. Reuse the frozen tape, opening
@@ -234,8 +253,31 @@ layout checks pass and the migrated tests retain their coverage.
   the high-stock/low-flow regime is verified from the measured ratio
   and the traces show whether flows quench the weight gap or another
   part of the policy prevents trades.
+- [ ] If the trace shows late eligibility on otherwise actionable
+  reversals, vary patience alone at each opening size before changing
+  the directional model. Include a sustained relative trend as a
+  control for premature trades and compare net returns against
+  maintenance on a separate tape.
 
 [[file:buck-basket-findings.org::*When the quiet-flow runs rebalanced (November 26 UTC)][Observed gaps and replay windows]]
+
+** Remaining experiments before the five-year studies finish
+
+- [ ] Run a day-one parity trace with common opening quotes and the
+  same market-forcing schedule. Align the V3 token orientation in a
+  deterministic fixture and compare the first differing actor, inputs,
+  intent and confirmed outcome. Separate the effect of the quotes
+  from the effect of cast order.
+- [ ] Qualify one deterministic lifecycle transition, starting with
+  retirement and a funded drawdown in Python. Use the same inputs in
+  WebEVM to locate gaps in daily scheduling or missing operations.
+- [ ] Run the rebalancing experiment above with baseline and mature
+  capital and controlled flows. Preserve both historical no-ask
+  windows and a positive control. Validate detection and fills
+  separately before comparing investment outcomes.
+- [ ] Run the fork-free canonical V3 deployment smoke independently of
+  the parity and basket experiments. Reconcile distribution and
+  required fixture migrations against that deployment.
 
 * Live Savings prices and execution sizing
 
