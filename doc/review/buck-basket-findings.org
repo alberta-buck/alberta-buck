@@ -663,11 +663,27 @@ urgency first qualified, and minimum size absorbed small asks.
 
 From matched opening equity of 6.06M BUCK, the active share mark
 gained 0.363% and maintenance gained 0.348% over treatment, a
-0.014 percentage-point difference. This is one short tape and one
-seed. Replay the historical full state and log the per-peer readiness,
-separation and motion to explain the zero directional rate.
+0.014 percentage-point difference.
 
-[[file:../../build/research-results/cnst-window-j0.json][Matched short-slice decision trace]]
+The 2M investment opened treatment at 8.80M BUCK in both arms, 45%
+above the unfunded pair. Non-Jubilee receipt flow was again zero on
+source day 342. The largest CNST decision gap was -291 bp. One
+decision missed urgency and three eligible decisions had zero
+directional rate. The first changed CNST plan with a confirmed swap
+again came on day 343, for 15,187 BUCK, with a second on day 344 for
+9,392 BUCK. The active share mark gained 0.049% and maintenance lost
+0.024%, a 0.073 percentage-point difference. The additional capital
+increased the measured gap and changed the return. It left the
+directional delay in place on this tape and seed.
+
+Replay the historical full state and log per-peer readiness,
+separation and motion to explain the zero directional rate. This
+short slice uses new opening state and price anchors and the two
+funding cases share one price path. The matched mature-scale and
+controlled-flow experiments remain open.
+
+[[file:../../build/research-results/cnst-window-j0.json][Unfunded short-slice trace]] ·
+[[file:../../build/research-results/cnst-window-j2000000.json][2M Jubilee short-slice trace]]
 
 * Recommendations for performance and stability
 

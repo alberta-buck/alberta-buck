@@ -230,6 +230,11 @@ realized receipt returns, drawdown, parity and gross execution costs.
   pair-driven plan changes with confirmed CNST swaps and two asks
   below trade grain. This establishes separate gates in the short
   replay. Its reset price anchors differ from the frozen long run.
+  The paired 2M variant also completed and reconciled its trace against
+  the daily counters. Its equity was 45% higher and non-Jubilee receipt
+  flow was again zero on source close 342. Three eligible CNST
+  decisions had zero directional rate. Its first pair-driven CNST
+  swap still occurred on source close 343.
 - [X] Verify the optional per-peer gate capture. A deliberately low-
   patience four-close control recorded all five peer statuses across
   128 peer decisions. It reconciled 55 constituent decisions per arm
