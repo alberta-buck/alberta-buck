@@ -24,6 +24,7 @@ except ImportError:
 SYMBOLS = ("LABR", "CNST", "FOOD", "NRGC", "PAXG")
 WEIGHTS = np.array([2553, 2340, 2128, 2128, 851]) / 10_000
 DAY = 86_400
+SENSORS = ("motion", "gap", "turn", "band")
 SEPARATION = 100 * LOG_TICK
 RESPONSE, ERROR_TIME, MAX_GAP, WARMUP, FLOOR = OBSERVER
 FLOOR = FLOOR / 10**18 * LOG_TICK * DAY
@@ -184,14 +185,19 @@ def backfill_urgency(endpoint, dt, origin, mark_prev, books, weights, arms, cumu
     mark_prev[:] = spot
 
 
-def bridge_chunks(seconds, logs, step, noise_bp, seed):
+def bridge_chunks(seconds, logs, step, noise_bp, seed, hold=False):
     """Seeded log Brownian bridges with the supplied anchor endpoints and no extra drift."""
+    if hold and noise_bp:
+        raise ValueError("anchor hold requires zero bridge noise")
     rng = np.random.default_rng(seed)
     for k in range(len(seconds) - 1):
         span = int(seconds[k + 1] - seconds[k])
         blocks = span // step
-        fraction = np.arange(1, blocks + 1)[:, None] / blocks
-        chunk = logs[k] + fraction * (logs[k + 1] - logs[k])
+        if hold:
+            chunk = np.broadcast_to(logs[k], (blocks, logs.shape[1])).copy()
+        else:
+            fraction = np.arange(1, blocks + 1)[:, None] / blocks
+            chunk = logs[k] + fraction * (logs[k + 1] - logs[k])
         if noise_bp and blocks > 1:
             walk = np.cumsum(rng.standard_normal(chunk.shape), axis=0)
             chunk += (walk - fraction * walk[-1]) * (noise_bp / 10_000 * math.sqrt(step / DAY))
@@ -239,7 +245,7 @@ def synthetic(tape, days, step):
 # holdings, urgency, gap sign, allowance and the previous observed gap.
 @njit
 def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, errors, hour_open, roughness,
-                   weights, arms, first, step, schedule, clock, observer, last_cumulative, cumulative, spots,
+                   weights, arms, first, step, schedule, clock, observer, last_cumulative, cumulative, spots, prior_marks,
                    history, history_step, history_urgency, previous_gap, slack, cost, grain, depth):
     response = RESPONSE / DAY
     hour = 3600 // step
@@ -313,7 +319,7 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
             # Price elasticity of a full-range LP mark in the basket numeraire.
             factors[i] = math.exp(.5 * (current[i] - mark_prev[i] - movement))
         for m in range(len(arms)):
-            tilt, patience, drift_fraction, adaptive, brake_width, wide_threshold, weight_basis, settle_floor = arms[m]
+            tilt, patience, drift_fraction, adaptive, brake_width, wide_threshold, weight_basis, settle_floor, sensor = arms[m]
             holdings = books[m, 0]
             book = 0.
             for i in range(n):
@@ -323,7 +329,7 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
             maximum = CAP
             rates[:] = 0.
             raw_early[:] = 0.
-            if ready and patience > 0:
+            if ready and patience > 0 and sensor == 0:
                 p = 0
                 for i in range(n):
                     for j in range(i + 1, n):
@@ -358,12 +364,27 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
                                 rates[j] += weights[i] * desire
                                 raw_early[j] += weights[i] * max(0., desire - base)
                         p += 1
+            if ready and sensor == 2:
+                for i in range(n):
+                    for j in range(n):
+                        if i == j:
+                            continue
+                        side = 1. if holdings[i] > targets[i] * book else -1.
+                        spread = side * (live[i] - live[j])
+                        change = side * (live[i] - live[j] - prior_marks[i] + prior_marks[j])
+                        if spread > SEPARATION and change < -FLOOR * book_dt:
+                            rates[i] += weights[j]
             for i in range(n):
                 gap = holdings[i] / book - targets[i]
                 next_urgency, side = credit_urgency(books[m, :, i], gap, urgency_dt, slack, patience, previous_gap)
                 leash = abs(holdings[i] / book - weights[i]) > LEASH * weights[i]
                 rate = rates[i] / (1 - weights[i])
                 eligible = ready and patience > 0 and next_urgency >= patience
+                if sensor != 0:
+                    excursion_rate = CAP * min(1., abs(gap) / DEFAULTS_EXCURSION)
+                    if sensor == 3:
+                        eligible = ready and abs(gap) > .01
+                    rate = excursion_rate * (rate if sensor == 2 else 1.)
                 amount = 0.
                 accrued = 0.
                 if leash:
@@ -413,6 +434,7 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
             stats[m, 6] = max(equity, stats[m, 6])
             stats[m, 7] = max(stats[m, 7], 1 - equity / stats[m, 6])
         mark_prev[:] = current
+        prior_marks[:] = live
 
 
 DEFAULT_CAP = DEFAULTS["lean_cap_bp"] / 10_000
@@ -421,10 +443,11 @@ LEASH = DEFAULTS["leash_bp"] / 10_000
 CAP = math.log(2) / DEFAULTS["half_life_days"]
 RELEASE = DEFAULTS["release_rate"]
 STEP_CAP = .05
+DEFAULTS_EXCURSION = DEFAULTS["signal_excursion"]
 
 
 def replay(seconds, log_prices, arms, step, decision, noise_bp, seed, cost_bp, grain_bp, depth_bp,
-           previous_gap=False, history=0, history_step=None, history_urgency=False, slack=SLACK):
+           previous_gap=False, history=0, history_step=None, history_urgency=False, slack=SLACK, anchor_hold=False):
     n = len(WEIGHTS)
     origin = log_prices[0]
     prev, mark_prev = origin.copy(), origin.copy()
@@ -439,6 +462,7 @@ def replay(seconds, log_prices, arms, step, decision, noise_bp, seed, cost_bp, g
     spots = np.zeros_like(cumulative)
     spots[0] = origin
     last_cumulative = np.zeros(n)
+    prior_marks = np.zeros(n)
     hour_open = origin.copy()
     track = np.zeros((2, n))
     errors = np.zeros((n * (n - 1) // 2, 2))
@@ -449,9 +473,9 @@ def replay(seconds, log_prices, arms, step, decision, noise_bp, seed, cost_bp, g
     stats = np.zeros((len(arms), 9))
     stats[:, 6] = 1.
     first = 1
-    for prices in bridge_chunks(seconds, log_prices, step, noise_bp, seed):
+    for prices in bridge_chunks(seconds, log_prices, step, noise_bp, seed, anchor_hold):
         simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, errors, hour_open, roughness,
-                       WEIGHTS, arms, first, step, schedule, clock, observer, last_cumulative, cumulative, spots,
+                       WEIGHTS, arms, first, step, schedule, clock, observer, last_cumulative, cumulative, spots, prior_marks,
                        history_blocks, (history_step or step) // step, history_urgency, previous_gap, slack, cost_bp / 10_000, grain_bp / 10_000, depth_bp / 10_000)
         first += len(prices)
     end_move = log_prices[-1] - mark_prev
@@ -491,6 +515,8 @@ def main(argv=None):
                    help="floor for small stall releases with ordinary closing retained, zero disables this variant")
     p.add_argument("--slack-bp", type=float, default=SLACK * 10_000,
                    help="allocation-gap slack, applies to all arms in the run")
+    p.add_argument("--sensor-ablation", action="store_true", help="compare gap-only, sampled turn and a one-point band")
+    p.add_argument("--anchor-hold", action="store_true", help="hold each observation until the next anchor")
     p.add_argument("--adaptive", type=float, nargs="+", default=[0., 1.], help="additional slow noise allowance weight")
     p.add_argument("--previous-gap", action="store_true", help="accrue using the previous observed gap")
     p.add_argument("--cost-bp", type=float, default=30.)
@@ -509,6 +535,8 @@ def main(argv=None):
         p.error("wide-brake must be between -1 and 1")
     if args.days is not None and args.days <= 0:
         p.error("days must be positive")
+    if args.anchor_hold and any(args.noise_bp):
+        p.error("anchor hold requires zero bridge noise")
     if min(args.patience) <= 0 or not all(
             math.isfinite(x) and x >= 0 for x in
             [*args.noise_bp, *args.tilt, *args.patience, *args.outward, *args.adaptive, *args.brake_spread,
@@ -535,16 +563,20 @@ def main(argv=None):
     else:
         seconds, logs = synthetic(args.tape, args.days or 120, max(args.step, 3600))
         source = {"kind": args.tape, "anchors": len(seconds)}
-    production = (DEFAULTS["tilt"], DEFAULTS["patience"], 0., 0., 0., 0., 0., 0.)
-    base = (DEFAULTS["tilt"], 0., 0., 0., 0., 0., 0., 0.)
+    production = (DEFAULTS["tilt"], DEFAULTS["patience"], 0., 0., 0., 0., 0., 0., 0.)
+    base = (DEFAULTS["tilt"], 0., 0., 0., 0., 0., 0., 0., 0.)
     motion_variants = [(d, 0., 0., 0., 0.) for d in [0., *args.outward]]
     motion_variants += [(0., width, threshold, float(basis == "weight"), 0.) for width, threshold, basis in
                         itertools.product(args.brake_spread, args.wide_brake, args.brake_basis) if width > 0]
     motion_variants += [(0., 0., 0., 0., floor / 10_000) for floor in args.settled_spread_bp if floor > 0]
-    treatments = [(t, p / 10_000, drift, a, width, threshold, basis, floor)
+    treatments = [(t, p / 10_000, drift, a, width, threshold, basis, floor, 0.)
                   for t, p, a, (drift, width, threshold, basis, floor) in
                   itertools.product(args.tilt, args.patience, args.adaptive, motion_variants)]
-    controls = [(tilt, 0., 0., 0., 0., 0., 0., 0.) for tilt in args.tilt]
+    if args.sensor_ablation:
+        treatments += [(t, p / 10_000, 0., 0., 0., 0., 0., 0., sensor)
+                       for t, p, sensor in itertools.product(args.tilt, args.patience, (1, 2))]
+        treatments += [(t, DEFAULTS["patience"], 0., 0., 0., 0., 0., 0., 3) for t in args.tilt]
+    controls = [(tilt, 0., 0., 0., 0., 0., 0., 0., 0.) for tilt in args.tilt]
     arms = np.array(list(dict.fromkeys([base, production, *controls, *treatments])))
     maintenance = {arm[0]: i for i, arm in enumerate(arms) if arm[1] == 0.}
     rows, diagnostics = [], []
@@ -554,12 +586,12 @@ def main(argv=None):
     for (noise, seed), (window, fill_urgency) in itertools.product(groups, history_modes):
         marks, stats, state = replay(seconds, logs, arms, args.step, decision, noise, seed,
                                      args.cost_bp, args.grain_bp, args.depth_bp, args.previous_gap,
-                                     window, history_step, fill_urgency, args.slack_bp / 10_000)
+                                     window, history_step, fill_urgency, args.slack_bp / 10_000, args.anchor_hold)
         group = dict(noise_bp=noise, seed=seed, history_seconds=window, history_urgency=fill_urgency)
         diagnostics.append(dict(**group, **state))
         for index, (arm, mark, stat) in enumerate(zip(arms, marks, stats, strict=True)):
             rows.append(dict(arm=("maintenance" if arm[1] == 0. else "production" if index == 1 else "candidate"),
-                             tilt=arm[0], patience_bp_days=arm[1] * 10_000,
+                             sensor=SENSORS[int(arm[8])], tilt=arm[0], patience_bp_days=arm[1] * 10_000,
                              outward_drift_fraction=arm[2], adaptive_noise=arm[3],
                              brake_spread=arm[4], wide_brake=arm[5],
                              brake_basis=("weight" if arm[6] else "price") if arm[4] else None, settled_spread_bp=arm[7] * 10_000, **group,
@@ -571,7 +603,7 @@ def main(argv=None):
         print(f"{source['kind']}, {noise:g} bp, seed {seed}, history {window}s, reconstructed urgency {fill_urgency}: "
               f"{len(arms)} arms", flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(dict(schema=2, source=source, price_step_seconds=args.step,
+    args.output.write_text(json.dumps(dict(schema=3, source=source, anchor_hold=args.anchor_hold, price_step_seconds=args.step,
                                           decision_seconds=decision, history_step_seconds=history_step,
                                           previous_gap=args.previous_gap, observations=int(seconds[-1] // args.step),
                                           fee_bp=args.cost_bp, slack_bp=args.slack_bp, grain_bp=args.grain_bp, depth_bp=args.depth_bp,

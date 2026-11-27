@@ -17,6 +17,31 @@ def test_bridge_preserves_anchors_at_each_noise_level():
         assert not np.array_equal(noisy[index][:-1], flat[index][:-1])
 
 
+def test_anchor_hold_changes_only_when_the_new_observation_arrives():
+    logs = np.array([[0., .02], [.10, .03], [-.1, 0.]])
+    chunks = list(study.bridge_chunks(np.array([0, 60, 120]), logs, 12, 0, 7, hold=True))
+    for index, chunk in enumerate(chunks):
+        np.testing.assert_array_equal(chunk[:-1], np.broadcast_to(logs[index], (4, 2)))
+        np.testing.assert_array_equal(chunk[-1], logs[index + 1])
+
+
+def test_gap_rule_buys_a_persistent_gap_and_turn_rule_waits_for_closure():
+    days = np.arange(19)
+    seconds = days * 86_400
+    logs = np.zeros((len(days), len(study.WEIGHTS)))
+    logs[:, 1] = -.10 * np.clip((days - 2) / 6, 0., 1.)
+    arms = np.array([[.5, .01, 0., 0., 0., 0., 0., 0., sensor] for sensor in (1, 2)])
+
+    def fills(tape):
+        _, stats, _ = study.replay(seconds, tape, arms, 600, [3600, 21_600], 0, 1, 30, 2, 30)
+        return stats[:, 8]
+
+    gap, turn = fills(logs)
+    assert gap > 0 and turn == 0
+    logs[:, 1] += .06 * np.clip((days - 10) / 7, 0., 1.)
+    assert fills(logs)[1] > 0
+
+
 def test_urgency_uses_time_and_resets_on_a_side_change():
     whole, side = study.urgency_step(0., 1, .0125, 1., .0025, .02)
     partial = 0.
@@ -55,7 +80,7 @@ def test_small_stall_release_requires_no_clear_outward_motion():
 def test_common_inflation_and_elapsed_schedule_do_not_create_trades():
     seconds = np.arange(5) * 86_400
     prices = np.broadcast_to(np.arange(5)[:, None] * .01, (5, 5))
-    arms = np.array([[0., .02, 0., 0., 0., 0., 0., 0.], [.5, .02, .75, 1., 0., 0., 0., 0.]])
+    arms = np.array([[0., .02, 0., 0., 0., 0., 0., 0., 0.], [.5, .02, .75, 1., 0., 0., 0., 0., 0.]])
     for schedule in ([300], [300, 1800, 14_400], [172_800]):
         marks, stats, _ = study.replay(seconds, prices, arms, 300, schedule, 0, 0, 30, 2, 30)
         np.testing.assert_allclose(marks, 1., atol=1e-14)
@@ -79,7 +104,7 @@ def test_full_history_recovers_block_observer_without_intermediate_wheel_calls()
     seconds = np.arange(8) * 86_400
     logs = np.zeros((len(seconds), len(study.WEIGHTS)))
     logs[:, 1] = .08 * np.cos(np.arange(len(seconds)))
-    arms = np.array([[0., 0., 0., 0., 0., 0., 0., 0.]])
+    arms = np.array([[0., 0., 0., 0., 0., 0., 0., 0., 0.]])
     # Seven days end on the same boundary for both schedules.
     fine, fine_stats, sampled = study.replay(seconds, logs, arms, 300, [300], 50, 7, 30, 2, 30)
     uneven, uneven_stats, restored = study.replay(seconds, logs, arms, 300, [3600, 21_600], 50, 7, 30, 2, 30,
@@ -104,7 +129,7 @@ def test_history_urgency_reconstructs_a_side_change_without_extra_executions():
     # Sustained spread with very brief excursions toward the anchor inside
     # wheel gaps. Holdings never hit the declared-weight leash.
     logs[1:, 1] = np.where(hours[1:] % 7 == 5, .02, -.18)
-    arms = np.array([[0., .02, 0., 0., 0., 0., 0., 0.]])
+    arms = np.array([[0., .02, 0., 0., 0., 0., 0., 0., 0.]])
     def run(fill):
         return study.replay(seconds, logs, arms, 300, [3600, 21_600], 0, 0, 30, 2, 30,
                             history=21_600, history_step=3600, history_urgency=fill)

@@ -1009,6 +1009,85 @@ reference before tying targets to it.
 [[file:../../build/research-results/commodity-lag-forecast.json][Held-out lag forecasts]] ·
 [[file:../../build/research-results/pair-plateau-plateau-slack5.json][Small-stall matrix]]
 
+*** Which sensors matter on the historical proxies?
+
+The Python ablation keeps maintenance, tilt, costs and caps matched
+within each comparison. The tested alternatives are a one-point
+allocation band, elapsed-time gap persistence by itself, and
+persistence plus one observed turn. The turn compares consecutive
+10-minute basket-relative price marks at actual wheel calls. After
+the same 1% relative-reference separation, it requires the aligned
+pair to be closing by more than the fixed rate floor. Its requested
+rate is proportional to the allocation gap up to the existing
+excursion cap. It uses no fitted acceleration or volatility for
+the trade decision. The common simulator still applies the opening
+warmup and freshness rules. All arms pay 30 bp per leg in the model.
+
+| 1984–2025 proxy construction | One-point band | Gap only | Gap plus turn | Full motion |
+|------------------------------+----------------+----------+---------------+-------------|
+| Hold monthly marks until the next one is dated | +0.555 | +0.291 | +0.573 | +0.413 |
+| Log interpolation | +0.338 | -0.094 | +1.115 | +0.699 |
+| Interpolation plus 50 bp daily bridge volatility | +0.564 | +0.420 | +0.757 | +0.733 |
+| Interpolation plus 150 bp daily bridge volatility | +4.139 | +9.642 | +5.445 | +9.250 |
+
+The table gives cumulative percentage points over same-tilt
+maintenance with zero tilt and 200 bp-days where applicable.
+The ordinary production arm also retains half tilt, which was
+stronger on the largest injected noise and weaker on the monthly
+hold. The three separated windows (1984–1999, 2000–2014 and
+2015–2025) gave the zero-tilt turn arm three positive and three
+negative outcomes across smooth and 50 bp bridge paths. Its
+range was -0.111 to +0.245 pp. This nominates a small sensor set
+for the matched execution test. It leaves the historical gain
+uncertain. The monthly hold uses dated, revised observations as
+available on the anchor date, without a publication-vintage feed.
+
+On the earlier pinned 730-close EVM tape, the gap-only excursion
+arm earned 0.510 pp above maintenance against production's
+0.573 pp. That is 89% of the production increment on that tape.
+The same monthly inputs yielded zero production gain with linear
+interpolation and a loss with delayed carry-forward. A realized
+price excursion or the incumbent's gain is insufficient as the
+denominator for a claim about the share of attainable net return.
+
+[[file:../../build/research-results/pair-sensor-proxies-hold.json][Monthly hold ablation]] ·
+[[file:../../build/research-results/pair-sensor-proxies-bridge.json][Bridge ablation]]
+
+*** Passive range execution and redemptions
+
+The treasury seeder already places a funded one-sided V3 range
+from the live BUCK/USDC price toward parity and lets corrective
+arbitrage convert the inventory. For a TOKEN/BUCK pool, price here
+means BUCK per TOKEN. A TOKEN-funded range above spot sells TOKEN
+for BUCK as the price rises. This can realize a rebound and
+stock a redemption buffer. A BUCK-funded range below spot buys
+TOKEN as the price falls. An above-spot range needs TOKEN
+inventory even when the ultimate allocation objective is to buy
+that TOKEN at a cheaper price.
+
+Beyond a filled sell range, a continuing rise lets the basket offer
+another bounded TOKEN tranche farther out. The first range's
+BUCK proceeds can stay available for redemption. New sell ranges
+require TOKEN still available beyond the target and retained
+liquidity. Recrossing an open range can undo conversions until
+liquidity is withdrawn. The buy-side ladder draws down a cash
+budget as a falling price continues. A permanent repricing can
+leave it with a larger position, just as with active purchases.
+Completed ranges, partially filled ranges, and the inventory
+left out of the range all enter the same final book mark.
+
+Use the same target, inventory budget and price signal when
+comparing an immediate swap, a single range and a bounded ladder.
+Measure BUCK ready by the redemption deadline, net fees, capture
+price, partial fills, recross, mint and burn gas, and terminal
+inventory against maintenance. The existing synchronous payout
+remains backed by liquid BUCK or the established immediate unwind.
+Price-only simulations cannot estimate a range's fee share or
+fill timing from an interpolated external price alone.
+
+[[file:../../alberta_buck/sim/seeder_agent.py][Treasury range seeder]] ·
+[[https://developers.uniswap.org/docs/get-started/concepts/liquidity-providers/range-orders][Uniswap range-order mechanics]]
+
 ** CNST reversal on a short historical slice
 
 The matched replay used the five historical columns from closes 335
