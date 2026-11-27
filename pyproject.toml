@@ -67,6 +67,7 @@ kernel = ["alberta-buck-core[kernel]>=0.4.0,<0.5"]
 fast = ["pyrevm >=0.3"]
 
 plots = ["matplotlib >=3.8", "numpy >=1.26"]  # renderers and offline sensor analysis
+price-research = ["numba >=0.63"]  # optional accelerator for high-resolution price studies
 server = ["websockets >=12"]    # alberta_buck.sim.server frame/control/rpc
 
 # Everything: the full simulation stack as a developer runs it.

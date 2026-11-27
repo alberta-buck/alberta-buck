@@ -721,6 +721,134 @@ could narrow that margin. The funded close-343 buy already qualified
 through the production braking rule. These calculations measure
 gate sensitivity and do not estimate executable return.
 
+** High-resolution raw-price study
+
+=doc/review/urgency-trial.py= at =b7560339^= mirrored the gap
+accumulator while driving the contracts. The Python Kalman experiment
+in =pair_observer.py= tracked motion in a different model. The raw-price
+runner =alberta_buck.sim.pair_price_study= uses the current alpha-beta
+interval observer, pair rate and gap accumulator. It retains the
+current target formula and tests tilt zero as well as the default
+half tilt. Tilt deliberately moves the target against relative price.
+With full-range liquidity, half tilt tends to increase a gap that already
+grows as the LP position reprices. It changes the desired exposure
+independently of the quality of a turning-point signal.
+
+The runner takes the common monthly USD anchors for LABR_US, CNST,
+FOOD_US, NRGC and XAU from the quote engine, or a CSV with
+=timestamp,LABR,CNST,FOOD,NRGC,PAXG=. It uses the imported timestamps
+when they are already at block resolution. Across missing intervals,
+it interpolates in log price and can overlay independent seeded
+random walks pinned to both endpoints. The generated points between
+monthly anchors are scenarios. The 0, 50 and 150 bp noise settings
+specify pre-pinning daily log volatility, scaled by the square root
+of elapsed time. An optional causal 30-day EWMA of absolute hourly
+relative moves widens each pair's empirical rate allowance.
+
+The normal run samples every 12 seconds. The same price path can be
+replayed with wheel calls after 12 seconds, a minute, half an hour
+and four hours in rotation. Each observation averages the interval's
+held quotes. The filter uses the difference between interval
+midpoints. Urgency and gap-release allowance use elapsed days and
+the one-day accrual cap. The observer starts a fresh warmup after a
+gap greater than one day. The =--previous-gap= arm tests crediting
+the last observed allocation gap over the elapsed interval and
+clearing it on a side change. The default follows the contract and
+credits the newly observed gap. After a late observation, these rules
+can disagree on how long the new gap has existed.
+
+The outward experiment adds a small release, capped at 10% of the
+ordinary maximum rate. It tapers to zero when the projected outward
+move from the upper rate bound and positive acceleration over one
+response time consumes the permitted fraction of excess separation.
+The acceleration penalty relative to the available separation falls
+as separation grows. The absolute acceleration required to stop the
+early release rises. Existing braking and closing remain available.
+This is a candidate sizing rule.
+
+The price-only book marks stylized full-range exposure, starts with
+5% cash, and pays modeled per-leg costs, with grain, step and depth
+limits. It uses one raw market observation stream, treating both quote
+routes as aligned. It does not model route divergence, swap impact,
+issuance, parity-driven book expansion, or household flows. Results
+compare with no discretionary pairs at the same tilt and also with
+the production parameter arm in this model. Returns are in the
+model's relative geometric basket numeraire. Drawdown is measured at
+wheel responses.
+
+#+begin_src sh
+# The price-research extra adds the optional Numba accelerator.
+python -m alberta_buck.sim.pair_price_study build/research-results/pair-price-long-grid.json \
+  --step 12 --decision 12 60 1800 14400 --noise-bp 0 50 150
+python -m alberta_buck.sim.pair_price_study build/research-results/pair-price-year-grid.json \
+  --step 12 --days 365 --noise-bp 0 50 150
+#+end_src
+
+*** First matrix
+
+The matrix uses tilt 0 or 0.5, patience 100 or 200 bp-days,
+outward-drift budget zero, 50% or 75% of excess separation, and
+slow-noise weight zero or one. The controls use the ordinary policy
+and no discretionary pairs at each tested tilt. The long tape has
+497 monthly anchors from January 1984 to September 2025, expanded to
+109,576,800 price steps at 12 seconds. The four-interval wheel
+schedule runs against that entire path. The 365-day slice and
+90-day synthetic controls also run with one wheel call each step.
+
+At the standard tilt and patience, the first long-tape run gave
+the following cumulative model results. The two adjustment columns
+change one setting at a time.
+
+| Daily bridge noise | Production vs maintenance, pp | Zero tilt vs production, pp | Early release (50%) vs production, pp | Slow noise allowance vs production, pp |
+|--------------------+-------------------------------+----------------------------+---------------------------------------+---------------------------------------|
+| 0 bp   |  +0.467 | +0.248 | -0.774 | +0.058 |
+| 50 bp  |  +0.775 | -0.038 | -0.350 | -0.006 |
+| 150 bp | +16.456 | -7.413 | -1.088 | -0.024 |
+
+Zero tilt cut turnover in all three long paths, including from
+213.5% to 88.3% of opening capital in the smooth interpolation.
+Its advantage did not survive the largest invented noise. The
+extra early release also reduced returns on the synthetic temporary
+and permanent shocks at the standard patience and tilt. Both shocks
+begin with the same decline. A larger eligibility envelope or
+more fills is insufficient evidence of better harvesting. The slow
+allowance did not produce a consistent return improvement.
+
+On the same 365-day price paths, production's return against
+maintenance was close across the two schedules. Fill counts could
+still differ materially.
+
+| Daily bridge noise | Return at 12 s, pp | Return with irregular calls, pp | 12 s fills | Irregular fills |
+|--------------------+--------------------+---------------------------------+------------+-----------------|
+| 0 bp   | -0.110 | -0.111 |  97 |  82 |
+| 50 bp  | -0.098 | -0.097 | 174 | 152 |
+| 150 bp | +0.510 | +0.546 | 908 | 640 |
+
+Halving patience gained 0.089–0.099 pp in the first high-noise
+year across the two schedules, with higher turnover. A second seed
+at the irregular cadence reduced that gain to 0.028 pp. The
+untouched long tape lost 0.050 pp under the same patience change.
+These observations favor preserving the 200 bp-day control while
+testing across long gaps and a broader set of noise realizations.
+
+For constant gap and rate, the fixed elapsed-time integral and
+exponential release compose under interval subdivision, before the
+policy's stale cap, resets and executions. Real price paths change
+within a wheel interval. The contract's current-gap accrual can
+credit a freshly observed shock with an entire elapsed interval.
+On the one-year irregular tape, switching to previous-gap accrual
+changed production return against maintenance by -0.0003, +0.0036
+and -0.0121 pp at 0, 50 and 150 bp of daily bridge noise. Those are
+pilot outcomes for one price seed, not a guarantee of equivalence
+under long gaps. Trade grain and depth also apply per response, so
+different wheel schedules can yield different fills even when the
+underlying time integrals agree.
+
+[[file:../../build/research-results/pair-price-long-v2-grid.json][Long matrix]] ·
+[[file:../../build/research-results/pair-price-history-block-grid.json][365 days, 12-second wheel]] ·
+[[file:../../build/research-results/pair-price-history-irregular-grid.json][365 days, irregular wheel]] ·
+[[file:../../build/research-results/pair-price-history-previous-grid.json][365 days, previous-gap accrual]]
+
 ** CNST reversal on a short historical slice
 
 The matched replay used the five historical columns from closes 335
