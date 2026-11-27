@@ -676,6 +676,51 @@ funded close 343 provides a positive control for the pair policy.
 NRGC closes 843–848 are still replaying.
 [[file:buck-merge-readiness.org::*Replay a completed stock cell with decision tracing][Replay command and local logs]]
 
+** Separation, urgency and outward motion
+
+Today urgency adds the allocation gap beyond slack times elapsed
+time. Pair separation enters later as a pass/fail check against
+accepted relative history. A ratio 15% beyond its reference uses the
+same motion rule as one just beyond the 1% floor. Positive outward
+velocity and acceleration can reduce the pair rate to zero even
+when the spread is wide. Braking can release some of the gap while
+the ratio is still moving outward.
+
+The frozen CNST trace distinguishes earlier eligibility from the
+ability to change a trade. Both unfunded close-342 maintenance buys
+already used the entire depth cap, roughly 27,513 and 28,127 BUCK.
+A positive pair ask could not have increased those buys at the same
+book states. The funded arm had five earlier responses without a
+CNST buy. At the largest of those gaps (257 bp), urgency was only
+11.84 bp-days. At that response a hurdle of half the standard 200
+bp-days would still have held. By the later 282 bp gap, urgency had
+reached 133.81 bp-days, but the 30,534 BUCK maintenance buy already
+used the full depth cap. These are same-state comparisons. Earlier
+writes to policy or trades could change subsequent book states.
+
+As a shadow calculation, compare projected outward drift over the
+12-hour observer response time with the separation above the 1%
+floor. For each trace rate use
+=0.5 days × max(0, rate + 0.5 × max(0, change))=, with rate and
+change in log-percent/day. The change is scaled to one observer
+response time. The comparison below uses the filtered spread and
+the recorded route envelope before the own-impact adjustment.
+
+| CNST buy peer NRGC | Filtered spread | Central outward rate | Change | Central outward drift | Upper outward drift | Upper drift / excess spread |
+|-------------------+-----------------+----------------------+--------+-----------------------+---------------------+-----------------------------|
+| Unfunded 342, eligible response | 15.15% | +4.58%/day | +2.84%/day | 3.00% | 8.18% | 58% |
+| Funded 343, confirmed pair buy  | 16.98% | +2.79%/day | -1.43%/day | 1.40% | 5.18% | 32% |
+
+The lower rate bounds were negative in both cases. The first trace
+shows an accelerating central estimate with an envelope that still
+spans zero. In this small comparison, a cap at half the excess
+separation would still withhold an additional early release on
+close 342. A cap at three quarters could admit it on the recorded
+filtered spread. The minimum live spread and own-impact allowance
+could narrow that margin. The funded close-343 buy already qualified
+through the production braking rule. These calculations measure
+gate sensitivity and do not estimate executable return.
+
 ** CNST reversal on a short historical slice
 
 The matched replay used the five historical columns from closes 335

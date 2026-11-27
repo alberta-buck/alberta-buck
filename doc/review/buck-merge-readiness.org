@@ -350,6 +350,22 @@ realized receipt returns, drawdown, parity and gross execution costs.
   control for premature trades and compare net returns against
   maintenance on a separate tape. Use positive patience values.
   A zero setting switches eligibility to the fixed allocation band.
+- [ ] Evaluate separation-weighted urgency and an early-release
+  motion gate independently before combining them. Capture ordered
+  peer evidence above gap slack even before eligibility, including the
+  minimum live spread and the rate allowance after own-impact widening.
+  For urgency, try a bounded multiplier on positive accrual using
+  the previous fresh, direction-aligned separation, weighted across
+  peers. Keep the side reset, slack drain and one-day cap.
+  For motion, compare projected outward drift over one observer
+  response time to a fraction of excess separation. Size any extra
+  release gradually and cap it below ordinary braking or closing
+  release at full strength. Keep freshness and live reference checks.
+  Score only incremental plans and confirmed fills against matched
+  maintenance and production. Include both opening sizes, withheld
+  history, and a temporary shock and permanent repricing with an
+  identical first leg.
+  [[file:buck-basket-findings.org::*Separation, urgency and outward motion][Frozen CNST shadow calculation]]
 
 [[file:buck-basket-findings.org::*When the quiet-flow runs rebalanced (November 26 UTC)][Observed gaps and replay windows]]
 
