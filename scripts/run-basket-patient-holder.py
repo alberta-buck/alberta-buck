@@ -86,6 +86,7 @@ def install_treatment(d, arm, peer_window=None):
     active = d.equity_upkeep.functions
     constructor = (active.pairPolicy().call(), active.parity().call(),
                    active.parityGain().call(), active.parityGainDear().call())
+    libraries = d.upkeep_libraries if hasattr(d, "upkeep_libraries") else d.net_basket.libraries
     facets = {}
     for name, contract in FACETS.items():
         args = constructor
@@ -93,7 +94,7 @@ def install_treatment(d, arm, peer_window=None):
             contract = "BasketUpkeepPeerTrace"
             first, last = peer_window
             args = (*constructor, d.household_epoch + first * 86400, d.household_epoch + (last + 1) * 86400)
-        abi, code = load_artifact(contract, libraries=d.upkeep_libraries)
+        abi, code = load_artifact(contract, libraries=libraries)
         facets[name] = d.chain.deploy(contract, *args, abi=abi, bytecode=code)
     chosen = facets[arm]
     receipt = d.chain.send(d.basket.functions.setEquityWheel(chosen.address),
@@ -129,7 +130,7 @@ def decision_stage(decision, arm):
 
 
 def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on_day_start, on_frame, recorder,
-           trace_days=None, trace_peers=False):
+           trace_days=None, trace_peers=False, expected_daily=None):
     exp = experiment.load(experiment_path, sets=settings)
     if exp.cfg.get("machine", {}).get("upkeep", "BasketUpkeepFacet") != "BasketUpkeepFacet":
         raise ValueError("the shared prefix requires ordinary BasketUpkeepFacet upkeep")
@@ -256,11 +257,16 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
 
     def capture(frame):
         owners_frame(frame)
-        daily.append(dict(day=frame["day"], prices=frame["refUsd"], share=frame["eq_share_price"],
-                          hold=frame["eq_hold"], total_issued=frame["net"]["total_issued"],
-                          jubilee=frame["net"]["jubilee"],
-                          decision_count=len(decisions), pair_asks=sum(amount > 0 for amount, _ in decisions),
-                          pair_changes=sum(changed for _, changed in decisions)))
+        close = dict(day=frame["day"], prices=frame["refUsd"], share=frame["eq_share_price"],
+                     hold=frame["eq_hold"], total_issued=frame["net"]["total_issued"],
+                     jubilee=frame["net"]["jubilee"], decision_count=len(decisions),
+                     pair_asks=sum(amount > 0 for amount, _ in decisions),
+                     pair_changes=sum(changed for _, changed in decisions))
+        if expected_daily is not None and close != expected_daily[frame["day"]]:
+            baseline = expected_daily[frame["day"]]
+            fields = ", ".join(k for k in close if close[k] != baseline.get(k))
+            raise ValueError(f"replay diverged at close {frame['day']} in {fields}")
+        daily.append(close)
         if arm == "maintenance" and any(amount or changed for amount, changed in decisions):
             raise ValueError("strict maintenance requested a discretionary gap trade")
         decisions.clear()
@@ -285,6 +291,13 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
         captured = {day: 0 for day in range(trace_days[0], trace_days[1] + 1)}
         for response in result["decision_trace"]:
             captured[response["day"]] += len(response["decisions"])
+            if trace_peers and arm == "active":
+                for decision in response["decisions"]:
+                    if decision["detail"]["eligible"] and decision["detail"]["gap"]:
+                        expected = set(range(len(scenario.tokens))) - {decision["token"]}
+                        peers = [peer["peer"] for peer in decision.get("peers", [])]
+                        if len(peers) != len(expected) or set(peers) != expected:
+                            raise ValueError(f"incomplete peer trace at close {response['day']}")
         if any(daily[day]["decision_count"] != count for day, count in captured.items()):
             raise ValueError("window trace disagrees with the daily decision counters")
     return {**result, "opening_lots_at_close": terminal_sleeve(result["opening"], result["closing"]),

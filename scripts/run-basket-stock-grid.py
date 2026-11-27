@@ -1,6 +1,7 @@
 """Compare patient basket capital and household flows on matched daily price tapes."""
 
 import argparse
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import fcntl
 import hashlib
@@ -16,6 +17,7 @@ from types import SimpleNamespace
 
 from alberta_buck.sim import experiment
 from alberta_buck.sim.gen_prices import gen_trend
+from alberta_buck.sim.prices import Prices
 
 
 HERE = Path(__file__).resolve().parent
@@ -23,6 +25,7 @@ ROOT = HERE.parent
 REGIMES = ("three-phase", "history", "revert", "inflating", "mixed", "shock",
            "shock-temporary", "shock-permanent", "commodity-trend")
 COMMODITY_TREND = {"LABR": .05, "CNST": .10, "FOOD": -.08, "NRGC": -.20, "PAXG": .25, "cbBTC": .12}
+PEER_GATES = ("unready", "filtered_spread", "live_spread", "zero_rate", "released")
 
 
 def script(name):
@@ -142,6 +145,14 @@ def plan(args):
                 cells=cells)
 
 
+def cell_settings(experiment_path, cell):
+    interventions = list(experiment.load(experiment_path).interventions) + [
+        dict(day=cell["warmup_days"], action="set_population", investor_rate=cell["investor_rate"]),
+        dict(day=cell["exit_day"], action="set_population", exit_now=cell["exit_fraction"])]
+    return [f"scenario.seed={cell['seed']}", "scenario.prices=history",
+            "interventions=" + repr(interventions)]
+
+
 def run_cell(folder, ident):
     manifest = json.loads((folder / "manifest.json").read_text())
     cell = next(c for c in manifest["cells"] if c["id"] == ident)
@@ -153,11 +164,7 @@ def run_cell(folder, ident):
         if day == 0:
             audit.append(endow(deployment, cell["endowment_buck"], cash_buck=cell["opening_cash_buck"]))
 
-    interventions = list(experiment.load(manifest["experiment"]).interventions) + [
-        dict(day=cell["warmup_days"], action="set_population", investor_rate=cell["investor_rate"]),
-        dict(day=cell["exit_day"], action="set_population", exit_now=cell["exit_fraction"])]
-    settings = [f"scenario.seed={cell['seed']}", "scenario.prices=history",
-                "interventions=" + repr(interventions)]
+    settings = cell_settings(manifest["experiment"], cell)
     files = [folder / "prices" / name for name in cell["files"]]
     runs = Path(manifest["run_root"])
     prefix = cell["run_prefix"]
@@ -184,6 +191,95 @@ def run_cell(folder, ident):
         write_json(path, record)
     result.update(fingerprint=cell["fingerprint"], endowment_audit=audit[0], run_ids=run_ids)
     write_json(folder / "cells" / (ident + ".json"), result)
+
+
+def ranked_opportunities(responses, tokens, prices, min_gap_bp, markout_days):
+    """Keep the largest missed gap per day, TOKEN and side, then rank by hindsight."""
+    candidates = {}
+    traded = set()
+    if len(tokens) < 2:
+        return []
+    for response in responses:
+        day = response["day"]
+        for decision in response["decisions"]:
+            i = decision["token"]
+            detail = decision["detail"]
+            gap_bp = detail["gap"] / 10**14
+            stage = decision["stage"]
+            side = "sell" if gap_bp > 0 else "buy"
+            traded.update((day, i, fill["side"]) for fill in decision["fills"] if fill["swap"])
+            if (abs(gap_bp) < min_gap_bp or stage == "maintenance"
+                    or any(fill["side"] == side and fill["swap"] for fill in decision["fills"])):
+                continue
+            key = (day, i, side)
+            if key in candidates and abs(candidates[key]["gap_bp"]) >= abs(gap_bp):
+                continue
+            markout = None
+            if day + markout_days < len(prices):
+                before, after = prices[day], prices[day + markout_days]
+                returns = [math.log(b / a) for a, b in zip(before, after, strict=True)]
+                peers = [r for j, r in enumerate(returns) if j != i]
+                markout = 100 * (returns[i] - sum(peers) / len(peers)) * (-1 if side == "sell" else 1)
+            candidates[key] = dict(day=day, tick=response["tick"], token=tokens[i], side=side,
+                                   gap_bp=gap_bp, stage=stage, tx=response["tx"],
+                                   response_log=response["response_log"],
+                                   peer_gates=dict(Counter(PEER_GATES[p["gate"]] for p in decision.get("peers", []))),
+                                   forward_relative_log_pct=markout)
+    for key, row in candidates.items():
+        row["same_day_directional_swap"] = key in traded
+    return sorted(candidates.values(), key=lambda row: (
+        row["forward_relative_log_pct"] is None, -(row["forward_relative_log_pct"] or 0), -abs(row["gap_bp"])))
+
+
+def replay_cell(folder, ident, output, window, arm, min_gap_bp, markout_days):
+    """Replay from the opening and publish evidence only after matching the archived closes."""
+    manifest = json.loads((folder / "manifest.json").read_text())
+    cell = next((c for c in manifest["cells"] if c["id"] == ident and c["status"] == "complete"), None)
+    if cell is None:
+        raise ValueError(f"no completed stock cell {ident}")
+    first, last = window
+    if not cell["warmup_days"] <= first <= last < cell["days"]:
+        raise ValueError("trace days must fall inside the archived treatment")
+    experiment_path = folder / Path(manifest["experiment"]).name
+    if digest(experiment_path.read_bytes()) != manifest["runtime"]["experiment_sha256"]:
+        raise ValueError("archived experiment differs from the cell input")
+    saved = (folder / "cells" / (ident + ".json")).read_bytes()
+    if digest(saved) != cell["sha256"]:
+        raise ValueError("archived cell has a different digest")
+    archived = json.loads(saved)
+    expected = archived["arms"][arm]
+    files = [folder / "prices" / name for name in cell["files"]]
+    series = Prices([str(path) for path in files]).series
+    tape = [column[:cell["days"]] for column in series]
+    if digest(json.dumps([manifest["tokens"], tape], separators=(",", ":")).encode()) != cell["price_digest"]:
+        raise ValueError("archived price files differ from the cell input")
+
+    patient = script("run-basket-patient-holder")
+    endow = script("basket_jubilee_endowment").apply_opening_endowment
+
+    def opening(day, deployment, agents, counters):
+        if day == 0:
+            audit = endow(deployment, cell["endowment_buck"], cash_buck=cell["opening_cash_buck"])
+            if audit != archived["endowment_audit"]:
+                raise ValueError("replay opening endowment differs from the archive")
+
+    if len(expected["daily"]) != cell["days"]:
+        raise ValueError("archived arm does not cover the cell horizon")
+    result = patient.replay(arm, experiment_path=experiment_path, days=last + 1,
+                            warmup_days=cell["warmup_days"], settings=cell_settings(experiment_path, cell),
+                            price_files=files, on_day_start=opening, on_frame=None, recorder=None,
+                            trace_days=window, trace_peers=arm == "active", expected_daily=expected["daily"])
+    if result["opening"] != expected["opening"] or result["switch"]["block"] != expected["switch"]["block"]:
+        raise ValueError("replay treatment opening differs from the archive")
+    responses = result["decision_trace"]
+    opportunities = ranked_opportunities(responses, manifest["tokens"], list(zip(*tape)),
+                                         min_gap_bp, markout_days) if arm == "active" else []
+    write_json(output, dict(schema_version=1, cell=cell, arm=arm, token_symbols=manifest["tokens"],
+                            archive_runtime=manifest["runtime"], window=window, matched_closes=last + 1,
+                            opportunity_min_gap_bp=min_gap_bp,
+                            opportunity_markout_days=markout_days,
+                            opportunities=opportunities, decision_trace=responses))
+    print(f"{output}: {last + 1} matching closes, {len(responses)} responses, {len(opportunities)} missed decisions")
 
 
 def execute(args):
@@ -265,8 +361,30 @@ def main():
     p.add_argument("--jobs", type=int, default=1, help="parallel pairs, arms run sequentially")
     p.add_argument("--plan", action="store_true")
     p.add_argument("--cell", help=argparse.SUPPRESS)
+    p.add_argument("--replay-cell", metavar="ID", help="trace a completed cell from its archived opening")
+    p.add_argument("--trace-days", nargs=2, type=int, metavar=("FIRST", "LAST"),
+                   help="inclusive archive close range for decision and peer capture")
+    p.add_argument("--trace-output", type=Path, help="destination for the verified replay JSON")
+    p.add_argument("--trace-arm", choices=("active", "maintenance"), default="active")
+    p.add_argument("--min-gap-bp", type=float, default=100, help="minimum decision gap for the missed-trade list")
+    p.add_argument("--markout-days", type=int, default=3, help="forward closes used to rank missed trades")
     args = p.parse_args()
     args.output = args.output.resolve()
+    if args.replay_cell:
+        if args.trace_days is None or args.trace_output is None:
+            p.error("--replay-cell requires --trace-days and --trace-output")
+        if not math.isfinite(args.min_gap_bp) or args.min_gap_bp <= 0 or args.markout_days < 1:
+            p.error("the gap floor and the markout horizon must be positive")
+        if args.trace_output.resolve().is_relative_to(args.output):
+            p.error("write the replay evidence outside the archived study")
+        if args.trace_output.exists():
+            p.error("the replay output already exists")
+        args.trace_output.parent.mkdir(parents=True, exist_ok=True)
+        replay_cell(args.output, args.replay_cell, args.trace_output, args.trace_days, args.trace_arm,
+                    args.min_gap_bp, args.markout_days)
+        return 0
+    if args.trace_days is not None or args.trace_output is not None:
+        p.error("--trace-days and --trace-output require --replay-cell")
     if args.cell:
         run_cell(args.output, args.cell)
         return 0

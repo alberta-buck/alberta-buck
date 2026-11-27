@@ -633,6 +633,30 @@ requires the matched maintenance arm.
 
 [[file:../../build/research-results/stock-grid-5y-flow-diagnostic.md][Receipt flow and relative-price windows]]
 
+** Frozen trace queued for CNST and NRGC
+
+The archived seed 41404 records bound the comparison while the replay
+regenerates decision-time state. These are book-wide counters.
+
+| Opening Jubilee | Close | Constituent decisions | Pair asks | Changed plans |
+|-----------------+-------+-----------------------+-----------+---------------|
+| 0               |   342 |                    10 |         0 |             0 |
+| 2M              |   342 |                    30 |         0 |             0 |
+| 0               |   343 |                    10 |         2 |             0 |
+| 2M              |   343 |                    20 |         1 |             1 |
+| 0               |   845 |                    10 |         0 |             0 |
+| 0               |   846 |                    10 |         1 |             0 |
+| 0               |   847 |                    10 |         1 |             1 |
+
+The frozen source and original artifacts reproduce the archived runtime
+fingerprint. The replay adds a peer observer compiled against those
+sources, preserves the original tape and warmup, and checks every
+replayed close against its archive. The zero-ask counters alone leave
+urgency, the directional gates, and a released amount below precision
+as possibilities for the missed decisions. The changed-plan rows give
+nearby controls for tracing through to pool execution.
+[[file:buck-merge-readiness.org::*Replay a completed stock cell with decision tracing][Replay command and local logs]]
+
 ** CNST reversal on a short historical slice
 
 The matched replay used the five historical columns from closes 335

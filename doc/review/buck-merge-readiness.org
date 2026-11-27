@@ -81,6 +81,71 @@ make nix-venv-basket-study-report BASKET_OUT="$stock/sim/stock-grid-5y" \
   BASKET_REPORT_ARGS="--rebalancing --no-comparison --output build/research-results/stock-grid-5y-rebalancing.md"
 #+end_src
 
+** Replay a completed stock cell with decision tracing
+
+The stock archive stores daily counters and household records. Its
+decision trace has to be regenerated from day zero, including the
+original warmup and opening endowment. Use the archive's Python
+sources, package versions and Foundry artifacts. For this older archive,
+build the diagnostic facet against the frozen source with an isolated
+artifact overlay. The overlay leaves all original artifacts in place.
+
+#+begin_src sh
+frozen="$HOME/src/alberta-buck-stock-multiyear-5bb86e77"
+python_bin="$HOME/src/alberta-buck-refresh-61aa2cf4/.venv/bin/python"
+archive="$frozen/build/sim/stock-grid-5y"
+trace_dir="$PWD/build/research-results"
+overlay="$trace_dir/frozen-stock-replay"
+mkdir -p "$trace_dir"
+nix develop --impure -c bash scripts/prepare-basket-stock-replay.sh "$frozen" "$overlay"
+
+ALBERTA_BUCK_REPO="$overlay" PYTHONPATH="$frozen:$frozen/core/python" \
+  "$python_bin" -u scripts/run-basket-stock-grid.py "$archive" \
+  --replay-cell stock-history-j0-i6-x0-n0-7d830bc1b4 \
+  --trace-days 339 345 --trace-output "$trace_dir/stock-cnst-41404-unfunded.json"
+#+end_src
+
+The funded CNST control uses cell
+=stock-history-j2000000-i6-x0-n0-bf095f936f= with the same trace days.
+The unfunded NRGC check uses days 843–848 on the first cell.
+=--trace-arm maintenance= replays the archived maintenance arm.
+Replay starts at day zero and stops after the last requested close.
+The command verifies the archived experiment and tape digests, compares
+each daily row and the treatment opening, and reconciles the trace
+against archived decision counters before writing JSON.
+
+The JSON records the gap, eligibility, urgency, safeguard, peer
+readiness, filtered and live separation, motion, released amount,
+maintenance and final plans, and same-response confirmed pool swaps.
+The opportunity list keeps the largest missed decision-time gap per
+day, TOKEN and direction above =--min-gap-bp= (100 by default). It
+ranks those candidates by the side-adjusted forward external price
+move against the geometric mean of the other TOKENs over
+=--markout-days= (three closes by default). The markout is retrospective
+and excludes execution costs. A flag records whether a different
+response filled in the same direction that day. Inspect all decisions
+for the candidate day to see whether successive responses hit
+different gates.
+
+#+begin_src sh
+jq --arg token CNST --argjson day 342 '
+  .token_symbols as $tokens
+  | .decision_trace[] | select(.day == $day)
+  | .tick as $tick
+  | .decisions[] | select($tokens[.token] == $token)
+  | {tick: $tick, stage, detail, peers, fills}
+' "$trace_dir/stock-cnst-unfunded-41404.json"
+#+end_src
+
+The four-close smoke matched the archived daily rows and captured
+55 decisions across 11 responses. Its gaps all fell below eligibility.
+The three five-year-prefix jobs were launched as user services
+=buck-stock-cnst-unfunded-41404=, =buck-stock-cnst-funded-41404= and
+=buck-stock-nrgc-41404=. Their logs and final JSON share the corresponding
+=stock-*= names under =build/research-results=. The archive has no
+resumable EVM checkpoint, so the warmup and all intervening closes must
+finish before the historical gate can be attributed.
+
 * Opening wheel and dashboard workbench
 
 The opening trace found that Python registers the arbitrage routes
@@ -241,6 +306,8 @@ realized receipt returns, drawdown, parity and gross execution costs.
   with the daily counters. Use the richer trace at the historical
   CNST zero-rate response to distinguish an unready quote, failed
   separation and a ready pair that is still moving outward.
+- [X] Add a verified stock-cell replay and an opportunity list tied to
+  raw response decisions and peer gates. See the replay recipe above.
 - [ ] Reproduce the historical no-ask and changed-plan decisions. Start
   with the CNST gap around day 342, where the tape shows a clear
   reversal, then use the NRGC window around days 845–847 to check the
