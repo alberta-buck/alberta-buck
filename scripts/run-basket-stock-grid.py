@@ -25,7 +25,7 @@ ROOT = HERE.parent
 REGIMES = ("three-phase", "history", "revert", "inflating", "mixed", "shock",
            "shock-temporary", "shock-permanent", "commodity-trend")
 COMMODITY_TREND = {"LABR": .05, "CNST": .10, "FOOD": -.08, "NRGC": -.20, "PAXG": .25, "cbBTC": .12}
-PEER_GATES = ("unready", "filtered_spread", "live_spread", "zero_rate", "released")
+PEER_GATES = ("unready", "filtered_spread", "live_spread", "zero_rate", "released", "gap_only", "turn_blocked")
 
 
 def script(name):

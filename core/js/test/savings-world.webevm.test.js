@@ -26,7 +26,7 @@ test("the savings world runs days, frames them for the page, and serves the page
   const world = new SavingsWorld({ session, identity, artifacts: loadAnyArtifact, prices,
     urArtifact: JSON.parse(readFileSync(urPath, "utf8")),
     sets: { "agents.HouseholdPopulationAgent.initial_investors": "2", "scenario.seed": "7",
-            "scenario.ticks_per_day": "4" } });
+            "scenario.ticks_per_day": "4", "machine.rebalance_mode": "turn" } });
   let t = performance.now();
   await world.boot();
   const bootMs = performance.now() - t;
@@ -88,6 +88,9 @@ test("the savings world runs days, frames them for the page, and serves the page
   const info = await link.call("sim_info");
   assert.equal(info.basket_kind, "equity");
   assert.equal(info.tokens.length, world.world.tokens.length);
+  assert.equal(info.rebalance_mode, "turn", "the selected policy reaches the deployed world");
+  await session.send(world.world.machine.policy, "setSignalMode", [1]);
+  assert.equal((await link.call("sim_info")).rebalance_mode, "gap", "the governor can switch the running policy");
   const saver = new Saver({ link, info });
   await saver.enroll();
   assert.ok(await session.call(world.world.reg, "isVerified", [saver.address]), "enrolled as an identity");

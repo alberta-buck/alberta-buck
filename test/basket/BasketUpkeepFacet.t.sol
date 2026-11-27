@@ -147,7 +147,7 @@ contract BasketUpkeepFacetTest is BuckBasketEquityFixture {
         uint128[3] memory placed = _placed3();
         intent.setRate(0);
         // A prior book resize can leave an allowance even when the current rate is zero.
-        vm.mockCall(address(intent), abi.encodeCall(intent.share, (0, 0)), abi.encode(0.25e18));
+        vm.mockCall(address(intent), abi.encodeCall(intent.pairShare, (0, 0)), abi.encode(0.25e18));
         vm.mockCall(address(intent), abi.encodeWithSelector(PairRebalancePolicy.urgencyOf.selector), abi.encode(0));
         address maintenance = address(new BasketUpkeepSignalTraceMaintenance(address(intent), address(parity), 0, 0));
         vm.prank(GOV);

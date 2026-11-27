@@ -131,6 +131,11 @@ export function mountSavings(ctx) {
     h("option", { value: "" }, "Mixed households"),
     ...Object.entries(SAVINGS_BORROWERS).map(([key, preset]) => h("option", { value: key }, preset.label)));
   const borrowerField = h("label", { class: "field" }, h("span", { class: "field-label" }, "Borrower scenario"), borrowerSel);
+  const rebalanceSel = h("select", { "aria-label": "rebalance signal" },
+    h("option", { value: "motion" }, "Full motion"),
+    h("option", { value: "gap" }, "Persistent gap"),
+    h("option", { value: "turn" }, "Gap and price turn"));
+  const rebalanceField = h("label", { class: "field" }, h("span", { class: "field-label" }, "Rebalance signal"), rebalanceSel);
   const seedIn = h("input", { type: "text", "aria-label": "seed", placeholder: "default", size: 8,
                               dataset: { key: "savings:seed" } });
   // Ticks a simulated day: the whales re-pin the TOKEN/USDC pools and the arbitrageurs and the wheel
@@ -182,7 +187,7 @@ export function mountSavings(ctx) {
         h("div", { class: "row" },
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Prices"), pricesSel),
           h("label", { class: "field" }, h("span", { class: "field-label" }, "Seed"), seedIn),
-          h("label", { class: "field" }, h("span", { class: "field-label" }, "Ticks / day"), ticksSel), borrowerField),
+          h("label", { class: "field" }, h("span", { class: "field-label" }, "Ticks / day"), ticksSel), borrowerField, rebalanceField),
         h("div", { class: "row" }, ...householdFields),
         h("div", { class: "row" }, noiseField), sineFields, priceAction,
         h("div", { class: "row" },
@@ -413,6 +418,7 @@ export function mountSavings(ctx) {
       delete S.sets["scenario.price_noise_pct"];
     }
     borrowerField.hidden = !S.local;
+    rebalanceSel.value = S.sets["machine.rebalance_mode"] ?? "motion";
     cycleOption.hidden = cycleOption.disabled = !S.local;
     sineOption.hidden = sineOption.disabled = !S.local;
     noise.value = S.sets["scenario.price_noise_pct"] ?? 0;
@@ -618,6 +624,7 @@ export function mountSavings(ctx) {
       : "Start a new world? This one keeps running until it is idle, but this tab leaves it.")) return;
     for (const [key, select] of Object.entries(householdSelects)) sets[`agents.HouseholdPopulationAgent.${key}`] = select.value;
     if (S.local && borrowerSel.value) sets["scenario.borrower"] = borrowerSel.value;
+    if (rebalanceSel.value !== "motion") sets["machine.rebalance_mode"] = rebalanceSel.value;
     if (seedIn.value.trim()) sets["scenario.seed"] = seedIn.value.trim();
     sets["scenario.ticks_per_day"] = ticksSel.value;
     const chain = S.status?.chain;
@@ -764,6 +771,7 @@ export function mountSavings(ctx) {
       stat("Prices", !S.info ? "–" : S.info.local ? ({ revert: "reverting", "three-phase": "commodity cycles", sine: "sine waves" }[S.priceMode] ?? S.priceMode ?? "–")
         : String(S.info.prices?.[0] ?? "").startsWith("rev-") ? "reverting" : "history",
         "Set when the world is made (World settings)"),
+      stat("Rebalance", { motion: "Full motion", gap: "Persistent gap", turn: "Gap and price turn" }[S.info?.rebalance_mode] ?? "–"),
     ] : [h("span", { class: "hint" }, S.link ? STATES[S.link.state] : "")]);
     drawControls();
     drawBorrower(rows, last);

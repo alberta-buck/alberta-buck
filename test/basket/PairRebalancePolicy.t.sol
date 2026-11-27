@@ -7,6 +7,8 @@ import {PairRebalancePolicy} from "../../src/basket/PairRebalancePolicy.sol";
 
 contract PairBookView {
     PairSignals immutable s;
+    address public immutable governance = msg.sender;
+    uint32 public constant twapWindow = 60;
     constructor(PairSignals s_) { s = s_; }
     function constituentsLength() external view returns (uint256) { return s.tokenCount(); }
     function constituents(uint256 i) external view returns (address, uint8, uint256, uint256, uint24, address, int24, int24, bool, uint256, uint128) {
@@ -78,6 +80,62 @@ contract PairRebalancePolicyTest is PairSignalsTest {
         assertApproxEqAbs(p.share(0, LN2), 0.5e18, 1e12);
         vm.warp(vm.getBlockTimestamp() + 30 days);
         assertApproxEqAbs(p.share(0, LN2), 0.5e18, 1e12, "an unobserved stretch earns a day and no more");
+    }
+
+    function test_gapModeSizesFromExcursionAndDiscardsOldAllowance() public {
+        address book = address(new PairBookView(s));
+        PairRebalancePolicy p = _sized(book, 0, PairRebalancePolicy.Sizing(0, 0, 0, 0, uint64(LN2), 1e18, 0, .02e18));
+        warm();
+        step(1 hours);
+        vm.prank(book); p.recordRates(_rates(LN2, 0, 0));
+        assertGt(p.allowance(0), 0);
+        int256[] memory gaps = new int256[](3);
+        gaps[0] = .03e18;
+        vm.prank(book); p.recordGaps(gaps);
+        (uint128 urgency,) = p.urgency(0);
+        assertGt(urgency, 0);
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(bytes("governance only"));
+        p.setSignalMode(PairRebalancePolicy.SignalMode.Gap);
+        p.setSignalMode(PairRebalancePolicy.SignalMode.Gap);
+        assertEq(p.allowance(0), 0);
+        (uint128 kept,) = p.urgency(0);
+        assertEq(kept, urgency);
+        uint256[] memory weights = _rates(1000, 3000, 6000);
+        assertEq(p.allocationRate(0, true, .01e18, weights), 0, "switch awaits a sample");
+        p.observe();
+        assertEq(p.allocationRate(0, true, .01e18, weights), LN2 / 2);
+        assertEq(p.allocationRate(0, false, .1e18, weights), LN2);
+        step(3601);
+        assertEq(p.allocationRate(0, true, .1e18, weights), 0);
+        assertEq(p.pairShare(0, 0), 0);
+    }
+
+    function test_turnModeConfirmsClosureFromTwoWheelMarksOnEveryRoute() public {
+        address book = address(new PairBookView(s));
+        PairRebalancePolicy p = _policy(book, 0);
+        p.setSignalMode(PairRebalancePolicy.SignalMode.Turn);
+        setTicks(600, 0, 300, 0);
+        warm();
+        vm.prank(book); p.observe();
+        assertEq(p.desire(0, 1), 0, "one mark");
+        // The first pair closes. The other peer closes on just one quote route.
+        setTicks(540, 0, 300, 100);
+        pools[5].set(-300);
+        step(180);
+        p.observe();
+        assertEq(p.turnElapsed(), 0, "permissionless price reads do not advance the wheel turn");
+        vm.prank(book); p.observe();
+        assertEq(p.turnElapsed(), 180);
+        assertEq(p.desire(0, 1), p.maxRate());
+        assertEq(p.desire(0, 2), 0, "the second route is widening");
+        assertEq(p.desire(1, 0), 0, "opposite direction is below reference");
+        uint256[] memory weights = _rates(1000, 3000, 6000);
+        assertApproxEqAbs(p.allocationRate(0, true, .01e18, weights), p.maxRate() / 6, 1);
+        vm.prank(book); p.observe();
+        assertEq(p.turnElapsed(), 180, "same timestamp does not overwrite the turn");
+        setTicks(40, 0, 300, 0);
+        assertEq(p.desire(0, 1), 0, "live crossing vetoes the cached TWAP");
     }
 
     function test_policy_theSameTimeReleasesTheSameShareHoweverOftenItIsAsked() public {

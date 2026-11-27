@@ -137,6 +137,9 @@ function isqrt(n) {
  * @param opts.rng        scalar drawer for the issuer keypair
  */
 export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
+  const rebalanceMode = opts.rebalanceMode ?? "motion";
+  const signalMode = ["motion", "gap", "turn"].indexOf(rebalanceMode);
+  if (signalMode < 0) throw new Error(`Unknown rebalance mode: ${rebalanceMode}`);
   if (!opts.urArtifact) {
     throw new Error("buildEquilibriumWorld needs opts.urArtifact " +
                     "(alberta_buck/sim/artifacts/UniversalRouter.json)");
@@ -340,6 +343,7 @@ export async function buildEquilibriumWorld(session, artifacts, opts = {}) {
   const policy = await session.deploy(artifacts("PairRebalancePolicy"),
     [observer.address, basket.address, reference, MACHINE.sizing],
     { name: "PairRebalancePolicy", gas });
+  await session.send(policy, "setSignalMode", [signalMode], { tag: "eq:setRebalanceMode" });
   const rebalanceMath = await session.deploy(artifacts("BasketRebalanceMath"), [], { name: "BasketRebalanceMath", gas });
   const upkeep = await session.deploy(linkArtifact(artifacts("BasketUpkeepFacet"), {
     "src/basket/BasketRebalanceMath.sol:BasketRebalanceMath": rebalanceMath.address,

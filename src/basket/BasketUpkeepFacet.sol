@@ -259,20 +259,14 @@ contract BasketUpkeepFacet is BasketCreditSetup {
     /// @dev How fast constituent i may be worked: the policy's rate for it
     /// against each of the others, weighed by their declared weights. Sold,
     /// it is the pair's seller; bought, its buyer.
-    function _rate(uint256 i, bool sold, uint256 n, uint256) internal view virtual returns (uint256) {
-        uint256 sum;
-        uint256 weights;
-        for (uint256 j; j < n; ++j) {
-            if (j == i) continue;
-            uint256 weight = constituents[j].targetWeightBp;
-            sum += weight * (sold ? pairPolicy.desire(i, j) : pairPolicy.desire(j, i));
-            weights += weight;
-        }
-        return weights == 0 ? 0 : sum / weights;
+    function _rate(uint256 i, bool sold, uint256 n, uint256 excursion) internal view virtual returns (uint256) {
+        uint256[] memory weights = new uint256[](n);
+        for (uint256 j; j < n; ++j) weights[j] = constituents[j].targetWeightBp;
+        return pairPolicy.allocationRate(i, sold, excursion, weights);
     }
 
     function _pairShare(uint256 i, uint256 rate) internal view virtual returns (uint256) {
-        return pairPolicy.share(i, rate);
+        return pairPolicy.pairShare(i, rate);
     }
 
     /// @dev Which gaps may be worked at all: with a patient policy, those

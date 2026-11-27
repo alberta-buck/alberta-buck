@@ -10,7 +10,7 @@ contract BasketUpkeepPeerTrace is BasketUpkeepSignalTrace {
     uint256 private immutable from;
     uint256 private immutable until;
 
-    enum Gate { Unready, FilteredSpread, LiveSpread, ZeroRate, Released }
+    enum Gate { Unready, FilteredSpread, LiveSpread, ZeroRate, Released, GapOnly, TurnBlocked }
 
     event SignalPeer(
         uint256 indexed constituent,
@@ -58,9 +58,15 @@ contract BasketUpkeepPeerTrace is BasketUpkeepSignalTrace {
         uint64 applied = policy.sampledAt();
         uint256 intent;
         Gate gate;
+        // The frozen stock runtime predates selectable signals.
+        (bool ok, bytes memory result) = address(policy).staticcall(abi.encodeWithSignature("signalMode()"));
+        uint256 mode = ok && result.length == 32 ? abi.decode(result, (uint256)) : 0;
         if (pair.readyMask != (uint256(1) << signals.venueCount()) - 1
             || pair.readyMask != policy.readyMask() || observed != applied) {
             gate = Gate.Unready;
+        } else if (mode != 0) {
+            intent = policy.desire(a, b);
+            gate = mode == 1 ? Gate.GapOnly : intent == 0 ? Gate.TurnBlocked : Gate.Released;
         } else if (level <= policy.MIN_SEPARATION()) {
             gate = Gate.FilteredSpread;
         } else if (!policy.separated(a, b)) {

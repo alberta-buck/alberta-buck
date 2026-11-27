@@ -34,4 +34,5 @@ interface IPairSignals {
     function readyMask() external view returns (uint256 mask);
     function pairIndex(uint256 i, uint256 j) external view returns (uint256);
     function pair(uint256 i, uint256 j) external view returns (Pair memory);
+    function readWindow(uint256 q, uint32 window) external view returns (int256[] memory levels);
 }

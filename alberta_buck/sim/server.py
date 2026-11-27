@@ -93,6 +93,7 @@ from queue import Queue, Empty
 from websockets.exceptions import ConnectionClosed, InvalidMessage
 
 from alberta_buck.sim import experiment as expmod
+from alberta_buck.sim.basket_machine import REBALANCE_MODES
 from alberta_buck.sim.loop import run
 from alberta_buck.sim.pyrevm_backend import PyrevmAnvil
 
@@ -576,7 +577,9 @@ class Session:
                                                     ("saver_rate", 6.), ("investor_rate", 30.),
                                                     ("surplus_policy", "adaptive"))},
                 "tokens": toks}
-        return self._info or {}
+        info = self._info or {}
+        policy = getattr(self.d, "pair_policy", None)
+        return {**info, "rebalance_mode": REBALANCE_MODES[policy.functions.signalMode().call()]} if policy else info
 
     def status(self) -> dict:
         chain = next((a.profile.name for a in (self.agents or [])
@@ -667,7 +670,7 @@ PUBLIC_CHOICES = tuple(f"agents.HouseholdPopulationAgent.{key}={value}"
                                            ("saver_rate", (0, 3, 6, 12, 30, 60)),
                                            ("investor_rate", (0, 3, 6, 12, 30, 60)),
                                            ("surplus_policy", ("adaptive", "basket", "retire", "discount")))
-                       for value in values)
+                       for value in values) + tuple(f"machine.rebalance_mode={mode}" for mode in REBALANCE_MODES)
 
 
 def public_sets(sets) -> list:

@@ -395,6 +395,9 @@ realized receipt returns, drawdown, parity and gross execution costs.
 - [X] Compare a fixed allocation band, a persistent gap alone,
   a persistent gap with one relative-price turn and full motion
   on the historical proxy tape and disjoint subperiods.
+- [X] Add selectable Solidity motion, persistent gap and gap plus
+  price turn under the same upkeep caps. Allow governance to switch
+  the mode live and select it at Python or WebEVM world activation.
 - [ ] Replay the simplest viable sensors on matched EVM stock
   runs around verified opportunity windows and independent held-out
   windows. Compare net gains against maintenance on the same

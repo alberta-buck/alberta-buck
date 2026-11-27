@@ -19,6 +19,15 @@ contract PairRebalancePolicy is IRebalancePolicy {
     int256 public constant MIN_SEPARATION = 100e18; // ~1%: explicit first-experiment spread floor.
     uint256 public constant IMPACT_MEMORY = 2 days;
     uint256 public constant MAX_ALLOWANCE = 4e18; // a share of 98%: more is no more
+    uint256 public constant FULL_EXCURSION = 0.02e18;
+
+    enum SignalMode { Motion, Gap, Turn }
+    SignalMode public signalMode;
+    struct TurnMark { int128 level; int128 change; }
+    mapping(uint256 => TurnMark) public turnMarks; // venue-major
+    uint64 public turnAt;
+    uint64 public turnElapsed;
+    event SignalModeChanged(SignalMode mode);
 
     /// @notice How fast a separated pair closes an eligible allocation gap.
     /// Speeds are log returns per day and rates are fractions of the remaining
@@ -85,15 +94,38 @@ contract PairRebalancePolicy is IRebalancePolicy {
         }
     }
 
+    /// @notice Change the discretionary signal. Allocation urgency survives a signal change.
+    function setSignalMode(SignalMode mode) external {
+        require(msg.sender == IBasketView(basket).governance(), "governance only");
+        if (signalMode == mode) return;
+        signalMode = mode;
+        for (uint256 i; i < count; ++i) delete allowance[i];
+        ratesAt = uint64(block.timestamp);
+        turnAt = 0;
+        turnElapsed = 0;
+        // A previous mode's sample cannot provide new motion evidence at the switch.
+        readyMask = 0;
+        sampledAt = 0;
+        emit SignalModeChanged(mode);
+    }
+
     /// @notice Permissionless price observation; no book or budget changes.
     function observe() external {
         signals.observe();
+        // Permissionless observations cannot change the Turn baseline between wheel responses.
+        if (signalMode == SignalMode.Turn && msg.sender != basket) return;
         uint64 at = signals.lastSampleAt();
         (, uint64 midpoint2,,,,) = signals.venues(0);
         uint256 mask = signals.readyMask();
         if (at == sampledAt && mask == readyMask) return;
         bool continuous = readyMask == mask && mask != 0 && midpoint2 > sampledMidpoint2 && at > sampledAt
             && at - sampledAt <= signals.maxGap();
+        if (signalMode == SignalMode.Turn) _observeTurn(at, mask);
+        else if (signalMode == SignalMode.Motion) _observeMotion(midpoint2, continuous);
+        sampledAt = at; sampledMidpoint2 = midpoint2; readyMask = mask;
+    }
+
+    function _observeMotion(uint64 midpoint2, bool continuous) private {
         for (uint256 i; i < count; ++i) for (uint256 j = i + 1; j < count; ++j) {
             uint256 p = signals.pairIndex(i, j);
             int256 rate = signals.pair(i, j).rate;
@@ -106,7 +138,30 @@ contract PairRebalancePolicy is IRebalancePolicy {
                 && change >= type(int128).min && change <= type(int128).max, "motion range");
             motion[p] = Motion(int128(rate), int128(change));
         }
-        sampledAt = at; sampledMidpoint2 = midpoint2; readyMask = mask;
+    }
+
+    function _observeTurn(uint64 at, uint256 mask) private {
+        uint64 previous = turnAt;
+        turnAt = 0;
+        turnElapsed = 0;
+        uint256 venues = signals.venueCount();
+        if (at != block.timestamp || mask != (uint256(1) << venues) - 1) return;
+        uint32 window = IBasketView(basket).twapWindow();
+        if (window == 0) return;
+        bool continuous = previous != 0 && at > previous && at - previous <= signals.maxGap();
+        for (uint256 q; q < venues; ++q) {
+            try signals.readWindow{gas: 100_000 * count}(q, window) returns (int256[] memory levels) {
+                for (uint256 i; i < count; ++i) {
+                    uint256 index = q * count + i;
+                    int256 change = continuous ? levels[i] - turnMarks[index].level : int256(0);
+                    turnMarks[index] = TurnMark(int128(levels[i]), int128(change));
+                }
+            } catch {
+                return;
+            }
+        }
+        turnAt = at;
+        if (continuous) turnElapsed = at - previous;
     }
 
     /// @notice Record measured immediate impact, without claiming a known
@@ -136,6 +191,10 @@ contract PairRebalancePolicy is IRebalancePolicy {
     /// a thousand times releases the same share.
     function share(uint256 i, uint256 rateWad) public view returns (uint256) {
         return uint256(WAD) - PM.expWad(-int256(_accrued(i, rateWad)));
+    }
+
+    function pairShare(uint256 i, uint256 rateWad) external view returns (uint256) {
+        return signalMode != SignalMode.Motion && rateWad == 0 ? 0 : share(i, rateWad);
     }
 
     function _accrued(uint256 i, uint256 rateWad) private view returns (uint256 sum) {
@@ -228,16 +287,69 @@ contract PairRebalancePolicy is IRebalancePolicy {
         IPairSignals.Pair memory p = signals.pair(a, b);
         int256 anchor = int256(referenceLevels[a]) - referenceLevels[b];
         if (p.level - anchor <= MIN_SEPARATION) return false;
-        // A cached filtered level can lag a crossing, including a pool swap
-        // earlier in this same block. Recheck every live quote route.
+        return _liveSeparated(a, b, anchor);
+    }
+
+    function _liveSeparated(uint256 a, uint256 b, int256 anchor) private view returns (bool) {
+        // A cached mark can lag a crossing, including a pool swap in this block.
         for (uint256 q; q < signals.venueCount(); ++q)
             if (_liveLevel(q, a) - _liveLevel(q, b) - anchor <= MIN_SEPARATION) return false;
         return true;
     }
 
+    function signalReady() public view returns (bool) {
+        uint256 allRoutes = (uint256(1) << signals.venueCount()) - 1;
+        return readyMask == allRoutes && signals.readyMask() == allRoutes && sampledAt == signals.lastSampleAt();
+    }
+
+    function _turnDesire(uint256 a, uint256 b) private view returns (uint256) {
+        if (turnAt != sampledAt || turnElapsed == 0) return 0;
+        int256 anchor = int256(referenceLevels[a]) - referenceLevels[b];
+        int256 minClosure = int256(uint256(signals.rateFloor()) * turnElapsed
+            + (remainingImpact(a) + remainingImpact(b)) * impactShare / uint256(WAD));
+        uint256 venues = signals.venueCount();
+        for (uint256 q; q < venues; ++q) {
+            TurnMark memory sell = turnMarks[q * count + a];
+            TurnMark memory buy = turnMarks[q * count + b];
+            if (int256(sell.level) - buy.level - anchor <= MIN_SEPARATION
+                || int256(buy.change) - sell.change <= minClosure) return 0;
+        }
+        return _liveSeparated(a, b, anchor) ? maxRate : 0;
+    }
+
+    function allocationRate(uint256 i, bool sell, uint256 excursion, uint256[] calldata weights)
+        external view returns (uint256 rateWad)
+    {
+        require(i < count && weights.length == count, "allocation size");
+        SignalMode mode = signalMode;
+        if (mode == SignalMode.Gap) {
+            if (!signalReady()) return 0;
+            rateWad = maxRate;
+        } else {
+            if (mode == SignalMode.Turn && !signalReady()) return 0;
+            uint256 total;
+            for (uint256 j; j < count; ++j) {
+                if (j == i) continue;
+                (uint256 a, uint256 b) = sell ? (i, j) : (j, i);
+                rateWad += weights[j] * (mode == SignalMode.Turn ? _turnDesire(a, b) : _motionDesire(a, b));
+                total += weights[j];
+            }
+            if (total == 0) return 0;
+            rateWad /= total;
+        }
+        if (mode != SignalMode.Motion) rateWad = rateWad * PM.min(excursion, FULL_EXCURSION) / FULL_EXCURSION;
+    }
+
     /// @return rateWad Fraction of an available allocation gap per day.
     /// Positive A/B velocity is outward for selling A to buy B.
     function desire(uint256 a, uint256 b) public view returns (uint256 rateWad) {
+        SignalMode mode = signalMode;
+        if (mode == SignalMode.Motion) return _motionDesire(a, b);
+        if (!signalReady()) return 0;
+        return mode == SignalMode.Gap ? maxRate : _turnDesire(a, b);
+    }
+
+    function _motionDesire(uint256 a, uint256 b) private view returns (uint256 rateWad) {
         IPairSignals.Pair memory p = signals.pair(a, b);
         uint256 allRoutes = (uint256(1) << signals.venueCount()) - 1;
         // The initial experiment requires every registered route. No vote is

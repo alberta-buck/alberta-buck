@@ -1053,6 +1053,55 @@ denominator for a claim about the share of attainable net return.
 [[file:../../build/research-results/pair-sensor-proxies-hold.json][Monthly hold ablation]] ·
 [[file:../../build/research-results/pair-sensor-proxies-bridge.json][Bridge ablation]]
 
+**** Switching the signal in a contract-backed world
+
+The Solidity wheel uses one upkeep facet and a selectable pair policy.
+The choices are =motion= (the incumbent, default), =gap= (persistent
+allocation gap, sized by excursion), and =turn= (the same gap rule with
+one relative-price turn). In =turn=, the policy compares two consecutive
+wheel observations of the basket's TWAP window on each ready quote
+route. The pair must still be on the intended side of its relative
+reference on both the cached marks and the live routes. The observed
+closure must clear a rate floor times elapsed seconds and any remaining
+own-impact allowance. The two simpler modes scale release up to the
+shared maximum at a two-point allocation gap. The floor, depth, book
+and issuance limits remain in the same upkeep path.
+
+Savings exposes the mode in *World settings* when starting a new world.
+For a matched Python run, vary only =machine.rebalance_mode=. For example,
+the following uses the same seed, history, tilt and execution cadence
+for all modes. Run it in the development environment with compiled
+artifacts.
+
+#+begin_src sh
+for mode in motion gap turn; do
+    python -m alberta_buck.sim --experiment alberta_buck/sim/experiments/economy.toml \
+        --days 120 --set scenario.seed=41404 --set scenario.prices=history \
+        --set machine.tilt=0 --set "machine.rebalance_mode=$mode" \
+        --out "build/research-results/rebalance-$mode.json" --run-id "rebalance-$mode"
+done
+#+end_src
+
+=PairRebalancePolicy.setSignalMode= also lets basket governance switch a
+deployed world using enum values 0, 1 and 2. It preserves existing
+allocation urgency, clears unused discretionary allowance and resets
+the signal baseline. Only the basket's responses set the two turn marks.
+Use activation-time selection for matched comparisons.
+
+The four-close historical smoke used seed 41404 and zero tilt. All
+three modes completed with identical price rows, opening equity,
+closing share value and 26 confirmed arbitrage cycles. The WebEVM
+smoke booted with =turn= and switched to =gap= as governance. The
+Solidity fixtures also exercised a confirmed turn, a route disagreement,
+a live crossing and the clearing of allowance on a switch.
+
+Measure the held share and directly held BUCK at the same starting
+capital and closing mark. Attribute maintenance, pair-driven fills,
+pool fees, flash-arbitrage receipts and charged demurrage separately.
+Report reserve and relief effects against the underlying exposures so
+the larger TOKEN/BUCK book can be compared with the cost of carrying
+BUCK directly.
+
 *** Passive range execution and redemptions
 
 The treasury seeder already places a funded one-sided V3 range

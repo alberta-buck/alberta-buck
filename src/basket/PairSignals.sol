@@ -164,6 +164,27 @@ contract PairSignals is IPairSignals {
         }
     }
 
+    /// @notice Equal-window TOKEN log marks on one complete quote route.
+    /// @dev As with interval observations, value a carrying quote at its current net/gross ratio.
+    function readWindow(uint256 q, uint32 window) external view returns (int256[] memory levels) {
+        require(q < venueCount && window > 0, "quote window");
+        levels = new int256[](tokenCount);
+        uint32[] memory ago = new uint32[](2);
+        ago[0] = window;
+        bool net = carryMask & (1 << q) != 0;
+        for (uint256 i; i < tokenCount; ++i) {
+            Route memory route = routes[q * tokenCount + i];
+            IUniswapV3Pool pool = IUniswapV3Pool(route.pool);
+            require(pool.liquidity() != 0, "empty pool");
+            (int56[] memory cumulatives,) = pool.observe(ago);
+            int56 delta;
+            unchecked { delta = cumulatives[1] - cumulatives[0]; }
+            int256 mark = int256(delta) * WAD / int256(uint256(window));
+            levels[i] = (route.token0 ? mark : -mark) + route.decimalOffset;
+            if (net) levels[i] += _carryTicks(quotes[q], route.pool);
+        }
+    }
+
     function observe() external {
         if (!isDue()) return;
         lastAttemptBlock = _clock();

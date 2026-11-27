@@ -30,6 +30,7 @@ DEFAULTS = {
     "slack": .0025,                 # a gap this small, as a share of the book, builds no urgency
     "patience": .02,                # share of the book times days: the urgency that releases in full
     "upkeep": "BasketUpkeepFacet",  # the facet; a trial names its own (test/harness)
+    "rebalance_mode": "motion",     # motion, gap, or turn; the same policy and wheel
     "signal_mode": "velocity",      # BasketUpkeepSignalSizing: velocity, excursion, or both
     "signal_rate": None,            # discretionary fraction-rate/day at full strength; None: use maxRate
     "signal_excursion": .02,        # share of the book away from target at full excursion strength
@@ -75,6 +76,7 @@ ENVIRONMENT = {"interval": "SIM_MACHINE_INTERVAL", "max_age": "SIM_MACHINE_MAX_A
 # Responded's action: what a response did, and which of its two amounts measures it. A sale's is the
 # TOKEN sold and a purchase's the TOKEN bought, in BUCK; a placement's is the BUCKs paired.
 ACTIONS = {1: ("sell", "proceeds"), 2: ("buy", "buySpent"), 4: ("place", "buySpent"), 8: ("refresh", "buySpent")}
+REBALANCE_MODES = ("motion", "gap", "turn")
 
 
 def settings(given=None) -> dict:
@@ -87,6 +89,8 @@ def settings(given=None) -> dict:
     if unknown:
         raise ValueError(f"unknown [machine] settings: {sorted(unknown)}")
     out.update(given or {})
+    if out["rebalance_mode"] not in REBALANCE_MODES:
+        raise ValueError(f"machine.rebalance_mode must be one of {REBALANCE_MODES}")
     return out
 
 
@@ -300,6 +304,7 @@ def activate(d, given=None, turn_seconds=0) -> None:
                  for i in range(len(d.tokens))]
     policy_sizing = sizing(s)
     policy = chain.deploy("PairRebalancePolicy", observer.address, basket.address, reference, policy_sizing)
+    chain.send(policy.functions.setSignalMode(REBALANCE_MODES.index(s["rebalance_mode"])), sender=gov)
     # A facet's constructor names what it needs; a trial may need more than the policy.
     wanted = next((e["inputs"] for e in load_artifact(s["upkeep"])[0] if e.get("type") == "constructor"), [])
     given_to = {"policy": policy.address, "parity_": signals.address, "parityGain_": round(s["parity_gain"] * 10**18),

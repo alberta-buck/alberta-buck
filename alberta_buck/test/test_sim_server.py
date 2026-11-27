@@ -162,9 +162,10 @@ def test_public_session_overrides_are_the_pages_toggles_only():
     from alberta_buck.sim.server import public_sets
     sets = ["scenario.prices=revert", "scenario.agents.DirectMintAgent=10000",
             "agents.BasketWheelAgent.chain=l1", "scenario.basket=equity-machine",
-            "scenario.basket=fence", "scenario.basket=equity-machine-and-more", "machine.tilt=1"]
+            "scenario.basket=fence", "scenario.basket=equity-machine-and-more", "machine.tilt=1",
+            "machine.rebalance_mode=turn", "machine.rebalance_mode=gap-plus"]
     # The basket's upkeep is no longer the page's choice: the machine is the only one (2026-11-20).
-    assert public_sets(sets) == ["scenario.prices=revert", "agents.BasketWheelAgent.chain=l1"]
+    assert public_sets(sets) == ["scenario.prices=revert", "agents.BasketWheelAgent.chain=l1", "machine.rebalance_mode=turn"]
 
 
 def test_public_household_choices_are_bounded():

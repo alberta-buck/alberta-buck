@@ -22,6 +22,9 @@ interface IRebalancePolicy {
     ///         a the dearer: selling a or buying b, as a fraction of the gap
     ///         per day. ln 2 halves what remains each day.
     function desire(uint256 a, uint256 b) external view returns (uint256 rateWad);
+    /// @notice Size a constituent's eligible gap using the selected policy and the basket's declared weights.
+    function allocationRate(uint256 i, bool sell, uint256 excursion, uint256[] calldata weights)
+        external view returns (uint256 rateWad);
     /// @notice The fastest any gap is closed, a fraction of it per day: the pace
     ///         the basket also gives its book's own move.
     function maxRate() external view returns (uint256);
@@ -31,6 +34,7 @@ interface IRebalancePolicy {
     ///         time since it last traded and carried to now at `rateWad`.
     ///         However often it is asked, the same time releases the same share.
     function share(uint256 i, uint256 rateWad) external view returns (uint256);
+    function pairShare(uint256 i, uint256 rateWad) external view returns (uint256);
     function lastExecutionAt() external view returns (uint64);
 
     // Reports from the basket alone.

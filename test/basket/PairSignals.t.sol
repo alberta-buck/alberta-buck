@@ -28,7 +28,11 @@ contract PairPool {
     function observe(uint32[] calldata ago) external view returns (int56[] memory c, uint160[] memory l) {
         require(!broken, "unavailable");
         c = new int56[](ago.length); l = new uint160[](ago.length);
-        unchecked { c[0] = cumulative + int56(tick) * int56(uint56(block.timestamp - at)); }
+        for (uint256 i; i < ago.length; ++i) {
+            uint256 target = block.timestamp - ago[i];
+            require(target >= at, "fixture only retains the current segment");
+            unchecked { c[i] = cumulative + int56(tick) * int56(uint56(target - at)); }
+        }
     }
     function slot0() external view returns (uint160, int24, uint16, uint16, uint16, uint8, bool) {
         return (1 << 96, tick, 0, 1, 1, 0, true);

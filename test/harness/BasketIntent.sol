@@ -17,16 +17,28 @@ contract ControlledPairIntent {
     function observe() external {}
     function setRate(uint256 r) external { rate = r; }
     function setRecipient(uint256 j) external { onlyRecipient = j; }
-    function desire(uint256, uint256 j) external view returns (uint256) {
+    function desire(uint256, uint256 j) public view returns (uint256) {
         return onlyRecipient == type(uint256).max || onlyRecipient == j ? rate : 0;
     }
+    function allocationRate(uint256 i, bool sell, uint256, uint256[] calldata weights)
+        external view returns (uint256 result)
+    {
+        uint256 total;
+        for (uint256 j; j < weights.length; ++j) {
+            if (j == i) continue;
+            result += weights[j] * (sell ? desire(i, j) : desire(j, i));
+            total += weights[j];
+        }
+        return total == 0 ? 0 : result / total;
+    }
     // The share of a gap to move: any rule will do for the facet's tests.
-    function share(uint256, uint256 r) external view returns (uint256) {
+    function share(uint256, uint256 r) public view returns (uint256) {
         uint256 elapsed = block.timestamp - lastExecutionAt;
         if (elapsed > 1 days) elapsed = 1 days;
         uint256 u = r * elapsed / 1 days;
         return u * 1e18 / (1e18 + u);
     }
+    function pairShare(uint256 i, uint256 r) external view returns (uint256) { return share(i, r); }
     uint256[] public asked;
     function recordRates(uint256[] calldata rates) external { require(msg.sender == basket); asked = rates; }
     function recordImpact(uint256, int24, int24) external { require(msg.sender == basket); ++impacts; }

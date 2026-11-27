@@ -154,7 +154,8 @@ export class SavingsWorld {
    * @param deps.artifacts  (name) => {abi, bytecode}
    * @param deps.urArtifact the UniversalRouter artifact
    * @param deps.sets       the page's settings: agents.HouseholdPopulationAgent.<key>,
-   *                        scenario.seed, scenario.ticks_per_day, scenario.prices, scenario.borrower
+   *                        scenario.seed, scenario.ticks_per_day, scenario.prices, scenario.borrower,
+   *                        machine.rebalance_mode
    * @param deps.days      population scheduling horizon, 3650 for an interactive world
    * @param deps.bootstrapDeposits ordered TOKEN endowments supplied by a paired replay
    * @param deps.prices     the economy's TOKENs and price paths (alberta_buck.sim.savings_prices:
@@ -171,6 +172,7 @@ export class SavingsWorld {
     const borrower = sets["scenario.borrower"] ?? "";
     if (borrower && !Object.hasOwn(SAVINGS_BORROWERS, borrower)) throw new Error(`Unknown borrower preset: ${borrower}`);
     this.borrower = borrower;
+    this.rebalanceMode = sets["machine.rebalance_mode"] ?? "motion";
     this.day = 0;
     this.seed = Number(sets["scenario.seed"] ?? 41404) || 41404;
     this.priceTape = prices ? savingsPriceTape(prices, this.priceMode, sets, this.seed) : null;
@@ -201,7 +203,8 @@ export class SavingsWorld {
     const w = this.world = await buildEquilibriumWorld(this.session, this.artifacts, {
       identity: this.identity, urArtifact: this.urArtifact, rng: this.rng, basket: "machine",
       feedSeed: this.seed, bootstrapDeposits: this.bootstrapDeposits, beforeFirstDeposit,
-      turnSeconds: Math.floor(DAY / this.ticksPerDay), withDesk: true, ...deployment, ...given });
+      turnSeconds: Math.floor(DAY / this.ticksPerDay), withDesk: true, rebalanceMode: this.rebalanceMode,
+      ...deployment, ...given });
     if (firstTickTimestamp !== undefined) w.householdEpoch = firstTickTimestamp;
     const T = this.ticksPerDay;
     const arb = new ParityArb({ everyTick: true });
@@ -433,6 +436,7 @@ export class SavingsWorld {
       basket: w.basket.address, receipt, kctrl: w.kctrl.address, pool_ub: w.poolUB.address,
       router: w.router?.address ?? null, wheel: w.wheel?.address ?? null, director: null,
       basket_kind: "equity", machine: true, tokens, prices: [this.priceMode],
+      rebalance_mode: ["motion", "gap", "turn"][Number(await s.call(w.machine.policy, "signalMode"))],
       start_date: this.startDate,
       borrower: this.borrower,
       households: { ...this.population, ...this.settings }, local: true, ticks_per_day: this.ticksPerDay,
