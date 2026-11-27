@@ -308,9 +308,14 @@ realized receipt returns, drawdown, parity and gross execution costs.
   separation and a ready pair that is still moving outward.
 - [X] Add a verified stock-cell replay and an opportunity list tied to
   raw response decisions and peer gates. See the replay recipe above.
-- [ ] Reproduce the historical no-ask and changed-plan decisions. Start
-  with the CNST gap around day 342, where the tape shows a clear
-  reversal, then use the NRGC window around days 845–847 to check the
+- [X] Reproduce the historical CNST no-ask and changed-plan
+  decisions. Both replays matched 346 frozen closes. On close 342 the
+  funded arm remained under the urgency threshold throughout. The
+  unfunded arm reached eligibility in its second response, when
+  three peers failed filtered separation and NRGC was still moving
+  outward and accelerating. The funded arm confirmed a pair-driven
+  CNST buy on close 343.
+- [ ] Reproduce the NRGC window around days 845–847 to check the
   later change in direction. Reuse the frozen tape, opening state and
   warmup. At each wheel response trace held and target exposure,
   declared-weight leash, urgency, observation freshness, route

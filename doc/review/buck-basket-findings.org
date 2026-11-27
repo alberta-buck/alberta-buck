@@ -633,10 +633,9 @@ requires the matched maintenance arm.
 
 [[file:../../build/research-results/stock-grid-5y-flow-diagnostic.md][Receipt flow and relative-price windows]]
 
-** Frozen trace queued for CNST and NRGC
+** Frozen CNST trace and pending NRGC comparison
 
-The archived seed 41404 records bound the comparison while the replay
-regenerates decision-time state. These are book-wide counters.
+These archived seed 41404 counters cover the whole book.
 
 | Opening Jubilee | Close | Constituent decisions | Pair asks | Changed plans |
 |-----------------+-------+-----------------------+-----------+---------------|
@@ -648,13 +647,33 @@ regenerates decision-time state. These are book-wide counters.
 | 0               |   846 |                    10 |         1 |             0 |
 | 0               |   847 |                    10 |         1 |             1 |
 
-The frozen source and original artifacts reproduce the archived runtime
-fingerprint. The replay adds a peer observer compiled against those
-sources, preserves the original tape and warmup, and checks every
-replayed close against its archive. The zero-ask counters alone leave
-urgency, the directional gates, and a released amount below precision
-as possibilities for the missed decisions. The changed-plan rows give
-nearby controls for tracing through to pool execution.
+Both CNST replays matched all 346 archived closes. The frozen source
+and original artifacts matched the archived runtime fingerprint.
+
+- At close 342 without extra Jubilee capital, CNST started the
+  responses 243 bp under target with 118 of the required 200 bp-days
+  of urgency. At the second response the gap reached 255 bp and
+  urgency reached 200. LABR, FOOD and PAXG failed filtered separation.
+  NRGC passed both separation checks, but its relative price against
+  CNST was still moving outward and accelerating, so the directional
+  rate was zero. Both responses bought CNST for book maintenance and
+  had identical plans with and without the pair policy.
+- With 2M extra Jubilee capital, all six CNST decisions at close 342
+  fell below the urgency threshold. The largest gap was 282 bp at
+  134 bp-days, and the roughly 30,534 BUCK buy at that response was
+  book maintenance. At close 343 urgency reached 200 and NRGC supplied
+  the only positive directional rate while the relative move was
+  braking. The plan bought 5,957 BUCK of CNST, versus zero in its
+  same-book maintenance plan, and the pool swap confirmed.
+- The unfunded close 343 had two positive CNST asks. One was 713 BUCK
+  against a sizing floor of twice the 1,681 BUCK grain. The other was
+  7,399 BUCK and left the existing 28,687 BUCK maintenance plan intact.
+  Neither ask changed the final plan.
+
+Decision-time gaps were substantially larger than their closing marks.
+The trace identified distinct blockers for a large gap, and the
+funded close 343 provides a positive control for the pair policy.
+NRGC closes 843–848 are still replaying.
 [[file:buck-merge-readiness.org::*Replay a completed stock cell with decision tracing][Replay command and local logs]]
 
 ** CNST reversal on a short historical slice
