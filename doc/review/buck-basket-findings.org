@@ -633,7 +633,7 @@ requires the matched maintenance arm.
 
 [[file:../../build/research-results/stock-grid-5y-flow-diagnostic.md][Receipt flow and relative-price windows]]
 
-** Frozen CNST trace and pending NRGC comparison
+** Frozen CNST and NRGC traces
 
 These archived seed 41404 counters cover the whole book.
 
@@ -673,7 +673,15 @@ and original artifacts matched the archived runtime fingerprint.
 Decision-time gaps were substantially larger than their closing marks.
 The trace identified distinct blockers for a large gap, and the
 funded close 343 provides a positive control for the pair policy.
-NRGC closes 843–848 are still replaying.
+The NRGC replay matched all 849 archived closes. At close 845 it
+was 286 bp over target with 131 of the required 200 bp-days, while
+the maintenance sale used all 35,701 BUCK of available depth. At
+the first response of 846 urgency cleared. All four peers cleared
+price separation and were moving outward with positive
+acceleration. The subsequent response had a 4,714 BUCK ask below
+twice the 2,382 BUCK trade grain. At close 847 the first response
+confirmed a 21,360 BUCK pair-driven sale from a same-book
+maintenance plan of zero.
 [[file:buck-merge-readiness.org::*Replay a completed stock cell with decision tracing][Replay command and local logs]]
 
 ** Separation, urgency and outward motion
@@ -848,6 +856,93 @@ underlying time integrals agree.
 [[file:../../build/research-results/pair-price-history-block-grid.json][365 days, 12-second wheel]] ·
 [[file:../../build/research-results/pair-price-history-irregular-grid.json][365 days, irregular wheel]] ·
 [[file:../../build/research-results/pair-price-history-previous-grid.json][365 days, previous-gap accrual]]
+
+*** Backfill from a retained price history
+
+Wheel calls alternate one and six hours on the same 12-second
+price path. The no-history control uses one interval mean at each
+call. The other arms process five-minute cumulative-price
+intervals at that call, looking back one hour or six hours. A
+one-hour buffer during a six-hour gap still yields the recent
+intervals. The old prefix uses one mean from the cumulative saved
+at the last call. Fully retained history at the regular sampling
+resolution reproduces the regular observer's level and rate at an
+aligned endpoint in the test. All execution stays on the wheel
+clock.
+
+Reconstructing urgency is a separate switch. It marks the existing
+inventory at historical prices, calculates the target gaps and
+updates urgency through historical side changes. It uses the
+ordinary one-day bound and makes no hypothetical intermediate
+trades. Production feasibility requires the appropriate
+inventory history if deposits, exits or other actions can change
+the holdings between wheel calls. The price observer alone can be
+backfilled from quote history. The current contract takes one
+mean per call. An on-chain replay would need common retained
+endpoints on every route, including enough history for any
+route-specific price adjustments.
+
+On the 365-day tape, wheel-only, one-hour and six-hour modes made
+2,503, 31,287 and 105,096 observer updates respectively for the
+same 2,503 wheel calls. At standard settings the six-hour mode
+without urgency backfill changed return versus wheel-only by
+-0.007 to +0.026 pp across the five price paths. Urgency backfill
+on top of that changed return by -0.027 to +0.001 pp. On a
+synthetic path with a side change between calls, backfill reset
+urgency that the wheel-only gap check carried through. That is a
+real difference in the signal even where the return difference is
+small.
+
+The six-hour mode with 30-minute buckets used 17,516 observer
+updates. Without urgency backfill its result versus wheel-only
+ranged from -0.006 to +0.020 pp. That is a lower-work research
+control for comparison with five-minute backfill.
+
+*** Separation-dependent braking
+
+The candidate replaces the earlier drift-budget rule with an
+explicit threshold for signed rate change, in units of the pair's
+empirical allowance. Just beyond the price-separation floor,
+the outward velocity must fall by about one allowance over the
+observer response time. As the separation grows, the requirement
+falls linearly to 0.05 allowance in the mild-braking arm. An
+exploratory signed threshold of -0.25 allowance lets only weak
+outward acceleration through once the separation is wide. The
+release grows above the threshold and remains subject to normal
+eligibility, live price separation and caps. This candidate
+applies the threshold to the closing release as well, including a
+pair already converging.
+
+Two versions use either the ordered price ratio versus its
+accepted reference, or the ordered held-weight ratio versus its
+target-weight ratio, to ease the threshold. The weight version
+requires the inventory imbalance to agree with the trade direction.
+Both versions still require price separation. The test fixture
+passes the same mild braking at wide separation that it rejects
+near the reference. Clear inward acceleration passes both.
+
+The one-year sweep used two widths (5 and 15 log-percent),
+the mild and signed thresholds, both tilt and patience settings,
+and two realizations of each nonzero noise level. With six hours
+of five-minute history and standard tilt and patience, the narrow
+transition with mild braking changed return by -0.134 to +0.019
+pp using price separation and by -0.100 to +0.020 pp using weight
+separation, relative to production on the same observations.
+Allowing weak outward acceleration improved some noisy cases and
+hurt others. No tested threshold was a consistent winner across
+the historical paths and the temporary and permanent shock
+controls.
+
+#+begin_src sh
+python -m alberta_buck.sim.pair_price_study build/research-results/pair-history-grid.json \
+  --days 365 --decision 3600 21600 --history 0 3600 21600 --history-step 300 \
+  --history-urgency --brake-spread 0 .05 .15 --wide-brake .05 -.25 \
+  --brake-basis price weight --outward 0 --adaptive 0 --noise-bp 0 50 150 --seed 41404 41405
+#+end_src
+
+[[file:../../build/research-results/pair-history-long-grid.json][Price-ratio threshold matrix]] ·
+[[file:../../build/research-results/pair-history-weight-grid.json][Target-weight threshold matrix]] ·
+[[file:../../build/research-results/pair-history-half-hour-grid.json][30-minute history matrix]]
 
 ** CNST reversal on a short historical slice
 

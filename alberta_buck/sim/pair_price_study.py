@@ -71,6 +71,110 @@ def early_rate(separation, rate, change, allowance, drift_fraction, cap):
     return .1 * cap * max(0., 1. - drift / budget) if budget > 0 else 0.
 
 
+@njit
+def spread_braking_rate(separation, rate, change, allowance, width, wide_threshold, release_rate, cap):
+    """Require less inward acceleration as aligned separation grows."""
+    scale = allowance + FLOOR
+    spread_fraction = min(1., max(0., separation - SEPARATION) / width)
+    threshold = 1. + spread_fraction * (wide_threshold - 1.)
+    strength = min(1., max(0., -change / scale - threshold))
+    release = release_rate * scale / (scale + max(0., rate))
+    closure = cap * min(1., max(0., -(rate + allowance)) / scale)
+    return min(cap, (release + closure) * strength)
+
+
+@njit
+def observe_interval(endpoint, step, previous_cumulative, cumulative, track, errors, observer, changes):
+    span = endpoint - observer[0]
+    seed = observer[1] == 0
+    reset = span * step > MAX_GAP
+    elapsed = (span + observer[1]) * step / (2 * DAY)
+    response = RESPONSE / DAY
+    k = elapsed / (response + elapsed)
+    beta = k * k
+    alpha = 2 * k - beta
+    error_gain = elapsed * DAY / (ERROR_TIME + elapsed * DAY)
+    n = len(changes)
+    center = 0.
+    for i in range(n):
+        center += (cumulative[i] - previous_cumulative[i]) / (span * n)
+    residual = np.empty(n)
+    for i in range(n):
+        observation = (cumulative[i] - previous_cumulative[i]) / span - center
+        residual[i] = 0. if seed or reset else observation - track[0, i] - track[1, i] * elapsed
+        changes[i] = beta * residual[i] / elapsed
+        if seed or reset:
+            track[0, i], track[1, i] = observation, 0.
+        else:
+            track[0, i] += track[1, i] * elapsed + alpha * residual[i]
+            track[1, i] += changes[i]
+        previous_cumulative[i] = cumulative[i]
+    p = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            if seed or reset:
+                errors[p, 0], errors[p, 1] = 0., 0.
+            else:
+                errors[p, 0] += error_gain * (abs(residual[i] - residual[j]) - errors[p, 0])
+                errors[p, 1] += error_gain * (abs(changes[i] - changes[j]) / elapsed - errors[p, 1])
+            p += 1
+    midpoint2 = 2 * endpoint - span
+    if seed or reset:
+        observer[2] = midpoint2
+        observer[3] = 0
+    observer[0] = endpoint
+    observer[1] = 0 if reset else span
+    if not reset:
+        observer[3] += 1
+    observer[4] += 1
+    ready = observer[3] >= 3 and (midpoint2 - observer[2]) * step >= 2 * WARMUP
+    return ready, elapsed
+
+
+@njit
+def historical_marks(endpoint, origin, cumulative, spots, step, live):
+    """Log TWAP ending at a known historical endpoint."""
+    span = min(endpoint, 600 / step)
+    whole = math.ceil(span)
+    start = endpoint - whole
+    for i in range(len(live)):
+        excess = spots[start % len(spots), i] * (whole - span)
+        total = cumulative[endpoint % len(cumulative), i] - cumulative[start % len(cumulative), i]
+        live[i] = (total - excess) / span - origin[i]
+
+
+@njit
+def credit_urgency(state, gap, dt, patience, previous_gap):
+    old_side = state[2]
+    amount, side = urgency_step(state[1], old_side, gap, dt, SLACK, patience)
+    if previous_gap:
+        if side != old_side:
+            amount = 0.
+        else:
+            amount, _ = urgency_step(state[1], old_side, state[4], dt, SLACK, patience)
+    state[1], state[2], state[4] = amount, side, gap
+    return amount, side
+
+
+@njit
+def backfill_urgency(endpoint, dt, origin, mark_prev, books, weights, arms, cumulative, spots, step, previous_gap):
+    live = np.empty(len(weights))
+    targets = np.empty(len(weights))
+    historical_marks(endpoint, origin, cumulative, spots, step, live)
+    spot = spots[endpoint % len(spots)]
+    common_move = 0.
+    for i in range(len(weights)):
+        common_move += weights[i] * (spot[i] - mark_prev[i])
+    factors = np.exp(.5 * (spot - mark_prev - common_move))
+    for m in range(len(arms)):
+        books[m, 0] *= factors
+        book = np.sum(books[m, 0])
+        target_weights(targets, live, weights, arms[m, 0], DEFAULT_CAP)
+        for i in range(len(weights)):
+            credit_urgency(books[m, :, i], books[m, 0, i] / book - targets[i], dt, arms[m, 1], previous_gap)
+    mark_prev[:] = spot
+
+
 def bridge_chunks(seconds, logs, step, noise_bp, seed):
     """Seeded log Brownian bridges with the supplied anchor endpoints and no extra drift."""
     rng = np.random.default_rng(seed)
@@ -122,13 +226,12 @@ def synthetic(tape, days, step):
 # holdings, urgency, gap sign, allowance and the previous observed gap.
 @njit
 def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, errors, hour_open, roughness,
-                   weights, arms, first, step, schedule, clock, integral, quotes, twap_sum, previous_gap, cost, grain, depth):
+                   weights, arms, first, step, schedule, clock, observer, last_cumulative, cumulative, spots,
+                   history, history_step, history_urgency, previous_gap, cost, grain, depth):
     response = RESPONSE / DAY
     hour = 3600 // step
-    twap_span = 600 / step
     rough_gain = 1 - math.exp(-1 / (24 * 30))
     n = len(weights)
-    residual = np.empty(n)
     changes = np.empty(n)
     live = np.empty(n)
     factors = np.empty(n)
@@ -140,11 +243,11 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
     for offset in range(len(prices)):
         index = first + offset
         current = prices[offset]
-        slot = (index - 1) % len(quotes)
+        slot = index % len(spots)
+        prior = (index - 1) % len(spots)
         for i in range(n):
-            integral[i] += prev[i]
-            twap_sum[i] += prev[i] - quotes[slot, i]
-            quotes[slot, i] = prev[i]
+            cumulative[slot, i] = cumulative[prior, i] + prev[i]
+            spots[slot, i] = current[i]
             prev[i] = current[i]
         if index % hour == 0:
             p = 0
@@ -157,50 +260,38 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
         if index != clock[0]:
             continue
 
-        # The raw price is held until its next update. Average the interval
-        # exactly, then track successive interval midpoints as PairSignals does.
-        span = index - clock[1]
-        center = np.sum(integral) / (span * n)
-        seed = clock[2] == 0
-        reset = span * step > MAX_GAP
-        obs_dt = (span + clock[2]) * step / (2 * DAY)
-        k = obs_dt / (response + obs_dt)
-        beta = k * k
-        alpha = 2 * k - beta
-        error_gain = obs_dt * DAY / (ERROR_TIME + obs_dt * DAY)
-        for i in range(n):
-            oldest = quotes[(slot + 1) % len(quotes), i]
-            excess = oldest * (len(quotes) - twap_span) if index >= len(quotes) else 0.
-            live[i] = (twap_sum[i] - excess) / min(index, twap_span) - origin[i]
-            observation = integral[i] / span - center
-            residual[i] = 0. if seed or reset else observation - track[0, i] - track[1, i] * obs_dt
-            changes[i] = beta * residual[i] / obs_dt
-            if seed or reset:
-                track[0, i], track[1, i] = observation, 0.
-            else:
-                track[0, i] += track[1, i] * obs_dt + alpha * residual[i]
-                track[1, i] += changes[i]
-            integral[i] = 0.
-        p = 0
-        for i in range(n):
-            for j in range(i + 1, n):
-                if seed or reset:
-                    errors[p, 0], errors[p, 1] = 0., 0.
-                else:
-                    errors[p, 0] += error_gain * (abs(residual[i] - residual[j]) - errors[p, 0])
-                    errors[p, 1] += error_gain * (abs(changes[i] - changes[j]) / obs_dt - errors[p, 1])
-                p += 1
-        if seed or reset:
-            clock[3] = 2 * index - span
-            clock[4] = 0
-        clock[2] = 0 if reset else span
-        if not reset:
-            clock[4] += 1
-        ready = clock[4] >= 3 and (2 * index - span - clock[3]) * step >= 2 * WARMUP
-        book_dt = min(1., span * step / DAY)
+        # Keep the archived cumulative at the last wheel call. If detailed
+        # history is shorter than the gap, use one mean for the old prefix.
+        # Retained observations are processed now. No intervening trades exist.
+        clock[3] += 1
+        urgency_at = max(clock[1], index - DAY // step)
+        if history > 0:
+            cutoff = max(clock[1], index - history)
+            if cutoff > clock[1]:
+                clock[4] += 1
+                observe_interval(cutoff, step, last_cumulative, cumulative[cutoff % len(spots)],
+                                 track, errors, observer, changes)
+                if history_urgency and cutoff > urgency_at:
+                    backfill_urgency(cutoff, (cutoff - urgency_at) * step / DAY, origin, mark_prev, books,
+                                     weights, arms, cumulative, spots, step, previous_gap)
+                    urgency_at = cutoff
+            endpoint = (cutoff // history_step + 1) * history_step
+            while endpoint < index:
+                observe_interval(endpoint, step, last_cumulative, cumulative[endpoint % len(spots)],
+                                 track, errors, observer, changes)
+                if history_urgency and endpoint > urgency_at:
+                    backfill_urgency(endpoint, (endpoint - urgency_at) * step / DAY, origin, mark_prev, books,
+                                     weights, arms, cumulative, spots, step, previous_gap)
+                    urgency_at = endpoint
+                endpoint += history_step
+        ready, obs_dt = observe_interval(index, step, last_cumulative, cumulative[slot],
+                                         track, errors, observer, changes)
+        historical_marks(index, origin, cumulative, spots, step, live)
+        book_dt = min(1., (index - clock[1]) * step / DAY)
+        urgency_dt = min(1., (index - urgency_at) * step / DAY)
         clock[1] = index
-        clock[5] = (clock[5] + 1) % len(schedule)
-        clock[0] += schedule[clock[5]]
+        clock[2] = (clock[2] + 1) % len(schedule)
+        clock[0] += schedule[clock[2]]
 
         movement = 0.
         for i in range(n):
@@ -209,7 +300,7 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
             # Price elasticity of a full-range LP mark in the basket numeraire.
             factors[i] = math.exp(.5 * (current[i] - mark_prev[i] - movement))
         for m in range(len(arms)):
-            tilt, patience, drift_fraction, adaptive = arms[m]
+            tilt, patience, drift_fraction, adaptive, brake_width, wide_threshold, weight_basis = arms[m]
             holdings = books[m, 0]
             book = 0.
             for i in range(n):
@@ -236,27 +327,25 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
                                          + adaptive * roughness[p])
                             base = motion_rate(speed, change, allowance, RELEASE, maximum)
                             early = early_rate(separation, speed, change, allowance, drift_fraction, maximum)
-                            desire = max(base, early)
+                            easing_spread = separation
+                            if brake_width > 0 and weight_basis:
+                                relative_gap = math.log(holdings[i] / targets[i]) - math.log(holdings[j] / targets[j])
+                                easing_spread = SEPARATION + max(0., sign * relative_gap)
+                            desire = (spread_braking_rate(easing_spread, speed, change, allowance, brake_width,
+                                                          wide_threshold, RELEASE, maximum)
+                                      if brake_width > 0 else max(base, early))
                             # Two columns would duplicate the peer scan. A pair
                             # can direct a sale on the high side and a buy on the low side.
                             if sign * (holdings[i] - targets[i] * book) > 0:
                                 rates[i] += weights[j] * desire
-                                raw_early[i] += weights[j] * max(0., early - base)
+                                raw_early[i] += weights[j] * max(0., desire - base)
                             if -sign * (holdings[j] - targets[j] * book) > 0:
                                 rates[j] += weights[i] * desire
-                                raw_early[j] += weights[i] * max(0., early - base)
+                                raw_early[j] += weights[i] * max(0., desire - base)
                         p += 1
             for i in range(n):
                 gap = holdings[i] / book - targets[i]
-                old_side = books[m, 2, i]
-                next_urgency, side = urgency_step(books[m, 1, i], old_side, gap, book_dt, SLACK, patience)
-                if previous_gap:
-                    if side != old_side:
-                        next_urgency = 0.
-                    else:
-                        next_urgency, _ = urgency_step(books[m, 1, i], old_side, books[m, 4, i],
-                                                       book_dt, SLACK, patience)
-                books[m, 1, i], books[m, 2, i], books[m, 4, i] = next_urgency, side, gap
+                next_urgency, side = credit_urgency(books[m, :, i], gap, urgency_dt, patience, previous_gap)
                 leash = abs(holdings[i] / book - weights[i]) > LEASH * weights[i]
                 rate = rates[i] / (1 - weights[i])
                 eligible = ready and patience > 0 and next_urgency >= patience
@@ -320,16 +409,21 @@ STEP_CAP = .05
 
 
 def replay(seconds, log_prices, arms, step, decision, noise_bp, seed, cost_bp, grain_bp, depth_bp,
-           previous_gap=False):
+           previous_gap=False, history=0, history_step=None, history_urgency=False):
     n = len(WEIGHTS)
     origin = log_prices[0]
     prev, mark_prev = origin.copy(), origin.copy()
     schedule = np.array(decision, dtype=np.int64) // step
-    # Next call, last endpoint, previous span, seeded midpoint, samples, schedule position.
-    clock = np.array([schedule[0], 0, 0, 0, 0, 0], dtype=np.int64)
-    integral = np.zeros(n)
-    quotes = np.zeros((math.ceil(600 / step), n))
-    twap_sum = np.zeros(n)
+    # Next call, last call, schedule position, wheel calls, truncated windows.
+    clock = np.array([schedule[0], 0, 0, 0, 0], dtype=np.int64)
+    # Endpoint, prior span, warmup start midpoint, samples, total updates.
+    observer = np.zeros(5, dtype=np.int64)
+    history_blocks = history // step
+    retained = history_blocks + math.ceil(600 / step) + 1
+    cumulative = np.zeros((retained, n))
+    spots = np.zeros_like(cumulative)
+    spots[0] = origin
+    last_cumulative = np.zeros(n)
     hour_open = origin.copy()
     track = np.zeros((2, n))
     errors = np.zeros((n * (n - 1) // 2, 2))
@@ -342,14 +436,16 @@ def replay(seconds, log_prices, arms, step, decision, noise_bp, seed, cost_bp, g
     first = 1
     for prices in bridge_chunks(seconds, log_prices, step, noise_bp, seed):
         simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, errors, hour_open, roughness,
-                       WEIGHTS, arms, first, step, schedule, clock, integral, quotes, twap_sum, previous_gap,
-                       cost_bp / 10_000, grain_bp / 10_000, depth_bp / 10_000)
+                       WEIGHTS, arms, first, step, schedule, clock, observer, last_cumulative, cumulative, spots,
+                       history_blocks, (history_step or step) // step, history_urgency, previous_gap, cost_bp / 10_000, grain_bp / 10_000, depth_bp / 10_000)
         first += len(prices)
     end_move = log_prices[-1] - mark_prev
     factors = np.exp(.5 * (end_move - WEIGHTS @ end_move))
     marked = cash + books[:, 0, :] @ factors
     stats[:, 7] = np.maximum(stats[:, 7], 1 - marked / stats[:, 6])
-    return marked, stats
+    diagnostics = dict(wheel_calls=int(clock[3]), truncated_windows=int(clock[4]), observer_updates=int(observer[4]),
+                       last_observer_seconds=int(observer[0] * step), levels=track[0].tolist(), rates=track[1].tolist())
+    return marked, stats, diagnostics
 
 
 def main(argv=None):
@@ -366,6 +462,16 @@ def main(argv=None):
     p.add_argument("--patience", type=float, nargs="+", default=[100., 200.], help="basis-point-days")
     p.add_argument("--outward", type=float, nargs="+", default=[0., .5, .75],
                    help="projected drift budget as a multiple of excess separation, zero disables early release")
+    p.add_argument("--history", type=int, nargs="+", default=[0],
+                   help="retained detailed price history in seconds, zero uses one wheel-interval mean")
+    p.add_argument("--history-step", type=int, help="reconstructed observer interval in seconds, defaults to raw price step")
+    p.add_argument("--history-urgency", action="store_true", help="also test reconstructing urgency within the retained history")
+    p.add_argument("--brake-spread", type=float, nargs="+", default=[0.],
+                   help="excess log separation reaching the mild-braking threshold, zero disables this variant")
+    p.add_argument("--wide-brake", type=float, nargs="+", default=[.05],
+                   help="inward rate change as a fraction of allowance required at wide separation")
+    p.add_argument("--brake-basis", choices=("price", "weight"), nargs="+", default=["price"],
+                   help="ease the braking threshold by price spread or target-relative allocation ratio")
     p.add_argument("--adaptive", type=float, nargs="+", default=[0., 1.], help="additional slow noise allowance weight")
     p.add_argument("--previous-gap", action="store_true", help="accrue using the previous observed gap")
     p.add_argument("--cost-bp", type=float, default=30.)
@@ -375,11 +481,18 @@ def main(argv=None):
     decision = args.decision or [args.step]
     if args.step <= 0 or 3600 % args.step or any(d < args.step or d % args.step for d in decision):
         p.error("step must divide an hour and wheel intervals must be positive multiples of step")
+    history_step = args.history_step if args.history_step is not None else args.step
+    if history_step <= 0 or history_step % args.step or any(d < 0 or d % args.step for d in args.history):
+        p.error("history retention and replay intervals must be multiples of the raw price step")
+    if args.history_urgency and not any(args.history):
+        p.error("history-based urgency requires a positive history window")
+    if not all(math.isfinite(x) and -1 <= x <= 1 for x in args.wide_brake):
+        p.error("wide-brake must be between -1 and 1")
     if args.days is not None and args.days <= 0:
         p.error("days must be positive")
     if min(args.patience) <= 0 or not all(
             math.isfinite(x) and x >= 0 for x in
-            [*args.noise_bp, *args.tilt, *args.patience, *args.outward, *args.adaptive,
+            [*args.noise_bp, *args.tilt, *args.patience, *args.outward, *args.adaptive, *args.brake_spread,
              args.cost_bp, args.grain_bp, args.depth_bp]):
         p.error("study parameters must be finite and nonnegative, with positive patience")
     if max(args.tilt) > 1 or args.cost_bp >= 10_000:
@@ -403,33 +516,46 @@ def main(argv=None):
     else:
         seconds, logs = synthetic(args.tape, args.days or 120, max(args.step, 3600))
         source = {"kind": args.tape, "anchors": len(seconds)}
-    production = (DEFAULTS["tilt"], DEFAULTS["patience"], 0., 0.)
-    base = (DEFAULTS["tilt"], 0., 0., 0.)
-    treatments = [(t, p / 10_000, d, a) for t, p, d, a in
-                  itertools.product(args.tilt, args.patience, args.outward, args.adaptive)]
-    controls = [(tilt, 0., 0., 0.) for tilt in args.tilt]
+    production = (DEFAULTS["tilt"], DEFAULTS["patience"], 0., 0., 0., 0., 0.)
+    base = (DEFAULTS["tilt"], 0., 0., 0., 0., 0., 0.)
+    motion_variants = [(d, 0., 0., 0.) for d in [0., *args.outward]]
+    motion_variants += [(0., width, threshold, float(basis == "weight")) for width, threshold, basis in
+                        itertools.product(args.brake_spread, args.wide_brake, args.brake_basis) if width > 0]
+    treatments = [(t, p / 10_000, drift, a, width, threshold, basis)
+                  for t, p, a, (drift, width, threshold, basis) in
+                  itertools.product(args.tilt, args.patience, args.adaptive, motion_variants)]
+    controls = [(tilt, 0., 0., 0., 0., 0., 0.) for tilt in args.tilt]
     arms = np.array(list(dict.fromkeys([base, production, *controls, *treatments])))
     maintenance = {arm[0]: i for i, arm in enumerate(arms) if arm[1] == 0.}
-    rows = []
+    rows, diagnostics = [], []
     groups = [(noise, seed) for noise in args.noise_bp for seed in (args.seed if noise else args.seed[:1])]
-    for noise, seed in groups:
-        marks, stats = replay(seconds, logs, arms, args.step, decision, noise, seed,
-                              args.cost_bp, args.grain_bp, args.depth_bp, args.previous_gap)
+    history_modes = [(window, fill) for window in dict.fromkeys(args.history)
+                     for fill in ([False, True] if window and args.history_urgency else [False])]
+    for (noise, seed), (window, fill_urgency) in itertools.product(groups, history_modes):
+        marks, stats, state = replay(seconds, logs, arms, args.step, decision, noise, seed,
+                                     args.cost_bp, args.grain_bp, args.depth_bp, args.previous_gap,
+                                     window, history_step, fill_urgency)
+        group = dict(noise_bp=noise, seed=seed, history_seconds=window, history_urgency=fill_urgency)
+        diagnostics.append(dict(**group, **state))
         for index, (arm, mark, stat) in enumerate(zip(arms, marks, stats, strict=True)):
             rows.append(dict(arm=("maintenance" if arm[1] == 0. else "production" if index == 1 else "candidate"),
                              tilt=arm[0], patience_bp_days=arm[1] * 10_000,
-                             outward_drift_fraction=arm[2], adaptive_noise=arm[3], noise_bp=noise, seed=seed,
+                             outward_drift_fraction=arm[2], adaptive_noise=arm[3],
+                             brake_spread=arm[4], wide_brake=arm[5],
+                             brake_basis=("weight" if arm[6] else "price") if arm[4] else None, **group,
                              net_return_pct=100 * (mark - 1), vs_maintenance_pp=100 * (mark - marks[maintenance[arm[0]]]),
                              vs_production_pp=100 * (mark - marks[1]), trades=int(stat[0]), discretionary_fills=int(stat[8]),
                              turnover_pct=100 * stat[1], cost_pct=100 * stat[2],
-                             eligible=int(stat[3]), positive_rate=int(stat[4]), extra_early_rate=int(stat[5]),
-                             max_drawdown_pct=100 * stat[7]))
-        print(f"{source['kind']}, {noise:g} bp, seed {seed}: {len(arms)} arms", flush=True)
+                             eligible=int(stat[3]), positive_rate=int(stat[4]),
+                             above_production_rate=int(stat[5]), max_drawdown_pct=100 * stat[7]))
+        print(f"{source['kind']}, {noise:g} bp, seed {seed}, history {window}s, reconstructed urgency {fill_urgency}: "
+              f"{len(arms)} arms", flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(dict(schema=1, source=source, price_step_seconds=args.step,
-                                          decision_seconds=decision, previous_gap=args.previous_gap, observations=int(seconds[-1] // args.step),
+    args.output.write_text(json.dumps(dict(schema=2, source=source, price_step_seconds=args.step,
+                                          decision_seconds=decision, history_step_seconds=history_step,
+                                          previous_gap=args.previous_gap, observations=int(seconds[-1] // args.step),
                                           fee_bp=args.cost_bp, grain_bp=args.grain_bp, depth_bp=args.depth_bp,
-                                          rows=rows), indent=2, allow_nan=False) + "\n")
+                                          diagnostics=diagnostics, rows=rows), indent=2, allow_nan=False) + "\n")
 
 
 if __name__ == "__main__":
