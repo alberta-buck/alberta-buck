@@ -944,6 +944,71 @@ python -m alberta_buck.sim.pair_price_study build/research-results/pair-history-
 [[file:../../build/research-results/pair-history-weight-grid.json][Target-weight threshold matrix]] ·
 [[file:../../build/research-results/pair-history-half-hour-grid.json][30-minute history matrix]]
 
+*** Inventory changes, small stalls and slow references
+
+The wheel's completion memo already includes basket BUCK and TOKEN
+balances and pool spot and liquidity. A change invalidates the idle
+memo. The response still requires a caller and is subject to its
+minimum interval, 30 minutes in the study. At a response the facet
+observes pairs, places idle holdings, re-marks the book and records the
+gaps and rates from the resulting plan. A holding change within the
+interval can therefore await a later response even if the wheel now
+rechecks the slot. A useful experiment is an inventory-triggered
+observation that captures current holdings, marks and decision inputs
+without bringing forward trade execution. Check deposit, exit,
+arbitrage credit and same-block repeats. Same-timestamp captures must
+not add urgency or count as fresh rate evidence.
+
+The small-stall arm lowers the live and filtered spread floor to 35
+or 50 bp and offers a small release when outward rate and acceleration
+are within the observer allowance. It retains the ordinary braking
+and closure releases. On repeated 0.5% price divergences with a
+16-day plateau and subsequent reversal, no arm made an eligible
+decision at 25 bp allocation slack. A 0.5% price ratio move is only
+about a 4.5 bp CNST allocation gap from full-range mark elasticity at
+declared weights, before any change in the targets. At 5 bp slack
+and 25 bp-days of patience, the half-tilt arm with a 35 bp spread
+floor made at most two fills at the ordinary grain and lost a small
+amount after fees. Reducing the grain from 2 to 0.25 bp made at most
+six fills. The best gain at 5 bp per leg was below 0.0001 pp over the
+synthetic year. At 30 bp per leg no candidate beat maintenance on
+that tape. The study excludes gas and impact. Keep a sustained
+separation control when testing a longer phase of falling outward
+acceleration. The stall arm tests current acceleration and does
+not estimate its rate of change.
+
+The long-run hypothesis is error correction around a common nominal
+trend. One parsimonious model is a currency inflation trend with a
+different response lag per commodity, a slow commodity-specific real
+price baseline, and a temporary residual. A steady 3% annual trend
+with a two-month versus six-month lag produces about a 1% difference
+in price levels after calibration. It is a change in the inflation
+trend that can produce an expected temporary catch-up. A persistent
+reduction in real production cost can move the slow baseline.
+Relative prices alone cannot identify the cause or the permanence.
+A lag-informed reference would first remove the lag already
+expected from the measured divergence. Any temporary target tilt
+should depend on expected catch-up beyond that reference and the
+cost of acting. A mandate change in long-run weights is a separate
+decision.
+
+=commodity-inflation.py --lag-forecast= fits one lag from zero to
+12 months using data before 2000 and predicts six-month nominal
+price changes on data from 2000 onward. It assumes a one-month CPI
+release delay and projects the trailing 12-month CPI rate beyond
+the observed months. This is a pilot on the vendored CPI history,
+with overlapping forecast windows and without historical vintages.
+Food's fitted five-month lag reduced forecast RMSE from 2.94% to
+2.85%. Construction improved from 5.23% to 5.20%. Labour tied, while
+the other five series worsened slightly. That supports keeping the
+lag term in off-chain research and comparing it with an unchanged
+reference before tying targets to it.
+
+[[https://users.ssc.wisc.edu/~behansen/718/EngleGranger1987.pdf][Engle and Granger on error correction]] ·
+[[https://www.nber.org/papers/w12713][Frankel on commodity price adjustment and monetary shocks]] ·
+[[file:../../build/research-results/commodity-lag-forecast.json][Held-out lag forecasts]] ·
+[[file:../../build/research-results/pair-plateau-plateau-slack5.json][Small-stall matrix]]
+
 ** CNST reversal on a short historical slice
 
 The matched replay used the five historical columns from closes 335

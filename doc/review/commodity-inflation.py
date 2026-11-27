@@ -14,6 +14,7 @@ that window's own trend line. Those are the figures the control lab's
 synthetic commodity profile is calibrated to: a 120-day run stands for a decade.
 
 Run: PYTHONPATH=. python3 doc/review/commodity-inflation.py [--json out.json]
+Use --lag-forecast for the held-out fixed-lag CPI comparison.
 """
 import json
 import math
@@ -73,6 +74,46 @@ def median(values):
     return sorted(values)[len(values) // 2]
 
 
+def lag_forecast(prices, cpi, horizon=6, split_year=2000):
+    """Fixed-lag CPI forecasts, fitted before the split and scored afterwards."""
+    def index(d):
+        return d.year * 12 + d.month - 1
+
+    macro = {index(d): math.log(v) for d, v in cpi.items()}
+    split = split_year * 12
+    rows = {}
+    for name, price in prices.items():
+        log_price = {index(d): math.log(v) for d, v in price.items() if d >= START}
+        train, test = [], []
+        for t, value in sorted(log_price.items()):
+            known = t - 1
+            if t + horizon not in log_price or any(m not in macro for m in range(t - 13, t)):
+                continue
+            rate = (macro[known] - macro[known - 12]) / 12
+
+            def expected_cpi(month):
+                return macro[month] if month <= known else macro[known] + rate * (month - known)
+
+            guesses = [expected_cpi(t + horizon - lag) - expected_cpi(t - lag) for lag in range(13)]
+            result = log_price[t + horizon] - value, guesses
+            if t + horizon < split:
+                train.append(result)
+            elif t >= split:
+                test.append(result)
+        if not train or not test:
+            continue
+
+        def rmse(records, lag):
+            return math.sqrt(sum((actual - forecast[lag]) ** 2 for actual, forecast in records) / len(records))
+
+        # A delay of zero or one month can produce identical forecasts.
+        chosen = min(range(13), key=lambda lag: round(rmse(train, lag), 12))
+        rows[name] = dict(lag_months=chosen, train_months=len(train), test_months=len(test),
+                          no_lag_rmse_pct=100 * rmse(test, 0),
+                          fitted_lag_rmse_pct=100 * rmse(test, chosen))
+    return dict(horizon_months=horizon, split_year=split_year, series=rows)
+
+
 def decades(prices, cpi, window=120, step=12):
     """Per series: medians over rolling ten-year windows, and the median pairwise correlation."""
     real = {name: {d: math.log(p[d] / cpi[d]) for d in p if d >= START and d in cpi} for name, p in prices.items()}
@@ -106,6 +147,9 @@ def decades(prices, cpi, window=120, step=12):
 
 def main(argv):
     prices, cpi, m2 = load()
+    if "--lag-forecast" in argv:
+        print(json.dumps(lag_forecast(prices, cpi), indent=2))
+        return
     rows = {name: describe(p, cpi, m2) for name, p in prices.items()}
     print(f"Real price = log(price / US CPI), monthly, from {START}. Departures are from each series' own trend line.\n")
     print(f"{'series':24s} {'span':>17s} {'real drift':>10s} {'spread':>7s} {'low':>7s} {'high':>7s} {'half-life':>9s} "

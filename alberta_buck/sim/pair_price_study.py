@@ -64,6 +64,15 @@ def motion_rate(rate, change, allowance, release_rate, cap):
 
 
 @njit
+def settling_rate(rate, change, allowance, cap):
+    """A small release when outward motion and acceleration are indistinguishable from a stall."""
+    scale = allowance + FLOOR
+    motion = max(0., 1. - max(0., rate) / scale)
+    quiet = min(1., max(0., 1. - change / (.2 * scale)))
+    return .1 * cap * motion * quiet
+
+
+@njit
 def early_rate(separation, rate, change, allowance, drift_fraction, cap):
     """Additional small release. The acceleration penalty falls as the excess spread widens."""
     drift = RESPONSE / DAY * max(0., rate + allowance + .5 * max(0., change))
@@ -144,20 +153,20 @@ def historical_marks(endpoint, origin, cumulative, spots, step, live):
 
 
 @njit
-def credit_urgency(state, gap, dt, patience, previous_gap):
+def credit_urgency(state, gap, dt, slack, patience, previous_gap):
     old_side = state[2]
-    amount, side = urgency_step(state[1], old_side, gap, dt, SLACK, patience)
+    amount, side = urgency_step(state[1], old_side, gap, dt, slack, patience)
     if previous_gap:
         if side != old_side:
             amount = 0.
         else:
-            amount, _ = urgency_step(state[1], old_side, state[4], dt, SLACK, patience)
+            amount, _ = urgency_step(state[1], old_side, state[4], dt, slack, patience)
     state[1], state[2], state[4] = amount, side, gap
     return amount, side
 
 
 @njit
-def backfill_urgency(endpoint, dt, origin, mark_prev, books, weights, arms, cumulative, spots, step, previous_gap):
+def backfill_urgency(endpoint, dt, origin, mark_prev, books, weights, arms, cumulative, spots, step, slack, previous_gap):
     live = np.empty(len(weights))
     targets = np.empty(len(weights))
     historical_marks(endpoint, origin, cumulative, spots, step, live)
@@ -171,7 +180,7 @@ def backfill_urgency(endpoint, dt, origin, mark_prev, books, weights, arms, cumu
         book = np.sum(books[m, 0])
         target_weights(targets, live, weights, arms[m, 0], DEFAULT_CAP)
         for i in range(len(weights)):
-            credit_urgency(books[m, :, i], books[m, 0, i] / book - targets[i], dt, arms[m, 1], previous_gap)
+            credit_urgency(books[m, :, i], books[m, 0, i] / book - targets[i], dt, slack, arms[m, 1], previous_gap)
     mark_prev[:] = spot
 
 
@@ -214,6 +223,10 @@ def synthetic(tape, days, step):
     stagger = np.arange(len(SYMBOLS))
     if tape == "cycle":
         logs = .10 * np.sin(time[:, None] * 2 * np.pi / (27 + 13 * stagger) + stagger)
+    elif tape == "plateau":
+        pattern = np.interp(time % 42, [0., 3., 19., 22., 42.], [0., .005, .005, 0., 0.])
+        logs = np.zeros((len(sample), len(SYMBOLS)))
+        logs[:, 1] = -pattern
     else:
         logs = np.zeros((len(sample), len(SYMBOLS)))
         logs[:, 1] = -.22 * np.clip((time - 25) / 12, 0, 1)
@@ -227,7 +240,7 @@ def synthetic(tape, days, step):
 @njit
 def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, errors, hour_open, roughness,
                    weights, arms, first, step, schedule, clock, observer, last_cumulative, cumulative, spots,
-                   history, history_step, history_urgency, previous_gap, cost, grain, depth):
+                   history, history_step, history_urgency, previous_gap, slack, cost, grain, depth):
     response = RESPONSE / DAY
     hour = 3600 // step
     rough_gain = 1 - math.exp(-1 / (24 * 30))
@@ -273,7 +286,7 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
                                  track, errors, observer, changes)
                 if history_urgency and cutoff > urgency_at:
                     backfill_urgency(cutoff, (cutoff - urgency_at) * step / DAY, origin, mark_prev, books,
-                                     weights, arms, cumulative, spots, step, previous_gap)
+                                     weights, arms, cumulative, spots, step, slack, previous_gap)
                     urgency_at = cutoff
             endpoint = (cutoff // history_step + 1) * history_step
             while endpoint < index:
@@ -281,7 +294,7 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
                                  track, errors, observer, changes)
                 if history_urgency and endpoint > urgency_at:
                     backfill_urgency(endpoint, (endpoint - urgency_at) * step / DAY, origin, mark_prev, books,
-                                     weights, arms, cumulative, spots, step, previous_gap)
+                                     weights, arms, cumulative, spots, step, slack, previous_gap)
                     urgency_at = endpoint
                 endpoint += history_step
         ready, obs_dt = observe_interval(index, step, last_cumulative, cumulative[slot],
@@ -300,7 +313,7 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
             # Price elasticity of a full-range LP mark in the basket numeraire.
             factors[i] = math.exp(.5 * (current[i] - mark_prev[i] - movement))
         for m in range(len(arms)):
-            tilt, patience, drift_fraction, adaptive, brake_width, wide_threshold, weight_basis = arms[m]
+            tilt, patience, drift_fraction, adaptive, brake_width, wide_threshold, weight_basis, settle_floor = arms[m]
             holdings = books[m, 0]
             book = 0.
             for i in range(n):
@@ -319,7 +332,7 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
                         spot = current[i] - current[j] - anchor
                         sign = 1. if filtered > 0 else -1.
                         separation = min(sign * filtered, sign * spot)
-                        if separation > SEPARATION:
+                        if separation > (settle_floor if settle_floor else SEPARATION):
                             speed = sign * (track[1, i] - track[1, j])
                             change = sign * (changes[i] - changes[j]) * response / obs_dt
                             allowance = (FLOOR + errors[p, 0] / response
@@ -334,6 +347,8 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
                             desire = (spread_braking_rate(easing_spread, speed, change, allowance, brake_width,
                                                           wide_threshold, RELEASE, maximum)
                                       if brake_width > 0 else max(base, early))
+                            if settle_floor:
+                                desire = max(base, settling_rate(speed, change, allowance, maximum))
                             # Two columns would duplicate the peer scan. A pair
                             # can direct a sale on the high side and a buy on the low side.
                             if sign * (holdings[i] - targets[i] * book) > 0:
@@ -345,7 +360,7 @@ def simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, e
                         p += 1
             for i in range(n):
                 gap = holdings[i] / book - targets[i]
-                next_urgency, side = credit_urgency(books[m, :, i], gap, urgency_dt, patience, previous_gap)
+                next_urgency, side = credit_urgency(books[m, :, i], gap, urgency_dt, slack, patience, previous_gap)
                 leash = abs(holdings[i] / book - weights[i]) > LEASH * weights[i]
                 rate = rates[i] / (1 - weights[i])
                 eligible = ready and patience > 0 and next_urgency >= patience
@@ -409,7 +424,7 @@ STEP_CAP = .05
 
 
 def replay(seconds, log_prices, arms, step, decision, noise_bp, seed, cost_bp, grain_bp, depth_bp,
-           previous_gap=False, history=0, history_step=None, history_urgency=False):
+           previous_gap=False, history=0, history_step=None, history_urgency=False, slack=SLACK):
     n = len(WEIGHTS)
     origin = log_prices[0]
     prev, mark_prev = origin.copy(), origin.copy()
@@ -437,7 +452,7 @@ def replay(seconds, log_prices, arms, step, decision, noise_bp, seed, cost_bp, g
     for prices in bridge_chunks(seconds, log_prices, step, noise_bp, seed):
         simulate_chunk(prices, origin, prev, mark_prev, books, cash, stats, track, errors, hour_open, roughness,
                        WEIGHTS, arms, first, step, schedule, clock, observer, last_cumulative, cumulative, spots,
-                       history_blocks, (history_step or step) // step, history_urgency, previous_gap, cost_bp / 10_000, grain_bp / 10_000, depth_bp / 10_000)
+                       history_blocks, (history_step or step) // step, history_urgency, previous_gap, slack, cost_bp / 10_000, grain_bp / 10_000, depth_bp / 10_000)
         first += len(prices)
     end_move = log_prices[-1] - mark_prev
     factors = np.exp(.5 * (end_move - WEIGHTS @ end_move))
@@ -451,7 +466,7 @@ def replay(seconds, log_prices, arms, step, decision, noise_bp, seed, cost_bp, g
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("output", type=Path)
-    p.add_argument("--tape", choices=("long", "cycle", "temporary", "permanent"), default="long")
+    p.add_argument("--tape", choices=("long", "cycle", "plateau", "temporary", "permanent"), default="long")
     p.add_argument("--csv", type=Path, help="raw external CSV with timestamp and five symbol columns")
     p.add_argument("--days", type=int, help="use the trailing N days of anchors or a synthetic duration")
     p.add_argument("--step", type=int, default=12, help="price observation cadence, seconds")
@@ -472,6 +487,10 @@ def main(argv=None):
                    help="inward rate change as a fraction of allowance required at wide separation")
     p.add_argument("--brake-basis", choices=("price", "weight"), nargs="+", default=["price"],
                    help="ease the braking threshold by price spread or target-relative allocation ratio")
+    p.add_argument("--settled-spread-bp", type=float, nargs="+", default=[0.],
+                   help="floor for small stall releases with ordinary closing retained, zero disables this variant")
+    p.add_argument("--slack-bp", type=float, default=SLACK * 10_000,
+                   help="allocation-gap slack, applies to all arms in the run")
     p.add_argument("--adaptive", type=float, nargs="+", default=[0., 1.], help="additional slow noise allowance weight")
     p.add_argument("--previous-gap", action="store_true", help="accrue using the previous observed gap")
     p.add_argument("--cost-bp", type=float, default=30.)
@@ -493,7 +512,7 @@ def main(argv=None):
     if min(args.patience) <= 0 or not all(
             math.isfinite(x) and x >= 0 for x in
             [*args.noise_bp, *args.tilt, *args.patience, *args.outward, *args.adaptive, *args.brake_spread,
-             args.cost_bp, args.grain_bp, args.depth_bp]):
+             *args.settled_spread_bp, args.slack_bp, args.cost_bp, args.grain_bp, args.depth_bp]):
         p.error("study parameters must be finite and nonnegative, with positive patience")
     if max(args.tilt) > 1 or args.cost_bp >= 10_000:
         p.error("tilt must be at most one and cost must be less than 10000 bp")
@@ -516,15 +535,16 @@ def main(argv=None):
     else:
         seconds, logs = synthetic(args.tape, args.days or 120, max(args.step, 3600))
         source = {"kind": args.tape, "anchors": len(seconds)}
-    production = (DEFAULTS["tilt"], DEFAULTS["patience"], 0., 0., 0., 0., 0.)
-    base = (DEFAULTS["tilt"], 0., 0., 0., 0., 0., 0.)
-    motion_variants = [(d, 0., 0., 0.) for d in [0., *args.outward]]
-    motion_variants += [(0., width, threshold, float(basis == "weight")) for width, threshold, basis in
+    production = (DEFAULTS["tilt"], DEFAULTS["patience"], 0., 0., 0., 0., 0., 0.)
+    base = (DEFAULTS["tilt"], 0., 0., 0., 0., 0., 0., 0.)
+    motion_variants = [(d, 0., 0., 0., 0.) for d in [0., *args.outward]]
+    motion_variants += [(0., width, threshold, float(basis == "weight"), 0.) for width, threshold, basis in
                         itertools.product(args.brake_spread, args.wide_brake, args.brake_basis) if width > 0]
-    treatments = [(t, p / 10_000, drift, a, width, threshold, basis)
-                  for t, p, a, (drift, width, threshold, basis) in
+    motion_variants += [(0., 0., 0., 0., floor / 10_000) for floor in args.settled_spread_bp if floor > 0]
+    treatments = [(t, p / 10_000, drift, a, width, threshold, basis, floor)
+                  for t, p, a, (drift, width, threshold, basis, floor) in
                   itertools.product(args.tilt, args.patience, args.adaptive, motion_variants)]
-    controls = [(tilt, 0., 0., 0., 0., 0., 0.) for tilt in args.tilt]
+    controls = [(tilt, 0., 0., 0., 0., 0., 0., 0.) for tilt in args.tilt]
     arms = np.array(list(dict.fromkeys([base, production, *controls, *treatments])))
     maintenance = {arm[0]: i for i, arm in enumerate(arms) if arm[1] == 0.}
     rows, diagnostics = [], []
@@ -534,7 +554,7 @@ def main(argv=None):
     for (noise, seed), (window, fill_urgency) in itertools.product(groups, history_modes):
         marks, stats, state = replay(seconds, logs, arms, args.step, decision, noise, seed,
                                      args.cost_bp, args.grain_bp, args.depth_bp, args.previous_gap,
-                                     window, history_step, fill_urgency)
+                                     window, history_step, fill_urgency, args.slack_bp / 10_000)
         group = dict(noise_bp=noise, seed=seed, history_seconds=window, history_urgency=fill_urgency)
         diagnostics.append(dict(**group, **state))
         for index, (arm, mark, stat) in enumerate(zip(arms, marks, stats, strict=True)):
@@ -542,7 +562,7 @@ def main(argv=None):
                              tilt=arm[0], patience_bp_days=arm[1] * 10_000,
                              outward_drift_fraction=arm[2], adaptive_noise=arm[3],
                              brake_spread=arm[4], wide_brake=arm[5],
-                             brake_basis=("weight" if arm[6] else "price") if arm[4] else None, **group,
+                             brake_basis=("weight" if arm[6] else "price") if arm[4] else None, settled_spread_bp=arm[7] * 10_000, **group,
                              net_return_pct=100 * (mark - 1), vs_maintenance_pp=100 * (mark - marks[maintenance[arm[0]]]),
                              vs_production_pp=100 * (mark - marks[1]), trades=int(stat[0]), discretionary_fills=int(stat[8]),
                              turnover_pct=100 * stat[1], cost_pct=100 * stat[2],
@@ -554,7 +574,7 @@ def main(argv=None):
     args.output.write_text(json.dumps(dict(schema=2, source=source, price_step_seconds=args.step,
                                           decision_seconds=decision, history_step_seconds=history_step,
                                           previous_gap=args.previous_gap, observations=int(seconds[-1] // args.step),
-                                          fee_bp=args.cost_bp, grain_bp=args.grain_bp, depth_bp=args.depth_bp,
+                                          fee_bp=args.cost_bp, slack_bp=args.slack_bp, grain_bp=args.grain_bp, depth_bp=args.depth_bp,
                                           diagnostics=diagnostics, rows=rows), indent=2, allow_nan=False) + "\n")
 
 

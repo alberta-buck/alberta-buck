@@ -378,6 +378,20 @@ realized receipt returns, drawdown, parity and gross execution costs.
   urgency reconstruction also needs a plan for inventory changes
   between calls. Keep the production closing branch as a separate
   comparison when retesting the separation-dependent trigger.
+- [ ] Test whether an inventory-triggered observation adds evidence
+  before the next scheduled response. Cover deposits, exits, wheel
+  movements and arbitrage credits. Capture the resulting holdings,
+  live marks and decision inputs while preserving the trade cooldown
+  and zero elapsed-time accrual on same-timestamp calls.
+- [X] Test a quiet-release arm on repeated 0.5% relative-price
+  plateaus with a lower price floor, slack, patience, grain and fee
+  comparisons. Document the gate and net outcome alongside the
+  initial held-out CPI lag test.
+- [ ] Compare fixed reference, externally anchored delayed
+  inflation reference and bounded residual-based tilt on held-out
+  regimes. Keep temporary catch-up and permanent changes in real
+  cost as distinct scenarios. Benchmark the lag forecast against
+  simpler controls before using it to set targets.
 - [ ] Verify simulated urgency and release against a contract trace
   with deliberately uneven timestamps before selecting production
   parameters. Score timestamped fills and time-in-market alongside
