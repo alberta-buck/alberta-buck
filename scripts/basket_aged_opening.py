@@ -146,8 +146,8 @@ def apply_aged_opening(d, aged_days, passive_buck, passive_holders, seed, *, aft
 def aged_opening(aged_days, passive_buck, passive_holders, *, seed=41404, after_age=None):
     """Install only around sequential fresh worlds in a dedicated study worker.
 
-    Snapshotter is constructed after deployment and pool bootstrap. The
-    normal loop chooses its opening timestamps afterward from the aged EVM.
+    The caller applies the aging before the shared startup, if enabled.
+    Legacy experiments apply it while constructing the Snapshotter.
     Ordinary household decisions and live price shocks start at the new
     day zero. During the opening pause, all outstanding BUCK contributes to
     global fund accrual. Settling named wallets does not credit the fund again.
@@ -155,16 +155,19 @@ def aged_opening(aged_days, passive_buck, passive_holders, *, seed=41404, after_
     snapshotter = loop.Snapshotter
     audits = []
 
+    def bootstrap(deployment):
+        audits.append(apply_aged_opening(deployment, aged_days, passive_buck, passive_holders, seed,
+                                         after_age=after_age))
+
     class AgedSnapshotter(snapshotter):
         def __init__(self, deployment, scenario):
-            audit = apply_aged_opening(deployment, aged_days, passive_buck, passive_holders, seed,
-                                       after_age=after_age)
+            if not scenario.startup_days:
+                bootstrap(deployment)
             super().__init__(deployment, scenario)
-            audits.append(audit)
-            self.meta["aged_opening"] = audit
+            self.meta["aged_opening"] = audits[-1]
 
     loop.Snapshotter = AgedSnapshotter
     try:
-        yield audits
+        yield audits, bootstrap
     finally:
         loop.Snapshotter = snapshotter

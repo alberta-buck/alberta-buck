@@ -177,11 +177,13 @@ def run_cell(folder, ident):
     patient = stock.script("run-basket-patient-holder")
     if tuple(patient.FACETS) != ARMS:
         raise ValueError("patient runner arm order changed")
+    startup_days = experiment.load(frozen).scenario.get("startup_days", 0)
     with aged_opening(cell["age_days"], design["passive_buck"], design["passive_holders"],
-                      seed=cell["seed"], after_age=direct) as audits:
+                      seed=cell["seed"], after_age=direct) as (audits, bootstrap):
         pair = patient.run_pair(experiment_path=frozen, days=cell["days"], warmup_days=WARMUP,
                                 settings=settings, price_files=files, on_day_start=on_start, on_frame=on_frame,
-                                record_root=runs, run_id=cell["run_prefix"])
+                                record_root=runs, run_id=cell["run_prefix"],
+                                fund_opening=bootstrap if startup_days else None)
     if len(audits) != 2 or audits[0] != audits[1]:
         raise ValueError("matched arms had different aged bootstrap ledgers")
     for arm in ARMS:
