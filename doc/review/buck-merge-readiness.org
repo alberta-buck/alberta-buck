@@ -980,9 +980,14 @@ supervisor are saved alongside the rerun manifests.
 The warmed rerun queue and the 18 remaining old pair workers
 were stopped by request before changing the treasury fee basis.
 The 36 affected run records retain their recorded closes, with
-their manifests marked stopped. The 32 replacement pairs are ready at
-=build/sim/stock-demurrage-basis-9a43ec23= with the tested artifacts
-and byte-identical tapes. The replacement launcher is idle.
+their manifests marked stopped. On November 27 at 18:37 Pacific,
+=buck-demurrage-stock-9a43ec23.service= launched the 32 replacement
+pairs at =build/sim/stock-demurrage-basis-9a43ec23= with the
+demurrage-adjusted fee artifacts and byte-identical tapes.
+Eight workers started across the six studies and 24 pairs were
+queued. Each worker runs its active arm and then maintenance.
+All eight initial arms recorded day zero after the fixed-price startup.
+The dashboard records are under the campaign's =runs/= directory.
 =withdrawalBasis(id)= reports the
 remaining receipt value benchmarked against holding Ordinary BUCK.
 New deposits start at their own timestamps. Top-ups age the
