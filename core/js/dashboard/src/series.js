@@ -129,30 +129,28 @@ const shareMark = (f) => {
   const shares = basket?.ownership?.closing?.total_shares ?? basket?.treasury?.total_shares;
   return shares != null && Number(shares) === 0 ? null : num(basket?.share_price);
 };
-const observedShare = (frames) => frames.find((f) =>
-  shareMark(f) > 0 && (f.basket?.equity == null || Number(f.basket.equity) > 0));
-const shareReturn = (f, first) => first && f.day >= first.day
-  ? returnPct(shareMark(f), shareMark(first)) : null;
+export const startupShareMark = (f) => Number(f?.startup?.share_price) > 0 ? Number(f.startup.share_price) : null;
 
 function shareHistory(frames) {
-  const first = observedShare(frames);
+  const first = frames.find((f) => startupShareMark(f) !== null
+    || (shareMark(f) > 0 && (f.basket?.equity == null || Number(f.basket.equity) > 0)));
   const closes = new Map();
   if (first) {
     for (const frame of frames) {
       if (frame.day >= first.day) closes.set(frame.day, shareMark(frame));
     }
   }
-  return { first, closes };
+  return { first, closes, basis: startupShareMark(first) ?? (first && shareMark(first)) };
 }
 
-function meanShareReturn(day, { first, closes }) {
+function meanShareReturn(day, { basis, closes }) {
   let total = 0;
   for (let offset = 0; offset < 7; offset++) {
     const mark = closes.get(day - offset);
     if (mark == null) return null;
     total += mark;
   }
-  return returnPct(total / 7, shareMark(first));
+  return returnPct(total / 7, basis);
 }
 
 function householdPosition(f) {
@@ -215,10 +213,10 @@ const OWNERSHIP_CHARTS = [
 export const BASKET = (tokens = []) => [
   {
     id: "share-return", title: "Cumulative basket share return in BUCK", unit: "pct", kind: "line", reference: 0,
-    note: "Both returns use the first funded close as their baseline. The 7-day mean uses seven consecutive daily marks. Returns include changes in portfolio valuation and precede redemption costs and the treasury cut.",
+    note: "Both returns use the post-warmup mark when recorded, or the first funded close. The 7-day mean uses seven consecutive daily marks. Returns include changes in portfolio valuation and precede redemption costs and the treasury cut.",
     baseline: shareHistory,
     series: [
-      { key: "share", label: "Closing mark", value: (f, _i, _frames, history) => shareReturn(f, history.first) },
+      { key: "share", label: "Closing mark", value: (f, _i, _frames, history) => returnPct(history.closes.get(f.day), history.basis) },
       { key: "mean", label: "7-day mean", value: (f, _i, _frames, history) => meanShareReturn(f.day, history) },
     ],
   },
@@ -408,9 +406,10 @@ export function tabTiles(id, frames) {
     const { basis, mark } = householdPosition(f);
     const history = shareHistory(frames);
     const meanReturn = meanShareReturn(f.day, history);
-    const period = history.first ? `Day ${history.first.day} to ${f.day}` : undefined;
+    const period = startupShareMark(history.first) !== null ? `After startup to day ${f.day}`
+      : history.first ? `Day ${history.first.day} to ${f.day}` : undefined;
     return [
-      { id: "share-return", label: "Cumulative share return", value: meanReturn ?? shareReturn(f, history.first), unit: "pct",
+      { id: "share-return", label: "Cumulative share return", value: meanReturn ?? returnPct(history.closes.get(f.day), history.basis), unit: "pct",
         detail: period ? `${period} · ${meanReturn == null ? "closing mark" : "7-day mean"}` : undefined },
       { id: "household-at-risk", label: "Household capital at risk", value: buck(basis), unit: "buck" },
       { id: "household-net-mark", label: "Household net mark", value: buck(mark), unit: "buck" },

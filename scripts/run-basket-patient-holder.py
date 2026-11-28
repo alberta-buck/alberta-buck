@@ -130,7 +130,7 @@ def decision_stage(decision, arm):
 
 
 def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on_day_start, on_frame, recorder,
-           trace_days=None, trace_peers=False, expected_daily=None):
+           trace_days=None, trace_peers=False, expected_daily=None, fund_opening=None):
     exp = experiment.load(experiment_path, sets=settings)
     if exp.cfg.get("machine", {}).get("upkeep", "BasketUpkeepFacet") != "BasketUpkeepFacet":
         raise ValueError("the shared prefix requires ordinary BasketUpkeepFacet upkeep")
@@ -160,6 +160,8 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
         day_now = day
         owners_start(day, d, agents, counters)
         if day == 0:
+            if fund_opening is not None and not scenario.startup_days:
+                fund_opening(d)
             cohort.update({a.member: a for a in agents if getattr(a, "investor", False)
                            and a.arrive_day == 0 and not a.lifecycle})
             if not cohort:
@@ -281,7 +283,8 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
     try:
         with TemporaryDirectory(prefix="basket-patient-identity-") as cache, PyrevmAnvil(code_size_limit=65536) as backend:
             identity._CACHE_PATH = Path(cache) / "registry.json"
-            run(scenario, backend, on_day_start=start, on_frame=capture_frame, recorder=run_recorder)
+            startup = {"on_startup": fund_opening} if scenario.startup_days and fund_opening is not None else {}
+            run(scenario, backend, on_day_start=start, on_frame=capture_frame, recorder=run_recorder, **startup)
     finally:
         identity._CACHE_PATH = previous_cache
 
@@ -306,7 +309,8 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
 
 
 def run_pair(*, experiment_path=DEFAULT_EXPERIMENT, days, warmup_days, settings=(), price_files=(),
-             on_day_start=None, on_frame=None, record_root=None, run_id=None, trace_days=None, trace_peers=False):
+             on_day_start=None, on_frame=None, record_root=None, run_id=None, trace_days=None,
+             trace_peers=False, fund_opening=None):
     """Run sequential arms. Hooks are called on the normal sim clock in each arm."""
     if not 1 <= warmup_days < days:
         raise ValueError("need at least one warmup day and one treatment day")
@@ -318,7 +322,7 @@ def run_pair(*, experiment_path=DEFAULT_EXPERIMENT, days, warmup_days, settings=
         raise ValueError("peer traces require a decision trace window")
     run_arm = partial(replay, experiment_path=experiment_path, days=days, warmup_days=warmup_days,
                       settings=settings, price_files=price_files, on_day_start=on_day_start, on_frame=on_frame,
-                      trace_days=trace_days, trace_peers=trace_peers)
+                      trace_days=trace_days, trace_peers=trace_peers, fund_opening=fund_opening)
     recorders = {}
     try:
         arms = {}
@@ -370,15 +374,14 @@ def main():
         parser.error("--opening-jubilee must be nonnegative")
     endowment = []
 
-    def opening(day, deployment, _agents, _counters):
-        if day == 0:
-            from basket_jubilee_endowment import apply_opening_endowment
-            endowment.append(apply_opening_endowment(deployment, args.opening_jubilee))
+    def opening(deployment):
+        from basket_jubilee_endowment import apply_opening_endowment
+        endowment.append(apply_opening_endowment(deployment, args.opening_jubilee))
 
     data = run_pair(experiment_path=args.experiment, days=args.days, warmup_days=args.warmup_days,
                     settings=args.settings, price_files=args.price_file, record_root=args.record_root, run_id=args.run_id,
                     trace_days=args.trace_days, trace_peers=args.trace_peers,
-                    on_day_start=opening if args.opening_jubilee else None)
+                    fund_opening=opening if args.opening_jubilee else None)
     if args.opening_jubilee:
         if len(endowment) != 2 or endowment[0] != endowment[1]:
             raise ValueError("opening Jubilee funding differed between arms")

@@ -91,6 +91,10 @@ test("ROI keeps first-close and explicit treatment baselines distinct, and missi
   const treatment = specs([run]).find((s) => s.id === 'treatment-roi').series[0];
   assert.equal(treatment.value(merge([run])[0]), null);
   assert.ok(Math.abs(treatment.value(merge([run])[2]) - h.treatment_roi) < 1e-9);
+  const started = { ...run, frames: [{ ...frames[0], startup: { share_price: 0.8 } }, ...frames.slice(1)] };
+  const share = specs([started]).find((s) => s.id === "share-roi").series[0];
+  assert.equal(headline(started.frames, started).share_roi, 62.5);
+  assert.equal(share.value(merge([started])[0]), 25);
   assert.deepEqual(clipFrames(frames, 1).map((f) => f.day), [0,1]);
   assert.equal(frames.length, 3, 'clipping does not mutate cached frames');
 });

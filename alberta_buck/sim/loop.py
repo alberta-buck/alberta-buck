@@ -7,7 +7,7 @@ import random
 from alberta_buck.sim import identity as idmod
 from alberta_buck.sim import acts as acts_mod
 from alberta_buck.sim import rng as _rng_mod
-from alberta_buck.sim.agents import REGISTRY, MarketMakerWhale
+from alberta_buck.sim.agents import REGISTRY, AnonymousArbAgent, MarketMakerWhale, TokenAccumulatorAgent
 from alberta_buck.sim.chain import Chain
 from alberta_buck.sim.deploy import deploy, REDEEMED_TOPIC
 import alberta_buck.sim.rebalancer  # noqa: F401  triggers @_register
@@ -21,7 +21,7 @@ from alberta_buck.sim.direct_mint import (
     BootstrapDMAgent, DirectMintAgent, DirectMintBuckAgent,
 )
 from alberta_buck.sim.snapshot import Snapshotter
-from alberta_buck.sim.timeline import tick_timestamp
+from alberta_buck.sim.timeline import DAY_SECONDS, tick_timestamp
 from alberta_buck.sim.markout import MarkoutLedger, PoolProbe, actor_tag  # WP-1
 import alberta_buck.sim.undertaking_agents  # noqa: F401  WP-2
 import alberta_buck.sim.facility_agent  # noqa: F401  triggers @_register  WP-6
@@ -67,9 +67,62 @@ def settle_wheel(d, ctr=None) -> bool:
     return settled
 
 
+def warm_start(d, anvil, scenario, whales, agents, days):
+    """Age the funded economy, then allow arbitrage and scheduled reserve work at the opening prices."""
+    if d.wheel is None or not whales or not d.basket.functions.totalShares().call():
+        raise ValueError("startup warmup requires a funded basket, work wheel and MarketMakerWhale")
+    from alberta_buck.sim.gauge import pool_state
+    pools = [*d.pool_usdc, *d.pool_buck, d.pool_ub]
+    if any(not pool or pool_state(d.chain, pool)[2] == 0 for pool in pools):
+        raise ValueError("startup warmup requires funded TOKEN/USDC, TOKEN/BUCK and BUCK/USDC pools")
+
+    b, buck = d.basket.functions, d.buck.functions
+    fund = d.net_stack.fund.functions
+
+    def fund_receipt_shares():
+        receipt = fund.positionId().call()
+        return int(b.holdings(receipt).call()[0]) if receipt else 0
+
+    def advance(seconds):
+        anvil.warp_to(d.w3.eth.get_block("latest")["timestamp"] + seconds)
+        d.chain.clear_balance_cache()
+
+    opening = d.w3.eth.get_block("latest")
+    cash_before = buck.fundBalancesScaled().call()[1]
+    fund_shares_before = fund_receipt_shares()
+    advance(days * DAY_SECONDS)
+    cash_accrued = buck.fundBalancesScaled().call()[1]
+    prices = [scenario.prices.ref(i, 0) for i in range(len(d.tokens))]
+    counts = {"cycleTrades": 0, "directTrades": 0, "ubTrades": 0, "day": 0, "refUsd": prices}
+    commodity_arbs = (AnonymousArbAgent, TokenAccumulatorAgent)
+    arbs = [agent for agent in agents if isinstance(agent, commodity_arbs)]
+    work = []
+    for round_index in range(3):
+        for whale in whales:
+            for i in range(len(d.tokens)):
+                whale.snap(d, scenario, 0, i, counts)
+        for agent in arbs:
+            agent.act(d, scenario, 0, round_index, counts)
+        work.append(turn_wheel(d, rounds=2))
+        if round_index < 2:
+            # Jubilee's first pass observes excess. Each later pass gets a
+            # full one-day reserve half-life and fresh oracle observations.
+            advance(DAY_SECONDS)
+    advance(int(b.twapWindow().call()))
+    closing = d.w3.eth.get_block("latest")
+    return dict(days=days, start_block=opening["number"], end_block=closing["number"],
+                elapsed_seconds=closing["timestamp"] - opening["timestamp"], reference_usd=prices,
+                fund_cash_before_scaled=str(cash_before), fund_cash_accrued_scaled=str(cash_accrued),
+                fund_cash_after_scaled=str(buck.fundBalancesScaled().call()[1]),
+                fund_shares_before=str(fund_shares_before), fund_shares_after=str(fund_receipt_shares()),
+                work=work, cycle_trades=counts["cycleTrades"], direct_trades=counts["directTrades"],
+                share_price=int(b.sharePrice().call()))
+
+
 def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machine",
         on_day_start=None, on_frame=None,
-        controller_impl="direct", recorder=None, on_boot=None, journal=None, on_bootstrap=None) -> dict:
+        controller_impl="direct", recorder=None, on_boot=None, journal=None, on_bootstrap=None,
+        on_startup=None) -> dict:
     """on_boot(d): read the bootstrapped world before any daily activity.
     on_day_start(day, d, agents, ctr): a mutation window before the
     day's ticks (the sim server applies population/knob controls here).
@@ -78,7 +131,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     recorder: a runrecord.RunRecorder, opened here and fed every captured
     day; the caller closes it (complete or failed).
     journal: optional chain transaction journal, owned by the caller.
-    on_bootstrap(d): called after agent setup, before the opening deposits."""
+    on_bootstrap(d): called after agent setup, before the opening deposits.
+    on_startup(d): called after seed liquidity is placed, before demurrage accrual."""
     from alberta_buck.sim import report
     out_path = report.output_path(out_path, scenario.days)
     if out_path and scenario.days >= report.FIVE_YEARS:
@@ -168,6 +222,14 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     if verbose and ctr.get("dmEntries", 0) > 0:
         print(f"[sim] bootstrap: {ctr['dmEntries']} DM deposits seeded "
               f"basket pools before tick 0", flush=True)
+
+    if on_startup is not None:
+        on_startup(d)
+    startup_days = getattr(scenario, "startup_days", 0)
+    startup = warm_start(d, anvil, scenario, whales, agents, startup_days) if startup_days else None
+    if startup is not None and verbose:
+        print(f"[sim] startup: aged {startup_days} days, then opened at fixed commodity prices"
+              f" with wheel work {startup['work']}", flush=True)
 
     # --- experiment: price overlay + scripted interventions ---------- #
     # When an Experiment is attached, wrap the price source so price_shock
@@ -333,6 +395,8 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
             pass
         snap.capture(day, ctr, agents, init_val, reb_init, dm_init,
                      ledger=ledger)
+        if day == 0 and startup is not None:
+            snap.frames[-1]["startup"] = startup
         if recorder is not None:
             recorder.frame(snap.frames[-1], applied=iv.applied if iv is not None else ())
         if on_frame is not None:

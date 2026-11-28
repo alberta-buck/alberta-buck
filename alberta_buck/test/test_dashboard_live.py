@@ -103,6 +103,13 @@ def test_a_live_session_is_steered_recorded_and_exported(tmp_path):
         _wait(lambda: (s := call(f"/api/sessions/{sid}"))["paused"] and s["day"] >= 2)
         frames = call(f"/api/runs/{run}/frames")
         assert [f["day"] for f in frames] == [0, 1] and frames[-1]["population"]["roles"]["saver"]["arrived"] == 7
+        startup = frames[0]["startup"]
+        assert startup["days"] == 7
+        assert startup["reference_usd"] == [round(t["ref_usd"] * 10**6) for t in frames[0]["market"]["tokens"]]
+        assert int(startup["fund_cash_accrued_scaled"]) > int(startup["fund_cash_before_scaled"])
+        assert int(startup["fund_shares_after"]) > int(startup["fund_shares_before"])
+        assert startup["end_block"] < frames[0]["block"]
+        assert startup["share_price"] > 0 and "startup" not in frames[1]
 
         exported = call(f"/api/sessions/{sid}/experiment")
         cfg = tomllib.loads(exported)

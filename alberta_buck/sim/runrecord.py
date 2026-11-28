@@ -149,9 +149,11 @@ def frame_record(flat: dict, tokens) -> dict:
         treasury["treasury"] = dict(shares=str(shares), total_shares=str(total),
                                     mark=shares * int(flat["eq_equity"]) // total if total else 0)
     position = jubilee.get("position") or {}
+    startup = flat.get("startup")
     return _jsonable({
         "day": flat["day"],
         "block": net.get("block"),
+        **({"startup": {**startup, "share_price": _ratio(startup["share_price"])}} if startup is not None else {}),
         "control": dict(k=_ratio(flat.get("buckK")), bvib=_ratio(flat.get("basketVal")),
                         bvib_nominal=_ratio(flat.get("basketValNominal")),
                         bvib_usdc=_ratio(flat.get("eq_book_usdc")) or None,

@@ -8,7 +8,7 @@
 // CompareTab at the end is the page's.
 
 import { TimeChart } from "./chart.js";
-import { RAW, format } from "./series.js";
+import { RAW, format, startupShareMark } from "./series.js";
 
 export const MAX_RUNS = 6;     // one categorical hue per run, never cycled: more values, fewer at once
 
@@ -99,6 +99,7 @@ export function roi(value, baseline) {
   const v = num(value), b = num(baseline);
   return v !== null && b !== null && Number.isFinite(v) && Number.isFinite(b) && b > 0 ? 100 * (v / b - 1) : null;
 }
+const shareBaseline = (f) => startupShareMark(f) ?? f?.basket?.share_price;
 
 // One run's headline figures (compare.py's headline, the ones the table shows).
 export function headline(frames, run = {}) {
@@ -113,14 +114,14 @@ export function headline(frames, run = {}) {
     supply_end: buck(last.supply?.total), lien_end: buck(last.supply?.basket_lien),
     arrived: Object.keys(last.population?.roles ?? {}).length && Object.values(last.population.roles).every((r) => num(r.arrived) !== null) ? Object.values(last.population.roles).reduce((s, r) => s + num(r.arrived), 0) : null,
     refused_days: frames.every((f) => num(f.health?.errors) !== null) ? frames.reduce((s, f) => s + num(f.health.errors), 0) : null,
-    share_roi: roi(last.basket?.share_price, frames[0].basket?.share_price),
+    share_roi: roi(last.basket?.share_price, shareBaseline(frames[0])),
     passive_roi: roi(last.basket?.hold_index, frames[0].basket?.hold_index),
     treatment_roi: run.treatment_day != null && last.day >= run.treatment_day ? roi(last.basket?.share_price, run.baseline_share_price) : null,
   };
 }
 
 export const COLUMNS = [
-  { key: "share_roi", label: "Share return from first close", unit: "pct" },
+  { key: "share_roi", label: "Share return from opening mark", unit: "pct" },
   { key: "passive_roi", label: "Passive return from first close", unit: "pct" },
   { key: "treatment_roi", label: "Share return from pre-switch", unit: "pct" },
   { key: "k_end", label: "K at end", unit: "ratio" }, { key: "k_mean", label: "Mean K", unit: "ratio" },
@@ -178,7 +179,9 @@ export function specs(runs) {
     { id: "share-bid-roi", title: "Share return in USDC at the market BUCK bid", unit: "pct", kind: "line",
       note: "Same-day BUCK share mark multiplied by the recorded market BUCK bid, rebased to the earliest common day with both observations for the available runs. Missing bids stay unavailable. This is a mark, not the proceeds from redeeming and selling a holder position; fees, slippage and exit restrictions are excluded.",
       value: (f, r) => f && commonBid.day !== null && f.day >= commonBid.day ? roi(bidMark(f), commonBid.marks.get(r.id)) : null },
-    { id: "share-roi", title: "Share return from first close", unit: "pct", kind: "line", value: (f, r) => roi(f?.basket?.share_price, r.frames[0]?.basket?.share_price) },
+    { id: "share-roi", title: "Share return from opening mark", unit: "pct", kind: "line",
+      note: "Uses the mark after startup when recorded, or the first close.",
+      value: (f, r) => roi(f?.basket?.share_price, shareBaseline(r.frames[0])) },
     { id: "passive-roi", title: "Passive TOKEN return from first close", unit: "pct", kind: "line", value: (f, r) => roi(f?.basket?.hold_index, r.frames[0]?.basket?.hold_index) },
     { id: "treatment-roi", title: "Share return from pre-switch mark", unit: "pct", kind: "line", value: (f, r) => f?.day >= r.treatment_day ? roi(f?.basket?.share_price, r.baseline_share_price) : null },
   ];

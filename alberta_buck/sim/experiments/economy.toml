@@ -13,6 +13,7 @@ rng = "keyed"
 years = 5.0
 ticks_per_day = 2
 day_step = 1
+startup_days = 7 # let the funded economy accrue demurrage before the opening keeper rounds
 seed = 0xA1BC
 basket = "equity-machine"
 tokens = ["LABR", "CNST", "FOOD", "NRGC", "PAXG"]

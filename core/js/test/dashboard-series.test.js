@@ -176,6 +176,11 @@ test("basket smoothing uses seven consecutive closes and the same baseline as th
   assert.equal(tile.detail, "Day 1 to 8 · 7-day mean");
   const gap = frames.filter((f) => f.day !== 5);
   assert.deepEqual(chartData(chart, gap.slice(-2), gap).series[1].values, [null, null]);
+
+  const started = [ { ...frames[1], startup: { share_price: 0.8 } }, ...frames.slice(2) ];
+  assert.equal(chartData(chart, started).series[0].values[0], 25);
+  const afterStartup = tabTiles("basket", started).find((t) => t.id === "share-return");
+  assert.equal(afterStartup.detail, "After startup to day 8 · 7-day mean");
 });
 
 test("Jubilee surfaces deferred principal when a run actually records it", async () => {

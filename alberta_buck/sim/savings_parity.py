@@ -23,7 +23,8 @@ OPENING_FIELDS = {
 
 def replay_inputs(days, seed):
     """Resolve one price tape and opening cohort for both EVMs."""
-    settings = [f"scenario.days={days}", f"scenario.seed={seed}",
+    # This parity fixture compares the bootstrap shared with WebEVM.
+    settings = [f"scenario.days={days}", f"scenario.seed={seed}", "scenario.startup_days=0",
                 *(f"{POP}.initial_{role}s=1" for role in ("debtor", "saver", "investor"))]
     exp = experiment.load(ECONOMY, settings)
     scenario = experiment.build(exp)

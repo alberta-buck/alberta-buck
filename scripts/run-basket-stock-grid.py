@@ -160,9 +160,8 @@ def run_cell(folder, ident):
     endow = script("basket_jubilee_endowment").apply_opening_endowment
     audit = []
 
-    def opening(day, deployment, agents, counters):
-        if day == 0:
-            audit.append(endow(deployment, cell["endowment_buck"], cash_buck=cell["opening_cash_buck"]))
+    def opening(deployment):
+        audit.append(endow(deployment, cell["endowment_buck"], cash_buck=cell["opening_cash_buck"]))
 
     settings = cell_settings(manifest["experiment"], cell)
     files = [folder / "prices" / name for name in cell["files"]]
@@ -170,7 +169,7 @@ def run_cell(folder, ident):
     prefix = cell["run_prefix"]
     result = patient.run_pair(experiment_path=manifest["experiment"], days=cell["days"],
                               warmup_days=cell["warmup_days"], settings=settings,
-                              price_files=files, on_day_start=opening,
+                              price_files=files, fund_opening=opening,
                               record_root=runs, run_id=prefix)
     if len(audit) != 2 or audit[0] != audit[1]:
         raise ValueError("opening endowments differ between arms")
@@ -257,18 +256,18 @@ def replay_cell(folder, ident, output, window, arm, min_gap_bp, markout_days):
     patient = script("run-basket-patient-holder")
     endow = script("basket_jubilee_endowment").apply_opening_endowment
 
-    def opening(day, deployment, agents, counters):
-        if day == 0:
-            audit = endow(deployment, cell["endowment_buck"], cash_buck=cell["opening_cash_buck"])
-            if audit != archived["endowment_audit"]:
-                raise ValueError("replay opening endowment differs from the archive")
+    def opening(deployment):
+        audit = endow(deployment, cell["endowment_buck"], cash_buck=cell["opening_cash_buck"])
+        if audit != archived["endowment_audit"]:
+            raise ValueError("replay opening endowment differs from the archive")
 
     if len(expected["daily"]) != cell["days"]:
         raise ValueError("archived arm does not cover the cell horizon")
     result = patient.replay(arm, experiment_path=experiment_path, days=last + 1,
                             warmup_days=cell["warmup_days"], settings=cell_settings(experiment_path, cell),
-                            price_files=files, on_day_start=opening, on_frame=None, recorder=None,
-                            trace_days=window, trace_peers=arm == "active", expected_daily=expected["daily"])
+                            price_files=files, on_day_start=None, on_frame=None, recorder=None,
+                            trace_days=window, trace_peers=arm == "active", expected_daily=expected["daily"],
+                            fund_opening=opening)
     if result["opening"] != expected["opening"] or result["switch"]["block"] != expected["switch"]["block"]:
         raise ValueError("replay treatment opening differs from the archive")
     responses = result["decision_trace"]

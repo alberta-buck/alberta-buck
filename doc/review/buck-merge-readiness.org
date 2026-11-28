@@ -61,8 +61,29 @@ records checked had nonzero treasury shares at their most recent
 close. For example, the completed unfunded seed-41404 historical
 active arm marked its treasury at 39.58 BUCK on close 1824.
 
-The share return is cumulative in BUCK from the first funded close.
-The tab plots closing marks and their trailing seven-day mean.
+The Python economy now starts with seeded pools and basket. Research
+Jubilee endowments are applied before startup accrual. The default
+=scenario.startup_days= is seven days in =economy.toml=. The chain
+advances through that period, followed by three rounds. Each round
+pins every TOKEN/USDC pool to the first tape price, then runs the
+commodity arbitrageurs and work wheel. A day passes between
+rounds so Jubilee can observe and invest excess cash on its normal
+reserve schedule. A full oracle window elapses after the last round.
+Household arrivals, day-zero interventions and measurement then
+begin at tape day zero. =scenario.startup_days= can be set to zero
+for the older opening. The separate stock policy warmup still
+sets the treatment-switch day. The WebEVM parity fixture uses the
+shared bootstrap with =startup_days=0= until the startup sequence
+is available in WebEVM.
+
+The first record includes the startup prices, blocks, Jubilee cash
+and shares, wheel work and post-startup share mark. BuckBasket and
+Compare use that mark as the opening measurement when available.
+BuckBasket plots closing marks and their trailing seven-day mean.
+In the two-day economy pilot, Jubilee cash rose from 44 to 9,241 BUCK
+by the first keeper round. The funded smoke replay verified that
+the 2M BUCK Jubilee endowment was in place before accrual and that
+the first measured frame followed the startup rounds.
 The [[file:buck-basket-findings.org::*The early return and day-zero funding][opening analysis]] separates the initial Jubilee relief mark
 from the rise during the common market warmup. Use the pre-switch mark
 in Compare for treatment return. Replay windows with timestamped

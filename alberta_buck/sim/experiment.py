@@ -11,6 +11,7 @@ reproduce the standard macro run):
     years = 5.0           # or start = "2020-07-01" / end = "2025-06-30"
     ticks_per_day = 1
     day_step = 10
+    startup_days = 7      # optional pre-measurement demurrage accrual, with opening prices held fixed
     seed = 0xA1BC
     [scenario.agents]     # count overrides, merged over the defaults
     FatCreditBorrowerAgent = 5
@@ -391,6 +392,9 @@ def build(exp: Experiment):
     if s["days"]:
         sc.days = min(int(s["days"]), sc.prices.days)
     sc.day_step = int(s["day_step"])
+    sc.startup_days = s.get("startup_days", 0)
+    if type(sc.startup_days) is not int or sc.startup_days < 0:
+        raise ValueError("scenario.startup_days must be a nonnegative integer")
     sc.rng_mode = s.get("rng", "")
     sc.experiment = exp
     return sc
