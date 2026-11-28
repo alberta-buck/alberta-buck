@@ -932,3 +932,45 @@ for name in stock-grid-5y stock-5y-balanced stock-5y-working-cash stock-5y-disco
 done
 make basket-study-status BASKET_OUT="$aged_dir/build/sim/aged-5y" BASKET_RUNS="$aged_dir/build/runs"
 #+end_src
+
+** Five-year warm-start rerun, November 27
+
+The dashboard stock directory has 84 records. Of these, 32 are
+completed 730-day runs. The five stock campaigns plan 28
+active/maintenance pairs, or 56 five-year runs. At the check, 16
+runs were finalized, 18 additional runs had recorded close 1824,
+18 were in progress and four had yet to start. The aged campaign
+has four additional finalized pairs, or eight runs.
+
+The 16 finalized stock runs took 27.6 to 53.2 hours each, with a
+39.2-hour median. Each pair worker runs its two arms in sequence.
+A Python profile of the first three measured days on patched
+pyrevm, excluding deployment, startup, record writes and teardown, spent 127 of
+172 seconds in 10,778 Web3 contract reads. Daily snapshots used
+66 seconds, including 41 seconds of household marks. Work-wheel
+calls and household decisions used 41 and 36 seconds,
+respectively. These phase totals overlap the contract-read total.
+Python ABI validation, encoding and formatting dominated the
+calls. Native EVM =message_call= took 12.5 seconds in this sample.
+Profile a steady-state window before extrapolating the breakdown
+to the full five years. The journal patch remains important for
+memory use.
+
+All 32 warmed pairs have frozen manifests under
+=build/sim/stock-warm-start-cb58edd5=. Their tapes and axes were
+checked against the previous manifests, including 40 byte-identical
+commodity CSV pairs. The only resolved experiment
+setting changed was =scenario.startup_days=7=. The pinned worktree
+is =~/src/alberta-buck-warm-stock-cb58edd5= at =cb58edd5= with copied
+artifacts and patched pyrevm. The aged runner applies its directed
+funding and additional age before the common startup. The 365-day,
+2M BUCK smoke replay verified this ordering through its first close.
+
+The user service =buck-warm-stock-cb58edd5.service= queues eight
+parallel workers across the six studies once the host has at least
+45 GiB available RAM and 40 GiB free storage. At submission 18
+existing workers held about 71 GiB of combined RSS, and host
+available RAM was about 12 GiB. The new reports and run records
+will be written under the rerun directory. The old studies
+continue in their frozen locations. The opening profile and
+supervisor are saved alongside the rerun manifests.
