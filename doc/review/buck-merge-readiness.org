@@ -980,8 +980,10 @@ supervisor are saved alongside the rerun manifests.
 The warmed rerun queue and the 18 remaining old pair workers
 were stopped by request before changing the treasury fee basis.
 The 36 affected run records retain their recorded closes, with
-their manifests marked stopped. A fresh campaign must pin artifacts
-built with the revised basis. =withdrawalBasis(id)= reports the
+their manifests marked stopped. The 32 replacement pairs are ready at
+=build/sim/stock-demurrage-basis-9a43ec23= with the tested artifacts
+and byte-identical tapes. The replacement launcher is idle.
+=withdrawalBasis(id)= reports the
 remaining receipt value benchmarked against holding Ordinary BUCK.
 New deposits start at their own timestamps. Top-ups age the
 existing balance before adding fresh BUCK equity, and partial
