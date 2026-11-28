@@ -10,11 +10,14 @@ import { LiveControl } from "./live.js";
 import { ChartTab, OverviewTab } from "./overview.js";
 import { BASKET, JUBILEE, MARKET, runStatus, tabTiles } from "./series.js";
 import { HttpRunSource, compareSource, listRuns } from "./sources.js";
+import { WheelTab } from "./wheel.js";
+import { runLabel, runOptions } from "./run-picker.js";
 
 const POLL_MS = 2000;
 const MANIFEST_MS = 10000;
 const TABS = [
   ["overview", "Overview"], ["market", "Market"], ["basket", "BuckBasket"], ["jubilee", "Jubilee fund"],
+  ["wheel", "Wheel revenue"],
   ["insurers", "Insurers and pools", "Not yet recorded: the frames do not read the insurers' pools"],
   ["agents", "Agents"], ["events", "Events", "Not yet built"], ["compare", "Compare"],
 ];
@@ -85,9 +88,10 @@ function view(id) {
     : id === "market" ? new ChartTab(root, bus, MARKET(tokens, !state.frames.length || state.frames.some((f) => f.market?.pools)),
       (f) => tabTiles("market", f))
       : id === "basket" ? new ChartTab(root, bus, BASKET(tokens), (f) => tabTiles("basket", f))
-        : id === "jubilee" ? new ChartTab(root, bus, JUBILEE(), (f) => tabTiles("jubilee", f))
-          : id === "agents" ? new AgentsTab(root, bus, panel)
-            : id === "compare" ? new CompareTab(root, bus, compareSource()) : null;
+        : id === "wheel" ? new WheelTab(root, bus)
+          : id === "jubilee" ? new ChartTab(root, bus, JUBILEE(), (f) => tabTiles("jubilee", f))
+            : id === "agents" ? new AgentsTab(root, bus, panel)
+              : id === "compare" ? new CompareTab(root, bus, compareSource()) : null;
   return views[id];
 }
 
@@ -138,7 +142,8 @@ function render(switched = false) {
     }
     return;
   }
-  v.update({ frames: state.frames, manifest: state.manifest, interventions: state.interventions, range: state.range });
+  v.update({ frames: state.frames, manifest: state.manifest, interventions: state.interventions, range: state.range,
+    source: state.source });
 }
 
 async function poll() {
@@ -206,6 +211,7 @@ async function open(id) {
     if (!state.control) panel.detach();
     showStatus();
     state.frames = await src.frames(-1);
+    label();
     render(true);
     $("problem").hidden = true;
   } catch (e) {
@@ -219,17 +225,20 @@ async function open(id) {
 // The open run's entry in the picker follows its growth.
 function label() {
   const o = [...$("run").options].find((x) => x.value === state.source?.id);
-  if (o) o.textContent = `${state.source.id} (${effectiveStatus()}, ${state.frames.length} days)`;
+  if (o && state.manifest?.id === state.source.id) {
+    o.textContent = runLabel(state.manifest, effectiveStatus(), state.frames.length);
+  }
 }
 
 async function refreshRuns(select = null) {
-  const runs = await listRuns().catch(() => []);
+  const runs = await listRuns().catch(() => null);
+  if (!runs) return [];
   const pick = $("run");
   const current = select ?? pick.value;
-  pick.replaceChildren(...runs.map((r) => {
+  pick.replaceChildren(...runOptions(runs).map(([id, label]) => {
     const o = document.createElement("option");
-    o.value = r.id;
-    o.textContent = `${r.id} (${runStatus(r)}, ${r.frames ?? 0} days)`;
+    o.value = id;
+    o.textContent = label;
     return o;
   }));
   if (current && runs.some((r) => r.id === current)) pick.value = current;
@@ -261,7 +270,10 @@ async function main() {
     theme(order[(order.indexOf(store.get("dashboard-theme") ?? "auto") + 1) % order.length]);
   });
   tabs();
-  setInterval(() => { if (state.tab === "compare" && views.compare) views.compare.show(true); }, 10000);
+  setInterval(() => {
+    if (state.tab === "compare" && views.compare) views.compare.show(true);
+    refreshRuns().then(label);
+  }, MANIFEST_MS);
   panel = new ControlPanel($("live"));
   newSessionForm($("new-session"), (started) => follow(started));
   for (const b of document.querySelectorAll("#range button")) {

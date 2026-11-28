@@ -106,6 +106,7 @@ library BasketMarketOps {
 
     event BasketArbitrage(uint256 indexed route, uint8 direction, uint256 input,
                          int256 cashReturn, int256 lpReturn, uint256 lpFees, int256 totalReturn);
+    event PriorArbFeesCollected(uint256 indexed route, uint256 fees);
     event ArbBuckFlow(address indexed pool, bool buckInput, uint256 nominal, uint256 netScaled,
                       uint256 basketRatioBefore, uint256 basketRatioAfter,
                       uint256 poolRatioBefore, uint256 poolRatioAfter);
@@ -307,7 +308,8 @@ library BasketMarketOps {
     {
         if (direction > 1 || amount == 0) revert InvalidArbRoute();
         Context memory c = _context(buck, wheel, route);
-        _sync(c, idle);
+        uint256 priorFees = _sync(c, idle);
+        if (priorFees != 0) emit PriorArbFeesCollected(route, priorFees);
         c = _context(buck, wheel, route);
         c.reserveFloor = Math.min(c.reserveFloor, spendableNet(buck) - borrowed);
         Route memory r = _route(c, direction);

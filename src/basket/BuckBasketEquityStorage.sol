@@ -197,6 +197,7 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     // Redeemed (BuckBasketStorage), which the simulation already reads.
     event WalletCredited(address indexed token, uint256 amount);
     event WheelWork(uint8 indexed kind, uint256 indexed i, uint256 amount);
+    event WheelFeesCollected(uint256 indexed pool, uint256 buckNet, uint256 tokenAmount, uint256 tokenMarkBuck);
     event CreditOpened(address indexed credit, uint256 indexed tokenId, uint256 face);
     /// @notice A pro-rata exit's TOKEN, paid in kind.
     event PaidInKind(address indexed to, address indexed token, uint256 amount);

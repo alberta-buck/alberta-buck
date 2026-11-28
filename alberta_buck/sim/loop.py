@@ -22,6 +22,7 @@ from alberta_buck.sim.direct_mint import (
 )
 from alberta_buck.sim.snapshot import Snapshotter
 from alberta_buck.sim.timeline import DAY_SECONDS, tick_timestamp
+from alberta_buck.sim.wheel_revenue import WheelRevenue
 from alberta_buck.sim.markout import MarkoutLedger, PoolProbe, actor_tag  # WP-1
 import alberta_buck.sim.undertaking_agents  # noqa: F401  WP-2
 import alberta_buck.sim.facility_agent  # noqa: F401  triggers @_register  WP-6
@@ -293,10 +294,14 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
     # wrapper below sits on top of it.
     acts_mod.install(d.chain)
     _send = d.chain.send
+    revenue = WheelRevenue(d) if d.wheel is not None and getattr(d, "buck_accounting", "") == "net" else None
 
     def _counting_send(*args, **kw):
         sent[0] += 1
-        return _send(*args, **kw)
+        receipt = _send(*args, **kw)
+        if revenue is not None:
+            revenue.book(receipt)
+        return receipt
     d.chain.send = _counting_send
     chain.send = _counting_send
     for day in range(0, scenario.days, step):
@@ -395,12 +400,16 @@ def run(scenario, anvil, out_path=None, verbose=True, basket_impl="equity-machin
             pass
         snap.capture(day, ctr, agents, init_val, reb_init, dm_init,
                      ledger=ledger)
+        if revenue is not None:
+            snap.frames[-1]["wheel_revenue"], snap.frames[-1]["wheel_operations"] = revenue.close_day()
         if day == 0 and startup is not None:
             snap.frames[-1]["startup"] = startup
         if recorder is not None:
             recorder.frame(snap.frames[-1], applied=iv.applied if iv is not None else ())
         if on_frame is not None:
             on_frame(snap.frames[-1])
+        if revenue is not None:
+            del snap.frames[-1]["wheel_operations"]
         # Incremental checkpoint: flush the vector periodically so a long run
         # killed mid-flight still yields usable partial data (and can be
         # plotted); the final write below still produces the complete vector.

@@ -12,6 +12,7 @@ import {IBasketReference} from "./IBasketReference.sol";
 import {IRebalancePolicy} from "./IRebalancePolicy.sol";
 import {PortfolioMath as PM} from "./PortfolioMath.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @notice The basket's upkeep facet: Daily, Sync(i) and Respond, for a shell
 /// whose credit is marked net (netMark): K bounds the BUCKs the basket has
@@ -136,9 +137,17 @@ contract BasketUpkeepFacet is BasketCreditSetup {
         if (kind == 1) {
             if (i >= constituents.length || liquidityOf[i] == 0 || block.timestamp / 1 days <= lastSyncDay[i]) return 0;
             lastSyncDay[i] = uint64(block.timestamp / 1 days);
+            IBuckNetView cash = IBuckNetView(address(buck));
+            uint256 beforeCash = netAccounting ? cash.netBalanceOf(address(this)) : 0;
             (uint256 t, uint256 b) = _v().positionSync(i);
             idleToken[i] += t;
-            _markS(_snap());
+            Snap memory sn = _snap();
+            if (t != 0 || b != 0) {
+                uint256 received = netAccounting ? sn.cash - beforeCash : b;
+                uint256 tokenMark = Math.mulDiv(t, sn.m[i].pTwap, 10 ** constituents[i].decimals);
+                emit WheelFeesCollected(i, received, t, tokenMark);
+            }
+            _markS(sn);
             emit WheelWork(1, i, b);
             return 1;
         }

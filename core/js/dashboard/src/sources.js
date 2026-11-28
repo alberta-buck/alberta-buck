@@ -55,6 +55,10 @@ export class HttpRunSource {
     return this.get(`events?member=${encodeURIComponent(member)}`);
   }
 
+  wheel(day) {
+    return this.get(`wheel?day=${encodeURIComponent(day)}`);
+  }
+
   get capabilities() {
     const c = this.meta?.capabilities ?? {};
     return { live: this.meta?.status === "running", control: c.control ?? null, agents: !!c.agents, events: !!c.events };

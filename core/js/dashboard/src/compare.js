@@ -9,6 +9,7 @@
 
 import { TimeChart } from "./chart.js";
 import { RAW, format, startupShareMark } from "./series.js";
+import { runOptions } from "./run-picker.js";
 
 export const MAX_RUNS = 6;     // one categorical hue per run, never cycled: more values, fewer at once
 
@@ -327,7 +328,7 @@ export class CompareTab {
       this.question.textContent = [index.question && sentence(index.question), axis?.note ? sentence(`${axis.name}: ${axis.note}`) : null,
         `${index.days ?? "All"} days of ${index.experiment}.`].filter(Boolean).join(" ");
     } else {
-      const opts = this.runList.map((r) => [r.id, r.id]);
+      const opts = runOptions(this.runList);
       controls.push(this.select("Run", opts, st.a, (v) => { st.a = v; this.draw(); }));
       controls.push(this.select("against", opts, st.b, (v) => { st.b = v; this.draw(); }));
       runs = [{ id: st.b, label: "reference" }, { id: st.a, label: "run" }].filter((r) => r.id);

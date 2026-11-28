@@ -22,6 +22,7 @@ interface IBasketArb {
 
     event BasketArbitrage(uint256 indexed route, uint8 direction, uint256 input,
                          int256 cashReturn, int256 lpReturn, uint256 lpFees, int256 totalReturn);
+    event PriorArbFeesCollected(uint256 indexed route, uint256 fees);
     /// @notice Ratios are net/nominal, scaled 1e36. Net transport and all
     /// pre/post fee bases are observable without assigning selectable BUCK lots.
     event ArbBuckFlow(address indexed pool, bool buckInput, uint256 nominal, uint256 netScaled,

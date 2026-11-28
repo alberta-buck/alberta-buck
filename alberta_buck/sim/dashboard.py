@@ -12,6 +12,7 @@ Serves core/js/dashboard/ and a JSON API over a runs directory (alberta_buck.sim
   GET  /api/runs/<id>/agents              each household's latest line (the Agents table)
   GET  /api/runs/<id>/agents?member=<m>   one household's lines, day by day
   GET  /api/runs/<id>/events?member=<m>   one household's state-machine steps
+  GET  /api/runs/<id>/wheel?day=<day>     one day of confirmed wheel revenue and reserve transfers
   GET  /api/comparisons                   every comparison's index (alberta_buck.sim.compare), newest first
   GET  /api/comparisons/<name>            one comparison's index: its axes, which run is which, its summary
 
@@ -120,12 +121,12 @@ class FrameCache:
 
 
 class LineIndex:
-    """A JSON Lines file's lines grouped by member, as byte ranges, extended from the last whole line;
-    and each member's latest line. One household's history is read without loading the whole file."""
+    """Index complete JSON Lines by group and read only the requested group's byte ranges."""
 
-    def __init__(self):
+    def __init__(self, group_key="member"):
         self.lock = threading.Lock()
         self.files: dict[str, tuple[int, dict, dict]] = {}
+        self.group_key = group_key
 
     def _update(self, path: Path):
         key = str(path)
@@ -146,7 +147,7 @@ class LineIndex:
             line = data[start:end]
             if line.strip():
                 row = json.loads(line)
-                member = row.get("member")
+                member = row.get(self.group_key)
                 if member is not None:
                     ranges.setdefault(member, []).append((offset + start, end - start))
                     latest[member] = row
@@ -158,9 +159,9 @@ class LineIndex:
         with self.lock:
             return list(self._update(path)[1].values())
 
-    def member(self, path: Path, member: str) -> list[dict]:
+    def group(self, path: Path, key: str | int) -> list[dict]:
         with self.lock:
-            spans = list(self._update(path)[0].get(member, []))
+            spans = list(self._update(path)[0].get(key, []))
         with open(path, "rb") as f:
             out = []
             for start, length in spans:
@@ -172,6 +173,7 @@ class LineIndex:
 def make_handler(root: Path, static: Path = STATIC, live: LiveSessions | None = None):
     cache = FrameCache()
     lines = LineIndex()
+    wheel_lines = LineIndex("day")
 
     class Handler(SimpleHTTPRequestHandler):
         extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".js": "text/javascript",
@@ -303,11 +305,17 @@ def make_handler(root: Path, static: Path = STATIC, live: LiveSessions | None = 
                     if parts[3] == "interventions":
                         rows, _ = runrecord.read_lines(directory / runrecord.FILES["interventions"])
                         return self._json(rows)
+                    if parts[3] == "wheel":
+                        day = int((parse_qs(url.query).get("day") or ["-1"])[0])
+                        if day < 0:
+                            raise ValueError("wheel records require a nonnegative ?day=")
+                        path = directory / runrecord.FILES["wheel"]
+                        return self._json(wheel_lines.group(path, day) if path.is_file() else [])
                     if parts[3] in ("agents", "events"):
                         path = directory / runrecord.FILES[parts[3]]
                         member = (parse_qs(url.query).get("member") or [None])[0]
                         if member is not None:
-                            return self._json(lines.member(path, member))
+                            return self._json(lines.group(path, member))
                         if parts[3] == "agents":
                             return self._json(lines.latest(path))
                         raise ValueError("events are read one household at a time: ?member=")

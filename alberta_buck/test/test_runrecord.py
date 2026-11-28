@@ -188,6 +188,7 @@ def test_dashboard_server_reads_runs_and_refuses_what_it_does_not_serve(tmp_path
         assert [r["id"] for r in get("/api/runs")] == ["live"]
         assert get("/api/runs/live/manifest")["status"] == "running"
         assert [f["day"] for f in get("/api/runs/live/frames")] == [0]
+        assert get("/api/runs/live/wheel?day=0") == []
         for flat in FIXTURE["flat"][1:]:
             rec.frame(flat)                              # the run grows; the page asks for what is new
         assert [f["day"] for f in get("/api/runs/live/frames?since=0")] == [1, 2]
@@ -198,6 +199,9 @@ def test_dashboard_server_reads_runs_and_refuses_what_it_does_not_serve(tmp_path
         assert [(e["day"], e["kind"]) for e in get("/api/runs/live/events?member=0/debtor/0")] == [
             (0, "surplus"), (1, "surplus"), (2, "act"), (2, "surplus")]
         assert get("/api/runs/live/events?member=nobody") == []
+        rec.frame(dict(day=3, wheel_operations=[{"kind": "keeper_payout", "nominal": 5}]))
+        assert get("/api/runs/live/wheel?day=3") == [{"day": 3, "kind": "keeper_payout", "nominal": 5}]
+        assert get("/api/runs/live/wheel?day=0") == []
         assert b"<title>t</title>" in urllib.request.urlopen(base + "/", timeout=10).read()
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(base + "/api/runs/live/events", timeout=10)

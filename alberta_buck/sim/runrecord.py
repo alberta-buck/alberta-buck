@@ -41,7 +41,7 @@ SCHEMA                          = "buck-run/1"
 RAW                             = 10**6
 SCALE                           = 10**36
 FILES                           = dict(frames="frames.jsonl", events="events.jsonl", agents="agents.jsonl",
-                                       interventions="interventions.jsonl")
+                                       interventions="interventions.jsonl", wheel="wheel.jsonl")
 UNITS                           = dict(money="raw integer, 1e-6 BUCK or USDC", price="float, USD or BUCK per unit",
                                        ratio="float", day="simulated day index from 0")
 AGENT_FIELDS                    = ("role", "nw", "nw_buck", "hypo", "drawn", "limit", "basket", "basket_mark", "held_buck", "cash",
@@ -153,6 +153,7 @@ def frame_record(flat: dict, tokens) -> dict:
     return _jsonable({
         "day": flat["day"],
         "block": net.get("block"),
+        **({"wheel_revenue": flat["wheel_revenue"]} if "wheel_revenue" in flat else {}),
         **({"startup": {**startup, "share_price": _ratio(startup["share_price"])}} if startup is not None else {}),
         "control": dict(k=_ratio(flat.get("buckK")), bvib=_ratio(flat.get("basketVal")),
                         bvib_nominal=_ratio(flat.get("basketValNominal")),
@@ -328,8 +329,9 @@ class RunRecorder:
 
     def frame(self, flat: dict, applied=()):
         """Record one captured day: its frame, its events and marks, and interventions applied since."""
-        self._append("frames", [frame_record(flat, self.manifest.get("tokens") or [])])
         day = flat["day"]
+        self._append("wheel", [_jsonable({"day": day, **op}) for op in flat.get("wheel_operations") or []])
+        self._append("frames", [frame_record(flat, self.manifest.get("tokens") or [])])
         self._append("events", [self._event(day, e) for e in flat.get("household_events") or []])
         self._append("agents", agent_records(flat))
         new = list(applied)[self._applied:]
