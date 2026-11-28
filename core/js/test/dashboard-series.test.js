@@ -136,3 +136,30 @@ test("optional ownership flows and shares use the opening denominator and leave 
   sample.basket.ownership.opening.equity_buck = "0";
   assert.equal(chartData(specs.find((s) => s.id === "ownership-flows"), [sample]).series[0].values[0], null);
 });
+
+test("the basket distinguishes share return, remaining basis, and treasury mark", async () => {
+  const { BASKET, tabTiles } = await import("../dashboard/src/series.js");
+  const first = { day: 0, basket: { equity: 10e6, share_price: 2 } };
+  const last = { day: 80, basket: { share_price: 2.5, ownership: { closing: {
+    treasury_shares: "100", total_shares: "1000", equity_buck: "10000000",
+  }}}, households: { basket: 10e6, basket_mark: 20e6, basket_at_risk: 4e6, basket_mtm: 5e6 } };
+  const share = BASKET().find((s) => s.id === "share-return");
+  assert.deepEqual(chartData(share, [last], [first, last]).series[0].values, [25]);
+  const summary = Object.fromEntries(tabTiles("basket", [first, last]).map((x) => [x.id, x.value]));
+  assert.equal(summary["household-at-risk"], 4);
+  assert.equal(summary["household-net-mark"], 5);
+  assert.equal(summary["household-roi"], 25);
+  assert.equal(summary.treasury, 1);
+  assert.equal(tabTiles("basket", [first]).find((t) => t.id === "treasury").value, null);
+});
+
+test("Jubilee surfaces deferred principal when a run actually records it", async () => {
+  const { JUBILEE, tabTiles } = await import("../dashboard/src/series.js");
+  const backlog = JUBILEE().find((s) => s.id === "deferred");
+  const settled = { day: 1, supply: { deferred_principal: 0 } };
+  const pending = { day: 0, supply: { deferred_principal: 2e6 } };
+  assert.equal(backlog.showWhen([settled]), false);
+  assert.equal(backlog.showWhen([pending, settled]), true);
+  assert.deepEqual(chartData(backlog, [pending, settled]).series[0].values, [2, 0]);
+  assert.equal(tabTiles("jubilee", [settled]).some((t) => t.id === "deferred"), false);
+});

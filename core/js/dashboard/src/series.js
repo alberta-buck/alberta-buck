@@ -85,10 +85,11 @@ export function windowFrames(frames, range) {
 
 // One chart's data: days, and each series' values (null where not recorded). A series' value is
 // value(frame, index, frames), so a daily change can read the day before.
-export function chartData(spec, frames) {
+export function chartData(spec, frames, allFrames = frames) {
+  const baseline = spec.baseline?.(allFrames);
   return {
     days: frames.map((f) => f.day),
-    series: spec.series.map((s) => ({ key: s.key, label: s.label, values: frames.map((f, i) => s.value(f, i, frames)) })),
+    series: spec.series.map((s) => ({ key: s.key, label: s.label, values: frames.map((f, i) => s.value(f, i, frames, baseline)) })),
   };
 }
 
@@ -122,6 +123,29 @@ const netLienRatio = (f) => {
   return (Number(b.lien) - Number(b.held_buck ?? 0)) / Number(b.equity);
 };
 const pct = (v) => (v === null || v === undefined || !Number.isFinite(v) ? null : v * 100);
+const returnPct = (mark, basis) => mark == null || !(Number(basis) > 0) ? null : pct(Number(mark) / Number(basis) - 1);
+const observedShare = (frames) => frames.find((f) =>
+  Number(f.basket?.share_price) > 0 && (f.basket?.equity == null || Number(f.basket.equity) > 0));
+const shareReturn = (f, first) => first && f.day >= first.day
+  ? returnPct(f.basket?.share_price, first.basket.share_price) : null;
+
+function householdPosition(f) {
+  const h = f.households;
+  if (!h) return {};
+  // Older canonical records kept the remaining receipt basis and its mark here.
+  if (Object.hasOwn(h, "basket_at_risk")) return { basis: h.basket_at_risk, mark: h.basket_mtm };
+  return f.supply?.active_principal != null ? { basis: h.basket, mark: h.basket_mark } : {};
+}
+
+function treasuryMark(f) {
+  const b = f.basket;
+  if (b?.treasury?.mark != null) return buck(b.treasury.mark);
+  const closing = b?.ownership?.closing;
+  if (!closing || closing.treasury_shares == null || closing.equity_buck == null || closing.total_shares == null) return null;
+  const total = BigInt(closing.total_shares);
+  return total > 0n ? buck(BigInt(closing.treasury_shares) * BigInt(closing.equity_buck) / total) : 0;
+}
+const hasDeferred = (frames) => frames.some((f) => Number(f.supply?.deferred_principal) > 0);
 
 // Flows are shares, valued at the opening share mark and divided by opening equity.
 // The common mark cancels, so the exact ratio is flow shares / opening total shares.
@@ -137,6 +161,8 @@ const flowPercent = (f, kind, owner) => {
   return sharePercent(o.flows?.[kind]?.[owner], o.opening?.total_shares);
 };
 const ownerPercent = (f, key) => {
+  const treasury = f.basket?.treasury;
+  if (key === "treasury" && treasury) return sharePercent(treasury.shares, treasury.total_shares);
   const o = ownership(f), c = o?.closing;
   return sharePercent(key === "treasury" ? c?.treasury_shares : c?.receipt_shares?.[key], c?.total_shares);
 };
@@ -161,6 +187,25 @@ const OWNERSHIP_CHARTS = [
 // The BuckBasket tab. Leverage against K's cap is the chart behind observation F2: below the cap,
 // K does not restrain the basket's issuance.
 export const BASKET = (tokens = []) => [
+  {
+    id: "share-return", title: "Basket share return in BUCK", unit: "pct", kind: "line", reference: 0,
+    note: "Change in BUCK per share from the first recorded share mark, before individual redemption costs and the treasury cut on a profitable exit.",
+    baseline: observedShare,
+    series: [{ key: "share", label: "Share return", value: (f, _i, _frames, first) => shareReturn(f, first) }],
+  },
+  {
+    id: "household-basket-position", title: "Household basket capital at risk and net mark", unit: "buck", kind: "line", optional: true,
+    note: "Remaining cost basis and BUCK value of tracked open household receipts, before exit costs. The cohort changes with deposits and withdrawals.",
+    series: [
+      { key: "basis", label: "At risk", value: (f) => buck(householdPosition(f).basis) },
+      { key: "mark", label: "Net mark", value: (f) => buck(householdPosition(f).mark) },
+    ],
+  },
+  {
+    id: "basket-treasury", title: "Basket treasury value", unit: "buck", kind: "line", optional: true,
+    note: "BUCK value of shares assigned to treasury from profitable redemptions. The contract assigns 25% of the marked gain over redeemed cost basis.",
+    series: [{ key: "treasury", label: "Treasury mark", value: treasuryMark }],
+  },
   ...OWNERSHIP_CHARTS,
   {
     id: "limit", title: "Lien against K's limit", unit: "buck", kind: "line",
@@ -181,7 +226,7 @@ export const BASKET = (tokens = []) => [
   },
   {
     id: "book", title: "Equity, lien and gross", unit: "buck", kind: "line",
-    note: "Equity is the depositors' claim; the lien is the BUCK the basket has issued against its holdings; gross is their sum, the holdings' value.",
+    note: "Equity includes receipt and treasury shares. The lien is the BUCK issued against the holdings. Gross is the holdings' value.",
     series: [
       { key: "equity", label: "Equity", value: (f) => buck(f.basket?.equity) },
       { key: "lien", label: "Lien", value: (f) => buck(f.basket?.lien) },
@@ -190,7 +235,7 @@ export const BASKET = (tokens = []) => [
   },
   {
     id: "share", title: "Share price", unit: "ratio", kind: "line", reference: 1,
-    note: "BUCK a share redeems for: the depositors' return from rebalancing, fees and arbitrage.",
+    note: "Net basket equity in BUCK per outstanding share, before individual redemption costs.",
     series: [{ key: "share", label: "Share price", value: (f) => num(f.basket?.share_price) }],
   },
   {
@@ -313,12 +358,14 @@ export const JUBILEE = () => [
     ],
   },
   {
-    id: "principal", title: "Principal: open and deferred", unit: "buck", kind: "line",
-    note: "Open principal is every BUCK in existence; deferred principal is retired against the fund and not yet settled.",
-    series: [
-      { key: "active", label: "Open", value: (f) => buck(f.supply?.active_principal) },
-      { key: "deferred", label: "Deferred", value: (f) => buck(f.supply?.deferred_principal) },
-    ],
+    id: "principal", title: "Open facility principal", unit: "buck", kind: "line",
+    series: [{ key: "active", label: "Open", value: (f) => buck(f.supply?.active_principal) }],
+  },
+  {
+    id: "deferred", title: "Matured principal awaiting burn", unit: "buck", kind: "line", optional: true,
+    showWhen: hasDeferred,
+    note: "Principal transferred to Jubilee when a 50-year facility is released. It stays issued until Jubilee burns it.",
+    series: [{ key: "deferred", label: "Awaiting burn", value: (f) => buck(f.supply?.deferred_principal) }],
   },
 ];
 
@@ -329,7 +376,14 @@ export function tabTiles(id, frames) {
   if (id === "basket") {
     const limit = basketLimit(f);
     const recorded = f.basket?.headroom !== null && f.basket?.headroom !== undefined;
+    const { basis, mark } = householdPosition(f);
     return [
+      { id: "share-return", label: "Share return", value: shareReturn(f, observedShare(frames)), unit: "pct",
+        detail: "Since first recorded share mark" },
+      { id: "household-at-risk", label: "Household capital at risk", value: buck(basis), unit: "buck" },
+      { id: "household-net-mark", label: "Household net mark", value: buck(mark), unit: "buck" },
+      { id: "household-roi", label: "Open household receipt ROI", value: returnPct(mark, basis), unit: "pct" },
+      { id: "treasury", label: "Treasury mark", value: treasuryMark(f), unit: "buck" },
       { id: "equity", label: "Equity", value: buck(f.basket?.equity), unit: "buck", detail: "BUCK" },
       { id: "lien", label: "Lien", value: buck(f.basket?.lien), unit: "buck", detail: "BUCK" },
       { id: "le", label: "Lien / equity", value: ratioOf(f.basket?.lien, f.basket?.equity), unit: "ratio" },
@@ -354,7 +408,12 @@ export function tabTiles(id, frames) {
       { id: "cash", label: "Fund cash", value: buck(f.jubilee?.cash), unit: "buck", detail: "BUCK" },
       { id: "available", label: "Relief available", value: buck(f.jubilee?.relief_available), unit: "buck" },
       { id: "unpaid", label: "Basket's unpaid relief", value: buck(f.basket?.unpaid_relief), unit: "buck" },
-      { id: "deferred", label: "Deferred principal", value: buck(f.supply?.deferred_principal), unit: "buck" },
+      { id: "position-basis", label: "Basket position at risk", value: buck(f.jubilee?.position_basis), unit: "buck" },
+      { id: "position-mark", label: "Basket position net mark", value: buck(f.jubilee?.position_mark), unit: "buck" },
+      { id: "position-roi", label: "Basket position ROI", value: returnPct(f.jubilee?.position_mark, f.jubilee?.position_basis), unit: "pct" },
+      ...(Number(f.supply?.deferred_principal) > 0
+        ? [{ id: "deferred", label: "Matured principal awaiting burn", value: buck(f.supply.deferred_principal), unit: "buck" }]
+        : []),
     ];
   }
   return [];

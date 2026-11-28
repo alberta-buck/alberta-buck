@@ -44,6 +44,18 @@ def test_frame_record_groups_a_snapshot_frame_by_component():
     assert runrecord.frame_record(dict(day=0, supply=2**60), [])["supply"]["total"] == str(2**60), "past 2^53 as a string"
 
 
+def test_basket_treasury_and_open_position_marks():
+    flat = dict(day=4, eq_total_shares=2**60, eq_treasury_shares=2**59, eq_equity=5_000_003,
+                net={"jubilee": {"position": {"basis": 4_000_000, "mark": 4_500_000}}},
+                households={"basket_at_risk": 2_000_000, "basket_mtm": 1_500_000})
+    f = runrecord.frame_record(flat, [])
+    assert f["basket"]["treasury"] == dict(total_shares=str(2**60), shares=str(2**59), mark=2_500_001)
+    assert f["households"]["basket_at_risk"] == 2_000_000
+    assert f["households"]["basket_mtm"] == 1_500_000
+    assert f["jubilee"]["position_basis"] == 4_000_000
+    assert f["jubilee"]["position_mark"] == 4_500_000
+
+
 def test_recorder_writes_a_growing_run_that_reads_like_a_finished_one(tmp_path):
     rec = runrecord.RunRecorder(tmp_path, "economy test", kind="test", engine="pyrevm")
     assert rec.id.startswith("economy-test-")

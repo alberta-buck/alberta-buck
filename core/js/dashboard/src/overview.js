@@ -40,7 +40,7 @@ export class ChartTab {
       day: iv.day ?? iv.applied_day,
       label: `${iv.source === "operator" ? "operator: " : ""}${iv.action ?? "intervention"}${iv.ok === false ? " (refused)" : ""}`,
     }));
-    for (const chart of this.charts) chart.update(shown, markers);
+    for (const chart of this.charts) chart.update(shown, markers, frames);
   }
 }
 

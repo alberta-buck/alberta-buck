@@ -52,6 +52,21 @@ The Savings chart displays confirmed pool swaps from the last 120
 closes and links legs of the same wheel response. Add the decision
 source and full-run drill-down to the dashboard with the new trace.
 
+The BuckBasket tab shows per-share return since the first funded
+recorded mark, the basis and net mark of tracked open household
+receipts, and the treasury's BUCK mark. The treasury receives
+shares for 25% of a profitable redemption's marked gain over
+cost basis. Governance can redeem those shares. All 84 stock
+records checked had nonzero treasury shares at their most recent
+close. For example, the completed unfunded seed-41404 historical
+active arm marked its treasury at 39.58 BUCK on close 1824.
+
+The Jubilee tab shows matured principal awaiting burn only for
+runs with an observed backlog. The 50-year release and later
+burn path still exists. Every one of the same 84 observed closes
+recorded zero in the backlog. New records also retain the basis
+of Jubilee's own basket receipt.
+
 [[file:buck-basket-findings.org::*When the quiet-flow runs rebalanced (November 26 UTC)][Five-year observations and replay starting points]] ·
 [[file:consolidation-plan.org::*Order of work (from 2026-11-21), with the recommended approach for each][Remaining legacy dependency migrations]]
 

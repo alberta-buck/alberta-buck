@@ -143,6 +143,12 @@ def frame_record(flat: dict, tokens) -> dict:
                                         declared_bp=_at(flat.get("eq_decl"), i))
                                    for i, s in enumerate(tokens)] if flat.get("eq_w") else None
     ownership = {"ownership": flat["ownership"]} if "ownership" in flat else {}
+    treasury = {}
+    if all(flat.get(k) is not None for k in ("eq_total_shares", "eq_treasury_shares", "eq_equity")):
+        total, shares = int(flat["eq_total_shares"]), int(flat["eq_treasury_shares"])
+        treasury["treasury"] = dict(shares=str(shares), total_shares=str(total),
+                                    mark=shares * int(flat["eq_equity"]) // total if total else 0)
+    position = jubilee.get("position") or {}
     return _jsonable({
         "day": flat["day"],
         "block": net.get("block"),
@@ -166,7 +172,7 @@ def frame_record(flat: dict, tokens) -> dict:
         "supply": dict(total=supply, active_principal=net.get("active_principal"),
                        deferred_principal=net.get("deferred_principal"), basket_lien=flat.get("eq_lien"),
                        household_principal=hh.get("drawn") if hh else None, holders=held),
-        "basket": dict(**ownership, equity=flat.get("eq_equity"), lien=flat.get("eq_lien"), nav=flat.get("basketNav"),
+        "basket": dict(**ownership, **treasury, equity=flat.get("eq_equity"), lien=flat.get("eq_lien"), nav=flat.get("basketNav"),
                        share_price=_ratio(flat.get("eq_share_price")), hold_index=flat.get("eq_hold"),
                        held_buck=flat.get("eq_held_buck"),
                        idle_buck=flat.get("eq_liquidity"), headroom=flat.get("eq_headroom"), mark=flat.get("eq_mark"),
@@ -181,14 +187,16 @@ def frame_record(flat: dict, tokens) -> dict:
                                   if "wh_eq_refresh_n" in flat else None,
                                   responds=flat.get("wh_eq_respond_n"))),
         "jubilee": dict(nominal=jubilee.get("nominal"), cash=jubilee.get("cash"),
-                        position_mark=(jubilee.get("position") or {}).get("mark"),
+                        position_mark=position.get("mark"),
+                        **({"position_basis": position["basis"]} if "basis" in position else {}),
                         relief_available=_scaled(net.get("available_relief_scaled"))) if jubilee else None,
         "population": dict(roles=roles, gap=pop.get("gap"), k_factor=pop.get("k_factor"),
                            stages=pop.get("stages")) if pop else None,
         "households": dict(active=hh.get("active"), exited=hh.get("exited"), nw=hh.get("nw"),
                            nw_buck=hh.get("nw_buck"), hypo=hh.get("hypo"),
                            drawn=hh.get("drawn"), basket=hh.get("basket"), basket_mark=hh.get("basket_mark"),
-                           cash=hh.get("cash"), mortgage=hh.get("mortgage")) if hh else None,
+                           cash=hh.get("cash"), mortgage=hh.get("mortgage"),
+                           **{k: hh[k] for k in ("basket_at_risk", "basket_mtm") if k in hh}) if hh else None,
         "health": dict(errors=sum(bool(a.get("error")) for a in members) if members else None,
                        relief_unavailable=sum(bool(a.get("relief_unavailable")) for a in members) if members else None,
                        faults=sum(e.get("kind") == "act" for e in events), events=len(events)),

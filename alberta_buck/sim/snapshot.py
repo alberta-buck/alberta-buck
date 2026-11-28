@@ -189,6 +189,9 @@ def _eqsave_frame(d, ctr) -> dict:
         f["eq_response_w"] = [int(x) for x in b.functions.responseWeightsBp().call()]
         f["eq_equity"] = int(b.functions.equity().call())
         f["eq_share_price"] = int(b.functions.sharePrice().call())
+        if canonical:
+            f["eq_total_shares"] = int(b.functions.totalShares().call())
+            f["eq_treasury_shares"] = int(b.functions.treasuryShares().call())
         f["eq_idle"] = [int(b.functions.idleToken(i).call()) for i in range(n)]
     except Exception:
         if canonical:

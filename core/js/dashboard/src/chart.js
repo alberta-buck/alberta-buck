@@ -38,6 +38,7 @@ export class HoverBus {
 
 export class TimeChart {
   constructor(card, spec, bus) {
+    this.card = card;
     this.spec = spec;
     this.bus = bus;
     this.data = { days: [], series: [] };
@@ -76,8 +77,10 @@ export class TimeChart {
     this.resize.observe(this.plot);
   }
 
-  update(frames, markers = []) {
-    this.data = chartData(this.spec, frames);
+  update(frames, markers = [], allFrames = frames) {
+    this.card.hidden = this.spec.showWhen ? !this.spec.showWhen(allFrames) : false;
+    if (this.card.hidden) return;
+    this.data = chartData(this.spec, frames, allFrames);
     this.markers = markers;
     this.render();
     if (this.showTable) this.renderTable();
