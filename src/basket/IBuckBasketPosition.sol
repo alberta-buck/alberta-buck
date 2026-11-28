@@ -3,6 +3,9 @@ pragma solidity ^0.8.20;
 
 /// @notice Create an equity-basket receipt or add to an existing receipt.
 interface IBuckBasketPosition {
+    /// @notice Remaining deposit value had the BUCK been held through ordinary demurrage.
+    function withdrawalBasis(uint256 id) external view returns (uint256);
+
     /// @notice Deposit an asset and create a new receipt.
     function deposit(address asset, uint256 amount, uint256 minShares) external returns (uint256 id);
 

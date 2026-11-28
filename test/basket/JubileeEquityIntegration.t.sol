@@ -510,9 +510,10 @@ contract JubileeEquityIntegrationTest is JubileeEquityFixture {
         (uint256 target,,) = fund.previewReserve();
         (, uint256 cashBefore) = buck.fundBalancesScaled();
         assertLt(cashBefore, target);
-        (uint128 shares, uint128 basis) = basket.holdings(id);
+        (uint128 shares,) = basket.holdings(id);
         uint256 requested = uint256(shares) / 5;
         uint256 mark = basket.valueOf(id);
+        uint256 basis = basket.withdrawalBasis(id);
         if (mark > basis) mark -= (mark - basis) * basket.LAMBDA_BP() / 10_000;
         uint256 requestedMark = mark * requested / shares;
         uint256 shareValue = basket.equity() * requested / basket.totalShares();

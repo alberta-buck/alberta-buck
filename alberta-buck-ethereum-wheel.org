@@ -130,8 +130,9 @@ are paid from.
 *No margin calls.*  A cut in =K= changes no lien; beyond its limit the account simply cannot spend.
 Buck never calls anything back.
 
-*Exits.*  The treasury takes 25% of a receipt's gain over its cost basis, as shares, and nothing of
-a loss.  The rest is paid in BUCKs when Buck lets the basket spend it.  Otherwise it is paid in
+*Exits.* The treasury takes 25% of the positive marked gain over the redeemed equity's
+demurrage-adjusted deposit value, as shares. The rest is paid in BUCKs when Buck lets the
+basket spend it. Otherwise it is paid in
 kind: the exit's fraction =f= of every position and of the wallet's TOKEN, by transfer, its share
 of the lien repaid from the BUCKs its positions return.  No swap is forced on anyone.
 

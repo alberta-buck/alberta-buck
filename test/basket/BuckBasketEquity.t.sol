@@ -23,6 +23,7 @@ import {BasketIntent} from "../harness/BasketIntent.sol";
 import {BuckBasketEquityStorage} from "../../src/basket/BuckBasketEquityStorage.sol";
 import {BuckBasketUniswapV3}   from "../../src/basket/BuckBasketUniswapV3.sol";
 import {BuckBasketReceipt}     from "../../src/basket/BuckBasketReceipt.sol";
+import {NetDemurrageMath} from "../../src/lib/NetDemurrageMath.sol";
 
 /// @dev Buck's K source and the basket's controller in one: K is set by hand.
 contract EqController {
@@ -719,6 +720,50 @@ contract BuckBasketEquityTest is BuckBasketEquityFixture {
         vm.prank(alice);
         b.redeem(id, 5000);
         assertEq(b.treasuryShares(), 0);
+    }
+
+    function test_redeem_takesAGainFeeAtAnUnchangedNominalMark() public {
+        uint256 id = _deposit(alice, address(tok[1]), 1_000e18);
+        (, uint128 nominal) = b.holdings(id);
+        uint256 openingMark = b.valueOf(id);
+        uint256 elapsed = 365 days + 6 hours;
+        vm.warp(vm.getBlockTimestamp() + elapsed);
+        assertEq(b.valueOf(id), openingMark);
+        uint256 basis = NetDemurrageMath.decay(nominal, elapsed);
+        assertEq(b.withdrawalBasis(id), basis);
+        uint256 expected = (openingMark - basis) / 4 * b.totalShares() / b.equity();
+        (uint128 shares,) = b.holdings(id);
+        vm.prank(alice);
+        b.redeemInKind(id, shares);
+        assertEq(b.treasuryShares(), expected);
+        assertEq(b.withdrawalBasis(id), 0);
+        _books();
+    }
+
+    function test_redeem_agesEachTopUpAndRetainsTheRemainingBasis() public {
+        uint256 id = _deposit(alice, address(tok[1]), 1_000e18);
+        (, uint128 first) = b.holdings(id);
+        uint256 elapsed = 365 days + 6 hours;
+        vm.warp(vm.getBlockTimestamp() + elapsed);
+        vm.startPrank(alice);
+        tok[1].approve(address(b), 500e18);
+        b.increasePosition(id, address(tok[1]), 500e18, 500e18, 1);
+        vm.stopPrank();
+        (uint128 shares, uint128 nominal) = b.holdings(id);
+        uint256 aged = NetDemurrageMath.decay(uint256(first) * 1e18, elapsed)
+            + (uint256(nominal) - first) * 1e18;
+        assertEq(b.withdrawalBasis(id), aged / 1e18);
+        vm.warp(vm.getBlockTimestamp() + elapsed);
+        aged = NetDemurrageMath.decay(aged, elapsed);
+        assertEq(b.withdrawalBasis(id), aged / 1e18);
+        vm.prank(alice);
+        (,, uint256 retired, uint256 remaining) = b.redeemInKind(id, shares / 3);
+        assertEq(retired + remaining, shares);
+        uint256 remainingBasis = aged - aged * retired / shares;
+        assertEq(b.withdrawalBasis(id), remainingBasis / 1e18);
+        vm.warp(vm.getBlockTimestamp() + elapsed);
+        assertEq(b.withdrawalBasis(id), NetDemurrageMath.decay(remainingBasis, elapsed) / 1e18);
+        _books();
     }
 
     /// Ruled (6.2.6): an exit the account cannot pay in BUCK is paid in kind

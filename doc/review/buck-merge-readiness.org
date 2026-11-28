@@ -55,8 +55,10 @@ source and full-run drill-down to the dashboard with the new trace.
 The BuckBasket tab shows per-share return since the first funded
 recorded mark, the basis and net mark of tracked open household
 receipts, and the treasury's BUCK mark. The treasury receives
-shares for 25% of a profitable redemption's marked gain over
-cost basis. Governance can redeem those shares. All 84 stock
+shares for 25% of a redemption's positive marked gain over the
+deposit value remaining after ordinary BUCK demurrage. Governance
+can redeem those shares. The older runs computed the gain over
+the original deposit value. All 84 stock
 records checked had nonzero treasury shares at their most recent
 close. For example, the completed unfunded seed-41404 historical
 active arm marked its treasury at 39.58 BUCK on close 1824.
@@ -971,6 +973,20 @@ parallel workers across the six studies once the host has at least
 45 GiB available RAM and 40 GiB free storage. At submission 18
 existing workers held about 71 GiB of combined RSS, and host
 available RAM was about 12 GiB. The new reports and run records
-will be written under the rerun directory. The old studies
-continue in their frozen locations. The opening profile and
+were configured to be written under the rerun directory.
+The opening profile and
 supervisor are saved alongside the rerun manifests.
+
+The warmed rerun queue and the 18 remaining old pair workers
+were stopped by request before changing the treasury fee basis.
+The 36 affected run records retain their recorded closes, with
+their manifests marked stopped. A fresh campaign must pin artifacts
+built with the revised basis. =withdrawalBasis(id)= reports the
+remaining receipt value benchmarked against holding Ordinary BUCK.
+New deposits start at their own timestamps. Top-ups age the
+existing balance before adding fresh BUCK equity, and partial
+exits carry forward the proportional remainder. The nominal
+=holdings= basis still reconciles credited deposits. A legacy
+receipt without a separate checkpoint ages its remaining basis
+from the recorded deposit time. Jubilee's standalone and
+self-invested valuations use the same adjusted fee threshold.

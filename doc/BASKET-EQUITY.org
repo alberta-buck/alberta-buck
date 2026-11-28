@@ -288,13 +288,17 @@ director (=IRebalanceDirector=) can supply the policy instead.  Its
 
 * 8. The split
 
-lambda = 25% of the gain above the cost basis, at exit, in shares moved to
-the treasury, and nothing on a loss.  Per unit of equity E at K = 0.75,
+Lambda is 25% of the gain above the deposit value after ordinary BUCK
+demurrage. The exit moves that gain fee to the treasury in shares.
+A loss relative to that basis incurs zero gain fee. Each incoming
+lot accrues from its own deposit time. Per unit of equity E at K = 0.75,
 with the TOKEN moving by p (in BUCK) over the receipt's life and a harvest
 h (fees, rebalancing, the wheel's captures) on the position:
 
 - depositor equity = (1+K) E (sqrt p + h) - K E
-- payout = equity - 0.25 x max(equity - E, 0)
+- payout = equity - 0.25 x max(equity - the remaining Ordinary BUCK value of E, 0)
+
+The examples below use the original design's zero-demurrage comparison.
 
 | scenario              | holding | today (treasury) | equity | *payout* (basket) |
 |-----------------------+---------+------------------+--------+-------------------|
@@ -563,8 +567,8 @@ expected numbers are the prototype's, with tolerances for tick math.
 
 * 11. Open
 
-1. lambda: fixed at 25%, or governed.  A hurdle (the gain above BUCK's
-   demurrage, say) is a one-parameter refinement of the cost basis.
+1. Governance of lambda. The current rate is fixed at 25% and the
+   fee basis tracks the remaining Ordinary BUCK value of each deposit.
 2. Re-levering earnings: treat realized earnings as a deposit (credit
    K x earnings), or keep them unlevered, as now.
 3. Pending credit that a K cut strands: keep it until K rises (as now), or
@@ -1036,7 +1040,7 @@ mode="hold")=:
 4. [ruled] The exit charge: the mirror of the entry charge.
 5. [ruled] The director: the lean at tilt 1; the anchor a multi-year EMA
    (1280 days, governance may reset it); the turn gate at quorum 4 of 6.
-6. [ruled] lambda: 25% of the gain over cost basis, fixed (a constant).
+6. [ruled] lambda: 25% of the gain over the demurrage-adjusted basis, fixed.
 7. [ruled] No deposit cap: the wheel places a deposit in gap-sized steps
    through the better route.
 8. [ruled] The stress fee: the exit-fee hook stays, off.  The stress run
@@ -1084,7 +1088,8 @@ the cut, the grain, explicit books.
   deposit's own credit, whatever the pool's leverage.  The asset and the
   BUCK land in the wallet, and dayFlow += v.
 - *redeem(id, fraction)*:
-  1. The cut: 25% of the gain over basis, as treasury shares.
+  1. The cut: 25% of the positive gain over the demurrage-adjusted basis
+     of the redeemed shares, as treasury shares.
   2. The exit's value is taken at the exiter's marks, less the charge.
   3. It is paid from idleBuck, then minted from the headroom left after
      the exit.  owed += f x debt + the mint.

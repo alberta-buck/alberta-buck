@@ -119,8 +119,8 @@ valuation wheel or assume that a mark is immediate redeemable cash.
 ** Exact integer valuation and conservative ambiguous prices
 
 The pure =BasketJubileeMath= helper solves in external raw BUCK units. Its
-receipt mark is =floor(f * E)= less the existing 25% fee on gains over that
-receipt's original basis. Relief uses net fund cash at the token's full
+receipt mark is =floor(f * E)= less the 25% fee on gains over that
+receipt's demurrage-adjusted basis. Relief uses net fund cash at the token's full
 internal precision, exactly the fund's proportional claim calculation, then
 rounds down to raw BUCK and caps at the actual principal. The simple rational
 formula above remains a diagnostic; directly using it on chain would omit

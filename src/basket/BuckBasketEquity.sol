@@ -364,6 +364,8 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         Holding storage h = holdings[id];
         if (shares > type(uint128).max - uint256(h.shares)
             || value > type(uint128).max - uint256(h.basis)) revert PositionOverflow();
+        uint256 decayed = _withdrawalBasisScaled(id, h.basis);
+        _writeBasis(id, decayed + value * BASIS_SCALE);
         h.shares += uint128(shares);
         h.basis += uint128(value);
         Deposit storage d = deposits[id];
@@ -400,9 +402,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         Holding storage h = holdings[id];
         uint256 shares = uint256(h.shares) * bp / 10000;
         if (shares == 0) revert RedeemZero();
-        uint256 basis = uint256(h.basis) * bp / 10000;
-
-        (paid,,) = _redeemShares(id, h, shares, basis, minBuck, false);
+        (paid,,) = _redeemShares(id, h, shares, minBuck, false);
     }
 
     /// @notice Redeem exactly `shares`; unlike basis-point redemption, zero
@@ -428,8 +428,7 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
         uint256 priorShares = h.shares;
         if (shares == 0) revert RedeemZero();
         if (shares > priorShares) revert PositionSharesExceeded();
-        uint256 basis = uint256(h.basis) * shares / priorShares;
-        (paid, sharesRetired, sharesRemaining) = _redeemShares(id, h, shares, basis, minBuck, inKind);
+        (paid, sharesRetired, sharesRemaining) = _redeemShares(id, h, shares, minBuck, inKind);
         positionId = sharesRemaining == 0 ? 0 : id;
         emit PositionReduced(msg.sender, id, shares, paid, sharesRetired, sharesRemaining);
     }
@@ -437,52 +436,71 @@ contract BuckBasketEquity is BuckBasketEquityStorage, IBuckBasketPosition {
     /// @dev The exit runs under the position lock; the principal it must retire to hold the
     ///      basket's K shortfall is retired after the lock is released (a credit operation, which
     ///      the fund values against the complete, settled inventory).
-    function _redeemShares(uint256 id, Holding storage h, uint256 shares, uint256 basis, uint256 minBuck,
-                           bool inKind) internal returns (uint256 paid, uint256 retired, uint256 remaining)
+    function _redeemShares(uint256 id, Holding storage h, uint256 shares, uint256 minBuck, bool inKind)
+        internal returns (uint256 paid, uint256 retired, uint256 remaining)
     {
         if (_positionEntered || _creditEntered) revert PositionReentrant();
         _positionEntered = true;
         (Snap memory sn, uint256 before) = _exitSnapshot();
-        (uint256 cut, uint256 cutValue) = _treasuryCut(sn, shares, basis);
+        uint256 equity = _equityS(sn, MARK_TWAP);
+        uint256 supply = totalShares;
+        uint256 decayed = _withdrawalBasisScaled(id, h.basis);
+        uint256 basis = Math.mulDiv(decayed, shares, h.shares) / BASIS_SCALE;
+        uint256 worth = Math.mulDiv(shares, equity, supply);
+        uint256 cut = worth > basis ? Math.mulDiv((worth - basis) * LAMBDA_BP / 10000, supply, equity) : 0;
+        uint256 out = shares - cut;
         uint256 left;
-        (paid, left) = _exit(shares - cut, sn, msg.sender, inKind, before);
-        uint256 remainingBp = _retire(id, h, shares, left, basis);
+        (paid, left) = _exit(out, sn, msg.sender, inKind, before);
+        uint256 paidShares = out - left;
+        // Charge the gain fee only on the settled fraction of a clipped exit.
+        cut = Math.mulDiv(cut, paidShares, out);
+        treasuryShares += cut;
+        retired = paidShares + cut;
+        uint256 remainingBp = _retire(id, h, retired, decayed);
         if (paid < minBuck) revert MinOut();
         _positionEntered = false;
         // The fund's own receipt may have changed: the mark below values its final shares.
         _holdShortfall(before);
         // The pro-rata shells' event: nothing burned, BUCK paid, the cut's value.
-        emit Redeemed(msg.sender, id, 0, paid, cutValue, remainingBp);
-        return (paid, shares - left, h.shares);
+        emit Redeemed(msg.sender, id, 0, paid, Math.mulDiv(cut, equity, supply), remainingBp);
+        return (paid, retired, h.shares);
     }
 
-    /// @dev The treasury's cut: LAMBDA of the gain over the cost basis, in
-    ///      shares; returns them and their value.
-    function _treasuryCut(Snap memory sn, uint256 shares, uint256 basis)
-        internal returns (uint256 cut, uint256 cutValue)
-    {
-        uint256 S = totalShares;
-        uint256 e = _equityS(sn, MARK_TWAP);
-        uint256 worth = shares * e / S;
-        cut = worth > basis ? (worth - basis) * LAMBDA_BP / 10000 * S / e : 0;
-        treasuryShares += cut;
-        cutValue = cut * e / S;
+    function withdrawalBasis(uint256 id) external view override returns (uint256) {
+        return _withdrawalBasisScaled(id, holdings[id].basis) / BASIS_SCALE;
     }
 
-    /// @dev Take `shares` off the holding, less the `left` an under-water
-    ///      basket could not pay in BUCK; returns what remains, in bp.
-    function _retire(uint256 id, Holding storage h, uint256 shares, uint256 left, uint256 basis)
+    function _withdrawalBasisScaled(uint256 id, uint256 nominal) internal view returns (uint256) {
+        if (nominal == 0) return 0;
+        BasisCheckpoint memory checkpoint = _withdrawalBasis[id];
+        // Older receipts have one recorded date for their remaining principal.
+        if (checkpoint.timestamp == 0) {
+            return BasketJubileeMath.decayBasis(nominal * BASIS_SCALE, block.timestamp - deposits[id].depositTime);
+        }
+        return BasketJubileeMath.decayBasis(checkpoint.amount, block.timestamp - checkpoint.timestamp);
+    }
+
+    function _writeBasis(uint256 id, uint256 amount) internal {
+        _withdrawalBasis[id] = BasisCheckpoint(uint192(amount), uint64(block.timestamp));
+    }
+
+    /// @dev Retire paid and treasury shares and consume their proportional bases.
+    function _retire(uint256 id, Holding storage h, uint256 gone, uint256 decayed)
         internal returns (uint256 remainingBp)
     {
-        uint256 gone = shares - left;
         uint256 priorShares = h.shares;
         h.shares -= uint128(gone);
-        h.basis -= uint128(basis * gone / shares);
+        h.basis -= uint128(Math.mulDiv(h.basis, gone, priorShares));
         Deposit storage d = deposits[id];
         d.buckPrincipal = h.basis;
         d.tokenPrincipal -= d.tokenPrincipal * gone / priorShares;
         remainingBp = h.shares == 0 ? 0 : uint256(h.shares) * 10000 / (uint256(h.shares) + gone);
-        if (h.shares == 0) receipt.burn(id);
+        if (h.shares == 0) {
+            delete _withdrawalBasis[id];
+            receipt.burn(id);
+        } else {
+            _writeBasis(id, decayed - Math.mulDiv(decayed, gone, priorShares));
+        }
     }
 
     /// @notice The treasury's shares leave by the same door, with no cut.

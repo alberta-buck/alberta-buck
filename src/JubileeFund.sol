@@ -496,7 +496,7 @@ contract JubileeFund is IERC721Receiver {
         if (id == 0) return 0;
         _checkPositionMarket();
         mark = basket.valueOf(id);
-        (, uint128 basis) = basket.holdings(id);
+        uint256 basis = basket.withdrawalBasis(id);
         if (mark > basis) mark -= Math.mulDiv(mark - basis, basket.LAMBDA_BP(), BP);
     }
 

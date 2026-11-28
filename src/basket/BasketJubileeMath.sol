@@ -8,6 +8,7 @@ import {IBuckBasketVenue} from "./IBuckBasketVenue.sol";
 import {PortfolioMath} from "./PortfolioMath.sol";
 import {BuckTypes} from "../BuckTypes.sol";
 import {CarryRatio} from "../lib/CarryRatio.sol";
+import {NetDemurrageMath} from "../lib/NetDemurrageMath.sol";
 
 interface IJubileeCashSnapshot is IBuckNetView {
     function issue(uint256 id, uint256 coverage, uint256 amount, uint256 maxPremium, address pool) external;
@@ -32,6 +33,7 @@ interface IJubileePositionSnapshot {
 
 interface IJubileeBasketSnapshot {
     function holdings(uint256 id) external view returns (uint128 shares, uint128 basis);
+    function withdrawalBasis(uint256 id) external view returns (uint256);
     function totalShares() external view returns (uint256);
     function LAMBDA_BP() external view returns (uint256);
 }
@@ -74,6 +76,10 @@ library BasketJubileeMath {
 
     error InvalidJubileeInputs();
     error JubileeValueOverflow();
+
+    function decayBasis(uint256 amount, uint256 elapsed) public pure returns (uint256) {
+        return NetDemurrageMath.decay(amount, elapsed);
+    }
 
     function weights(BuckBasketStorage.Constituent[] storage assets,
                      mapping(uint256 => uint128) storage liquidity, mapping(uint256 => uint256) storage idle,
@@ -166,9 +172,9 @@ library BasketJubileeMath {
         if (position != 0) {
             if (fund.basket() == address(this)) {
                 IJubileeBasketSnapshot basket = IJubileeBasketSnapshot(address(this));
-                (uint128 shares, uint128 basis) = basket.holdings(position);
+                (uint128 shares,) = basket.holdings(position);
                 p.fundShares = shares;
-                p.basis = basis;
+                p.basis = basket.withdrawalBasis(position);
                 p.shares = basket.totalShares();
                 p.feeBp = basket.LAMBDA_BP();
             } else {

@@ -75,6 +75,7 @@ contract JubileeBasketMock {
     function constituentsLength() external view returns (uint256) { return secondEnabled ? 2 : 1; }
     function liquidityOf(uint256) external pure returns (uint128) { return 0; }
     function idleToken(uint256) external pure returns (uint256) { return 0; }
+    function withdrawalBasis(uint256 id) external view returns (uint256) { return holdings[id].basis; }
     function valueOf(uint256 id) external view returns (uint256) {
         if (holdings[id].shares == 0) return 0;
         return Buck(buck).netBalanceOf(address(this));

@@ -1370,8 +1370,10 @@ it.  Into an under-water basket (lien above its limit) the new equity first rest
 
 ** Redemption
 
-=redeem(id, bp, minBuck)= / =redeemShares(id, shares, minBuck)=.  The treasury takes 25% of the
-receipt's gain over its cost basis, as shares.  The rest is paid in BUCKs (the owner's decision of
+=redeem(id, bp, minBuck)= / =redeemShares(id, shares, minBuck)=. The treasury takes 25% of the
+positive difference between the redeemed shares' TWAP mark and their deposited BUCK equity
+after ordinary demurrage, as shares. Each top-up accrues from its own deposit date.
+The rest is paid in BUCKs (the owner's decision of
 2026-11-14: the basket's users, the Jubilee fund first, need BUCKs, not LABR):
 
 - from the wallet, at the exit marks less the same charge as a BUCK deposit, when it can pay that

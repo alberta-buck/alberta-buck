@@ -180,7 +180,15 @@ abstract contract BuckBasketEquityStorage is BuckBasketStorage {
     uint16 internal refreshTopBp;
     bool public portfolioLimits;
 
-    /// @notice The basket's share of a receipt's gain over its cost basis.
+    // Fractional raw BUCK preserve age across top-ups and partial exits.
+    uint256 internal constant BASIS_SCALE = 1e18;
+    struct BasisCheckpoint {
+        uint192 amount;
+        uint64 timestamp;
+    }
+    mapping(uint256 => BasisCheckpoint) internal _withdrawalBasis;
+
+    /// @notice The basket's share of a receipt's gain over its decayed basis.
     uint256 public constant LAMBDA_BP = 2500;
 
     uint8 internal constant DEP_MARKED = 3;    // BuckCredit.DepreciationType.MARKED

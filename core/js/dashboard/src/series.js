@@ -230,7 +230,7 @@ export const BASKET = (tokens = []) => [
   },
   {
     id: "basket-treasury", title: "Basket treasury value", unit: "buck", kind: "line", optional: true,
-    note: "BUCK value of shares assigned to treasury from profitable redemptions. The contract assigns 25% of the marked gain over redeemed cost basis.",
+    note: "BUCK value of shares assigned to treasury on redemptions. Current contracts retain 25% of the marked gain above the demurrage-adjusted deposit value. Older runs used the original deposit value.",
     series: [{ key: "treasury", label: "Treasury mark", value: treasuryMark }],
   },
   ...OWNERSHIP_CHARTS,
