@@ -139,13 +139,18 @@ test("optional ownership flows and shares use the opening denominator and leave 
 
 test("the basket distinguishes share return, remaining basis, and treasury mark", async () => {
   const { BASKET, tabTiles } = await import("../dashboard/src/series.js");
-  const first = { day: 0, basket: { equity: 10e6, share_price: 2 } };
+  const first = { day: 1, basket: { equity: 10e6, share_price: 2 } };
   const last = { day: 80, basket: { share_price: 2.5, ownership: { closing: {
     treasury_shares: "100", total_shares: "1000", equity_buck: "10000000",
   }}}, households: { basket: 10e6, basket_mark: 20e6, basket_at_risk: 4e6, basket_mtm: 5e6 } };
   const share = BASKET().find((s) => s.id === "share-return");
   assert.deepEqual(chartData(share, [last], [first, last]).series[0].values, [25]);
-  const summary = Object.fromEntries(tabTiles("basket", [first, last]).map((x) => [x.id, x.value]));
+  const unfunded = { day: 0, basket: { equity: 0, share_price: 1 } };
+  const tiles = tabTiles("basket", [unfunded, first, last]);
+  const returns = tiles.find((t) => t.id === "share-return");
+  assert.equal(returns.value, 25);
+  assert.equal(returns.detail, "Day 1 to 80 · marked in BUCK");
+  const summary = Object.fromEntries(tiles.map((x) => [x.id, x.value]));
   assert.equal(summary["household-at-risk"], 4);
   assert.equal(summary["household-net-mark"], 5);
   assert.equal(summary["household-roi"], 25);

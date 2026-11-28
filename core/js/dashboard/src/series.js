@@ -188,8 +188,8 @@ const OWNERSHIP_CHARTS = [
 // K does not restrain the basket's issuance.
 export const BASKET = (tokens = []) => [
   {
-    id: "share-return", title: "Basket share return in BUCK", unit: "pct", kind: "line", reference: 0,
-    note: "Change in BUCK per share from the first recorded share mark, before individual redemption costs and the treasury cut on a profitable exit.",
+    id: "share-return", title: "Cumulative basket share return in BUCK", unit: "pct", kind: "line", reference: 0,
+    note: "Each point compares the closing BUCK value per share with the first funded closing mark in the run. It includes changes in portfolio valuation and is measured before redemption costs and the treasury cut.",
     baseline: observedShare,
     series: [{ key: "share", label: "Share return", value: (f, _i, _frames, first) => shareReturn(f, first) }],
   },
@@ -377,9 +377,10 @@ export function tabTiles(id, frames) {
     const limit = basketLimit(f);
     const recorded = f.basket?.headroom !== null && f.basket?.headroom !== undefined;
     const { basis, mark } = householdPosition(f);
+    const firstShare = observedShare(frames);
     return [
-      { id: "share-return", label: "Share return", value: shareReturn(f, observedShare(frames)), unit: "pct",
-        detail: "Since first recorded share mark" },
+      { id: "share-return", label: "Cumulative share return", value: shareReturn(f, firstShare), unit: "pct",
+        detail: firstShare ? `Day ${firstShare.day} to ${f.day} · marked in BUCK` : undefined },
       { id: "household-at-risk", label: "Household capital at risk", value: buck(basis), unit: "buck" },
       { id: "household-net-mark", label: "Household net mark", value: buck(mark), unit: "buck" },
       { id: "household-roi", label: "Open household receipt ROI", value: returnPct(mark, basis), unit: "pct" },

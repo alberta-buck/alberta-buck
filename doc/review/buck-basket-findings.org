@@ -135,6 +135,65 @@ target tilt increases the inventory exposed to either outcome. Parity,
 leverage, LP marks and shareholder flows can also change as the paired
 worlds evolve.
 
+** What moves the dashboard share return
+
+The BuckBasket tile and chart give 100 × (closing BUCK per share /
+first funded closing BUCK per share − 1). Day-to-day moves in the
+chart are percentage-point changes relative to that first mark.
+The daily statistics below use the prior day as the denominator.
+
+=BuckBasketEquity.sharePrice()= divides TWAP equity by total shares.
+Canonical equity is marked LP positions and idle TOKEN, plus wallet
+BUCK and accrued unpaid relief, less issued principal, floored at
+zero. Pool assets are net of the Carrying ratio. The current V3
+mark doubles the LP's BUCK leg at each pool's TWAP and does not
+separately accrue uncollected LP fees into this view. All 62,059
+available historical closes reconciled the recorded share price
+to closing equity divided by total shares at contract precision.
+
+In the unfunded historical seed-41404 active arm
+(=stock-history-j0-i6-x0-n0-7d830bc1b4-active=), the share mark fell
+from 0.99252 to 0.95287 BUCK over closes 0–1824, a −4.00% cumulative
+return. The matched maintenance arm returned −3.39%. From the
+common treatment opening on close 30, the arms returned −5.91%
+and −5.31%, respectively. The active arm's daily returns ranged
+from −1.82% to +2.12%. After close 30 it had 294 days with an
+absolute move above 1%. The pair policy changed the trade plan on
+44 days in that period and on none of those 294 days. The matched
+maintenance arm had 292 days above 1%. Ordinary wheel activity
+can still affect the marks on those dates.
+
+On close 1571, active shares rose 1.736% against the previous
+close. Gross assets including wallet BUCK contributed +1.869
+percentage points, principal −0.127, outstanding shares −0.010,
+and unpaid relief +0.003. For an exact bridge, divide each equity
+change by prior equity scaled by the new/prior share count and add
+the prior/new share count minus one. The run's passive index of
+constituents at the lower of the spot and TWAP rose 1.822%. The
+declared-weight index of closing TOKEN/BUCK spot quotes fell 0.022%,
+and the corresponding external TOKEN/USD index fell 0.005%.
+
+A frozen replay matched the archived closes through day 17, in the
+common warmup before either policy took over. Applying the contract's
+mark formula with the same liquidity, cash, principal, unpaid relief
+and shares gave the returns below. The 600-second TWAP equity rebuilt
+from the individual pool marks reconciled exactly to the contract.
+
+| Close | TWAP share return | Spot share return | Difference (pp) |
+|-------+-------------------+-------------------+-----------------|
+|    10 |           +1.866% |           +1.330% |          +0.537 |
+|    17 |           −0.558% |           −0.034% |          −0.525 |
+
+For the 18 active and four maintenance historical records with
+at least 1,800 observed closes, the median within-run daily
+correlation after close 30 between share return and the passive
+low-mark index was 0.935 and 0.819, respectively. Against the
+weighted closing TOKEN/BUCK spot returns it was 0.373 and 0.374.
+The daily volatility therefore needs a price-mark audit before
+attributing it to rebalancing or fees. The archive can reconcile
+the accounting totals, but it cannot recover the underlying pool
+observations and same-block holdings for the late outliers.
+
 ** What survived replaying the archived prices
 
 The original 120-day lab used three equally weighted TOKENs, four market
