@@ -1014,3 +1014,65 @@ exits carry forward the proportional remainder. The nominal
 receipt without a separate checkpoint ages its remaining basis
 from the recorded deposit time. Jubilee's standalone and
 self-invested valuations use the same adjusted fee threshold.
+
+* Direct wheel revenue and the next five-year campaign
+
+The dashboard's =Wheel revenue= tab reports confirmed operations from
+the measured window after fixed-price startup. An arbitrage row records
+the signed cash and LP contributions and identifies the LP fees included
+in the cycle gain. Earlier accrued fees collected before an arb and
+standalone wheel fee collections go to the basket and have separate rows.
+TOKEN fees in the standalone collection are marked at the basket TWAP.
+Reserve deposits identify the funder, and reserve payments identify the
+keeper who ran the tick. Both retain nominal and actual net BUCK. A run
+may record zero keeper payouts because the reserve has no funding. Indirect
+rebalancing gains remain part of share performance. The per-day summaries
+are in =frames.jsonl= and the transaction receipts are referenced by
+=wheel.jsonl=. Prior run records cannot supply those rows. Main and Compare
+run selectors show status and recorded days and sort numeric ID fields.
+
+** Historical share returns and launch priority
+
+The table uses each active arm's last seven daily share marks averaged in
+BUCK, divided by the close immediately before the policy switch. Returns
+are cumulative and precede withdrawal fees. The earlier five-year archives
+are =alberta-buck-stock-multiyear-5bb86e77/build/runs= and
+=alberta-buck-aged-3969952b/build/runs=. Arms that reached their final close
+qualify for the share-return ranking even when their companion maintenance
+arm was stopped. Use same-horizon pairs for a policy-effect comparison.
+
+| Historical price treatment | 2M BUCK contributed | No contribution |
+|----------------------------+---------------------+-----------------|
+| Standard retirement, 30 annual investor arrivals | +3.40% to +3.62% | −3.64% to −3.04% |
+| Narrower retirement discounts (0.25–1.5%) | +3.98% to +4.02% | −3.42% to −3.17% |
+| Three months of household working cash | +3.73% to +4.12% | −3.67% to −2.74% |
+| Both household changes (one seed at final close) | +3.82% | −2.88% |
+| Standard retirement, six annual investor arrivals | +0.93% to +1.37% | −5.83% to −5.71% |
+| No extra opening age (aged study, one seed) | +2.83% | −4.46% |
+| 365 days of opening age (aged study, one seed) | −1.27% | −6.74% |
+
+The 30-arrival run with 2M BUCK and the reverting tape had the
+highest observed share return (+4.64% to +5.29%). That tape adds
+simulated reversion. On the historical tape, Jubilee funding made the
+clearest difference (about 6–8 percentage points in the two-seed
+comparisons). The discount and working-cash variants were both near 4%,
+and their ordering changed with the seed. For the next campaign, start
+both historical seeds of funded discount, working cash, combined, and
+standard 30-arrival runs first. Put the funded reverting arms and an
+unaged funded arm in the same wave. Reserve slots for the unfunded
+historical standard and discount controls and a funded six-arrival
+history run. Include all 32 pairs in the queue.
+
+The wheel-instrumented campaign is staged at
+=build/sim/stock-wheel-revenue=. The six freshly planned manifests use
+the same 32 economic configurations and byte-identical tapes as
+=stock-demurrage-basis-9a43ec23=. The ordered =restart.queue= is consumed
+by =scripts/run-basket-stock-grid.py= with the campaign directory,
+=--queue <campaign>/restart.queue=, and =--jobs 16=. Use =--plan= to
+check the order and compiled runtime before launch. The local campaign
+=launch.sh= selects the same bounded-journal pyrevm environment as the
+previous campaign. Records go to the new campaign's =runs/= directory.
+The LAN operator can serve
+it with =python -m alberta_buck.sim.dashboard --runs <campaign>/runs
+--host 0.0.0.0 --no-live= from the updated checkout. The previous live
+campaign and its dashboard continue to use their original records.

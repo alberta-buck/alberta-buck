@@ -3,6 +3,7 @@
 import argparse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from contextlib import ExitStack
 import fcntl
 import hashlib
 import importlib.util
@@ -281,6 +282,48 @@ def replay_cell(folder, ident, output, window, arm, min_gap_bp, markout_days):
     print(f"{output}: {last + 1} matching closes, {len(responses)} responses, {len(opportunities)} missed decisions")
 
 
+def run_cells(entries, jobs):
+    def launch(folder, manifest, cell):
+        driver = HERE / ("run-basket-aged-study.py" if "aged_study" in manifest else "run-basket-stock-grid.py")
+        with (folder / "cells" / (cell["id"] + ".log")).open("a") as log:
+            print(f"Starting {cell['run_prefix']}", file=log, flush=True)
+            return subprocess.run([sys.executable, str(driver), str(folder), "--cell", cell["id"]],
+                                  cwd=ROOT, stdout=log, stderr=subprocess.STDOUT).returncode
+
+    pending = iter(entry for entry in entries if entry[2]["status"] != "complete")
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        active = {}
+        while True:
+            while len(active) < jobs:
+                entry = next(pending, None)
+                if entry is None:
+                    break
+                folder, manifest, cell = entry
+                runs = Path(manifest["run_root"])
+                prefix = cell["id"]
+                attempt = 1
+                while any((runs / f"{prefix}-{arm}").exists() for arm in ("active", "maintenance")):
+                    attempt += 1
+                    prefix = f"{cell['id']}-try{attempt}"
+                cell.update(status="running", run_prefix=prefix,
+                            run_ids={arm: f"{prefix}-{arm}" for arm in ("active", "maintenance")})
+                write_json(folder / "manifest.json", manifest)
+                print("starting", cell["id"], flush=True)
+                active[pool.submit(launch, folder, manifest, cell)] = entry
+            if not active:
+                break
+            for task in wait(active, return_when=FIRST_COMPLETED).done:
+                folder, manifest, cell = active.pop(task)
+                status = task.result()
+                cell["status"] = "failed" if status else "complete"
+                if not status:
+                    raw = (folder / "cells" / (cell["id"] + ".json")).read_bytes()
+                    cell.update(sha256=digest(raw), run_ids=json.loads(raw)["run_ids"])
+                write_json(folder / "manifest.json", manifest)
+                print(cell["status"], cell["id"], flush=True)
+    return int(any(c["status"] != "complete" for _, _, c in entries))
+
+
 def execute(args):
     m = plan(args)
     cells_dir = args.output / "cells"
@@ -302,40 +345,41 @@ def execute(args):
     if args.plan:
         print(f"{len(m['cells'])} matched pairs planned")
         return 0
-    def launch(c):
-        with (cells_dir / (c["id"] + ".log")).open("w") as log:
-            r = subprocess.run([sys.executable, str(Path(__file__).resolve()), str(args.output),
-                                "--cell", c["id"]], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
-            return c, r.returncode
-    pending = iter(c for c in m["cells"] if c["status"] != "complete")
-    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        active = {}
-        while True:
-            while len(active) < args.jobs:
-                cell = next(pending, None)
-                if cell is None:
-                    break
-                prefix = cell["id"]
-                attempt = 1
-                while any((args.runs / f"{prefix}-{arm}").exists() for arm in ("active", "maintenance")):
-                    attempt += 1
-                    prefix = f"{cell['id']}-try{attempt}"
-                cell.update(status="running", run_prefix=prefix,
-                            run_ids={arm: f"{prefix}-{arm}" for arm in ("active", "maintenance")})
-                write_json(manifest_file, m)
-                active[pool.submit(launch, cell)] = cell
-            if not active:
-                break
-            for task in wait(active, return_when=FIRST_COMPLETED).done:
-                del active[task]
-                cell, status = task.result()
-                cell["status"] = "failed" if status else "complete"
-                if not status:
-                    raw = (cells_dir / (cell["id"] + ".json")).read_bytes()
-                    cell.update(sha256=digest(raw), run_ids=json.loads(raw)["run_ids"])
-                write_json(manifest_file, m)
-                print(cell["status"], cell["id"], flush=True)
-    return int(any(c["status"] != "complete" for c in m["cells"]))
+    return run_cells([(args.output, m, c) for c in m["cells"]], args.jobs)
+
+
+def execute_queue(args):
+    rows = [tuple(line.split()) for line in args.queue.read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")]
+    if not rows or any(len(row) != 2 for row in rows) or len(set(rows)) != len(rows):
+        raise ValueError("queue must list unique study and cell ID pairs")
+    folders = {path.parent.name: path.parent for path in args.output.glob("*/manifest.json")}
+    studies = {row[0] for row in rows}
+    if studies != folders.keys():
+        raise ValueError("queue must include every prepared study in the campaign directory")
+    entries = {}
+    runtime = script("run-basket-signal-grid").runtime_inputs()
+    with ExitStack() as locks:
+        for name in sorted(studies):
+            folder = folders[name]
+            lock = locks.enter_context((folder / ".lock").open("a"))
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            manifest = json.loads((folder / "manifest.json").read_text())
+            expected = manifest["runtime"]
+            if any(expected.get(key) != value for key, value in runtime.items()) or any(
+                digest((HERE / script_name).read_bytes()) != sha
+                for script_name, sha in expected["study_scripts"].items()
+            ):
+                raise ValueError(f"{name}: prepared campaign runtime changed")
+            for cell in manifest["cells"]:
+                entries[name, cell["id"]] = (folder, manifest, cell)
+        if entries.keys() != set(rows):
+            raise ValueError("queue must include every prepared cell exactly once")
+        if args.plan:
+            for name, ident in rows:
+                print(name, ident)
+            return 0
+        return run_cells([entries[row] for row in rows], args.jobs)
 
 
 def main():
@@ -359,6 +403,7 @@ def main():
     p.add_argument("--seed", action="append", type=int)
     p.add_argument("--jobs", type=int, default=1, help="parallel pairs, arms run sequentially")
     p.add_argument("--plan", action="store_true")
+    p.add_argument("--queue", type=Path, help="ordered study and cell ID pairs for a prepared multi-study campaign")
     p.add_argument("--cell", help=argparse.SUPPRESS)
     p.add_argument("--replay-cell", metavar="ID", help="trace a completed cell from its archived opening")
     p.add_argument("--trace-days", nargs=2, type=int, metavar=("FIRST", "LAST"),
@@ -369,6 +414,10 @@ def main():
     p.add_argument("--markout-days", type=int, default=3, help="forward closes used to rank missed trades")
     args = p.parse_args()
     args.output = args.output.resolve()
+    if args.jobs < 1:
+        p.error("--jobs must be positive")
+    if args.queue:
+        return execute_queue(args)
     if args.replay_cell:
         if args.trace_days is None or args.trace_output is None:
             p.error("--replay-cell requires --trace-days and --trace-output")
@@ -406,8 +455,6 @@ def main():
             setattr(args, key, default)
     if args.design not in ("full", "pilot") or any(r not in REGIMES for r in args.regime or []):
         p.error("unknown study design or price regime")
-    if args.jobs < 1:
-        p.error("--jobs must be positive")
     args.runs = args.runs.resolve()
     args.experiment = args.experiment.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
