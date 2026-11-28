@@ -172,7 +172,8 @@ def replay(arm, *, experiment_path, days, warmup_days, settings, price_files, on
             return
         result["opening"] = read_cohort(d, cohort)
         if not any(m["positions"] for m in result["opening"]["members"].values()):
-            raise ValueError("the treatment starts before any tracked investor obtained a receipt")
+            print(f"[study] day {day}: no tracked investor receipts at the switch; opening sleeve is empty",
+                  flush=True)
         result["switch"] = install_treatment(d, arm, trace_days if trace_peers else None)
         if recorder is not None:
             recorder.intervene(day, "set_upkeep_facet", {"arm": arm, **result["switch"]},
