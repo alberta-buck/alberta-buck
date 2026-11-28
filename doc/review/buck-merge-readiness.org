@@ -988,6 +988,23 @@ Eight workers started across the six studies and 24 pairs were
 queued. Each worker runs its active arm and then maintenance.
 All eight initial arms recorded day zero after the fixed-price startup.
 The dashboard records are under the campaign's =runs/= directory.
+
+On November 28, =buck-demurrage-stock-16.service= adopted the
+eight existing cell workers and launched eight more. The prior
+supervisors are paused until their existing workers finish.
+=buck-demurrage-retire-original.service= then retires the prior
+service. All 16 active pairs have valid day-zero frames and the
+other 16 pairs are queued. New attempts
+use =c37b54cf= with the same compiled contracts and archived inputs.
+Two funded attempts had stopped at the day-30 policy switch because
+the tracked investor cohort had not acquired any receipts. The new
+runner records an empty opening sleeve and continues the study. Both
+cells were retried under new run IDs.
+
+Both pinned worktrees' =build/runs= paths point to the campaign's
+live records. The temporary loopback dashboard was stopped at the
+operator's request. From a pinned checkout, =make nix-venv-dashboard-lan=
+serves the live records read-only on =0.0.0.0:8890=.
 =withdrawalBasis(id)= reports the
 remaining receipt value benchmarked against holding Ordinary BUCK.
 New deposits start at their own timestamps. Top-ups age the
