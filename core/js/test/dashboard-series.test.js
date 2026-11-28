@@ -65,7 +65,10 @@ test("the BuckBasket, Market and Jubilee tabs read the recorded frame shape", as
       const d = chartData(s, frames);
       for (const series of d.series) {
         assert.ok(series.values.every((v) => v === null || Number.isFinite(v)), `${s.id}.${series.key}`);
-        if (!s.optional) assert.ok(series.values.some((v) => v !== null), `${s.id}.${series.key} is recorded in the fixture`);
+        const needsSevenCloses = s.id === "share-return" && series.key === "mean";
+        if (!s.optional && !needsSevenCloses) {
+          assert.ok(series.values.some((v) => v !== null), `${s.id}.${series.key} is recorded in the fixture`);
+        }
       }
     }
   }
@@ -149,13 +152,30 @@ test("the basket distinguishes share return, remaining basis, and treasury mark"
   const tiles = tabTiles("basket", [unfunded, first, last]);
   const returns = tiles.find((t) => t.id === "share-return");
   assert.equal(returns.value, 25);
-  assert.equal(returns.detail, "Day 1 to 80 · marked in BUCK");
+  assert.equal(returns.detail, "Day 1 to 80 · closing mark");
   const summary = Object.fromEntries(tiles.map((x) => [x.id, x.value]));
   assert.equal(summary["household-at-risk"], 4);
   assert.equal(summary["household-net-mark"], 5);
   assert.equal(summary["household-roi"], 25);
   assert.equal(summary.treasury, 1);
   assert.equal(tabTiles("basket", [first]).find((t) => t.id === "treasury").value, null);
+});
+
+test("basket smoothing uses seven consecutive closes and the same baseline as the raw return", async () => {
+  const { BASKET, tabTiles } = await import("../dashboard/src/series.js");
+  const frames = Array.from({ length: 9 }, (_, day) => ({
+    day, basket: { equity: day === 0 ? 0 : 100, share_price: day < 3 ? 1 : 2 },
+  }));
+  const chart = BASKET().find((spec) => spec.id === "share-return");
+  const { series } = chartData(chart, frames.slice(-3), frames);
+  assert.deepEqual(series[0].values, [100, 100, 100]);
+  assert.equal(series[1].values[0], null);
+  assert.ok(Math.abs(series[1].values[1] - 500 / 7) < 1e-12);
+  const tile = tabTiles("basket", frames).find((t) => t.id === "share-return");
+  assert.ok(Math.abs(tile.value - 600 / 7) < 1e-12);
+  assert.equal(tile.detail, "Day 1 to 8 · 7-day mean");
+  const gap = frames.filter((f) => f.day !== 5);
+  assert.deepEqual(chartData(chart, gap.slice(-2), gap).series[1].values, [null, null]);
 });
 
 test("Jubilee surfaces deferred principal when a run actually records it", async () => {

@@ -194,6 +194,67 @@ attributing it to rebalancing or fees. The archive can reconcile
 the accounting totals, but it cannot recover the underlying pool
 observations and same-block holdings for the late outliers.
 
+** The early return and day-zero funding
+
+Among 44 historical stock records covering the first month, the median
+BUCK share return from the first close was +0.75% on day 1, +1.42% on
+day 7, +2.20% on day 14 and +1.98% on day 30. Day 14 was before the
+policy switch. The median day-14 share return translated at each close's
+BUCK/USD spot was +0.08%. The median BUCK/USD move was −1.39%, and the
+weighted closing TOKEN/BUCK spot and passive low-mark indices rose
+1.35% and 1.28%, respectively. These are medians of separate series.
+The common tape and BUCK repricing explain much of the early BUCK gain,
+with basket operations and valuation timing also affecting it.
+
+The unfunded seed-41404 active run opened at 1.00136 BUCK/share
+before day-zero market activity and closed that day at 0.99252.
+It then reached 1.01660 on day 14, a +2.43% return from the first
+close and +1.52% from the pre-trading mark. From the first close to
+day 14, gross assets including cash contributed +18.947 percentage
+points, principal −5.457, additional shares −11.125 and unpaid relief
++0.061. Its passive low-mark index rose 2.12%. The deposit-driven
+growth of the book was largely matched by debt and new shares.
+
+The funded day-zero move is a separate event. The median first-day
+move from the pre-trading mark was −0.88% without the endowment and
++8.47% with it, over 22 records in each group. The replay code reads
+opening ownership before moving 2M BUCK from the research seeder to
+Jubilee and investing it. A frozen replay of the funded seed-41404 run
+agreed with the endowment audit. Immediately after the investment,
+before market trading, the share mark had risen 3.82%, with unchanged
+basket principal. The unpaid relief mark increased from about 8 BUCK
+to 225,123 BUCK and contributed 2.84 percentage points. The rest came
+from cash delivered relative to shares priced at the deposit quote.
+At the matching first close, the relief mark reached 509,498 BUCK,
+or 0.06292 BUCK/share. The basket's fraction of selected to total
+claim-seconds rose from 11.28% just after funding to 24.69% at the
+close. The claim included Jubilee's stake in the same basket and fund
+cash. =BasketJubileeMath.claim= solves for equity and the corresponding
+relief claim together. The opening revaluation precedes the
+dashboard's first-close baseline.
+
+The BuckBasket chart and headline now use a trailing mean of seven
+consecutive recorded daily share marks with the original funded
+close as baseline. The raw close is visible in the chart. Across
+the 44 historical runs, the median standard deviation of post-warmup
+daily returns fell from 0.62% to 0.11% in the rolling series.
+Using the mean of the first seven closes as a separate diagnostic
+baseline, the seven-day mean through day 30 was up a median 1.14%
+in unfunded runs and 0.54% in funded runs. From day 30 to day 365,
+the historical active and maintenance medians advanced 2.07% and
+2.09%, respectively, with 22 records in each arm. The initial rise
+therefore does not establish which strategy earned a return after
+warmup, and returns do not universally flatten.
+
+Daily records support this rolling chart. An actual intraday
+time-weighted share mark needs timestamped observations or a replay.
+At each observation, mark the actual V3 TOKEN and BUCK amounts and
+uncollected fees, plus cash and relief, less principal. Divide by
+shares before averaging across observation times. Compare the
+contract and common external marks of the same portfolio. Track
+relief, realized fees and discretionary fills separately and anchor
+the policy comparison at its funding-complete, pre-switch mark.
+
 ** What survived replaying the archived prices
 
 The original 120-day lab used three equally weighted TOKENs, four market

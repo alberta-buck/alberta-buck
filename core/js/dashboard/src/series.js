@@ -124,10 +124,36 @@ const netLienRatio = (f) => {
 };
 const pct = (v) => (v === null || v === undefined || !Number.isFinite(v) ? null : v * 100);
 const returnPct = (mark, basis) => mark == null || !(Number(basis) > 0) ? null : pct(Number(mark) / Number(basis) - 1);
+const shareMark = (f) => {
+  const basket = f.basket;
+  const shares = basket?.ownership?.closing?.total_shares ?? basket?.treasury?.total_shares;
+  return shares != null && Number(shares) === 0 ? null : num(basket?.share_price);
+};
 const observedShare = (frames) => frames.find((f) =>
-  Number(f.basket?.share_price) > 0 && (f.basket?.equity == null || Number(f.basket.equity) > 0));
+  shareMark(f) > 0 && (f.basket?.equity == null || Number(f.basket.equity) > 0));
 const shareReturn = (f, first) => first && f.day >= first.day
-  ? returnPct(f.basket?.share_price, first.basket.share_price) : null;
+  ? returnPct(shareMark(f), shareMark(first)) : null;
+
+function shareHistory(frames) {
+  const first = observedShare(frames);
+  const closes = new Map();
+  if (first) {
+    for (const frame of frames) {
+      if (frame.day >= first.day) closes.set(frame.day, shareMark(frame));
+    }
+  }
+  return { first, closes };
+}
+
+function meanShareReturn(day, { first, closes }) {
+  let total = 0;
+  for (let offset = 0; offset < 7; offset++) {
+    const mark = closes.get(day - offset);
+    if (mark == null) return null;
+    total += mark;
+  }
+  return returnPct(total / 7, shareMark(first));
+}
 
 function householdPosition(f) {
   const h = f.households;
@@ -189,9 +215,12 @@ const OWNERSHIP_CHARTS = [
 export const BASKET = (tokens = []) => [
   {
     id: "share-return", title: "Cumulative basket share return in BUCK", unit: "pct", kind: "line", reference: 0,
-    note: "Each point compares the closing BUCK value per share with the first funded closing mark in the run. It includes changes in portfolio valuation and is measured before redemption costs and the treasury cut.",
-    baseline: observedShare,
-    series: [{ key: "share", label: "Share return", value: (f, _i, _frames, first) => shareReturn(f, first) }],
+    note: "Both returns use the first funded close as their baseline. The 7-day mean uses seven consecutive daily marks. Returns include changes in portfolio valuation and precede redemption costs and the treasury cut.",
+    baseline: shareHistory,
+    series: [
+      { key: "share", label: "Closing mark", value: (f, _i, _frames, history) => shareReturn(f, history.first) },
+      { key: "mean", label: "7-day mean", value: (f, _i, _frames, history) => meanShareReturn(f.day, history) },
+    ],
   },
   {
     id: "household-basket-position", title: "Household basket capital at risk and net mark", unit: "buck", kind: "line", optional: true,
@@ -377,10 +406,12 @@ export function tabTiles(id, frames) {
     const limit = basketLimit(f);
     const recorded = f.basket?.headroom !== null && f.basket?.headroom !== undefined;
     const { basis, mark } = householdPosition(f);
-    const firstShare = observedShare(frames);
+    const history = shareHistory(frames);
+    const meanReturn = meanShareReturn(f.day, history);
+    const period = history.first ? `Day ${history.first.day} to ${f.day}` : undefined;
     return [
-      { id: "share-return", label: "Cumulative share return", value: shareReturn(f, firstShare), unit: "pct",
-        detail: firstShare ? `Day ${firstShare.day} to ${f.day} · marked in BUCK` : undefined },
+      { id: "share-return", label: "Cumulative share return", value: meanReturn ?? shareReturn(f, history.first), unit: "pct",
+        detail: period ? `${period} · ${meanReturn == null ? "closing mark" : "7-day mean"}` : undefined },
       { id: "household-at-risk", label: "Household capital at risk", value: buck(basis), unit: "buck" },
       { id: "household-net-mark", label: "Household net mark", value: buck(mark), unit: "buck" },
       { id: "household-roi", label: "Open household receipt ROI", value: returnPct(mark, basis), unit: "pct" },

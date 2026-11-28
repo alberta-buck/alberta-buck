@@ -62,12 +62,15 @@ close. For example, the completed unfunded seed-41404 historical
 active arm marked its treasury at 39.58 BUCK on close 1824.
 
 The share return is cumulative in BUCK from the first funded close.
-See [[file:buck-basket-findings.org::*What moves the dashboard share return][the closing mark reconciliation]] before using it to judge
-rebalancing income. For the late stock outliers, record each pool's
-liquidity, carry ratio and spot/TWAP marks at the closing block and
-again after a full oracle window. Value the same balances at a common
-external TOKEN and BUCK price and track execution and fee income
-separately.
+The tab plots closing marks and their trailing seven-day mean.
+The [[file:buck-basket-findings.org::*The early return and day-zero funding][opening analysis]] separates the initial Jubilee relief mark
+from the rise during the common market warmup. Use the pre-switch mark
+in Compare for treatment return. Replay windows with timestamped
+intra-day samples before running a new long campaign. At each sample,
+reconcile TWAP equity to contract components and compare the actual
+LP token balances and fees at a common external TOKEN and BUCK price.
+Include the funded opening and late outliers. Track the marked relief
+claim, realized fee income and discretionary fills separately.
 
 The Jubilee tab shows matured principal awaiting burn only for
 runs with an observed backlog. The 50-year release and later
